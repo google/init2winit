@@ -1,0 +1,34 @@
+;; Leak checking dictionary for fully homomorphic encryption
+;;
+;; Format:
+;; TERM;SEVERITY;EXCEPTIONS
+;;
+;; TERM - the term that is forbidden.
+;; SEVERITY - severity if this term is seen. This should normally be 3 in this
+;;   file, which triggers a fatal error.
+;;
+;;   0: Info
+;;   1: Warning
+;;   2: Error
+;;   3: Fatal
+;;
+;; EXCEPTIONS - comma-separated list of terms that can contain the forbidden
+;;   term, but are allowed.
+;;
+;; Note, this used both for true leak checking, as well as to aid in migration.
+;;
+copybara:;3;
+;; we don't want to leak that we don't want to leak.
+leakr;3;
+;; check for Buganizer links (e.g., b/12345678)
+$RE:b/[0-9]+;3;Searches for buganizer links (e.g., b/12345678)
+buganizer/;3;
+go/;3;
+goto/;3;
+google3;3;
+vizier;3;
+xmanager;3;
+mi6;3;
+health;3;
+imaging;3;
+mi6-gpu-quota-xm;3;
