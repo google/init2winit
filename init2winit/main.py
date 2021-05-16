@@ -29,6 +29,8 @@ from init2winit import trainer
 import utils as utils  # local file import
 import jax
 import tensorflow as tf
+# Don't let TF see the GPU, because all we use it for is tf.data loading.
+tf.config.experimental.set_visible_devices([], 'GPU')
 
 # Enable flax xprof trace labelling.
 os.environ['FLAX_PROFILE'] = 'true'
@@ -81,6 +83,10 @@ flags.DEFINE_integer('worker_id', 1,
                      'Client id for hparam sweeps and tuning studies.')
 
 FLAGS = flags.FLAGS
+
+set_new_checkpointing_default = True
+if set_new_checkpointing_default:
+  FLAGS.use_deprecated_checkpointing = False
 
 
 def main(unused_argv):

@@ -4,20 +4,12 @@ See more details in the
 [`README.md`](https://github.com/google/init2winit).
 """
 
-import os
-import sys
-
 from setuptools import find_packages
 from setuptools import setup
 
-# To enable importing version.py directly, we add its path to sys.path.
-version_path = os.path.join(os.path.dirname(__file__), 'init2winit')
-sys.path.append(version_path)
-from version import __version__  # pylint: disable=g-import-not-at-top
-
 setup(
     name='init2winit',
-    version=__version__,
+    version='0.0.1',
     description='init2winit',
     author='init2winit Team',
     author_email='znado@google.com',
@@ -26,12 +18,17 @@ setup(
     packages=find_packages(),
     install_requires=[
         'absl-py>=0.8.1',
+        'clu',
         'flax',
         'jax',
+        'ml_collections',
         'numpy>=1.7',
+        'pandas',
+        'sentencepiece',
         'tensorboard',
         'tensorflow-datasets',
-        'tf-nightly',
+        'tensorflow-text==2.5.0-rc0',
+        'tensorflow==2.5.0',
     ],
     extras_require={},
     classifiers=[
