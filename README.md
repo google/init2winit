@@ -63,6 +63,8 @@ To cite this repository:
 }
 ```
 
+For a list of references to the models, datasets, and techniques implemented in this codebase, see [`references.md`](https://github.com/google/init2winit/tree/master/init2winit/references.md).
+
 
 ## Contributors
 Contributors (past and present):
