@@ -2,21 +2,13 @@
 
 ## Datasets
 
-### CIFAR-10
+### CIFAR-10 and CIFAR-100
 ```
-@article{cifar10,
-  title = {CIFAR-10 (Canadian Institute for Advanced Research)},
-  author = {Alex Krizhevsky and Vinod Nair and Geoffrey Hinton},
-  url = {http://www.cs.toronto.edu/~kriz/cifar.html},
-}
-```
-
-### CIFAR-100
-```
-@article{cifar100,
-  title = {CIFAR-100 (Canadian Institute for Advanced Research)},
-  author = {Alex Krizhevsky and Vinod Nair and Geoffrey Hinton},
-  url = {http://www.cs.toronto.edu/~kriz/cifar.html},
+@techreport{cifarKrizhevsky09learningmultiple,
+    author = {Alex Krizhevsky},
+    title = {Learning multiple layers of features from tiny images},
+    institution = {University of Toronto},
+    year = {2009}
 }
 ```
 
@@ -40,6 +32,54 @@
   title = {{MNIST} handwritten digit database},
   url = {http://yann.lecun.com/exdb/mnist/},
   year = 2010
+}
+```
+
+### Fashion MNIST
+
+```
+@article{fashionMNIST,
+  author       = {Han Xiao and Kashif Rasul and Roland Vollgraf},
+  title        = {Fashion-{MNIST}: a Novel Image Dataset for Benchmarking Machine Learning Algorithms},
+  date         = {2017-08-28},
+  year         = {2017},
+  journal   = {CoRR},
+  volume    = {cs.LG/1708.07747},
+  url       = {http://arxiv.org/abs/1708.07747},
+  primaryClass  = {cs.LG},
+}
+```
+
+### SVHN
+
+```
+@inproceedings{svhn,
+  author = {Netzer, Yuval and Wang, Tao and Coates, Adam and Bissacco, Alessandro and Wu, Bo and Ng, Andrew Y.},
+  title = {Reading Digits in Natural Images with Unsupervised Feature Learning},
+  booktitle = {NIPS Workshop on Deep Learning and Unsupervised Feature Learning},
+  url = {http://ufldl.stanford.edu/housenumbers/nips2011_housenumbers.pdf},
+  year = {2011},
+}
+```
+
+### LM1B
+
+```
+@article{lm1b,
+  author    = {Ciprian Chelba and
+               Tomas Mikolov and
+               Mike Schuster and
+               Qi Ge and
+               Thorsten Brants and
+               Phillipp Koehn},
+  title     = {One Billion Word Benchmark for Measuring Progress in Statistical Language
+               Modeling},
+  journal   = {CoRR},
+  volume    = {abs/1312.3005},
+  year      = {2013},
+  url       = {http://arxiv.org/abs/1312.3005},
+  archivePrefix = {arXiv},
+  eprint    = {1312.3005},
 }
 ```
 
