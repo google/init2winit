@@ -332,6 +332,10 @@ def get_wmt_datasets(config: config_dict.ConfigDict,
 
   train_ds_builder = tfds.builder(config.tfds_dataset_key)
   eval_ds_builder = tfds.builder(config.tfds_eval_dataset_key)
+  if config.tfds_predict_dataset_key:
+    predict_ds_builder = tfds.builder(config.tfds_predict_dataset_key)
+  else:
+    predict_ds_builder = tfds.builder(config.tfds_eval_dataset_key)
   train_data = get_raw_dataset(
       train_ds_builder,
       config.train_split,
@@ -340,6 +344,11 @@ def get_wmt_datasets(config: config_dict.ConfigDict,
   eval_data = get_raw_dataset(
       eval_ds_builder,
       config.eval_split,
+      reverse_translation=config.reverse_translation)
+
+  predict_data = get_raw_dataset(
+      predict_ds_builder,
+      config.predict_split,
       reverse_translation=config.reverse_translation)
 
   # Tokenize data.
@@ -351,6 +360,8 @@ def get_wmt_datasets(config: config_dict.ConfigDict,
   train_data = train_data.map(
       tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
   eval_data = eval_data.map(
+      tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
+  predict_data = predict_data.map(
       tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
 
   train_ds = preprocess_wmt_data(
@@ -370,7 +381,7 @@ def get_wmt_datasets(config: config_dict.ConfigDict,
       max_length=config.max_eval_target_length)
 
   predict_ds = preprocess_wmt_data(
-      eval_data,
+      predict_data,
       is_training=False,
       shuffle_seed=None,
       pack_examples=False,

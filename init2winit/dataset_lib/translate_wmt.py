@@ -30,6 +30,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         tfds_dataset_key='wmt15_translate/de-en',
         tfds_eval_dataset_key='wmt14_translate/de-en',
+        # If 'tfds_predict_dataset_key' is None,
+        # 'tfds_eval_dataset_key' is used.
+        tfds_predict_dataset_key=None,
         reverse_translation=False,
         # If vocab_path is None, dataset_lib.mt_pipeline generates one with spm.
         # Right now, they have been generated offline and set in
@@ -42,7 +45,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         max_eval_target_length=256,  # similarly filter on eval data.
         max_predict_length=256,  # and filter on test examples for BLEU scores.
         train_split='train',
-        eval_split='test',
+        eval_split='validation',
+        predict_split='test',
         pack_examples=False,
         output_shape=(VOCAB_SIZE,),
         train_size=4522998,  # raw data size, update with filtered data size.
@@ -87,7 +91,7 @@ def _get_translate_wmt(per_host_batch_size,
             n_devices, per_host_eval_batch_size))
 
   vocab_path = hps.vocab_path
-  train_ds, eval_ds, _ = mt_pipeline.get_wmt_datasets(
+  train_ds, eval_ds, predict_ds = mt_pipeline.get_wmt_datasets(
       hps,
       shuffle_seed=shuffle_rng[0],
       n_devices=jax.local_device_count(),
@@ -121,13 +125,13 @@ def _get_translate_wmt(per_host_batch_size,
           data_format=None,
           mask_key='targets')
 
-  # pylint: disable=unreachable
-  def test_epoch(*args, **kwargs):
-    del args
-    del kwargs
-    return
-    yield  # This yield is needed to make this a valid (null) iterator.
-
-  # pylint: enable=unreachable
+  def test_epoch(num_batches=None):
+    predict_iter = iter(predict_ds)
+    for batch in itertools.islice(predict_iter, num_batches):
+      yield data_utils.maybe_pad_batch(
+          data_utils.tf_to_numpy(batch),
+          per_host_eval_batch_size,
+          data_format=None,
+          mask_key='targets')
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
