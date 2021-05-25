@@ -9,6 +9,8 @@ This is a research project, not an official Google product.
 
 
 ## Installation
+The current development version requires Python 3.6-3.8.
+
 To install the latest development version inside a virtual environment, run
 
 ```
