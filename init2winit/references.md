@@ -90,39 +90,6 @@ See the various WMT translation datasets in TFDS, e.g.
 As of early 2021, <http://www.statmt.org/wmt20/> should also have a lot of
 relevant information and links to the workshops for different years.
 
-### Uniref50
-
-The first paper describes the original data and the second paper describes the
-machine learning dataset derived from it.
-
-```
-@article{uniref50bio,
-    author = {Suzek, Baris E. and Wang, Yuqi and Huang, Hongzhan and McGarvey, Peter B. and Wu, Cathy H. and the UniProt Consortium},
-    title = {{UniRef} clusters: a comprehensive and scalable alternative for improving sequence similarity searches},
-    journal = {Bioinformatics},
-    volume = {31},
-    number = {6},
-    pages = {926-932},
-    year = {2014},
-    month = {11},
-    issn = {1367-4803},
-    doi = {10.1093/bioinformatics/btu739},
-    url = {https://doi.org/10.1093/bioinformatics/btu739},
-    eprint = {https://academic.oup.com/bioinformatics/article-pdf/31/6/926/569379/btu739.pdf},
-}
-
-@article {uniref50ml,
-	author = {Rives, Alexander and Meier, Joshua and Sercu, Tom and Goyal, Siddharth and Lin, Zeming and Liu, Jason and Guo, Demi and Ott, Myle and Zitnick, C. Lawrence and Ma, Jerry and Fergus, Rob},
-	title = {Biological structure and function emerge from scaling unsupervised learning to 250 million protein sequences},
-	elocation-id = {622803},
-	year = {2020},
-	doi = {10.1101/622803},
-	publisher = {Cold Spring Harbor Laboratory},
-	URL = {https://www.biorxiv.org/content/early/2020/12/15/622803},
-	eprint = {https://www.biorxiv.org/content/early/2020/12/15/622803.full.pdf},
-	journal = {bioRxiv}
-}
-```
 
 ## Models
 
