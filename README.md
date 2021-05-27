@@ -76,6 +76,7 @@ Contributors (past and present):
 - George E. Dahl
 - Justin M. Gilmer
 - Michal Badura
+- Rohan Anil
 - Sneha Kudugunta
 - Varun Godbole
 - Zachary Nado
