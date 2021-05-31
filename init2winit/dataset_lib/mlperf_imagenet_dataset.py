@@ -81,8 +81,8 @@ def get_mlperf_imagenet(rng,
         'Require eval_batch_size % jax.device_count(), received '
         'eval_batch_size={}, device_count={}.'.format(
             eval_batch_size, jax.device_count()))
-  host_batch_size = batch_size // jax.host_count()
-  eval_host_batch_size = eval_batch_size // jax.host_count()
+  host_batch_size = batch_size // jax.process_count()
+  eval_host_batch_size = eval_batch_size // jax.process_count()
 
   max_eval_steps = hps.valid_size // eval_batch_size + 1
 

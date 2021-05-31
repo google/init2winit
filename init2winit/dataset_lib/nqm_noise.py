@@ -55,7 +55,7 @@ def get_nqm_noise(shuffle_rng, batch_size, eval_batch_size, hps=None):
   """
   del eval_batch_size
 
-  per_host_batch_size = batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
   # We only use the first part of the seed, which may result in slightly more
   # rng collisions than normal.
   train_rng = np.random.RandomState(seed=shuffle_rng[0])

@@ -58,8 +58,8 @@ def get_fake_batch(batch_size, input_shape, num_classes):
 def get_fake(shuffle_rng, batch_size, eval_batch_size, hps=None):
   """Data generators for imagenet."""
   del shuffle_rng
-  per_host_batch_size = batch_size // jax.host_count()
-  per_host_eval_batch_size = eval_batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
+  per_host_eval_batch_size = eval_batch_size // jax.process_count()
 
   fake_train_batch = get_fake_batch(
       per_host_batch_size, hps.input_shape, hps.output_shape[0])

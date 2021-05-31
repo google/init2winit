@@ -134,7 +134,7 @@ def load_split(batch_size,
     return preprocess_fn(image, label)
 
   index = jax.host_id()
-  num_hosts = jax.host_count()
+  num_hosts = jax.process_count()
   use_training_files = split in ['train', 'eval_train']
   file_pattern = os.path.join(
       data_dir, 'train-*' if use_training_files else 'validation-*')

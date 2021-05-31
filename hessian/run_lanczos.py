@@ -134,7 +134,7 @@ def eval_checkpoints(
 
   if jax.host_id() == 0:
     logging.info('Starting eval!')
-    logging.info('Number of hosts: %d', jax.host_count())
+    logging.info('Number of hosts: %d', jax.process_count())
 
   hessian_evaluator = hessian_eval.CurvatureEvaluator(
       optimizer.target,

@@ -125,7 +125,7 @@ def _eval_batches(images,
 
 
 def _shard_by_host_id(array):
-  split_size = len(array) // jax.host_count()
+  split_size = len(array) // jax.process_count()
   start = split_size * jax.host_id()
   return array[start: start+split_size]
 
@@ -439,8 +439,8 @@ def get_mnist(shuffle_rng, batch_size, eval_batch_size, hps=None):
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
-  per_host_batch_size = batch_size // jax.host_count()
-  per_host_eval_batch_size = eval_batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
+  per_host_eval_batch_size = eval_batch_size // jax.process_count()
   rescale = lambda x: x / 255.0
   return _process_small_tfds_image_ds('mnist',
                                       per_host_batch_size,
@@ -478,8 +478,8 @@ def get_mnist_autoencoder(shuffle_rng, batch_size, eval_batch_size, hps=None):
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
-  per_host_batch_size = batch_size // jax.host_count()
-  per_host_eval_batch_size = eval_batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
+  per_host_eval_batch_size = eval_batch_size // jax.process_count()
   rescale = lambda x: x / 255.0
   return _process_small_tfds_image_ds('mnist',
                                       per_host_batch_size,
@@ -519,8 +519,8 @@ def get_fashion_mnist(shuffle_rng,
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
-  per_host_batch_size = batch_size // jax.host_count()
-  per_host_eval_batch_size = eval_batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
+  per_host_eval_batch_size = eval_batch_size // jax.process_count()
   rescale = lambda x: x / 255.0
   return _process_small_tfds_image_ds('fashion_mnist',
                                       per_host_batch_size,
@@ -563,8 +563,8 @@ def get_cifar10(shuffle_rng,
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
-  per_host_batch_size = batch_size // jax.host_count()
-  per_host_eval_batch_size = eval_batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
+  per_host_eval_batch_size = eval_batch_size // jax.process_count()
 
   logging.info('per_host_batch_size: %s', per_host_batch_size)
   logging.info('per_host_eval_batch_size: %s', per_host_eval_batch_size)
@@ -625,8 +625,8 @@ def get_cifar100(shuffle_rng,
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
-  per_host_batch_size = batch_size // jax.host_count()
-  per_host_eval_batch_size = eval_batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
+  per_host_eval_batch_size = eval_batch_size // jax.process_count()
 
   mean = jnp.array([129.3041658, 124.06996185, 112.4340492])[None, None,
                                                              None, :]
@@ -681,8 +681,8 @@ def get_svhn_no_extra(
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
-  per_host_batch_size = batch_size // jax.host_count()
-  per_host_eval_batch_size = eval_batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
+  per_host_eval_batch_size = eval_batch_size // jax.process_count()
   rescale = lambda x: x / 255.0
   augment_fn = functools.partial(image_preprocessing.augment_cifar10, hps=hps)
   return _process_small_tfds_image_ds(

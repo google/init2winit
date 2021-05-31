@@ -68,8 +68,8 @@ METADATA = {
 def get_translate_wmt(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
   """Wrapper to conform to the general dataset API."""
 
-  per_host_batch_size = batch_size // jax.host_count()
-  per_host_eval_batch_size = eval_batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
+  per_host_eval_batch_size = eval_batch_size // jax.process_count()
   return _get_translate_wmt(per_host_batch_size,
                             per_host_eval_batch_size,
                             hps,

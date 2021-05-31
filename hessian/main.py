@@ -99,7 +99,7 @@ def main(unused_argv):
   if jax.host_id() == 0:
     logging.info('argv:\n%s', ' '.join(sys.argv))
     logging.info('device_count: %d', jax.device_count())
-    logging.info('num_hosts : %d', jax.host_count())
+    logging.info('num_hosts : %d', jax.process_count())
     logging.info('host_id : %d', jax.host_id())
 
   model = models.get_model(model_name)

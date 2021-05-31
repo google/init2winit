@@ -220,15 +220,15 @@ def load_split(
   if split not in ['train', 'eval_train', 'valid']:
     raise ValueError('Unrecognized split {}'.format(split))
   if split in ['train']:
-    split_size = hps.train_size // jax.host_count()
+    split_size = hps.train_size // jax.process_count()
   else:
-    split_size = hps.valid_size // jax.host_count()
+    split_size = hps.valid_size // jax.process_count()
   start = jax.host_id() * split_size
   end = start + split_size
   # In order to properly load the full dataset, it is important that we load
   # entirely to the end of it on the last host, because otherwise we will drop
   # the last `{train,valid}_size % split_size` elements.
-  if jax.host_id() == jax.host_count() - 1:
+  if jax.host_id() == jax.process_count() - 1:
     end = -1
 
   logging.info('Loaded data [%d: %d] from %s', start, end, split)
@@ -283,8 +283,8 @@ def get_imagenet(shuffle_rng,
                  eval_batch_size,
                  hps):
   """Data generators for imagenet."""
-  per_host_batch_size = batch_size // jax.host_count()
-  per_host_eval_batch_size = eval_batch_size // jax.host_count()
+  per_host_batch_size = batch_size // jax.process_count()
+  per_host_eval_batch_size = eval_batch_size // jax.process_count()
 
   image_size = hps.input_shape[0]
   num_classes = 1000
