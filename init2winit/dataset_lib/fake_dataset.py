@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Fake ImageNet input pipeline."""
+"""Fake image input pipeline. Returns the same batch of ones over and over."""
 
 from init2winit.dataset_lib import data_utils
 import jax
@@ -42,9 +42,9 @@ METADATA = {
 
 
 def get_fake_batch(batch_size, input_shape, num_classes):
-  """Generate Gaussian random images."""
+  """Generate batches of images of all ones and one-hot labels."""
   train_input_shape = (batch_size, *input_shape)
-  images = np.random.normal(size=train_input_shape).astype(np.float32)
+  images = jnp.ones(train_input_shape, dtype=jnp.float32)
   labels = jax.nn.one_hot(
       np.zeros((batch_size,)), num_classes, dtype=jnp.int32)
   batch = {
