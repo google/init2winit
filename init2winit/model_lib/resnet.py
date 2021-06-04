@@ -49,6 +49,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     model_dtype='float32',
     virtual_batch_size=64,
     data_format='NHWC',
+    grad_clip=None,
 ))
 
 

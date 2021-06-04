@@ -60,6 +60,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         rng_seed=-1,
         use_shallue_label_smoothing=False,
         model_dtype='float32',
+        grad_clip=None,
     ))
 
 
