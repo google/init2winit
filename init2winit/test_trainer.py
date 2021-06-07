@@ -72,6 +72,7 @@ def get_column_names():
       'steps_per_sec',
       'preemption_count',
       'train_cost',
+      'grad_norm',
   ]
   return column_names
 

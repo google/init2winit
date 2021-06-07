@@ -46,6 +46,8 @@ from tensorflow.io import gfile
 
 FLAGS = flags.FLAGS
 
+_GRAD_CLIP_EPS = 1e-6
+
 
 def evaluate(flax_module, batch_stats, batch_iter, evaluate_batch_pmapped):
   """Compute aggregated metrics on the given data iterator.
@@ -114,7 +116,8 @@ def update(
     rng,
     local_device_index,
     training_metrics_grabber,
-    training_cost):
+    training_cost,
+    grad_clip):
   """Single step of the training loop.
 
   Args:
@@ -134,6 +137,9 @@ def update(
     training_cost: a function used to calculate the training objective that will
       be differentiated to generate updates. Takes
       (`flax_module`, `batch_stats`, `batch`, `rng`) as inputs.
+    grad_clip: Clip the l2 norm of the gradient at the specified value. For
+      minibatches with gradient norm ||g||_2 > grad_clip, we rescale g to the
+      value g / ||g||_2 * grad_clip. If None, then no clipping will be applied.
 
   Returns:
     A tuple of the new optimizer, the new batch stats, the scalar training cost,
@@ -153,12 +159,19 @@ def update(
   cost_value, grad = lax.pmean((cost_value, grad), axis_name='batch')
   new_optimizer = optimizer.apply_gradient(grad, learning_rate=lr)
 
+  grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
+  if grad_clip:
+    scaled_grad = jax.tree_map(
+        lambda x: x / (grad_norm + _GRAD_CLIP_EPS) * grad_clip, grad)
+    grad = jax.lax.cond(grad_norm > grad_clip, lambda _: scaled_grad,
+                        lambda _: grad, None)
+
   new_metrics_grabber = None
   if training_metrics_grabber:
     new_metrics_grabber = training_metrics_grabber.update(
         grad.params, optimizer, new_optimizer)
 
-  return new_optimizer, new_batch_stats, cost_value, new_metrics_grabber
+  return new_optimizer, new_batch_stats, cost_value, new_metrics_grabber, grad_norm
 
 
 def _merge_and_apply_prefix(d1, d2, prefix):
@@ -637,7 +650,10 @@ def train(train_dir,
   # lr = None, rng = None, local_device_index = 0, training_metrics_grabber = 0,
   # training_metrics_grabber, training_cost )
   update_pmapped = jax.pmap(
-      functools.partial(update, training_cost=model.training_cost),
+      functools.partial(
+          update,
+          training_cost=model.training_cost,
+          grad_clip=hps.get('grad_clip')),
       axis_name='batch',
       in_axes=(0, 0, 0, None, None, None, 0, 0))
   evaluate_batch_pmapped = jax.pmap(model.evaluate_batch, axis_name='batch')
@@ -679,7 +695,7 @@ def train(train_dir,
           use_deprecated_checkpointing=use_deprecated_checkpointing)
     batch = data_utils.shard(batch)
     lr = lr_fn(global_step)
-    optimizer, batch_stats, cost_val, training_metrics_grabber = update_pmapped(
+    optimizer, batch_stats, cost_val, training_metrics_grabber, grad_norm = update_pmapped(
         optimizer,
         batch_stats,
         batch,
@@ -708,6 +724,7 @@ def train(train_dir,
                     epoch=global_step * hps.batch_size // hps.train_size,
                     steps_per_sec=get_step_frequency(global_step),
                     eval_time=eval_time,
+                    grad_norm=np.mean(grad_norm),
                     preemption_count=preemption_count,
                     train_cost=mean_train_cost)
       yield report
@@ -746,6 +763,7 @@ def train(train_dir,
                   epoch=global_step * hps.batch_size // hps.train_size,
                   steps_per_sec=get_step_frequency(global_step),
                   eval_time=eval_time,
+                  grad_norm=np.mean(grad_norm),
                   preemption_count=preemption_count,
                   train_cost=mean_train_cost)
     yield report
