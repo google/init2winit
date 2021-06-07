@@ -21,9 +21,9 @@ from init2winit.dataset_lib import fake_dataset
 from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import mlperf_imagenet_dataset
 from init2winit.dataset_lib import nqm_noise
+from init2winit.dataset_lib import proteins
 from init2winit.dataset_lib import small_image_datasets
 from init2winit.dataset_lib import translate_wmt
-
 
 _Dataset = collections.namedtuple('Dataset', ('getter', 'hparams', 'meta_data'))
 
@@ -70,6 +70,10 @@ _ALL_DATASETS = {
         _Dataset(nqm_noise.get_nqm_noise,
                  nqm_noise.NQM_HPARAMS,
                  nqm_noise.NQM_METADATA),
+    'uniref50':
+        _Dataset(proteins.get_uniref,
+                 proteins.DEFAULT_HPARAMS,
+                 proteins.METADATA),
 }
 
 
