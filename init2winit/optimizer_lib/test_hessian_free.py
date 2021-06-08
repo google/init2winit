@@ -17,10 +17,20 @@
 
 """
 
+import copy
+from functools import partial  # pylint: disable=g-importing-member
+
 from absl.testing import absltest
-from init2winit.optimizer_lib import hessian_free
+from flax import nn
+from init2winit.model_lib import models
+from init2winit.optimizer_lib.hessian_free import gvp
+from init2winit.optimizer_lib.hessian_free import hessian_free
+from init2winit.optimizer_lib.hessian_free import mf_conjgrad_solver
 from init2winit.optimizer_lib.hessian_free import relative_per_iteration_progress_test
 from init2winit.optimizer_lib.hessian_free import residual_norm_test
+import jax
+from jax.flatten_util import ravel_pytree
+import jax.numpy as jnp
 import numpy as np
 
 
@@ -64,8 +74,8 @@ class HessianFreeTest(absltest.TestCase):
     x0 = np.ones(n)
 
     test_matmul_fn = lambda x: mat @ x
-    x = hessian_free.mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10,
-                                        None, 'residual_norm_test')
+    x = mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10, None,
+                           'residual_norm_test')
     self.assertAlmostEqual(np.linalg.norm(test_matmul_fn(x) - b), 0, places=3)
 
   def test_conjgrad_preconditioning(self):
@@ -90,8 +100,8 @@ class HessianFreeTest(absltest.TestCase):
 
     test_matmul_fn = lambda x: mat @ x
     test_precond_fn = lambda x: precond_mat @ x
-    x = hessian_free.mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10,
-                                        test_precond_fn, 'residual_norm_test')
+    x = mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10, test_precond_fn,
+                           'residual_norm_test')
     self.assertAlmostEqual(np.linalg.norm(test_matmul_fn(x) - b), 0, places=3)
 
   def test_conjgrad_martens_termination_criterion(self):
@@ -104,11 +114,110 @@ class HessianFreeTest(absltest.TestCase):
 
     test_mvm_fn = lambda x: mat @ x
 
-    x = hessian_free.mf_conjgrad_solver(
-        test_mvm_fn, b, x0, n, 1e-6, 500, None,
-        'relative_per_iteration_progress_test')
+    x = mf_conjgrad_solver(test_mvm_fn, b, x0, n, 1e-6, 500, None,
+                           'relative_per_iteration_progress_test')
     f_value = np.dot(x, test_mvm_fn(x) - 2 * b) / 2
     self.assertAlmostEqual(f_value, -0.223612323, places=8)
+
+  def test_hessian_free_optimizer(self):
+    """Tests the Hessian-free optimizer."""
+
+    model_str = 'autoencoder'
+    model_cls = models.get_model(model_str)
+    model_hps = models.get_model_hparams(model_str)
+
+    loss = 'sigmoid_binary_cross_entropy'
+    metrics = 'binary_autoencoder_metrics'
+
+    input_shape = (2, 2, 1)
+    output_shape = (4,)
+
+    hps = copy.copy(model_hps)
+    hps.update({
+        'hid_sizes': [2],
+        'activation_function': 'id',
+        'input_shape': input_shape,
+        'output_shape': output_shape
+    })
+
+    model = model_cls(hps, {}, loss, metrics)
+
+    inputs = jnp.array([[[1, 0], [1, 1]], [[1, 0], [0, 1]]])
+    targets = inputs.reshape(tuple([inputs.shape[0]] + list(output_shape)))
+    batch = {'inputs': inputs, 'targets': targets}
+
+    def forward_fn(params, inputs):
+      return nn.base.Model(model.flax_module_def, params)(inputs)
+
+    def opt_cost(params):
+      return model.loss_fn(forward_fn(params, inputs), targets)
+
+    optimizer = hessian_free(model.loss_fn)
+
+    params = {
+        'Dense_0': {
+            'kernel': jnp.array([[-1., 2.], [2., 0.], [-1., 3.], [-2., 2.]]),
+            'bias': jnp.array([0., 0.])
+        },
+        'Dense_1': {
+            'kernel': jnp.array([[4., 2., -2., 4.], [-3., 1., 2., -4.]]),
+            'bias': jnp.array([0., 0., 0., 0.])
+        }
+    }
+
+    grad_fn = jax.grad(opt_cost)
+    grads = grad_fn(params)
+
+    outputs = forward_fn(params, batch['inputs'])
+
+    n = inputs.shape[0]
+    m = outputs.shape[-1]
+    d = ravel_pytree(params)[0].shape[0]
+
+    v = np.ones(d)
+
+    p0 = np.zeros(d)
+    damping = 1
+    state = optimizer.init(p0, damping)
+
+    partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
+    partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
+
+    matmul_fn = partial(gvp, params, outputs, damping, partial_forward_fn,
+                        partial_loss_fn)
+
+    jacobian = jax.jacfwd(partial_forward_fn)(params)
+    jacobian_tensor = np.concatenate((
+        jacobian['Dense_0']['bias'].reshape(n, m, -1),
+        jacobian['Dense_0']['kernel'].reshape(n, m, -1),
+        jacobian['Dense_1']['bias'].reshape(n, m, -1),
+        jacobian['Dense_1']['kernel'].reshape(n, m, -1)), axis=2)
+
+    ggn_matrix = 0
+    for i in range(n):
+      jacobian_matrix = jacobian_tensor[i]
+      hessian = jax.hessian(partial_loss_fn)(outputs[i])
+      ggn_matrix += np.transpose(jacobian_matrix) @ hessian @ jacobian_matrix
+    ggn_matrix /= n
+    ggn_matrix += damping * np.identity(d)
+
+    expected = ggn_matrix @ v
+
+    # Test the gvp function
+    self.assertAlmostEqual(
+        jnp.linalg.norm(matmul_fn(v) - expected), 0, places=4)
+    p, state = optimizer.update(grads, state, forward_fn, batch, params)
+
+    # Test the damping parameter update
+    self.assertEqual(state.damping, 3/2)
+
+    # Test the search direction
+    self.assertAlmostEqual(
+        jnp.linalg.norm(
+            ravel_pytree(p)[0] +
+            jnp.linalg.inv(ggn_matrix) @ ravel_pytree(grads)[0]),
+        0,
+        places=4)
 
 
 if __name__ == '__main__':
