@@ -168,7 +168,7 @@ def meta_optimize_scales(loss_fn,
 
   # We will only optimize the scalars for model parameters with rank >=2.
   non_bias_and_scalar_keys = _get_non_bias_params(normalized_params)
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     logging.info('MetaInit will optimize the following parameters:')
     for key in non_bias_and_scalar_keys:
       logging.info(key)
@@ -206,7 +206,8 @@ def meta_optimize_scales(loss_fn,
 
     meta_opt, loss_value = update(meta_opt, inputs, targets)
     training_curve.append(loss_value)
-    if jax.host_id() == 0 and (i % log_every == 0 or (i + 1) == hps.meta_steps):
+    if (jax.process_index() == 0 and
+        (i % log_every == 0 or (i + 1) == hps.meta_steps)):
       end = time.clock()
       logging.info('Cumulative time (seconds): %d', end-start)
       logging.info('meta_init step %d, loss: %f', i, float(loss_value[0]))
@@ -255,7 +256,7 @@ def meta_init(loss_fn,
     A Flax model with the learned initialization.
   """
   # Pretty print the preinitialized norms with the variable shapes.
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     logging.info('Preinitialized norms:')
     _log_shape_and_norms(model.params, metrics_logger, key='init_norms')
     # First grab the norms of all weights and rescale params to have norm 1.
@@ -278,7 +279,7 @@ def meta_init(loss_fn,
       log_every=log_every)
   new_init = scale_params(normalized_params, learned_norms)
 
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     # Pretty print the meta init norms with the variable shapes.
     logging.info('Learned norms from meta_init:')
     _log_shape_and_norms(new_init, metrics_logger, key='meta_init_norms')

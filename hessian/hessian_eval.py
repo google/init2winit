@@ -69,7 +69,7 @@ def prepare_batches_gen(dataset, eval_config):
                                 eval_config['num_batches'])
   batches = list(train_iter)
   init_rng = jax.random.PRNGKey(eval_config['rng_key'])
-  init_rng = jax.random.fold_in(init_rng, jax.host_id())
+  init_rng = jax.random.fold_in(init_rng, jax.process_index())
   def training_batches_gen():
     for counter, batch in enumerate(batches):
       batch = data_utils.shard(batch)
@@ -232,7 +232,7 @@ class CurvatureEvaluator:
         use_pmap=True,
         average_hosts=eval_config['average_hosts'])
     assert self.n_params == n_params
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       logging.info('CurvatureEvaluator build with config: %r', eval_config)
       logging.info('n_params: %d', self.n_params)
 
@@ -310,7 +310,7 @@ class CurvatureEvaluator:
       row['cTg'] = np.copy(inner_prod_g)
       row['cTu'] = np.copy(inner_prod_u)
 
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       logging.info('stats eval finished. Statistics captured:')
       logging.info(row.keys())
     return row
@@ -353,7 +353,7 @@ class CurvatureEvaluator:
     full_batch_update = compiled_update(optimizer, full_grad)
     udirs.append(_unreplicate(full_batch_update))
 
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       logging.info('Update directions successfully computed')
     return gdirs, udirs
 
@@ -374,7 +374,7 @@ class CurvatureEvaluator:
         eta = etas[j]
         loss_values[j] = self._full_batch_eval(model, u_dir, eta)
       row['loss%d' % (i,)] = np.copy(loss_values)
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       logging.info('Loss interpolation along gradients finished.')
 
     for i, u_dir in enumerate(udirs):
@@ -384,7 +384,7 @@ class CurvatureEvaluator:
         eta = etas[j]
         loss_values[j] = self._full_batch_eval(model, u_dir, eta)
       row['loss_u%d' % (i,)] = np.copy(loss_values)
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       logging.info('Loss interpolation along optimizer directions finished.')
 
     _, unflatten = ravel_pytree(gdirs[0])
@@ -404,7 +404,7 @@ class CurvatureEvaluator:
         loss_values[j] = self._full_batch_eval(model, u_dir, eta)
       row['loss_cvec%d' % (i,)] = np.copy(loss_values)
 
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       logging.info('Loss interpolations finished. Statistics captured:')
       logging.info(row.keys())
     return row

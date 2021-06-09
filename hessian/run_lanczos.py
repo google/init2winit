@@ -78,7 +78,7 @@ def eval_checkpoints(
     use_deprecated_checkpointing: Whether to use deprecated checkpointing.
   """
   rng, init_rng = jax.random.split(rng)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = jax.random.fold_in(rng, jax.process_index())
   rng, data_rng = jax.random.split(rng)
 
   initializer = initializers.get_initializer('noop')
@@ -101,7 +101,7 @@ def eval_checkpoints(
     return model.training_cost(module, batch_stats, batch, rng)[0]
   batch_stats = jax_utils.replicate(batch_stats)
 
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     utils.log_pytree_shape_and_statistics(flax_module.params)
     logging.info('train_size: %d,', hps.train_size)
     logging.info(hps)
@@ -132,7 +132,7 @@ def eval_checkpoints(
   # pmap functions for the training loop
   evaluate_batch_pmapped = jax.pmap(model.evaluate_batch, axis_name='batch')
 
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     logging.info('Starting eval!')
     logging.info('Number of hosts: %d', jax.process_count())
 
@@ -166,7 +166,7 @@ def eval_checkpoints(
     report, _ = trainer.eval_metrics(optimizer.target, batch_stats, dataset,
                                      eval_num_batches, eval_num_batches,
                                      evaluate_batch_pmapped)
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       logging.info('Global Step: %d', step)
       logging.info(report)
     row = {}
@@ -184,5 +184,5 @@ def eval_checkpoints(
     row.update(hessian_evaluator.compute_interpolations(optimizer.target, grads,
                                                         updates, hess_evecs,
                                                         cov_evecs, step))
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       logger.append_pytree(row)

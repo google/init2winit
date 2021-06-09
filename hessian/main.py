@@ -87,7 +87,7 @@ def main(unused_argv):
   if FLAGS.experiment_config_filename:
     with tf.io.gfile.GFile(FLAGS.experiment_config_filename, 'r') as f:
       experiment_config = json.load(f)
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       logging.info('experiment_config: %r', experiment_config)
     dataset_name = experiment_config['dataset']
     model_name = experiment_config['model']
@@ -96,11 +96,11 @@ def main(unused_argv):
     dataset_name = FLAGS.dataset
     model_name = FLAGS.model
 
-  if jax.host_id() == 0:
+  if jax.process_index() == 0:
     logging.info('argv:\n%s', ' '.join(sys.argv))
     logging.info('device_count: %d', jax.device_count())
     logging.info('num_hosts : %d', jax.process_count())
-    logging.info('host_id : %d', jax.host_id())
+    logging.info('host_id : %d', jax.process_index())
 
   model = models.get_model(model_name)
   dataset_builder = datasets.get_dataset(dataset_name)

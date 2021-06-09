@@ -133,7 +133,7 @@ def load_split(batch_size,
     image = tf.image.convert_image_dtype(image, dtype)
     return preprocess_fn(image, label)
 
-  index = jax.host_id()
+  index = jax.process_index()
   num_hosts = jax.process_count()
   use_training_files = split in ['train', 'eval_train']
   file_pattern = os.path.join(
