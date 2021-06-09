@@ -576,13 +576,13 @@ def train(train_dir,
   # TODO(znado,gilmer,gdahl): implement replicating the same initialization
   # across hosts.
   rng, init_rng = jax.random.split(rng)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = jax.random.fold_in(rng, jax.process_count())
   rng, data_rng = jax.random.split(rng)
 
   # only used if checkpoints_steps is non-empty.
   checkpoint_dir = os.path.join(train_dir, 'checkpoints')
 
-  if jax.host_id() == 0:
+  if jax.process_count() == 0:
     logging.info('Let the training begin!')
     logging.info('Dataset input shape: %r', hps.input_shape)
     logging.info('Hyperparameters: %s', hps)
@@ -596,7 +596,7 @@ def train(train_dir,
                                         hps.output_shape, hps, init_rng,
                                         init_logger)
 
-  if jax.host_id() == 0:
+  if jax.process_count() == 0:
     utils.log_pytree_shape_and_statistics(flax_module.params)
     logging.info('train_size: %d,', hps.train_size)
 
@@ -663,7 +663,7 @@ def train(train_dir,
   def get_step_frequency(cur_step):
     return float(cur_step - start_step)/(time.time() - start_time)
 
-  if jax.host_id() == 0:
+  if jax.process_count() == 0:
     logging.info('Starting training!')
 
   # Numpy array of range(0, local_device_count) to send to each device to be
@@ -681,7 +681,7 @@ def train(train_dir,
   train_iter = itertools.islice(
       dataset.train_iterator_fn(), global_step, num_train_steps)
   for batch in train_iter:
-    if global_step in checkpoint_steps and jax.host_id() == 0:
+    if global_step in checkpoint_steps and jax.process_count() == 0:
       save_checkpoint(
           checkpoint_dir, {
               'optimizer': optimizer,
@@ -728,7 +728,7 @@ def train(train_dir,
                     preemption_count=preemption_count,
                     train_cost=mean_train_cost)
       yield report
-      if jax.host_id() == 0:
+      if jax.process_count() == 0:
         _log_epoch_report(report, metrics_logger)
         _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
         save_checkpoint(
@@ -767,7 +767,7 @@ def train(train_dir,
                   preemption_count=preemption_count,
                   train_cost=mean_train_cost)
     yield report
-    if jax.host_id() == 0:
+    if jax.process_count() == 0:
       _log_epoch_report(report, metrics_logger)
       _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
       save_checkpoint(
@@ -857,7 +857,7 @@ def run(
   if merged_hps.rng_seed < 0:
     rng_seed = create_synchronized_rng_seed()
   xm_experiment = None
-  if jax.host_id() == 0:
+  if jax.process_count() == 0:
     logging.info('Running with seed %d', rng_seed)
   rng = jax.random.PRNGKey(rng_seed)
 
@@ -866,7 +866,7 @@ def run(
   trial_dir = os.path.join(experiment_dir, str(worker_id))
   meta_data_path = os.path.join(trial_dir, 'meta_data.json')
   meta_data = {'worker_id': worker_id, 'status': 'incomplete'}
-  if jax.host_id() == 0:
+  if jax.process_count() == 0:
     logging.info('rng: %s', rng)
     gfile.makedirs(trial_dir)
     # Set up the metric loggers for host 0.
@@ -911,6 +911,6 @@ def run(
     meta_data['status'] = 'diverged'
     raise err
   finally:
-    if jax.host_id() == 0:
+    if jax.process_count() == 0:
       with gfile.GFile(meta_data_path, 'w') as f:
         f.write(json.dumps(meta_data, indent=2))

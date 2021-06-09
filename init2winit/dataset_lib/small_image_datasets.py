@@ -126,7 +126,7 @@ def _eval_batches(images,
 
 def _shard_by_host_id(array):
   split_size = len(array) // jax.process_count()
-  start = split_size * jax.host_id()
+  start = split_size * jax.process_count()
   return array[start: start+split_size]
 
 
@@ -294,7 +294,7 @@ def _process_small_tfds_image_ds(
   data_train = tfds.load(name=dataset_name, split=train_split,
                          as_dataset_kwargs={'shuffle_files': False})
   # Ensure a different shuffle of the training data on each host.
-  shuffle_rng = jax.random.fold_in(shuffle_rng, jax.host_id())
+  shuffle_rng = jax.random.fold_in(shuffle_rng, jax.process_count())
   data_train = data_train.shuffle(
       train_size,
       reshuffle_each_iteration=True,

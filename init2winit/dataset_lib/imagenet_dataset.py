@@ -223,12 +223,12 @@ def load_split(
     split_size = hps.train_size // jax.process_count()
   else:
     split_size = hps.valid_size // jax.process_count()
-  start = jax.host_id() * split_size
+  start = jax.process_count() * split_size
   end = start + split_size
   # In order to properly load the full dataset, it is important that we load
   # entirely to the end of it on the last host, because otherwise we will drop
   # the last `{train,valid}_size % split_size` elements.
-  if jax.host_id() == jax.process_count() - 1:
+  if jax.process_count() == jax.process_count() - 1:
     end = -1
 
   logging.info('Loaded data [%d: %d] from %s', start, end, split)

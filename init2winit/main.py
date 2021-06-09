@@ -99,19 +99,19 @@ def main(unused_argv):
 
   checkpoint_steps = [int(s.strip()) for s in FLAGS.checkpoint_steps]
   eval_steps = [int(s.strip()) for s in FLAGS.eval_steps]
-  if jax.host_id() == 0:
+  if jax.process_count() == 0:
     tf.io.gfile.makedirs(FLAGS.experiment_dir)
   log_dir = os.path.join(FLAGS.experiment_dir, 'r=3/')
   tf.io.gfile.makedirs(log_dir)
   log_path = os.path.join(
-      log_dir, 'worker{}_{}.log'.format(FLAGS.worker_id, jax.host_id()))
+      log_dir, 'worker{}_{}.log'.format(FLAGS.worker_id, jax.process_count()))
   with tf.io.gfile.GFile(log_path, 'a') as logfile:
     utils.add_log_file(logfile)
-    if jax.host_id() == 0:
+    if jax.process_count() == 0:
       logging.info('argv:\n%s', ' '.join(sys.argv))
       logging.info('device_count: %d', jax.device_count())
       logging.info('num_hosts : %d', jax.process_count())
-      logging.info('host_id : %d', jax.host_id())
+      logging.info('host_id : %d', jax.process_count())
       logging.info('checkpoint_steps: %r', checkpoint_steps)
       logging.info('eval_steps: %r', eval_steps)
 
