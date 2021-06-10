@@ -394,10 +394,11 @@ def _maybe_restore_latest_checkpoint(
 
 def get_optimizer(hps):
   """Constructs the optimizer from the given HParams."""
-  if 'weight_decay' in hps.opt_hparams:
-    weight_decay = hps.opt_hparams['weight_decay']
-  else:
-    weight_decay = 0
+  # We handle hps.l2_decay_factor in the training cost function base_model.py
+  # and hps.weight_decay in the optimizer. It is almost certainly an error if
+  # both are set.
+  weight_decay = hps.opt_hparams.get('weight_decay', 0)
+  assert hps.l2_decay_factor is None or weight_decay == 0.0
 
   if hps.optimizer == 'sgd':
     return optimizers.GradientDescent(learning_rate=None)
@@ -412,7 +413,6 @@ def get_optimizer(hps):
                                nesterov=False,
                                weight_decay=weight_decay)
   elif hps.optimizer == 'lamb':
-    assert hps.l2_decay_factor is None or weight_decay == 0.0
     return optimizers.LAMB(
         learning_rate=None,
         beta1=hps.opt_hparams['beta1'],
@@ -420,7 +420,6 @@ def get_optimizer(hps):
         eps=hps.opt_hparams['epsilon'],
         weight_decay=weight_decay)
   elif hps.optimizer == 'adam':
-    assert hps.l2_decay_factor is None or weight_decay == 0.0
     return optimizers.Adam(
         learning_rate=None,
         beta1=hps.opt_hparams['beta1'],
@@ -428,13 +427,11 @@ def get_optimizer(hps):
         eps=hps.opt_hparams['epsilon'],
         weight_decay=weight_decay)
   elif hps.optimizer == 'lars':
-    assert hps.l2_decay_factor is None or weight_decay == 0.0
     return optimizers.LARS(
         learning_rate=None,
         beta=hps.opt_hparams['beta'],
         weight_decay=weight_decay)
   elif hps.optimizer == 'mlperf_lars_resnet':
-    assert hps.l2_decay_factor is None or weight_decay == 0.0
     weight_opt_def = optimizers.LARS(
         learning_rate=None,
         beta=hps.opt_hparams['beta'],
@@ -454,7 +451,6 @@ def get_optimizer(hps):
     return optimizers.MultiOptimizer((weight_traversal, weight_opt_def),
                                      (other_traversal, other_opt_def))
   elif hps.optimizer == 'mlperf_lamb':
-    assert hps.l2_decay_factor is None or weight_decay == 0.0
     weight_opt_def = optimizers.LAMB(
         learning_rate=None,
         beta1=hps.opt_hparams['beta1'],
