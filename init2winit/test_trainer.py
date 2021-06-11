@@ -288,7 +288,7 @@ class TrainerTest(absltest.TestCase):
             'momentum': 0.9,
         },
         'lr_hparams': {
-            'initial_value': 0.005,
+            'base_lr': 0.005,
             'schedule': 'constant'
         },
         # Training HParams.
@@ -391,7 +391,7 @@ class TrainerTest(absltest.TestCase):
     dataset_builder = datasets.get_dataset(dataset_name)
     hparam_overrides = {
         'lr_hparams': {
-            'initial_value': 0.1,
+            'base_lr': 0.1,
             'schedule': 'cosine'
         },
         'batch_size': 8,
@@ -520,7 +520,7 @@ class TrainerTest(absltest.TestCase):
       decay_factor = (1 + jnp.cos(
           (final_step - 1) / num_train_steps_reload * jnp.pi)) * 0.5
       self.assertEqual(float(final_learning_rate),
-                       hps.lr_hparams['initial_value'] * decay_factor)
+                       hps.lr_hparams['base_lr'] * decay_factor)
 
     self.assertEqual(set(df.columns.values), set(get_column_names()))
 

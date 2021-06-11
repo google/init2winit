@@ -29,7 +29,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     blocks_per_group=3,
     channel_multiplier=2,
     lr_hparams={
-        'initial_value': 0.001,
+        'base_lr': 0.001,
         'schedule': 'cosine'
     },
     normalizer='batch_norm',

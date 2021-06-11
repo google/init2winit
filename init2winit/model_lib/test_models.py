@@ -121,7 +121,7 @@ class ModelsTest(parameterized.TestCase):
         'momentum': 0.9,
         'normalizer': 'layer_norm',
         'lr_hparams': {
-            'initial_value': 0.005,
+            'base_lr': 0.005,
             'schedule': 'constant'
         },
         'output_shape': (vocab_size,),
@@ -195,7 +195,7 @@ class ModelsTest(parameterized.TestCase):
         'attention_dropout_rate': 0.1,
         'momentum': 0.9,
         'lr_hparams': {
-            'initial_value': 0.005,
+            'base_lr': 0.005,
             'schedule': 'constant'
         },
         'output_shape': (vocab_size,),

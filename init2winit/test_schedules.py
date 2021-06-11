@@ -30,7 +30,7 @@ class LearningRateTest(absltest.TestCase):
         lr_hparams={
             'schedule': 'polynomial',
             'power': 2.0,
-            'initial_value': .1,
+            'base_lr': .1,
             'end_factor': .01,
             'decay_steps_factor': 0.5,
         }
@@ -41,10 +41,10 @@ class LearningRateTest(absltest.TestCase):
     decay_steps = max_training_steps * hps['decay_steps_factor']
     for step in range(max_training_steps):
       expected_learning_rate = tf.train.polynomial_decay(
-          hps['initial_value'],
+          hps['base_lr'],
           step,
           decay_steps,
-          hps['end_factor'] * hps['initial_value'],
+          hps['end_factor'] * hps['base_lr'],
           power=hps['power'])().numpy()
       self.assertAlmostEqual(lr_fn(step), expected_learning_rate)
 
@@ -54,7 +54,7 @@ class LearningRateTest(absltest.TestCase):
         lr_hparams={
             'schedule': 'polynomial',
             'power': 2.0,
-            'initial_value': .1,
+            'base_lr': .1,
             'end_factor': .01,
             'decay_steps': 200,
         }
@@ -65,10 +65,10 @@ class LearningRateTest(absltest.TestCase):
     decay_steps = hps['decay_steps']
     for step in range(max_training_steps):
       expected_learning_rate = tf.train.polynomial_decay(
-          hps['initial_value'],
+          hps['base_lr'],
           step,
           decay_steps,
-          hps['end_factor'] * hps['initial_value'],
+          hps['end_factor'] * hps['base_lr'],
           power=hps['power'])().numpy()
       self.assertAlmostEqual(lr_fn(step), expected_learning_rate)
 
@@ -130,20 +130,20 @@ class LearningRateTest(absltest.TestCase):
     bad_hps = config_dict.ConfigDict(dict(
         lr_hparams={
             'schedule': 'mlperf_polynomial',
-            'base_lr': .1,
             'warmup_steps': 200,
-            'initial_value': .1,
+            'base_lr': .1,
             'decay_end': -1,
             'end_lr': 1e-4,
             'power': 2.0,
             'start_lr': 0.0,
+            'initial_value': .1,
         }
     ))
     bad_hps2 = config_dict.ConfigDict(dict(
         lr_hparams={
             'schedule': 'polynomial',
             'power': 2.0,
-            'initial_value': .1,
+            'base_lr': .1,
             'end_factor': .01,
             'decay_steps': 200,
             'decay_steps_factor': 0.5

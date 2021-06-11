@@ -202,7 +202,7 @@ class TrainerTest(absltest.TestCase):
     dataset_builder = datasets.get_dataset(dataset_name)
     hparam_overrides = {
         'lr_hparams': {
-            'initial_value': 0.1,
+            'base_lr': 0.1,
             'schedule': 'cosine'
         },
         'batch_size': 8,

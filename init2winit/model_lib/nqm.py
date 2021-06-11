@@ -32,7 +32,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
         'momentum': 0.0,
     },
     lr_hparams={
-        'initial_value': 0.1,
+        'base_lr': 0.1,
         'schedule': 'constant'
     },
     batch_size=128,

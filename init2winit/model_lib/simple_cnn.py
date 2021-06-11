@@ -29,7 +29,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     num_filters=[20, 10],
     kernel_sizes=[3, 3],
     lr_hparams={
-        'initial_value': 0.001,
+        'base_lr': 0.001,
         'schedule': 'constant'
     },
     layer_rescale_factors={},

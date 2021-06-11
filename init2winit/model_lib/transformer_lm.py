@@ -49,7 +49,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         layer_rescale_factors={},
         normalizer='layer_norm',
         lr_hparams={
-            'initial_value': 0.05,
+            'base_lr': 0.05,
             'warmup_steps': 8000,
             'factors': 'constant * linear_warmup * rsqrt_decay',
             'schedule': 'compound'

@@ -60,7 +60,7 @@ flags.DEFINE_integer('eval_frequency', 1000, 'Evaluate every k steps.')
 flags.DEFINE_string(
     'hparam_overrides', '', 'json representation of a flattened dict of hparam '
     'overrides. For nested dictionaries, the override key '
-    'should be specified as lr_hparams.initial_value.')
+    'should be specified as lr_hparams.base_lr.')
 flags.DEFINE_list(
     'checkpoint_steps', [], 'List of steps to checkpoint the'
     ' model. The checkpoints will be saved in a separate'

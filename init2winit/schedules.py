@@ -28,17 +28,17 @@ def _check_schedule_hparams(schedule_hparams, expected_keys):
 def constant_schedule(schedule_hparams, max_training_steps):
   del max_training_steps
   _check_schedule_hparams(schedule_hparams,
-                          ['schedule', 'initial_value'])
-  return lambda t: schedule_hparams['initial_value']
+                          ['schedule', 'base_lr'])
+  return lambda t: schedule_hparams['base_lr']
 
 
 def cosine_schedule(schedule_hparams, max_training_steps):
   _check_schedule_hparams(schedule_hparams,
-                          ['schedule', 'initial_value'])
+                          ['schedule', 'base_lr'])
 
   def lr_fn(t):
     decay_factor = (1 + jnp.cos(t / max_training_steps * jnp.pi)) * 0.5
-    return schedule_hparams['initial_value'] * decay_factor
+    return schedule_hparams['base_lr'] * decay_factor
   return lr_fn
 
 
@@ -50,16 +50,14 @@ def polynomial_schedule(schedule_hparams, max_training_steps):
 
   Args:
     schedule_hparams: Relevant hparams are schedule,
-      initial_value, end_factor, power, and one of decay_steps or
+      base_lr, end_factor, power, and one of decay_steps or
       decay_steps_factor.
     max_training_steps: Only used when decay_steps_factor is provided.
 
   Returns:
     lr_fn: A function mapping global_step to lr.
   """
-  expected_keys = [
-      'schedule', 'initial_value', 'end_factor', 'power'
-  ]
+  expected_keys = ['schedule', 'base_lr', 'end_factor', 'power']
   if 'decay_steps' in schedule_hparams:
     expected_keys.append('decay_steps')
     decay_steps = schedule_hparams.decay_steps
@@ -69,12 +67,12 @@ def polynomial_schedule(schedule_hparams, max_training_steps):
         max_training_steps * schedule_hparams['decay_steps_factor'])
   _check_schedule_hparams(schedule_hparams, expected_keys)
 
-  end_learning_rate = schedule_hparams['initial_value'] * schedule_hparams[
+  end_learning_rate = schedule_hparams['base_lr'] * schedule_hparams[
       'end_factor']
 
   def lr_fn(t):
     step = min(decay_steps, t)
-    decayed_learning_rate = (schedule_hparams['initial_value'] -
+    decayed_learning_rate = (schedule_hparams['base_lr'] -
                              end_learning_rate) * (1 - step / decay_steps)**(
                                  schedule_hparams['power']) + end_learning_rate
     return decayed_learning_rate
@@ -91,7 +89,7 @@ def piecewise_constant_schedule(schedule_hparams, max_training_steps):
   decay_events = [100, 200] and decay_factors = [0.5, 0.1].
 
   Args:
-    schedule_hparams: Relevant hparams are initial_value, decay_events
+    schedule_hparams: Relevant hparams are base_lr, decay_events
       decay_factors.
     max_training_steps: This is ignored (needed to match API of other lr
       functions).
@@ -101,14 +99,14 @@ def piecewise_constant_schedule(schedule_hparams, max_training_steps):
   """
   del max_training_steps
   _check_schedule_hparams(schedule_hparams, [
-      'schedule', 'initial_value', 'decay_events',
+      'schedule', 'base_lr', 'decay_events',
       'decay_factors'
   ])
   boundaries = jnp.array([0] + schedule_hparams['decay_events'])
   factors = [1.0] + schedule_hparams['decay_factors']
   def lr_fn(t):
     index = jnp.sum(boundaries[1:] < t)
-    return factors[index] * schedule_hparams['initial_value']
+    return factors[index] * schedule_hparams['base_lr']
 
   return lr_fn
 
@@ -123,7 +121,7 @@ def piecewise_linear_schedule(schedule_hparams, max_training_steps):
   decay_events = [100, 200] and decay_factors = [0.5, 0.1].
 
   Args:
-    schedule_hparams: Relevant hparams are initial_value, decay_events
+    schedule_hparams: Relevant hparams are base_lr, decay_events
       decay_factors.
     max_training_steps: This is ignored (needed to match API of other lr
       functions).
@@ -133,7 +131,7 @@ def piecewise_linear_schedule(schedule_hparams, max_training_steps):
   """
   del max_training_steps
   _check_schedule_hparams(schedule_hparams, [
-      'schedule', 'initial_value', 'decay_events',
+      'schedule', 'base_lr', 'decay_events',
       'decay_factors'
   ])
   boundaries = jnp.array([0] + schedule_hparams['decay_events'])
@@ -141,11 +139,11 @@ def piecewise_linear_schedule(schedule_hparams, max_training_steps):
   def lr_fn(t):
     index = jnp.sum(boundaries[1:] < t)
     if index+1 == len(factors):
-      return factors[index] * schedule_hparams['initial_value']
+      return factors[index] * schedule_hparams['base_lr']
     m = (factors[index + 1] - factors[index]) / (
         boundaries[index + 1] - boundaries[index])
     interpolated_factor = m * (t - boundaries[index]) + factors[index]
-    return schedule_hparams['initial_value'] * interpolated_factor
+    return schedule_hparams['base_lr'] * interpolated_factor
 
   return lr_fn
 
@@ -212,7 +210,7 @@ def compound_schedule(schedule_hparams, max_training_steps):
   factors = [n.strip() for n in schedule_hparams['factors'].split('*')]
   expected_keys = ['schedule', 'factors']
   if 'constant' in factors:
-    expected_keys.append('initial_value')
+    expected_keys.append('base_lr')
   if 'linear_warmup' in factors or 'rsqrt_decay' in factors:
     expected_keys.append('warmup_steps')
   _check_schedule_hparams(schedule_hparams, expected_keys)
@@ -222,7 +220,7 @@ def compound_schedule(schedule_hparams, max_training_steps):
     ret = 1.0
     for name in factors:
       if name == 'constant':
-        ret *= schedule_hparams['initial_value']
+        ret *= schedule_hparams['base_lr']
       elif name == 'linear_warmup':
         ret *= jnp.minimum(1.0, step / schedule_hparams['warmup_steps'])
       elif name == 'rsqrt_decay':
@@ -231,6 +229,54 @@ def compound_schedule(schedule_hparams, max_training_steps):
         raise ValueError('Unknown factor %s.' % name)
     return jnp.asarray(ret, dtype=jnp.float32)
 
+  return lr_fn
+
+
+def prepend_linear_warmup(schedule_hparams, max_training_steps,
+                          base_lr_schedule):
+  """Models the base_lr_schedule to include a warmup phase.
+
+  The returned schedule will have the following form:
+
+  if step < hps.warmup_steps:
+     lr = (step / warmup_steps) ** warmup_power * base_lr
+
+  otherwise:
+    lr = base_lr_schedule(step - hps.warmup_steps)
+    where the max train steps input to base_lr_schedule is
+    max_train_steps - hps.warmup_steps.
+
+  Effectively, what this does is the first warmup_steps will be linear warmup
+  (if power =1), followed by what the base_lr_schedule would be if called with
+  max_train_steps - warmup_steps.
+
+  Args:
+    schedule_hparams: Must include all required hparams needed in
+      base_lr_schedule. Additionally we require warmup_steps, warmup_power to
+      be added.
+    max_training_steps: Full number of steps to be used in training.
+    base_lr_schedule: One of the schedule functions defined in this module.
+      Must satisfy the API of -
+      base_lr_schedule(schedule_hparams, max_training_steps) -> returns lr_fn.
+
+  Returns:
+    A function mapping global_step to learning rate.
+  """
+
+  # grab warmup hparams
+  schedule_hparams = dict(schedule_hparams)  # convert to dict so we can pop
+  warmup_steps = schedule_hparams.pop('warmup_steps')
+  warmup_power = schedule_hparams.pop('warmup_power')
+  base_lr = schedule_hparams['base_lr']
+
+  base_lr_fn = base_lr_schedule(schedule_hparams,
+                                max_training_steps - warmup_steps)
+
+  def lr_fn(t):
+    if t < warmup_steps:
+      return ((t / warmup_steps) ** warmup_power) * base_lr
+    step = t - warmup_steps
+    return base_lr_fn(step)
   return lr_fn
 
 
@@ -246,5 +292,11 @@ lr_fn_dict = {
 
 
 def get_schedule_fn(schedule_hparams, max_training_steps):
-  return lr_fn_dict[schedule_hparams['schedule']](
-      schedule_hparams, max_training_steps)
+  warmup_suffix = '_warmup'
+  if schedule_hparams['schedule'][-len(warmup_suffix):] == warmup_suffix:
+    base_name = schedule_hparams['schedule'][:-len(warmup_suffix)]
+    base_lr_schedule = lr_fn_dict[base_name]
+    return prepend_linear_warmup(schedule_hparams, max_training_steps,
+                                 base_lr_schedule)
+  return lr_fn_dict[schedule_hparams['schedule']](schedule_hparams,
+                                                  max_training_steps)

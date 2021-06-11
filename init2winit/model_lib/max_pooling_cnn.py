@@ -38,7 +38,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     strides=[2, 2, 2],
     num_dense_units=[512, 256],
     lr_hparams={
-        'initial_value': 0.001,
+        'base_lr': 0.001,
         'schedule': 'constant'
     },
     layer_rescale_factors={},

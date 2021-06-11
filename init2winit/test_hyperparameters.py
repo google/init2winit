@@ -28,7 +28,7 @@ class HyperParameterTest(absltest.TestCase):
     hps_overrides = {
         'lr_hparams.schedule': 'polynomial',
         'lr_hparams.power': 2.0,
-        'lr_hparams.initial_value': .1,
+        'lr_hparams.base_lr': .1,
         'lr_hparams.end_factor': .01,
         'lr_hparams.decay_steps_factor': 0.5,
     }
@@ -45,7 +45,7 @@ class HyperParameterTest(absltest.TestCase):
     self.assertEqual(
         set(merged_hps.lr_hparams.keys()),
         set([
-            'schedule', 'power', 'initial_value',
+            'schedule', 'power', 'base_lr',
             'end_factor', 'decay_steps_factor'
         ]))
 

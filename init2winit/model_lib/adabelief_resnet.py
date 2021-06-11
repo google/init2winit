@@ -50,7 +50,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         layer_rescale_factors={},
         lr_hparams={
             'schedule': 'constant',
-            'initial_value': 0.2,
+            'base_lr': 0.2,
         },
         optimizer='momentum',
         opt_hparams={

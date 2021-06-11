@@ -49,7 +49,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
 
         activation_function='relu',
         lr_hparams={
-            'initial_value': 0.02,
+            'base_lr': 0.02,
             'schedule': 'constant'
         },
         layer_rescale_factors={},

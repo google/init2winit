@@ -56,7 +56,7 @@ flags.DEFINE_string('dataset', '', 'Name of the dataset used to evaluate (not'
 flags.DEFINE_string(
     'hparam_overrides', '', 'json representation of a flattened dict of hparam '
     'overrides. For nested dictionaries, the override key '
-    'should be specified as lr_hparams.initial_value.')
+    'should be specified as lr_hparams.base_lr.')
 flags.DEFINE_integer('min_global_step', None, 'Lower bound of the step'
                      'interval to evaluate. None indicates all checkpoints.')
 flags.DEFINE_integer('max_global_step', None, 'Upper bound of the step'
