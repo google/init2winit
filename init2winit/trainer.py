@@ -645,14 +645,22 @@ def train(train_dir,
   # in_axes = (optimizer = 0, batch_stats = 0, batch = 0, step = None,
   # lr = None, rng = None, local_device_index = 0, training_metrics_grabber = 0,
   # training_metrics_grabber, training_cost )
+  # Also, we can donate buffers for 'optimizer', 'batch_stats',
+  # 'batch' and 'training_metrics_grabber' for update's pmapped computation.
   update_pmapped = jax.pmap(
       functools.partial(
           update,
           training_cost=model.training_cost,
           grad_clip=hps.get('grad_clip')),
       axis_name='batch',
-      in_axes=(0, 0, 0, None, None, None, 0, 0))
-  evaluate_batch_pmapped = jax.pmap(model.evaluate_batch, axis_name='batch')
+      in_axes=(0, 0, 0, None, None, None, 0, 0),
+      donate_argnums=(0, 1, 2, 7))
+  # During eval, we can donate the 'batch' buffer. We don't donate the
+  # 'flax_module' and 'batch_stats' buffers as we don't re-assign those values
+  # in eval, we do that only in train.
+  evaluate_batch_pmapped = jax.pmap(
+      model.evaluate_batch, axis_name='batch',
+      donate_argnums=(2,))
   start_time = time.time()
   start_step = global_step
   prev_eval_step = start_step
