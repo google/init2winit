@@ -25,6 +25,7 @@ from init2winit.dataset_lib import proteins
 from init2winit.dataset_lib import small_image_datasets
 from init2winit.dataset_lib import translate_wmt
 
+
 _Dataset = collections.namedtuple('Dataset', ('getter', 'hparams', 'meta_data'))
 
 _ALL_DATASETS = {
@@ -49,8 +50,7 @@ _ALL_DATASETS = {
                  small_image_datasets.CIFAR100_DEFAULT_HPARAMS,
                  small_image_datasets.CIFAR100_METADATA),
     'fake':
-        _Dataset(fake_dataset.get_fake,
-                 fake_dataset.DEFAULT_HPARAMS,
+        _Dataset(fake_dataset.get_fake, fake_dataset.DEFAULT_HPARAMS,
                  fake_dataset.METADATA),
     'imagenet':
         _Dataset(imagenet_dataset.get_imagenet,
@@ -67,12 +67,10 @@ _ALL_DATASETS = {
                  small_image_datasets.SVHN_NO_EXTRA_DEFAULT_HPARAMS,
                  small_image_datasets.SVHN_NO_EXTRA_METADATA),
     'nqm_noise':
-        _Dataset(nqm_noise.get_nqm_noise,
-                 nqm_noise.NQM_HPARAMS,
+        _Dataset(nqm_noise.get_nqm_noise, nqm_noise.NQM_HPARAMS,
                  nqm_noise.NQM_METADATA),
     'uniref50':
-        _Dataset(proteins.get_uniref,
-                 proteins.DEFAULT_HPARAMS,
+        _Dataset(proteins.get_uniref, proteins.DEFAULT_HPARAMS,
                  proteins.METADATA),
 }
 
@@ -89,8 +87,11 @@ def get_dataset_hparams(dataset_name):
   """Maps dataset name to default_hps."""
   try:
     hparams = _ALL_DATASETS[dataset_name].hparams
-    if hparams.input_shape is None:
-      if dataset_name == 'lm1b':
+    # TODO(mbadura): Refactor to explicitly support different input specs
+    if 'input_shape' not in hparams or hparams.input_shape is None:
+      if 'input_edge_shape' in hparams and 'input_node_shape' in hparams:
+        pass
+      elif dataset_name == 'lm1b':
         max_len = max(hparams.max_target_length, hparams.max_eval_target_length)
         hparams.input_shape = (max_len,)
       elif dataset_name == 'translate_wmt':
@@ -116,6 +117,7 @@ def get_dataset_meta_data(dataset_name):
 
   Args:
     dataset_name: (str) the name of the dataset.
+
   Returns:
     A dict of dataset metadata as described above.
   Raises:

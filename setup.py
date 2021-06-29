@@ -21,6 +21,7 @@ setup(
         'clu',
         'flax',
         'jax',
+        'jraph',
         'ml_collections',
         'numpy>=1.7',
         'pandas',
