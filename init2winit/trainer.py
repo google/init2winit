@@ -492,8 +492,10 @@ def _maybe_log_training_metrics(training_metrics_grabber, metrics_logger):
 
 
 def _write_trial_meta_data(meta_data_path, meta_data):
+  d = meta_data.copy()
+  d['timestamp'] = time.time()
   with gfile.GFile(meta_data_path, 'w') as f:
-    f.write(json.dumps(meta_data, indent=2))
+    f.write(json.dumps(d, indent=2))
 
 
 def _maybe_sync_batchnorm_stats(batch_stats):
