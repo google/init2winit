@@ -491,6 +491,11 @@ def _maybe_log_training_metrics(training_metrics_grabber, metrics_logger):
     metrics_logger.append_pytree(summary_tree)
 
 
+def _write_trial_meta_data(meta_data_path, meta_data):
+  with gfile.GFile(meta_data_path, 'w') as f:
+    f.write(json.dumps(meta_data, indent=2))
+
+
 def _maybe_sync_batchnorm_stats(batch_stats):
   """Sync batch_stats across devices."""
   # We first check that batch_stats is used (pmap will throw an error if
@@ -883,8 +888,7 @@ def run(
     logging.info('saving hparams to %s', hparams_fname)
     with gfile.GFile(hparams_fname, 'w') as f:
       f.write(merged_hps.to_json())
-    with gfile.GFile(meta_data_path, 'w') as f:
-      f.write(json.dumps(meta_data, indent=2))
+    _write_trial_meta_data(meta_data_path, meta_data)
   else:
     metrics_logger = None
     init_logger = None
@@ -916,5 +920,4 @@ def run(
     raise err
   finally:
     if jax.process_index() == 0:
-      with gfile.GFile(meta_data_path, 'w') as f:
-        f.write(json.dumps(meta_data, indent=2))
+      _write_trial_meta_data(meta_data_path, meta_data)
