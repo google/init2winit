@@ -142,14 +142,15 @@ def maybe_pad_batch(batch,
   return padded_batch
 
 
-def shard(pytree, n_devices=None):
-  """Reshapes all arrays in the pytree to add a leading n_devices dimension.
+def shard(batch, n_devices=None):
+  """Prepares the batch for pmap by adding a leading n_devices dimension.
 
-  Note: We assume that all arrays in the pytree have leading dimension divisble
-  by n_devices.
+  If all the entries are lists, assume they are already divided into n_devices
+  smaller arrays and stack them for pmapping. If all the entries are arrays,
+  assume they have leading dimension divisible by n_devices and reshape.
 
   Args:
-    pytree: A pytree of arrays to be sharded.
+    batch: A dict of arrays or lists of arrays
     n_devices: If None, this will be set to jax.local_device_count().
 
   Returns:
@@ -158,10 +159,21 @@ def shard(pytree, n_devices=None):
   if n_devices is None:
     n_devices = jax.local_device_count()
 
+  # TODO(mbadura): Specify a sharding function per dataset instead
+  # If entries in the batch dict are lists, then the data is already divided
+  # into n_devices chunks, so we need to stack them.
+  if all((isinstance(v, list) for v in batch.values())):
+    assert all(len(v) == n_devices for v in batch.values())
+    # transpose a dict of lists to a list of dicts
+    shards = [{k: v[i] for (k, v) in batch.items()} for i in range(n_devices)]
+    return jax.tree_map(lambda *vals: np.stack(vals, axis=0), shards[0],
+                        *shards[1:])
+
+  # Otherwise, the entries are arrays, so just reshape them.
   def _shard_array(array):
     return array.reshape((n_devices, -1) + array.shape[1:])
 
-  return jax.tree_map(_shard_array, pytree)
+  return jax.tree_map(_shard_array, batch)
 
 
 def tf_to_numpy(tfds_data):

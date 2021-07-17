@@ -26,6 +26,7 @@ from init2winit.model_lib import models
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import jax.tree_util
+import jraph
 from ml_collections.config_dict import config_dict
 import numpy as np
 
@@ -49,10 +50,13 @@ text_models = ['transformer', 'performer']
 seq2seq_models = ['xformer_translate']
 
 autoencoder_keys = [('test_{}'.format(m), m) for m in autoencoder_models]
+excluded_classification_models = text_models + autoencoder_models + seq2seq_models + [
+    'nqm', 'gnn'
+]
 classification_keys = [
     ('test_{}'.format(m), m)
     for m in models._ALL_MODELS.keys()  # pylint: disable=protected-access
-    if m not in text_models + autoencoder_models + seq2seq_models + ['nqm']
+    if m not in excluded_classification_models
 ]
 text_keys = [('test_{}'.format(m), m) for m in text_models]
 
@@ -328,6 +332,43 @@ class ModelsTest(parameterized.TestCase):
     self.assertEqual(
         outputs.shape,
         tuple([INPUT_SHAPE[model_str][0]] + list(OUTPUT_SHAPE[model_str])))
+
+  def test_graph_model(self):
+    """Test forward pass of the GNN model."""
+    edge_input_shape = (5,)
+    node_input_shape = (5,)
+    output_shape = (5,)
+    model_str = 'gnn'
+    model_hps = models.get_model_hparams(model_str)
+    model_hps.update({'output_shape': output_shape})
+    model_cls = models.get_model(model_str)
+    rng = jax.random.PRNGKey(0)
+    loss = 'sigmoid_binary_cross_entropy'
+    metrics = 'binary_classification_metrics'
+    model = model_cls(model_hps, {}, loss, metrics)
+
+    num_graphs = 5
+    node_per_graph = 3
+    edge_per_graph = 9
+    inputs = jraph.get_fully_connected_graph(
+        n_node_per_graph=node_per_graph,
+        n_graph=num_graphs,
+        node_features=np.ones((num_graphs * node_per_graph,) +
+                              node_input_shape),
+    )
+    inputs = inputs._replace(
+        edges=np.ones((num_graphs * edge_per_graph,) + edge_input_shape))
+    padded_inputs = jraph.pad_with_graphs(inputs, 20, 50, 7)
+    rng, params_rng = jax.random.split(rng)
+    with nn.stateful() as batch_stats:
+      _, flax_module = model.flax_module_def.create(
+          params_rng, padded_inputs, train=False)
+
+    # Check that the forward pass works with mutated batch_stats.
+    with nn.stateful(batch_stats) as _:
+      with nn.stochastic(params_rng):
+        outputs = flax_module(padded_inputs)
+        self.assertEqual(outputs.shape, (7,) + output_shape)
 
 
 if __name__ == '__main__':

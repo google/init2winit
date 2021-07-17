@@ -221,8 +221,15 @@ def eval_metrics(flax_module, batch_stats, dataset, eval_num_batches,
   return metrics
 
 
-def initialize(flax_module_def, initializer, loss_fn, input_shape, output_shape,
-               hps, rng, metrics_logger):
+def initialize(flax_module_def,
+               initializer,
+               loss_fn,
+               input_shape,
+               output_shape,
+               hps,
+               rng,
+               metrics_logger,
+               fake_batch=None):
   """Run the given initializer.
 
   We initialize in 3 phases. First we run the default initializer that is
@@ -239,30 +246,43 @@ def initialize(flax_module_def, initializer, loss_fn, input_shape, output_shape,
     hps: A dictionary specifying the model and initializer hparams.
     rng: An rng key to seed the initialization.
     metrics_logger: Used for black box initializers that have learning curves.
+    fake_batch: Fake input used to intialize the network or None if using
+      init_by_shape.
 
   Returns:
     A tuple (model, batch_stats), where model is the initialized
     flax.nn.Model and batch_stats is the collection used for batch norm.
   """
   model_dtype = utils.dtype_from_str(hps.model_dtype)
+  params_rng, init_rng, dropout_rng = jax.random.split(rng, num=3)
+
+  # TODO(mbadura): After the Linen upgrade, all models will provide a fake batch
+  if fake_batch:
+    with nn.stateful() as batch_stats:
+      with nn.stochastic(dropout_rng):
+        _, params = _, params = flax_module_def.init(
+            params_rng, fake_batch, train=False)
+
   # init_by_shape should either pass in a tuple or a list of tuples.
   # For example, for vision tasks typically input_shape is (image_shape)
   # For seq2seq tasks, shape can be a list of two tuples corresponding to
   # input_sequence_shape for encoder and output_sequence_shape for decoder.
   # TODO(gilmer,ankugarg): Support initializers for list of tuples.
-  if isinstance(input_shape, list):  # Typical case for seq2seq models
-    input_specs = [((hps.batch_size, *x), model_dtype) for x in input_shape]
-  else:  # Typical case for classification models
-    input_specs = [((hps.batch_size, *input_shape), model_dtype)]
-  params_rng, init_rng, dropout_rng = jax.random.split(rng, num=3)
 
-  with nn.stateful() as batch_stats:
-    with nn.stochastic(dropout_rng):
-      # Using flax_module_def.create can OOM for larger models, so we must use
-      # create by shape here.
-      # TODO(gilmer) Link to flax issue when bug reporting process finalizes.
-      _, params = flax_module_def.init_by_shape(
-          params_rng, input_specs, train=False)
+  else:
+    if isinstance(input_shape, list):  # Typical case for seq2seq models
+      input_specs = [((hps.batch_size, *x), model_dtype) for x in input_shape]
+    else:  # Typical case for classification models
+      input_specs = [((hps.batch_size, *input_shape), model_dtype)]
+
+    with nn.stateful() as batch_stats:
+      with nn.stochastic(dropout_rng):
+        # Using flax_module_def.create can OOM for larger models, so we must use
+        # create by shape here.
+        # TODO(gilmer) Link to flax issue when bug reporting process finalizes.
+        _, params = flax_module_def.init_by_shape(
+            params_rng, input_specs, train=False)
+
   model = nn.Model(flax_module_def, params)
 
   if hps.get('layer_rescale_factors'):
@@ -597,7 +617,7 @@ def train(train_dir,
   flax_module, batch_stats = initialize(model.flax_module_def, initializer,
                                         model.loss_fn, hps.input_shape,
                                         hps.output_shape, hps, init_rng,
-                                        init_logger)
+                                        init_logger, model.get_fake_batch(hps))
 
   if jax.process_index() == 0:
     utils.log_pytree_shape_and_statistics(flax_module.params)

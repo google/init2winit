@@ -17,6 +17,7 @@
 
 import copy
 import functools
+import itertools
 import os
 import shutil
 import tempfile
@@ -36,12 +37,12 @@ from init2winit.model_lib import metrics
 from init2winit.model_lib import models
 import jax.numpy as jnp
 import jax.random
+import jraph
 from ml_collections.config_dict import config_dict
 import numpy as np
 import pandas
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
-
 
 FLAGS = flags.FLAGS
 
@@ -116,6 +117,53 @@ def _get_fake_text_dataset(batch_size, eval_num_batches):
   }
   return (Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
                   test_epoch), meta_data)
+
+
+def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
+  """Yields graph batches with label 1 if graph has 4 nodes and 0 otherwise."""
+
+  def _get_batch(n_nodes, batch_size):
+    n_edges = n_nodes**2
+    graph = jraph.get_fully_connected_graph(
+        n_nodes, batch_size,
+        np.ones((n_nodes * batch_size, *hps.input_node_shape)))
+    graph = graph._replace(
+        edges=np.ones((n_edges * batch_size, *hps.input_edge_shape)))
+    labels = np.ones(
+        (batch_size, *hps.output_shape)) * (1 if n_nodes == 4 else 0)
+    weights = np.ones((batch_size, *hps.output_shape))
+    return {
+        'inputs': [graph],
+        'targets': [labels],
+        'weights': [weights],
+    }
+
+  def train_iterator_fn():
+    for n in itertools.cycle([3, 4, 5]):
+      yield _get_batch(n, batch_size)
+
+  def eval_train_epoch(num_batches=None):
+    if num_batches is None:
+      num_batches = eval_num_batches
+    for n in itertools.islice(itertools.cycle([3, 4, 5]), num_batches):
+      yield _get_batch(n, batch_size)
+
+  def valid_epoch(num_batches=None):
+    if num_batches is None:
+      num_batches = eval_num_batches
+    for n in itertools.islice(itertools.cycle([3, 4, 5]), num_batches):
+      yield _get_batch(n, batch_size)
+
+  def test_epoch(num_batches=None):
+    if num_batches is None:
+      num_batches = eval_num_batches
+    for n in itertools.islice(itertools.cycle([3, 4, 5]), num_batches):
+      yield _get_batch(n, batch_size)
+
+  return (Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
+                  test_epoch), {
+                      'apply_one_hot_in_loss': False,
+                  })
 
 
 class TrainerTest(absltest.TestCase):
@@ -227,6 +275,7 @@ class TrainerTest(absltest.TestCase):
             'weights': weights
         },
     ]
+
     def fake_batches_gen():
       for batch in fake_batches:
         yield batch
@@ -255,6 +304,60 @@ class TrainerTest(absltest.TestCase):
     self.assertAlmostEqual(
         expected_ce_loss, evaluated_metrics['ce_loss'], places=4)
     self.assertEqual(16, evaluated_metrics['denominator'])
+
+  def test_graph_model_trainer(self):
+    """Tests that graph model training decreases loss."""
+    rng = jax.random.PRNGKey(0)
+    model_str = 'gnn'
+    model_cls = models.get_model(model_str)
+    hps = models.get_model_hparams(model_str)
+    hps.update({
+        'batch_size': 2,
+        'input_edge_shape': (7,),
+        'input_node_shape': (3,),
+        'input_shape': (7, 3),
+        'output_shape': (5,),
+        'model_dtype': 'float32',
+        'train_size': 15,
+        'valid_size': 10,
+        'test_size': 10,
+        'lr_hparams': {
+            'base_lr': 0.001,
+            'schedule': 'constant'
+        },
+    })
+    eval_num_batches = 5
+    eval_batch_size = hps.batch_size
+    loss_name = 'sigmoid_binary_cross_entropy'
+    metrics_name = 'binary_classification_metrics'
+    dataset, dataset_meta_data = _get_fake_graph_dataset(
+        batch_size=hps.batch_size, eval_num_batches=eval_num_batches, hps=hps)
+    model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
+    initializer = initializers.get_initializer('noop')
+
+    metrics_logger, init_logger = trainer.set_up_loggers(self.test_dir)
+    _ = list(
+        trainer.train(
+            train_dir=self.test_dir,
+            model=model,
+            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+            initializer=initializer,
+            num_train_steps=10,
+            hps=hps,
+            rng=rng,
+            eval_batch_size=eval_batch_size,
+            eval_num_batches=eval_num_batches,
+            eval_train_num_batches=eval_num_batches,
+            eval_frequency=5,
+            checkpoint_steps=[],
+            metrics_logger=metrics_logger,
+            init_logger=init_logger))
+
+    with tf.io.gfile.GFile(os.path.join(self.test_dir,
+                                        'measurements.csv')) as f:
+      df = pandas.read_csv(f)
+      train_loss = df['train/ce_loss'].values
+      self.assertLess(train_loss[-1], train_loss[0])
 
   def test_text_model_trainer(self):
     """Test training of a small transformer model on fake data."""

@@ -68,6 +68,10 @@ _METRICS = {
         'error_rate': weighted_misclassifications,
         'ce_loss': losses.weighted_unnormalized_cross_entropy,
         'denominator': num_examples,
+    },
+    'binary_classification_metrics': {
+        'ce_loss': losses.sigmoid_binary_cross_entropy,
+        'denominator': num_examples,
     }
 }
 

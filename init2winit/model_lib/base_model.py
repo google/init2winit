@@ -200,5 +200,9 @@ class BaseModel(object):
 
     return total_loss, (new_batch_stats)
 
+  def get_fake_batch(self, hps):
+    del hps
+    return None
+
   def build_flax_module(self):
     raise NotImplementedError('Subclasses must implement build_flax_module().')

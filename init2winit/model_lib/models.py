@@ -21,6 +21,7 @@ from init2winit.model_lib import adabelief_vgg
 from init2winit.model_lib import autoencoder
 from init2winit.model_lib import convolutional_autoencoder
 from init2winit.model_lib import fully_connected
+from init2winit.model_lib import gnn
 from init2winit.model_lib import max_pooling_cnn
 from init2winit.model_lib import mlperf_resnet
 from init2winit.model_lib import nqm
@@ -29,7 +30,6 @@ from init2winit.model_lib import simple_cnn
 from init2winit.model_lib import transformer_lm
 from init2winit.model_lib import wide_resnet
 from init2winit.model_lib import xformer_translate
-
 
 _ALL_MODELS = {
     'fully_connected':
@@ -57,7 +57,8 @@ _ALL_MODELS = {
         (transformer_lm.TransformerLM1B, transformer_lm.DEFAULT_HPARAMS),
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
     'xformer_translate': (xformer_translate.TransformerTranslate,
-                          xformer_translate.DEFAULT_HPARAMS)
+                          xformer_translate.DEFAULT_HPARAMS),
+    'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS)
 }
 
 
