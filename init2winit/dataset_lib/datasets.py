@@ -90,7 +90,8 @@ def get_dataset_hparams(dataset_name):
     # TODO(mbadura): Refactor to explicitly support different input specs
     if 'input_shape' not in hparams or hparams.input_shape is None:
       if 'input_edge_shape' in hparams and 'input_node_shape' in hparams:
-        pass
+        hparams.input_shape = (hparams.input_node_shape,
+                               hparams.input_edge_shape)
       elif dataset_name == 'lm1b':
         max_len = max(hparams.max_target_length, hparams.max_eval_target_length)
         hparams.input_shape = (max_len,)
