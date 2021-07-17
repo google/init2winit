@@ -196,7 +196,7 @@ class HessianFreeTest(absltest.TestCase):
     ggn_matrix = 0
     for i in range(n):
       jacobian_matrix = jacobian_tensor[i]
-      hessian = jax.hessian(partial_loss_fn)(outputs[i])
+      hessian = jax.hessian(partial_loss_fn)(outputs[i, None])[0, :, 0, :]
       ggn_matrix += np.transpose(jacobian_matrix) @ hessian @ jacobian_matrix
     ggn_matrix /= n
     ggn_matrix += damping * np.identity(d)

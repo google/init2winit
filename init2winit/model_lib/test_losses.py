@@ -158,11 +158,29 @@ class LossesTest(parameterized.TestCase):
       ce_fn = losses.get_loss_fn('cross_entropy')
       self.assertAlmostEqual(
           sigmoid_binary_ce_fn(
-              np.array([logits[0] - logits[1] for logits in data['logits']]),
-              np.array([targets[0] for targets in data['targets']]),
+              np.array([[logits[0] - logits[1]] for logits in data['logits']]),
+              np.array([[targets[0]] for targets in data['targets']]),
               data['weights']),
           ce_fn(data['logits'], data['targets'], data['weights']),
           places=5)
+
+  def test_sigmoid_cross_entropy_per_label_weights(self):
+    """Tests whether per label weights mask the correct entries."""
+    sigmoid_binary_ce_fn = losses.get_loss_fn('sigmoid_binary_cross_entropy')
+    logits = np.arange(15).reshape(3, 5)
+    targets = np.arange(15, 30).reshape(3, 5)
+
+    per_label_weights = np.array([
+        [1, 1, 1, 1, 0],
+        [1, 1, 1, 1, 0],
+        [0, 0, 0, 0, 0],
+    ])
+    per_example_weights = np.array([1, 1, 0])
+
+    self.assertAlmostEqual(
+        sigmoid_binary_ce_fn(logits, targets, per_label_weights),
+        sigmoid_binary_ce_fn(logits[:, :4], targets[:, :4],
+                             per_example_weights))
 
 
 if __name__ == '__main__':

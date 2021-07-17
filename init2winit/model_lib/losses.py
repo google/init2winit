@@ -25,22 +25,30 @@ def sigmoid_binary_cross_entropy(logits, targets, weights=None):
   Args:
     logits: float array of shape (batch, output_shape)
     targets: float array of shape (batch, output_shape)
-    weights: None or float array of shape (batch,)
+    weights: None or float array of shape (batch,) or shape (batch,
+      output_shape)
 
   Returns:
-    float array of sigmoid binary cross entropy between logits and targets
-    of shape (batch, output_shape)
+    float value of sigmoid binary cross entropy between logits and targets
   """
+  # Ensure logits and targets are 2d, even if there's only one label per example
+  if len(logits.shape) == 1 or len(targets.shape) == 1:
+    raise ValueError('logits and targets must be 2d')
+
+  if weights is None:
+    weights = jnp.ones_like(targets)
+  elif weights.shape == targets.shape[:1]:
+    # Add a dimension if labels are per-example so that multiplication can be
+    # broadcasted.
+    weights = weights[:, None]
+
+  per_label_normalization = jnp.nan_to_num(1 / weights.sum(axis=0), nan=1.0)
+  weights = weights * per_label_normalization
+
   log_p = jax.nn.log_sigmoid(logits)
   log_not_p = jax.nn.log_sigmoid(-logits)
-  loss = -jnp.sum(
-      (targets * log_p +
-       (1 - targets) * log_not_p).reshape(targets.shape[0], -1),
-      axis=-1)
-  if weights is None:
-    weights = jnp.ones(loss.shape[0])
-  weights = weights / sum(weights)
-  return jnp.sum(jnp.dot(loss, weights))
+
+  return -jnp.sum((targets * log_p + (1 - targets) * log_not_p) * weights)
 
 
 def sigmoid_mean_squared_error(logits, targets, weights=None):
@@ -52,8 +60,7 @@ def sigmoid_mean_squared_error(logits, targets, weights=None):
     weights: None or float array of shape (batch,)
 
   Returns:
-    float array of sigmoid mean squared error between logits and targets
-    of shape (batch, output_shape)
+    float value of sigmoid mean squared error between logits and targets
   """
   loss = jnp.sum(
       jnp.square(nn.sigmoid(logits) - targets).reshape(targets.shape[0], -1),
