@@ -13,7 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Input pipeline for the ogbg_molpcba graph dataset from TFDS."""
+"""Input pipeline for the ogbg_molpcba graph dataset from TFDS.
+
+See https://www.tensorflow.org/datasets/catalog/ogbg_molpcba and
+https://ogb.stanford.edu/docs/graphprop/ for more details.
+"""
 
 import itertools
 
@@ -21,7 +25,6 @@ from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib.data_utils import Dataset
 import jax
 import jraph
-from jraph import dynamically_batch
 from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow_datasets as tfds
@@ -164,8 +167,8 @@ def _get_batch_iterator(dataset_iter,
   max_n_graphs = batch_size
 
   jraph_iter = map(_to_jraph, dataset_iter)
-  batched_iter = dynamically_batch(jraph_iter, max_n_nodes + 1, max_n_edges,
-                                   max_n_graphs + 1)
+  batched_iter = jraph.dynamically_batch(jraph_iter, max_n_nodes + 1,
+                                         max_n_edges, max_n_graphs + 1)
 
   count = 0
   graphs_shards = []
