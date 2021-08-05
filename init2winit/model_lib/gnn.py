@@ -20,13 +20,18 @@ with edge features, also known as GINE (https://arxiv.org/abs/1905.12265).
 The model replicates the GIN entry for the ogbg-molcpba benchmark
 (https://ogb.stanford.edu/docs/leader_graphprop/).
 
+TODO(mbadura): Add more config to make this closer to the original paper. Enable
+not using edges and globals during the message passing steps. Add a possible
+epsilon parameter for adding weights of the node itself.
 """
+
+import functools
 
 from flax import nn
 from init2winit.model_lib import base_model
+from init2winit.model_lib import model_utils
 import jax.numpy as jnp
 import jraph
-
 from ml_collections.config_dict import config_dict
 
 # small hparams used for unit tests
@@ -34,19 +39,25 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         rng_seed=-1,
         model_dtype='float32',
-        latent_dim=128,
-        optimizer='momentum',
-        hidden_dims=(128, 128),
+        latent_dim=300,
+        optimizer='adam',
+        hidden_dims=(600, 300),
+        batch_size=128,
         lr_hparams={
-            'base_lr': 0.0001,
+            'base_lr': 0.01,
             'schedule': 'constant'
         },
         opt_hparams={
-            'momentum': 0.9,
+            'beta1': 0.9,
+            'beta2': 0.999,
+            'epsilon': 1e-8,
         },
         activation_function='relu',
         l2_decay_factor=.0005,
         l2_decay_rank_threshold=2,
+        num_message_passing_steps=5,
+        normalizer='batch_norm',
+        dropout_rate=0.5,
     ))
 
 
@@ -58,15 +69,17 @@ def _make_embed(latent_dim):
   return make_fn
 
 
-def _make_mlp(hidden_dims):
+def _make_mlp(hidden_dims, maybe_normalize, dropout):
   """Creates a MLP with specified dimensions."""
+
   @jraph.concatenated_args
   def make_fn(inputs):
     x = inputs
-    # TODO(mbadura): Add batch normalization
     for dim in hidden_dims[:-1]:
       x = nn.Dense(x, features=dim)
+      x = maybe_normalize(x)
       x = nn.relu(x)
+      x = dropout(x)
     x = nn.Dense(x, features=hidden_dims[-1])
     return x
 
@@ -80,7 +93,19 @@ class GNN(nn.Module):
   variables. The final prediction will be encoded in the globals.
   """
 
-  def apply(self, graph, num_outputs, latent_dim, hidden_dims, train=True):
+  def apply(self,
+            graph,
+            num_outputs,
+            latent_dim,
+            hidden_dims,
+            normalizer,
+            dropout_rate,
+            num_message_passing_steps,
+            train=True):
+    maybe_normalize = model_utils.get_normalizer(normalizer, train)
+    dropout = functools.partial(
+        nn.dropout, rate=dropout_rate, deterministic=not train)
+
     graph = graph._replace(
         globals=jnp.zeros([graph.n_node.shape[0], num_outputs]))
 
@@ -89,15 +114,20 @@ class GNN(nn.Module):
         embed_edge_fn=_make_embed(latent_dim))
 
     net = jraph.GraphNetwork(
-        update_edge_fn=_make_mlp(hidden_dims),
-        update_node_fn=_make_mlp(hidden_dims),
-        update_global_fn=_make_mlp(hidden_dims + (num_outputs,)))
+        update_edge_fn=_make_mlp(
+            hidden_dims, maybe_normalize=maybe_normalize, dropout=dropout),
+        update_node_fn=_make_mlp(
+            hidden_dims, maybe_normalize=maybe_normalize, dropout=dropout),
+        update_global_fn=_make_mlp(
+            hidden_dims + (num_outputs,),
+            maybe_normalize=maybe_normalize,
+            dropout=dropout))
 
-    # TODO(mbadura): Add multiple message passing steps
-    embedded_graph = embedder(graph)
-    result = net(embedded_graph)
+    graph = embedder(graph)
+    for _ in range(num_message_passing_steps):
+      graph = net(graph)
 
-    return result.globals
+    return graph.globals
 
 
 class GNNModel(base_model.BaseModel):
@@ -118,4 +148,7 @@ class GNNModel(base_model.BaseModel):
     return GNN.partial(
         num_outputs=self.hps['output_shape'][-1],
         latent_dim=self.hps['latent_dim'],
-        hidden_dims=self.hps['hidden_dims'])
+        hidden_dims=self.hps['hidden_dims'],
+        normalizer=self.hps['normalizer'],
+        dropout_rate=self.hps['dropout_rate'],
+        num_message_passing_steps=self.hps['num_message_passing_steps'])

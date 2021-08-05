@@ -321,6 +321,9 @@ class TrainerTest(absltest.TestCase):
         'train_size': 15,
         'valid_size': 10,
         'test_size': 10,
+        'num_message_passing_steps': 1,
+        'normalizer': 'none',
+        'dropout_rate': 0.0,
         'lr_hparams': {
             'base_lr': 0.001,
             'schedule': 'constant'
