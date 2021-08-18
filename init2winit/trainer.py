@@ -157,7 +157,6 @@ def update(
   (cost_value, new_batch_stats), grad = grad_fn(optimizer.target)
 
   cost_value, grad = lax.pmean((cost_value, grad), axis_name='batch')
-  new_optimizer = optimizer.apply_gradient(grad, learning_rate=lr)
 
   grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
   if grad_clip:
@@ -166,6 +165,7 @@ def update(
     grad = jax.lax.cond(grad_norm > grad_clip, lambda _: scaled_grad,
                         lambda _: grad, None)
 
+  new_optimizer = optimizer.apply_gradient(grad, learning_rate=lr)
   new_metrics_grabber = None
   if training_metrics_grabber:
     new_metrics_grabber = training_metrics_grabber.update(
