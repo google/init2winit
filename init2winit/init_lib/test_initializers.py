@@ -23,6 +23,7 @@ from absl.testing import parameterized
 from init2winit import utils
 from init2winit.init_lib import initializers
 from init2winit.init_lib import meta_init
+from init2winit.init_lib import sparse_init
 from init2winit.model_lib import losses
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
@@ -59,7 +60,7 @@ def _load_model(model_name):
   _, flax_module = model.flax_module_def.create_by_shape(
       rng, [input_shape], train=True)
   utils.log_pytree_shape_and_statistics(flax_module.params)
-  return flax_module, input_shape
+  return flax_module, input_shape, hps
 
 
 class InitializersTest(parameterized.TestCase):
@@ -70,10 +71,11 @@ class InitializersTest(parameterized.TestCase):
     """Test that each initializer runs, and the output is a valid pytree."""
 
     rng = jax.random.PRNGKey(0)
-    flax_module, input_shape = _load_model('fully_connected')
+    flax_module, input_shape, model_hps = _load_model('fully_connected')
     _, init_rng = jax.random.split(rng)
     initializer = initializers.get_initializer(init)
     init_hps = initializers.get_initializer_hparams(init)
+    init_hps.update(model_hps)
     loss_name = 'cross_entropy'
     loss_fn = losses.get_loss_fn(loss_name)
     new_model = initializer(
@@ -95,7 +97,7 @@ class InitializersTest(parameterized.TestCase):
     """Test that meta_init does not update the bias scalars."""
 
     rng = jax.random.PRNGKey(0)
-    flax_module, input_shape = _load_model(model_name)
+    flax_module, input_shape, _ = _load_model(model_name)
     norms = jax.tree_map(lambda node: jnp.linalg.norm(node.reshape(-1)),
                          flax_module.params)
     normalized_params = jax.tree_map(meta_init.normalize,
@@ -118,6 +120,33 @@ class InitializersTest(parameterized.TestCase):
     for layer_key in learned_norms_flat:
       if 'bias' in layer_key:
         self.assertEqual(learned_norms_flat[layer_key], 0.0)
+
+  def test_sparse_init(self):
+    """Test that sparse_init produces sparse params."""
+
+    rng = jax.random.PRNGKey(0)
+    flax_module, input_shape, model_hps = _load_model('fully_connected')
+    non_zero_connection_weights = 3
+    init_hps = sparse_init.DEFAULT_HPARAMS
+    init_hps['non_zero_connection_weights'] = non_zero_connection_weights
+    init_hps.update(model_hps)
+    loss_name = 'cross_entropy'
+    loss_fn = losses.get_loss_fn(loss_name)
+    new_model = sparse_init.sparse_init(
+        loss_fn=loss_fn,
+        model=flax_module,
+        hps=init_hps,
+        input_shape=input_shape[1:],
+        output_shape=OUTPUT_SHAPE,
+        rng_key=rng)
+
+    # Check new params are sparse
+    for key in new_model.params:
+      num_units = new_model.params[key]['kernel'].shape[0]
+      self.assertEqual(
+          jnp.count_nonzero(new_model.params[key]['kernel']),
+          num_units * non_zero_connection_weights)
+      self.assertEqual(jnp.count_nonzero(new_model.params[key]['bias']), 0)
 
 
 if __name__ == '__main__':

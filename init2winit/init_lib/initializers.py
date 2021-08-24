@@ -24,6 +24,7 @@ are iid standard normal distributions.
 """
 
 from init2winit.init_lib import meta_init
+from init2winit.init_lib import sparse_init
 from ml_collections.config_dict import config_dict
 
 
@@ -46,6 +47,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict()
 _ALL_INITIALIZERS = {
     'noop': (noop, DEFAULT_HPARAMS),
     'meta_init': (meta_init.meta_init, meta_init.DEFAULT_HPARAMS),
+    'sparse_init': (sparse_init.sparse_init, sparse_init.DEFAULT_HPARAMS),
 }
 
 
