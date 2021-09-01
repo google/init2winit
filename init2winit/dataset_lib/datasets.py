@@ -22,7 +22,12 @@ from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import mlperf_imagenet_dataset
 from init2winit.dataset_lib import nqm_noise
 from init2winit.dataset_lib import ogbg_molpcba
-from init2winit.dataset_lib import proteins
+
+
+# This import is temporarily disabeled as the sequin database ovoerrides the
+# default directory tfds loads from. This can cause permissions errors, or even
+# worse could in theory result in the wrong data being loaded.
+# from init2winit.dataset_lib import proteins
 from init2winit.dataset_lib import small_image_datasets
 from init2winit.dataset_lib import translate_wmt
 
@@ -73,9 +78,9 @@ _ALL_DATASETS = {
     'ogbg_molpcba':
         _Dataset(ogbg_molpcba.get_ogbg_molpcba, ogbg_molpcba.DEFAULT_HPARAMS,
                  ogbg_molpcba.METADATA),
-    'uniref50':
-        _Dataset(proteins.get_uniref, proteins.DEFAULT_HPARAMS,
-                 proteins.METADATA),
+    # 'uniref50':
+    #     _Dataset(proteins.get_uniref, proteins.DEFAULT_HPARAMS,
+    #              proteins.METADATA),
 }
 
 
