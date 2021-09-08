@@ -58,9 +58,12 @@ flags.DEFINE_integer('eval_train_num_batches', 0,
                      'Number of batches when evaluating on the training set')
 flags.DEFINE_integer('eval_frequency', 1000, 'Evaluate every k steps.')
 flags.DEFINE_string(
-    'hparam_overrides', '', 'json representation of a flattened dict of hparam '
+    'hparam_overrides', '', 'JSON representation of a flattened dict of hparam '
     'overrides. For nested dictionaries, the override key '
     'should be specified as lr_hparams.base_lr.')
+flags.DEFINE_string(
+    'callback_configs', '', 'JSON representation of a list of dictionaries '
+    'which specify general callbacks to be run during eval of training.')
 flags.DEFINE_list(
     'checkpoint_steps', [], 'List of steps to checkpoint the'
     ' model. The checkpoints will be saved in a separate'
@@ -96,6 +99,10 @@ def main(unused_argv):
   training_metrics_config = None
   if FLAGS.training_metrics_config:
     training_metrics_config = json.loads(FLAGS.training_metrics_config)
+  if FLAGS.callback_configs:
+    callback_configs = json.loads(FLAGS.callback_configs)
+  else:
+    callback_configs = []
 
   checkpoint_steps = [int(s.strip()) for s in FLAGS.checkpoint_steps]
   eval_steps = [int(s.strip()) for s in FLAGS.eval_steps]
@@ -133,6 +140,7 @@ def main(unused_argv):
         experiment_dir=FLAGS.experiment_dir,
         worker_id=FLAGS.worker_id,
         training_metrics_config=training_metrics_config,
+        callback_configs=callback_configs,
         use_deprecated_checkpointing=FLAGS.use_deprecated_checkpointing)
 
 

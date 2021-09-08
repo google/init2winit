@@ -28,6 +28,7 @@ from absl import logging
 from flax import jax_utils
 from flax import nn
 from flax import optim as optimizers
+from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import hyperparameters
 from init2winit import schedules
@@ -37,6 +38,8 @@ from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
+
+
 import jax
 from jax import lax
 import jax.numpy as jnp
@@ -555,6 +558,7 @@ def train(train_dir,
           metrics_logger=None,
           init_logger=None,
           training_metrics_config=None,
+          callback_configs=None,
           use_deprecated_checkpointing=True):
   """Main training loop.
 
@@ -588,6 +592,9 @@ def train(train_dir,
     training_metrics_config: Dict specifying the configuration of the
       training_metrics_grabber. Set to None to skip logging of advanced training
       metrics.
+    callback_configs: List of configs specifying general callbacks to run
+      during the eval phase. Empty list means no callbacks are run. See
+      callbacks.py for details on what is expected in a config.
     use_deprecated_checkpointing: Whether to use deprecated checkpointing.
 
   Yields:
@@ -612,6 +619,8 @@ def train(train_dir,
 
   if eval_batch_size is None:
     eval_batch_size = hps.batch_size
+  if callback_configs is None:
+    callback_configs = []
 
   # Maybe run the initializer.
   flax_module, batch_stats = initialize(model.flax_module_def, initializer,
@@ -711,6 +720,14 @@ def train(train_dir,
   # (num_epochs + 1)-th epoch.
   train_iter = itertools.islice(
       dataset.train_iterator_fn(), global_step, num_train_steps)
+
+  eval_callbacks = []
+  for config in callback_configs:
+    eval_callback = callbacks.get_callback(config['name'])(optimizer, dataset,
+                                                           hps, config,
+                                                           train_dir)
+    eval_callbacks.append(eval_callback)
+
   for batch in train_iter:
     if global_step in checkpoint_steps and jax.process_index() == 0:
       save_checkpoint(
@@ -758,6 +775,14 @@ def train(train_dir,
                     grad_norm=np.mean(grad_norm),
                     preemption_count=preemption_count,
                     train_cost=mean_train_cost)
+
+      for eval_callback in eval_callbacks:
+        callback_metrics = eval_callback.run_eval(optimizer, batch_stats,
+                                                  global_step)
+        if set(callback_metrics.keys()).intersection(set(report.keys())):
+          raise ValueError('There was a collision between the callback metrics'
+                           'and the standard eval metrics keys')
+        report.update(callback_metrics)
       yield report
       if jax.process_index() == 0:
         _log_epoch_report(report, metrics_logger)
@@ -867,6 +892,7 @@ def run(
     experiment_dir,
     worker_id,
     training_metrics_config,
+    callback_configs,
     use_deprecated_checkpointing):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
@@ -933,6 +959,7 @@ def run(
             metrics_logger,
             init_logger,
             training_metrics_config=training_metrics_config,
+            callback_configs=callback_configs,
             use_deprecated_checkpointing=use_deprecated_checkpointing,
         ))
     logging.info(epoch_reports)
