@@ -31,7 +31,7 @@ from flax import nn
 from flax import optim as optimizers
 from init2winit.model_lib import model_utils
 import jax
-from jax.api import jvp
+from jax import jvp
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import numpy as np
