@@ -161,8 +161,7 @@ class AddPositionEmbs(nn.Module):
         i = cache_entry.i
         cache.store(cache_entry.replace(i=cache_entry.i + 1))
         _, _, df = pos_embedding.shape
-        pe = lax.dynamic_slice(pos_embedding, jnp.array((0, i, 0)),
-                               jnp.array((1, 1, df)))
+        pe = lax.dynamic_slice(pos_embedding, jnp.array((0, i, 0)), (1, 1, df))
     if inputs_positions is None:
       # normal unpacked case:
       return inputs + pe
