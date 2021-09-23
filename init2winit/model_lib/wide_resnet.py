@@ -18,7 +18,6 @@
 from flax import nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
-import jax
 from jax.nn import initializers
 
 from ml_collections.config_dict import config_dict
@@ -50,6 +49,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     use_shallue_label_smoothing=False,
     model_dtype='float32',
     grad_clip=None,
+    activation_function='relu',
 ))
 
 
@@ -62,10 +62,11 @@ class WideResnetBlock(nn.Module):
             strides=(1, 1),
             conv_kernel_init=initializers.lecun_normal(),
             normalizer='batch_norm',
+            activation_function='relu',
             train=True):
     maybe_normalize = model_utils.get_normalizer(normalizer, train)
     y = maybe_normalize(x, name='bn1')
-    y = jax.nn.relu(y)
+    y = model_utils.ACTIVATIONS[activation_function](y)
 
     # Apply an up projection in case of channel mismatch
     if (x.shape[-1] != channels) or strides != (1, 1):
@@ -88,7 +89,7 @@ class WideResnetBlock(nn.Module):
         kernel_init=conv_kernel_init,
         bias=False)
     y = maybe_normalize(y, name='bn2')
-    y = jax.nn.relu(y)
+    y = model_utils.ACTIVATIONS[activation_function](y)
     y = nn.Conv(
         y,
         channels,
@@ -114,6 +115,7 @@ class WideResnetGroup(nn.Module):
             strides=(1, 1),
             conv_kernel_init=initializers.lecun_normal(),
             normalizer='batch_norm',
+            activation_function='relu',
             train=True):
     for i in range(blocks_per_group):
       x = WideResnetBlock(
@@ -122,6 +124,7 @@ class WideResnetGroup(nn.Module):
           strides if i == 0 else (1, 1),
           conv_kernel_init=conv_kernel_init,
           normalizer=normalizer,
+          activation_function=activation_function,
           train=train)
     return x
 
@@ -138,6 +141,7 @@ class WideResnet(nn.Module):
       conv_kernel_init=initializers.lecun_normal(),
       dense_kernel_init=initializers.lecun_normal(),
       normalizer='batch_norm',
+      activation_function='relu',
       train=True,
   ):
 
@@ -155,6 +159,7 @@ class WideResnet(nn.Module):
         16 * channel_multiplier,
         conv_kernel_init=conv_kernel_init,
         normalizer=normalizer,
+        activation_function=activation_function,
         train=train)
     x = WideResnetGroup(
         x,
@@ -163,6 +168,7 @@ class WideResnet(nn.Module):
         (2, 2),
         conv_kernel_init=conv_kernel_init,
         normalizer=normalizer,
+        activation_function=activation_function,
         train=train)
     x = WideResnetGroup(
         x,
@@ -171,10 +177,11 @@ class WideResnet(nn.Module):
         (2, 2),
         conv_kernel_init=conv_kernel_init,
         normalizer=normalizer,
+        activation_function=activation_function,
         train=train)
     maybe_normalize = model_utils.get_normalizer(normalizer, train)
     x = maybe_normalize(x)
-    x = jax.nn.relu(x)
+    x = model_utils.ACTIVATIONS[activation_function](x)
     x = nn.avg_pool(x, (8, 8))
     x = x.reshape((x.shape[0], -1))
     x = nn.Dense(x, num_outputs, kernel_init=dense_kernel_init)
@@ -194,4 +201,5 @@ class WideResnetModel(base_model.BaseModel):
             hps.conv_kernel_scale),
         dense_kernel_init=model_utils.INITIALIZERS[hps.dense_kernel_init](
             hps.dense_kernel_scale),
-        normalizer=self.hps.normalizer)
+        normalizer=self.hps.normalizer,
+        activation_function=self.hps.activation_function)
