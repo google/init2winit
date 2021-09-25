@@ -28,7 +28,17 @@ AUTOTUNE = tf.data.AUTOTUNE
 Features = Dict[str, tf.Tensor]
 
 
-class NormalizeFetaureNamesOp:
+def get_user_defined_symbols(ds_info: tfds.core.DatasetInfo,
+                             reverse_translation: bool):
+  """Get language id token."""
+  if reverse_translation:
+    token, _ = ds_info.supervised_keys
+  else:
+    _, token = ds_info.supervised_keys
+  return f'<2{token}>'
+
+
+class NormalizeFeatureNamesOp:
   """Normalizes feature names to 'inputs' and 'targets'."""
 
   def __init__(self, ds_info: tfds.core.DatasetInfo, reverse_translation: bool):
@@ -42,10 +52,23 @@ class NormalizeFetaureNamesOp:
     return features
 
 
+class TaskTokenOp:
+  """Adds '2xx' task token to 'inputs'."""
+
+  def __init__(self, ds_info: tfds.core.DatasetInfo,
+               reverse_translation: bool):
+    self.token_lang = get_user_defined_symbols(ds_info, reverse_translation)
+
+  def __call__(self, features):
+    features['inputs'] = self.token_lang + ' ' + features['inputs']
+    return features
+
+
 def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
                     split: str,
                     *,
-                    reverse_translation: bool = False) -> tf.data.Dataset:
+                    reverse_translation: bool = False,
+                    add_language_token: bool = False) -> tf.data.Dataset:
   """Loads a raw WMT dataset and normalizes feature keys.
 
   Args:
@@ -54,6 +77,7 @@ def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
       multiple hosts and currently don't support sharding subsplits.
     reverse_translation: bool: whether to reverse the translation direction.
       e.g. for 'de-en' this translates from english to german.
+    add_language_token: whether to prepend a 2xx language token to the input.
 
   Returns:
     Dataset with source and target language features mapped to 'inputs' and
@@ -64,9 +88,14 @@ def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
       split, num_examples, drop_remainder=False)
   ds = dataset_builder.as_dataset(split=per_host_split, shuffle_files=False)
   ds = ds.map(
-      NormalizeFetaureNamesOp(
+      NormalizeFeatureNamesOp(
           dataset_builder.info, reverse_translation=reverse_translation),
       num_parallel_calls=AUTOTUNE)
+  if add_language_token:
+    ds = ds.map(
+        TaskTokenOp(dataset_builder.info,
+                    reverse_translation=reverse_translation),
+        num_parallel_calls=AUTOTUNE)
   return ds
 
 
@@ -265,11 +294,41 @@ def _pack_with_tf_ops(dataset: tf.data.Dataset, keys: List[str],
 # -----------------------------------------------------------------------------
 # Main dataset prep routines.
 # -----------------------------------------------------------------------------
-def preprocess_wmt_data(dataset,
+def get_sampled_dataset(ds_builders,
+                        split: str,
+                        rates: List[int],
+                        reverse_translation: bool,
+                        add_language_token: bool,
                         is_training: bool,
+                        sample_seed: int,
                         shuffle_seed: int,
+                        shuffle_buffer_size: int = 1024):
+  """Create a sampled training dataset."""
+  raw_data = []
+  for builder in ds_builders:
+    raw_data.append(get_raw_dataset(
+        builder, split,
+        reverse_translation=reverse_translation,
+        add_language_token=add_language_token))
+
+  def _shuffle_repeat(dataset, shuffle_seed: int,
+                      shuffle_buffer_size):
+    dataset = dataset.shuffle(shuffle_buffer_size, seed=shuffle_seed)
+    dataset = dataset.repeat()
+    return dataset
+
+  if is_training:
+    raw_data = [_shuffle_repeat(data, shuffle_seed=shuffle_seed,
+                                shuffle_buffer_size=shuffle_buffer_size)
+                for data in raw_data]
+
+  sampled_raw_data = tf.data.experimental.sample_from_datasets(
+      raw_data, rates, seed=sample_seed)
+  return sampled_raw_data
+
+
+def preprocess_wmt_data(dataset,
                         pack_examples: bool = True,
-                        shuffle_buffer_size: int = 1024,
                         max_length: int = 100,
                         batch_size: int = 256,
                         prefetch_size: int = AUTOTUNE):
@@ -286,10 +345,6 @@ def preprocess_wmt_data(dataset,
 
   if max_length > 0:
     dataset = dataset.filter(length_filter(max_length))
-
-  if is_training:
-    dataset = dataset.shuffle(shuffle_buffer_size, seed=shuffle_seed)
-    dataset = dataset.repeat()
 
   if pack_examples:
     dataset = pack_dataset(dataset, max_length)
@@ -316,6 +371,7 @@ def preprocess_wmt_data(dataset,
 def get_wmt_datasets(config: config_dict.ConfigDict,
                      *,
                      shuffle_seed: int,
+                     sample_seed: int,
                      n_devices: int,
                      per_host_batch_size: int,
                      per_host_eval_batch_size: int,
@@ -330,62 +386,81 @@ def get_wmt_datasets(config: config_dict.ConfigDict,
   if vocab_path is None:
     vocab_path = os.path.expanduser('~/wmt_sentencepiece_model')
 
-  train_ds_builder = tfds.builder(config.tfds_dataset_key)
+  if config.tfds_dataset_key is not None:
+    dataset_keys = [config.tfds_dataset_key]
+    dataset_rates = None
+  else:
+    dataset_keys = config.tfds_dataset_keys
+    dataset_rates = config.rates
+  train_ds_builders = [tfds.builder(tfds_dataset_key) for tfds_dataset_key in
+                       dataset_keys]
+
   eval_ds_builder = tfds.builder(config.tfds_eval_dataset_key)
   if config.tfds_predict_dataset_key:
     predict_ds_builder = tfds.builder(config.tfds_predict_dataset_key)
   else:
     predict_ds_builder = tfds.builder(config.tfds_eval_dataset_key)
-  train_data = get_raw_dataset(
-      train_ds_builder,
-      config.train_split,
-      reverse_translation=config.reverse_translation)
+
+  # TODO(dxin): give each task its own reverse translation bool.
+  sampled_train_data = get_sampled_dataset(
+      train_ds_builders, config.train_split, dataset_rates,
+      config.reverse_translation, config.add_language_token,
+      is_training=True, sample_seed=sample_seed,
+      shuffle_seed=shuffle_seed)
 
   eval_data = get_raw_dataset(
       eval_ds_builder,
       config.eval_split,
-      reverse_translation=config.reverse_translation)
+      reverse_translation=config.reverse_translation,
+      add_language_token=config.add_language_token)
 
   predict_data = get_raw_dataset(
       predict_ds_builder,
       config.predict_split,
-      reverse_translation=config.reverse_translation)
+      reverse_translation=config.reverse_translation,
+      add_language_token=config.add_language_token)
 
   # Tokenize data.
+  user_defined_symbols = []
+  if config.add_language_token:
+    user_defined_symbols = [
+        get_user_defined_symbols(ds_builders.info, True)
+        for ds_builders in train_ds_builders]
+    user_defined_symbols.extend(
+        [get_user_defined_symbols(ds_builders.info, False)
+         for ds_builders in train_ds_builders])
+  user_defined_symbols = list(set(user_defined_symbols))
+
+  # TODO(dxin): Check in vocab file eventually.
   sp_tokenizer = tokenizer.load_or_train_tokenizer(
-      train_data,
+      sampled_train_data,
       vocab_path=vocab_path,
       vocab_size=config.vocab_size,
-      max_corpus_chars=config.max_corpus_chars)
-  train_data = train_data.map(
+      max_corpus_chars=config.max_corpus_chars,
+      user_defined_symbols=user_defined_symbols)
+  sampled_train_data = sampled_train_data.map(
       tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
   eval_data = eval_data.map(
       tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
   predict_data = predict_data.map(
       tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
 
-  train_ds = preprocess_wmt_data(
-      train_data,
-      is_training=True,
-      shuffle_seed=shuffle_seed,
+  sampled_train_ds = preprocess_wmt_data(
+      sampled_train_data,
       pack_examples=config.pack_examples,
       batch_size=per_host_batch_size,
       max_length=config.max_target_length)
 
   eval_ds = preprocess_wmt_data(
       eval_data,
-      is_training=False,
-      shuffle_seed=None,
       pack_examples=False,
       batch_size=per_host_eval_batch_size,
       max_length=config.max_eval_target_length)
 
   predict_ds = preprocess_wmt_data(
       predict_data,
-      is_training=False,
-      shuffle_seed=None,
       pack_examples=False,
       batch_size=per_host_eval_batch_size,
       max_length=config.max_predict_length)
 
-  return train_ds, eval_ds, predict_ds
+  return sampled_train_ds, eval_ds, predict_ds

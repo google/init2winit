@@ -15,13 +15,13 @@
 
 """Provides op for tokenizing a dataset."""
 
+import dataclasses
 import os
 import tempfile
 import time
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Tuple, List
 
 from absl import logging
-import dataclasses
 import jax
 import tensorflow as tf
 import tensorflow_text as tftxt
@@ -66,7 +66,8 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
                          model_path: str,
                          model_type: str = 'unigram',
                          character_coverage: float = 1.0,
-                         data_keys=('inputs', 'targets')):
+                         data_keys: Tuple[str, str] = ('inputs', 'targets'),
+                         user_defined_symbols: List[str] = []):
   """Train SentencePiece tokenizer from subset of tf dataset.
 
   Args:
@@ -79,6 +80,7 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
       are 0.9995 for languages with rich character set like Japanese or Chinese
       and 1.0 for other languages with small character set.
     data_keys: Tuple[str]: keys of dataset to use for training.
+    user_defined_symbols: List[str]: tokens that are automatically added.
 
   Returns:
     path to the trained sentencepiece vocabulary model.
@@ -89,10 +91,12 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
   with tempfile.NamedTemporaryFile(
       delete=False, prefix='/tmp/sp_tmp') as model_fp:
     pass  # we just want a prefix'd tmp-filename
+  user_defined_symbols = ','.join(user_defined_symbols)
   argstr = ' '.join([
       f'--input={fname}', f'--vocab_size={vocab_size}',
       f'--character_coverage={character_coverage}',
-      f'--model_prefix={model_fp.name}', f'--model_type={model_type}'
+      f'--model_prefix={model_fp.name}', f'--model_type={model_type}',
+      f'--user_defined_symbols={user_defined_symbols}',
   ])
   spm.SentencePieceTrainer.Train(argstr)
   if jax.process_index() == 0:
@@ -126,7 +130,8 @@ def load_or_train_tokenizer(dataset: tf.data.Dataset,
                             vocab_path: str,
                             vocab_size: int,
                             max_corpus_chars: int,
-                            data_keys: Tuple[str, str] = ('inputs', 'targets')):
+                            data_keys: Tuple[str, str] = ('inputs', 'targets'),
+                            user_defined_symbols: List[str] = []):
   """Loads the tokenizer at `vocab_path` or trains a one from `dataset`."""
   try:
     return _load_sentencepiece_tokenizer(vocab_path)
@@ -137,7 +142,8 @@ def load_or_train_tokenizer(dataset: tf.data.Dataset,
         vocab_size=vocab_size,
         maxchars=max_corpus_chars,
         model_path=vocab_path,
-        data_keys=data_keys)
+        data_keys=data_keys,
+        user_defined_symbols=user_defined_symbols)
     return _load_sentencepiece_tokenizer(vocab_path)
 
 

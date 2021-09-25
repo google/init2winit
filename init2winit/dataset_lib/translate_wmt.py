@@ -28,7 +28,8 @@ VOCAB_SIZE = 32000  # Typical vocab_size for MT models.
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        tfds_dataset_key='wmt15_translate/de-en',
+        tfds_dataset_key=None,
+        tfds_dataset_keys=['wmt15_translate/de-en', 'wmt15_translate/ru-en'],
         tfds_eval_dataset_key='wmt14_translate/de-en',
         # If 'tfds_predict_dataset_key' is None,
         # 'tfds_eval_dataset_key' is used.
@@ -38,6 +39,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         # Right now, they have been generated offline and set in
         # experiments.translate dir.
         # TODO(ankugarg): Generate vocab with determinism.
+        rates=[0.5, 0.5],
+        # If 'rates' is None defaults to uniform.
+        add_language_token=False,
         vocab_path=None,
         vocab_size=VOCAB_SIZE,
         max_corpus_chars=10**7,
@@ -94,6 +98,7 @@ def _get_translate_wmt(per_host_batch_size,
   train_ds, eval_ds, predict_ds = mt_pipeline.get_wmt_datasets(
       hps,
       shuffle_seed=shuffle_rng[0],
+      sample_seed=shuffle_rng[1],
       n_devices=jax.local_device_count(),
       per_host_batch_size=per_host_batch_size,
       per_host_eval_batch_size=per_host_eval_batch_size,
