@@ -18,30 +18,35 @@
 Callbacks can be stateful, and in trainer are meant to be called as follows:
 
 
-  callback_builder = callbacks.get_callback(config['name'])
+  callback_builder = callbacks.get_callback(config['callback_name'])
   callback = callback_builder(optimizer, dataset, hps, config, train_dir)
 
   callback_metrics = callback.run_eval(optimizer, batch_stats, global_step).
 
-We require that the callback config has a field 'name', which the trainer
+We require that the config has a field 'callback_name', which the trainer
 uses to determine which callbacks to run. The dictionary, callback_metrics
 should be scalar valued, and will be automatically added to the existing trainer
 scalar metrics.
 """
 
 # TODO(gilmer) Add serialization so that we can checkpoint callback state.
+from init2winit.hessian import hessian_callback
 
 
 class TestCallBack:
   """Example callback to specify the required API."""
 
-  def __init__(self, optimizer, dataset, hps, config, train_dir):
+  def __init__(self, model, optimizer, batch_stats, dataset, hps,
+               callback_config, train_dir, rng):
     """Define the API for callback construction."""
+    del model
     del optimizer
+    del batch_stats
     del dataset
     del hps
-    del config
+    del callback_config
     del train_dir
+    del rng
 
   def run_eval(self, optimizer, batch_stats, global_step):
     """Define the API for running the callback during eval.
@@ -64,7 +69,8 @@ class TestCallBack:
     return {'train/fake_metric': 1.0}
 
 _ALL_CALLBACKS = {
-    'test': TestCallBack
+    'test': TestCallBack,
+    'hessian': hessian_callback.HessianCallback,
 }
 
 

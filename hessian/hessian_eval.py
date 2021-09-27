@@ -42,7 +42,7 @@ DEFAULT_EVAL_CONFIG = {
     'eval_gradient_covariance': False,
     'compute_stats': False,
     'compute_interps': False,
-    'update_stats': True,
+    'update_stats': False,
     'hparam_overrides': {},
     'average_hosts': True,
     'num_eigens': 5

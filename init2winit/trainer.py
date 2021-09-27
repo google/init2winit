@@ -722,10 +722,12 @@ def train(train_dir,
       dataset.train_iterator_fn(), global_step, num_train_steps)
 
   eval_callbacks = []
-  for config in callback_configs:
-    eval_callback = callbacks.get_callback(config['name'])(optimizer, dataset,
-                                                           hps, config,
-                                                           train_dir)
+  rng, callback_rng = jax.random.split(rng)
+  callback_rngs = jax.random.split(callback_rng, len(callback_configs))
+  for callback_rng, config in zip(callback_rngs, callback_configs):
+    eval_callback = callbacks.get_callback(
+        config['callback_name'])(model, optimizer, batch_stats, dataset, hps,
+                                 config, train_dir, callback_rng)
     eval_callbacks.append(eval_callback)
 
   for batch in train_iter:
