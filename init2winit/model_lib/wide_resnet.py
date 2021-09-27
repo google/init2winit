@@ -50,6 +50,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     model_dtype='float32',
     grad_clip=None,
     activation_function='relu',
+    dropout_rate=0.0,
 ))
 
 
