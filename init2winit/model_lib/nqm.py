@@ -42,6 +42,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     noise_decay_power=1,
     nqm_mode='diagH_diagC',
     model_dtype='float32',
+    l2_decay_factor=None,
 ))
 
 
@@ -172,7 +173,13 @@ class NQM(base_model.BaseModel):
   generates isotropic Gaussian noise.
   """
 
-  def __init__(self, hps, dataset_meta_data):
+  def __init__(self, hps, dataset_meta_data, loss_name, metrics_name):
+    del loss_name
+
+    # This is ignored, but is needed to satisfy the initializer API.
+    self.loss_fn = None
+    self.metrics_name = metrics_name
+
     self.hps = hps
     self.dataset_meta_data = dataset_meta_data
     self.flax_module_def = self.build_flax_module()

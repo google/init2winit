@@ -259,7 +259,7 @@ class ModelsTest(parameterized.TestCase):
 
     model_cls = models.get_model('nqm')
     rng = jax.random.PRNGKey(0)
-    model = model_cls(model_hps, {})
+    model = model_cls(model_hps, {}, None, None)
     noise_eps = jnp.array(np.random.normal(size=(batch_size, dim)))
     rng, params_rng = jax.random.split(rng)
     _, flax_module = model.flax_module_def.create_by_shape(
