@@ -24,8 +24,6 @@ from jax import lax
 from jax import vjp
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
-from jax.ops import index
-from jax.ops import index_update
 from optax import apply_updates
 from optax._src import base
 
@@ -192,7 +190,7 @@ def mf_conjgrad_solver(matmul_fn,
 
   def update_obj_arr(step, obj_val, obj_arr):
     if use_obj_arr:
-      return index_update(obj_arr, index[step % arr_len], obj_val)
+      return obj_arr.at[step % arr_len].set(obj_val)
     return obj_arr
 
   @jit

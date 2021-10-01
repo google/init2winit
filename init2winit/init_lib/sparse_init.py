@@ -20,8 +20,6 @@ For more information, see Section 5 of (Martens, 2010), which can be found at
 https://www.cs.toronto.edu/~jmartens/docs/Deep_HessianFree.pdf.
 """
 
-from jax.ops import index
-from jax.ops import index_update
 from ml_collections.config_dict import config_dict
 import numpy as np
 
@@ -69,12 +67,9 @@ def sparse_init(loss_fn,
       else:
         sample = np.random.choice(num_weights, hps.non_zero_connection_weights)
       mask[k, sample] = True
-    model.params[key]['kernel'] = index_update(model.params[key]['kernel'],
-                                               index[~mask], 0.0)
+    model.params[key]['kernel'] = model.params[key]['kernel'].at[~mask].set(0.0)
     if i < num_hidden_layers and activation_functions[i] == 'tanh':
-      model.params[key]['bias'] = index_update(model.params[key]['bias'],
-                                               index[:], 0.5)
+      model.params[key]['bias'] = model.params[key]['bias'].at[:].set(0.5)
     else:
-      model.params[key]['bias'] = index_update(model.params[key]['bias'],
-                                               index[:], 0.0)
+      model.params[key]['bias'] = model.params[key]['bias'].at[:].set(0.0)
   return model
