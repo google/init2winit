@@ -142,7 +142,7 @@ class LossesTest(parameterized.TestCase):
     for data in CLASSIFICATION_TEST_DATA:
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['one_hot_targets'], data['weights']),
-          data[loss_name])
+          data[loss_name], places=5)
 
   @parameterized.named_parameters(*RECONSTRUCTION_KEYS)
   def test_regression_losses(self, loss_name):
@@ -150,7 +150,7 @@ class LossesTest(parameterized.TestCase):
     for data in RECONSTRUCTION_TEST_DATA:
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['targets'], data['weights']),
-          data[loss_name])
+          data[loss_name], places=6)
 
   def test_cross_entropy_loss_fn(self):
     for data in CROSS_ENTROPY_TEST_DATA:
