@@ -71,6 +71,27 @@ def sigmoid_mean_squared_error(logits, targets, weights=None):
   return jnp.sum(jnp.dot(loss, weights))
 
 
+def mean_squared_error(logits, targets, weights=None):
+  """Computes the mean squared error between logits and targets.
+
+  Args:
+    logits: float array of shape (batch, output_shape)
+    targets: float array of shape (batch, output_shape)
+    weights: None or float array of shape (batch,)
+
+  Returns:
+    float value of mean squared error between logits and targets
+  """
+
+  loss = jnp.sum(
+      jnp.square(logits - targets).reshape(targets.shape[0], -1),
+      axis=-1)
+  if weights is None:
+    weights = jnp.ones(loss.shape[0])
+  weights = weights / sum(weights)
+  return jnp.sum(jnp.dot(loss, weights))
+
+
 def weighted_unnormalized_cross_entropy(logits, one_hot_targets, weights=None):
   """Compute weighted cross entropy and entropy for log probs and targets.
 
@@ -119,6 +140,7 @@ _ALL_LOSS_FUNCTIONS = {
     'sigmoid_binary_cross_entropy':
         (sigmoid_binary_cross_entropy, jax.nn.sigmoid),
     'cross_entropy': (weighted_cross_entropy, jax.nn.softmax),
+    'mean_squared_error': (mean_squared_error, None),
 }
 
 

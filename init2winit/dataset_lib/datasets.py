@@ -18,6 +18,7 @@
 import collections
 
 from init2winit.dataset_lib import fake_dataset
+from init2winit.dataset_lib import gaussian_noise
 from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import mlperf_imagenet_dataset
 from init2winit.dataset_lib import nqm_noise
@@ -76,6 +77,10 @@ _ALL_DATASETS = {
     'uniref50':
         _Dataset(proteins.get_uniref, proteins.DEFAULT_HPARAMS,
                  proteins.METADATA),
+    'gaussian_noise':
+        _Dataset(gaussian_noise.get_gaussian_noise,
+                 gaussian_noise.GAUSSIAN_HPARAMS,
+                 gaussian_noise.METADATA),
 }
 
 
