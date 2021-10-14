@@ -122,7 +122,17 @@ relevant information and links to the workshops for different years.
 
 ### Residual Networks
 ```
-@misc{resnet,
+
+@INPROCEEDINGS{heResnet2016,
+  author={He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
+  booktitle={2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  title={Deep Residual Learning for Image Recognition}, 
+  year={2016},
+  pages={770-778},
+  doi={10.1109/CVPR.2016.90}
+}
+
+@misc{resnetArxiv,
   title={Deep residual learning for image recognition. CoRR abs/1512.03385 (2015)},
   author={He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
   year={2015}
