@@ -268,7 +268,8 @@ class Encoder1DBlock(nn.Module):
         bias=False,
         broadcast_dropout=False,
         dropout_rate=attention_dropout_rate,
-        deterministic=deterministic)
+        deterministic=deterministic,
+        name='EncoderSelfAttention')
     x = nn.dropout(x, rate=dropout_rate, deterministic=deterministic)
     x = x + inputs
     x = maybe_post_normalize(x)
@@ -280,7 +281,8 @@ class Encoder1DBlock(nn.Module):
         mlp_dim=mlp_dim,
         dtype=dtype,
         dropout_rate=dropout_rate,
-        deterministic=deterministic)
+        deterministic=deterministic,
+        name='MLPBlock')
     res = x + y
 
     return maybe_post_normalize(res)
@@ -361,13 +363,13 @@ class EncoderDecoder1DBlock(nn.Module):
         broadcast_dropout=False,
         dropout_rate=attention_dropout_rate,
         deterministic=deterministic,
-        cache=cache)
+        cache=cache,
+        name='DecoderSelfAttention')
     x = nn.dropout(x, rate=dropout_rate, deterministic=deterministic)
     x = x + targets
     x = maybe_post_normalize(x)
 
     # Encoder-Decoder block.
-    # TODO(ankugarg): Support for confgurable pre vs post layernorm.
     y = maybe_pre_normalize(x)
     y = nn.SelfAttention(
         y,
@@ -386,7 +388,8 @@ class EncoderDecoder1DBlock(nn.Module):
         bias=False,
         broadcast_dropout=False,
         dropout_rate=attention_dropout_rate,
-        deterministic=deterministic)
+        deterministic=deterministic,
+        name='DecoderCrossAttention')
     y = nn.dropout(y, rate=dropout_rate, deterministic=deterministic)
     y = y + x
     y = maybe_post_normalize(y)
@@ -398,7 +401,8 @@ class EncoderDecoder1DBlock(nn.Module):
         mlp_dim=mlp_dim,
         dtype=dtype,
         dropout_rate=dropout_rate,
-        deterministic=deterministic)
+        deterministic=deterministic,
+        name='MLPBlock')
     res = y + z
 
     return maybe_post_normalize(res)
