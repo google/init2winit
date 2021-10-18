@@ -22,6 +22,7 @@ from flax import nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax import lax
+from jax.nn import initializers
 from jax.nn import one_hot
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
@@ -63,6 +64,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         use_shallue_label_smoothing=False,
         model_dtype='float32',
         grad_clip=None,
+        enc_self_attn_kernel_init='xavier_uniform',
+        dec_self_attn_kernel_init='xavier_uniform',
+        dec_cross_attn_kernel_init='xavier_uniform'
     ))
 
 
@@ -216,7 +220,8 @@ class Encoder1DBlock(nn.Module):
             dropout_rate=0.1,
             attention_dropout_rate=0.1,
             normalizer='layer_norm',
-            deterministic=False):
+            deterministic=False,
+            enc_self_attn_kernel_init_fn=initializers.xavier_uniform()):
     """Applies Encoder1DBlock module.
 
     Args:
@@ -232,6 +237,8 @@ class Encoder1DBlock(nn.Module):
       normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
         'pre_layer_norm', 'none'
       deterministic: <bool> Deterministic or not (to apply dropout).
+      enc_self_attn_kernel_init_fn: initializer for encoder's
+        self attention matrices.
 
     Returns:
       Output: <float>[batch_size, input_sequence_length, qkv_dim]
@@ -263,7 +270,7 @@ class Encoder1DBlock(nn.Module):
         causal_mask=False,
         segmentation=inputs_segmentation,
         padding_mask=padding_mask,
-        kernel_init=nn.initializers.xavier_uniform(),
+        kernel_init=enc_self_attn_kernel_init_fn,
         bias_init=nn.initializers.normal(stddev=1e-6),
         bias=False,
         broadcast_dropout=False,
@@ -306,6 +313,8 @@ class EncoderDecoder1DBlock(nn.Module):
             attention_dropout_rate=0.1,
             deterministic=False,
             normalizer='layer_norm',
+            dec_self_attn_kernel_init_fn=initializers.xavier_uniform(),
+            dec_cross_attn_kernel_init_fn=initializers.xavier_uniform(),
             cache=None):
     """Applies EncoderDecoder1DBlock module.
 
@@ -325,6 +334,10 @@ class EncoderDecoder1DBlock(nn.Module):
       deterministic: <bool> Deterministic or not (to apply dropout)
       normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
         'pre_layer_norm', 'none'
+      dec_self_attn_kernel_init_fn: initializer for decoder's
+        self attention matrices.
+      dec_cross_attn_kernel_init_fn: initializer for decoder's
+        cross attention matrices.
       cache: Flax attention cache for fast decoding.
 
     Returns:
@@ -357,7 +370,7 @@ class EncoderDecoder1DBlock(nn.Module):
         causal_mask=True,
         padding_mask=padding_mask,
         segmentation=targets_segmentation,
-        kernel_init=nn.initializers.xavier_uniform(),
+        kernel_init=dec_self_attn_kernel_init_fn,
         bias_init=nn.initializers.normal(stddev=1e-6),
         bias=False,
         broadcast_dropout=False,
@@ -383,7 +396,7 @@ class EncoderDecoder1DBlock(nn.Module):
         key_padding_mask=key_padding_mask,
         segmentation=targets_segmentation,
         key_segmentation=inputs_segmentation,
-        kernel_init=nn.initializers.xavier_uniform(),
+        kernel_init=dec_cross_attn_kernel_init_fn,
         bias_init=nn.initializers.normal(stddev=1e-6),
         bias=False,
         broadcast_dropout=False,
@@ -427,7 +440,8 @@ class Encoder(nn.Module):
             train=True,
             dropout_rate=0.1,
             normalizer='layer_norm',
-            attention_dropout_rate=0.1):
+            attention_dropout_rate=0.1,
+            enc_self_attn_kernel_init_fn=initializers.xavier_uniform()):
     """Applies Transformer model on the inputs.
 
     Args:
@@ -447,6 +461,8 @@ class Encoder(nn.Module):
       dropout_rate: dropout rate
       normalizer: One of 'batch_norm', 'layer_norm', 'none'
       attention_dropout_rate: dropout rate for attention weights
+      enc_self_attn_kernel_init_fn: initializer for encoder's
+        self attention matrices.
 
     Returns:
       output of a transformer encoder.
@@ -493,6 +509,7 @@ class Encoder(nn.Module):
           attention_dropout_rate=attention_dropout_rate,
           deterministic=not train,
           normalizer=normalizer,
+          enc_self_attn_kernel_init_fn=enc_self_attn_kernel_init_fn,
           name=f'encoderblock_{lyr}')
     if normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
       maybe_normalize = model_utils.get_normalizer(normalizer, train)
@@ -526,7 +543,9 @@ class Decoder(nn.Module):
             cache=None,
             dropout_rate=0.1,
             normalizer='layer_norm',
-            attention_dropout_rate=0.1):
+            attention_dropout_rate=0.1,
+            dec_self_attn_kernel_init_fn=initializers.xavier_uniform(),
+            dec_cross_attn_kernel_init_fn=initializers.xavier_uniform()):
     """Applies Transformer model on the inputs.
 
     Args:
@@ -555,6 +574,10 @@ class Decoder(nn.Module):
       normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
         'pre_layer_norm', 'none'
       attention_dropout_rate: dropout rate for attention weights.
+      dec_self_attn_kernel_init_fn: initializer for decoder's
+        self attention matrices.
+      dec_cross_attn_kernel_init_fn: initializer for decoder's
+        cross attention matrices.
 
     Returns:
       output of a transformer decoder.
@@ -608,6 +631,8 @@ class Decoder(nn.Module):
           attention_dropout_rate=attention_dropout_rate,
           deterministic=not train,
           normalizer=normalizer,
+          dec_self_attn_kernel_init_fn=dec_self_attn_kernel_init_fn,
+          dec_cross_attn_kernel_init_fn=dec_cross_attn_kernel_init_fn,
           cache=cache,
           name=f'encoderdecoderblock_{lyr}')
     if normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
@@ -665,6 +690,9 @@ class Transformer(nn.Module):
             dropout_rate=0.3,
             attention_dropout_rate=0.3,
             normalizer='layer_norm',
+            enc_self_attn_kernel_init_fn=initializers.xavier_uniform(),
+            dec_self_attn_kernel_init_fn=initializers.xavier_uniform(),
+            dec_cross_attn_kernel_init_fn=initializers.xavier_uniform(),
             cache=None):
     """Applies Transformer model on the inputs.
 
@@ -694,6 +722,12 @@ class Transformer(nn.Module):
       dropout_rate: dropout rate.
       attention_dropout_rate: dropout rate for attention weights.
       normalizer: One of 'batch_norm', 'layer_norm', 'none'
+      enc_self_attn_kernel_init_fn: initializer for encoder's
+        self attention matrices.
+      dec_self_attn_kernel_init_fn: initializer for decoder's
+        self attention matrices.
+      dec_cross_attn_kernel_init_fn: initializer for decoder's
+        cross attention matrices.
       cache: flax autoregressive cache for fast decoding.
 
     Returns:
@@ -728,6 +762,7 @@ class Transformer(nn.Module):
         dropout_rate=dropout_rate,
         attention_dropout_rate=attention_dropout_rate,
         normalizer=normalizer,
+        enc_self_attn_kernel_init_fn=enc_self_attn_kernel_init_fn,
         name='encoder')
 
     logits = Decoder(
@@ -751,6 +786,8 @@ class Transformer(nn.Module):
         dropout_rate=dropout_rate,
         attention_dropout_rate=attention_dropout_rate,
         normalizer=normalizer,
+        dec_self_attn_kernel_init_fn=dec_self_attn_kernel_init_fn,
+        dec_cross_attn_kernel_init_fn=dec_cross_attn_kernel_init_fn,
         cache=cache,
         name='decoder')
     return logits.astype(jnp.float32) if use_bfloat16 else logits
@@ -786,9 +823,13 @@ class Transformer(nn.Module):
              dropout_rate=0.1,
              attention_dropout_rate=0.1,
              normalizer='layer_norm',
+             enc_self_attn_kernel_init_fn=initializers.xavier_uniform(),
+             dec_self_attn_kernel_init_fn=initializers.xavier_uniform(),
+             dec_cross_attn_kernel_init_fn=initializers.xavier_uniform(),
              cache=None):
     del (output_vocab_size, shift, targets_positions, targets_segmentation,
-         tgt_padding_mask, logits_via_embedding, cache, dec_num_layers)
+         tgt_padding_mask, logits_via_embedding, cache, dec_num_layers,
+         dec_self_attn_kernel_init_fn, dec_cross_attn_kernel_init_fn)
     if share_embeddings:
       shared_embedding = nn.Embed.shared(
           num_embeddings=vocab_size,
@@ -814,6 +855,7 @@ class Transformer(nn.Module):
         dropout_rate=dropout_rate,
         attention_dropout_rate=attention_dropout_rate,
         normalizer=normalizer,
+        enc_self_attn_kernel_init_fn=enc_self_attn_kernel_init_fn,
         name='encoder')
 
     return encoded
@@ -845,8 +887,11 @@ class Transformer(nn.Module):
              dropout_rate=0.1,
              attention_dropout_rate=0.1,
              normalizer='layer_norm',
+             enc_self_attn_kernel_init_fn=initializers.xavier_uniform(),
+             dec_self_attn_kernel_init_fn=initializers.xavier_uniform(),
+             dec_cross_attn_kernel_init_fn=initializers.xavier_uniform(),
              cache=None):
-    del (inputs_positions, enc_num_layers)
+    del (inputs_positions, enc_num_layers, enc_self_attn_kernel_init_fn)
     if share_embeddings:
       shared_embedding = nn.Embed.shared(
           num_embeddings=vocab_size,
@@ -879,6 +924,8 @@ class Transformer(nn.Module):
         dropout_rate=dropout_rate,
         attention_dropout_rate=attention_dropout_rate,
         normalizer=normalizer,
+        dec_self_attn_kernel_init_fn=dec_self_attn_kernel_init_fn,
+        dec_cross_attn_kernel_init_fn=dec_self_attn_kernel_init_fn,
         cache=cache,
         name='decoder')
 
@@ -960,6 +1007,13 @@ class TransformerTranslate(base_model.BaseModel):
   def build_flax_module(self):
     max_len = max(self.hps.max_target_length, self.hps.max_eval_target_length,
                   self.hps.max_predict_length)
+    enc_self_attn_kernel_init_fn = model_utils.INITIALIZERS[
+        self.hps.enc_self_attn_kernel_init]()
+    dec_self_attn_kernel_init_fn = model_utils.INITIALIZERS[
+        self.hps.dec_self_attn_kernel_init]()
+    dec_cross_attn_kernel_init_fn = model_utils.INITIALIZERS[
+        self.hps.dec_cross_attn_kernel_init]()
+
     return Transformer.partial(
         vocab_size=self.hps['output_shape'][-1],
         output_vocab_size=self.hps['output_shape'][-1],
@@ -976,4 +1030,7 @@ class TransformerTranslate(base_model.BaseModel):
         dropout_rate=self.hps.dropout_rate,
         normalizer=self.hps.normalizer,
         attention_dropout_rate=self.hps.attention_dropout_rate,
+        enc_self_attn_kernel_init_fn=enc_self_attn_kernel_init_fn,
+        dec_self_attn_kernel_init_fn=dec_self_attn_kernel_init_fn,
+        dec_cross_attn_kernel_init_fn=dec_cross_attn_kernel_init_fn
     )

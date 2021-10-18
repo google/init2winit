@@ -204,7 +204,10 @@ class ModelsTest(parameterized.TestCase):
         },
         'output_shape': (vocab_size,),
         # Training HParams.
-        'l2_decay_factor': 1e-4
+        'l2_decay_factor': 1e-4,
+        'enc_self_attn_kernel_init': 'xavier_uniform',
+        'dec_self_attn_kernel_init': 'xavier_uniform',
+        'dec_cross_attn_kernel_init': 'xavier_uniform'
     })
     text_src_input_shape = (32, 64)  # batch_size, max_source_length
     text_tgt_input_shape = (32, 40)  # batch_size, max_target_length

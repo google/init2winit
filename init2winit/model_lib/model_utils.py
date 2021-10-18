@@ -42,7 +42,8 @@ lecun_normal = functools.partial(
 INITIALIZERS = {
     'delta_orthogonal': initializers.delta_orthogonal,
     'orthogonal': initializers.orthogonal,
-    'lecun_normal': lecun_normal
+    'lecun_normal': lecun_normal,
+    'xavier_uniform': initializers.xavier_uniform,
 }
 
 
