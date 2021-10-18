@@ -24,34 +24,34 @@ from ml_collections.config_dict import config_dict
 
 
 # small hparams used for unit tests
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    blocks_per_group=3,
-    channel_multiplier=2,
-    lr_hparams={
-        'base_lr': 0.001,
-        'schedule': 'cosine'
-    },
-    normalizer='batch_norm',
-    layer_rescale_factors={},
-    conv_kernel_scale=1.0,
-    dense_kernel_scale=1.0,
-    conv_kernel_init='lecun_normal',
-    dense_kernel_init='lecun_normal',
-    optimizer='momentum',
-    opt_hparams={
-        'momentum': 0.9,
-    },
-    batch_size=128,
-    l2_decay_factor=0.0001,
-    l2_decay_rank_threshold=2,
-    label_smoothing=None,
-    rng_seed=-1,
-    use_shallue_label_smoothing=False,
-    model_dtype='float32',
-    grad_clip=None,
-    activation_function='relu',
-    dropout_rate=0.0,
-))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        blocks_per_group=3,
+        channel_multiplier=2,
+        lr_hparams={
+            'base_lr': 0.001,
+            'schedule': 'cosine'
+        },
+        normalizer='batch_norm',
+        layer_rescale_factors={},
+        conv_kernel_scale=1.0,
+        dense_kernel_scale=1.0,
+        dropout_rate=0.0,
+        conv_kernel_init='lecun_normal',
+        dense_kernel_init='lecun_normal',
+        optimizer='momentum',
+        opt_hparams={
+            'momentum': 0.9,
+        },
+        batch_size=128,
+        l2_decay_factor=0.0001,
+        l2_decay_rank_threshold=2,
+        label_smoothing=None,
+        rng_seed=-1,
+        use_shallue_label_smoothing=False,
+        model_dtype='float32',
+        grad_clip=None,
+        activation_function='relu'))
 
 
 class WideResnetBlock(nn.Module):
@@ -63,6 +63,7 @@ class WideResnetBlock(nn.Module):
             strides=(1, 1),
             conv_kernel_init=initializers.lecun_normal(),
             normalizer='batch_norm',
+            dropout_rate=0.0,
             activation_function='relu',
             train=True):
     maybe_normalize = model_utils.get_normalizer(normalizer, train)
@@ -89,6 +90,7 @@ class WideResnetBlock(nn.Module):
         name='conv1',
         kernel_init=conv_kernel_init,
         bias=False)
+    y = nn.dropout(y, rate=dropout_rate, deterministic=not train)
     y = maybe_normalize(y, name='bn2')
     y = model_utils.ACTIVATIONS[activation_function](y)
     y = nn.Conv(
@@ -116,6 +118,7 @@ class WideResnetGroup(nn.Module):
             strides=(1, 1),
             conv_kernel_init=initializers.lecun_normal(),
             normalizer='batch_norm',
+            dropout_rate=0.0,
             activation_function='relu',
             train=True):
     for i in range(blocks_per_group):
@@ -125,6 +128,7 @@ class WideResnetGroup(nn.Module):
           strides if i == 0 else (1, 1),
           conv_kernel_init=conv_kernel_init,
           normalizer=normalizer,
+          dropout_rate=dropout_rate,
           activation_function=activation_function,
           train=train)
     return x
@@ -142,6 +146,7 @@ class WideResnet(nn.Module):
       conv_kernel_init=initializers.lecun_normal(),
       dense_kernel_init=initializers.lecun_normal(),
       normalizer='batch_norm',
+      dropout_rate=0.0,
       activation_function='relu',
       train=True,
   ):
@@ -160,23 +165,24 @@ class WideResnet(nn.Module):
         16 * channel_multiplier,
         conv_kernel_init=conv_kernel_init,
         normalizer=normalizer,
+        dropout_rate=dropout_rate,
         activation_function=activation_function,
         train=train)
     x = WideResnetGroup(
         x,
         blocks_per_group,
-        32 * channel_multiplier,
-        (2, 2),
+        32 * channel_multiplier, (2, 2),
         conv_kernel_init=conv_kernel_init,
         normalizer=normalizer,
+        dropout_rate=dropout_rate,
         activation_function=activation_function,
         train=train)
     x = WideResnetGroup(
         x,
         blocks_per_group,
-        64 * channel_multiplier,
-        (2, 2),
+        64 * channel_multiplier, (2, 2),
         conv_kernel_init=conv_kernel_init,
+        dropout_rate=dropout_rate,
         normalizer=normalizer,
         activation_function=activation_function,
         train=train)
@@ -202,5 +208,6 @@ class WideResnetModel(base_model.BaseModel):
             hps.conv_kernel_scale),
         dense_kernel_init=model_utils.INITIALIZERS[hps.dense_kernel_init](
             hps.dense_kernel_scale),
+        dropout_rate=hps.dropout_rate,
         normalizer=self.hps.normalizer,
         activation_function=self.hps.activation_function)
