@@ -25,9 +25,9 @@ from flax.training import common_utils
 from init2winit import checkpoint
 from init2winit import trainer
 from init2winit import utils
-from init2winit.bleu import decode
-from init2winit.bleu import eval_utils
 from init2winit.dataset_lib import mt_tokenizer
+from init2winit.mt_eval import decode
+from init2winit.mt_eval import eval_utils
 import jax
 import numpy as np
 from tensorflow.io import gfile

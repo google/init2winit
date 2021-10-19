@@ -17,6 +17,7 @@
 
 import os
 
+from init2winit import base_callback
 from init2winit import utils
 from init2winit.hessian import hessian_eval
 import jax
@@ -42,7 +43,7 @@ def set_up_hessian_eval(model, optimizer, batch_stats, dataset,
   return hessian_evaluator, logger
 
 
-class HessianCallback:
+class HessianCallback(base_callback.BaseCallBack):
   """Used to run the hessian eval in the trainer binary."""
 
   def __init__(self, model, optimizer, batch_stats, dataset, hps,

@@ -25,11 +25,12 @@ from absl import app
 from absl import flags
 from absl import logging
 from init2winit import hyperparameters
-from init2winit.bleu import bleu_evaluator
 from init2winit.dataset_lib import datasets
 from init2winit.model_lib import models
+from init2winit.mt_eval import bleu_evaluator
 import jax
 import tensorflow.compat.v2 as tf
+
 
 
 
