@@ -15,7 +15,7 @@
 
 """Virtual Batch Normalization Flax module."""
 
-from flax.nn import base
+from flax import nn
 
 from jax import lax
 from jax.nn import initializers
@@ -64,7 +64,7 @@ def _get_batch_axis(
   return batch_axis
 
 
-class VirtualBatchNorm(base.Module):
+class VirtualBatchNorm(nn.Module):
   """VirtualBatchNorm Module.
 
   Note that we may have to rewrite some of this module when upgrading to linen.
