@@ -34,7 +34,7 @@ https://github.com/juntang-zhuang/Adabelief-Optimizer/blob/update_0.1.0/PyTorch_
 
 """
 
-from flax import nn
+from flax.deprecated import nn
 from init2winit import utils
 from init2winit.model_lib import base_model
 from init2winit.model_lib import normalization

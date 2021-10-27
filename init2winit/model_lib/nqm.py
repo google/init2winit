@@ -17,8 +17,8 @@
 r"""NQM Model.
 
 """
-from flax import nn
-from flax.nn import initializers
+from flax.deprecated import nn
+from flax.deprecated.nn import initializers
 from init2winit.model_lib import base_model
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict

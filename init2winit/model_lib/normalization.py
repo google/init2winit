@@ -15,7 +15,7 @@
 
 """Virtual Batch Normalization Flax module."""
 
-from flax import nn
+from flax.deprecated import nn
 
 from jax import lax
 from jax.nn import initializers

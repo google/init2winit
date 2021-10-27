@@ -16,7 +16,7 @@
 # Lint as: python3
 """Base class for all classification models."""
 
-from flax import nn
+from flax.deprecated import nn
 from init2winit.model_lib import losses
 from init2winit.model_lib import metrics
 from init2winit.model_lib import model_utils
