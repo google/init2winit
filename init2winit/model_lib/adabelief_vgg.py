@@ -28,7 +28,7 @@ The original VGGNet paper can be found here:
 https://arxiv.org/abs/1409.1556
 """
 
-from flax import nn
+from flax.deprecated import nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax.numpy as jnp

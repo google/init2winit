@@ -20,7 +20,7 @@ import os
 
 from absl import logging
 from flax import jax_utils
-from flax import nn
+from flax.deprecated import nn
 from flax.training import common_utils
 from init2winit import checkpoint
 from init2winit import trainer

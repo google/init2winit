@@ -26,8 +26,8 @@ import time
 from absl import flags
 from absl import logging
 from flax import jax_utils
-from flax import nn
 from flax import optim as optimizers
+from flax.deprecated import nn
 from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import hyperparameters
@@ -38,8 +38,6 @@ from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
-
-
 import jax
 from jax import lax
 import jax.numpy as jnp

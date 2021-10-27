@@ -16,7 +16,7 @@
 # Lint as: python3
 """Flax implementation of ResNet V1."""
 
-from flax import nn
+from flax.deprecated import nn
 from init2winit import utils
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils

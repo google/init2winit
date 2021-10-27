@@ -18,8 +18,8 @@
 import functools
 
 from absl import logging
-from flax import nn
 from flax import optim
+from flax.deprecated import nn
 import jax
 from jax import lax
 from jax.nn import initializers

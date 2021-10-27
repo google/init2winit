@@ -19,7 +19,7 @@ This model can be used to implement the 3c3d architecture from:
 https://github.com/fsschneider/DeepOBS/blob/master/deepobs/tensorflow/testproblems/_3c3d.py
 """
 
-from flax import nn
+from flax.deprecated import nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers

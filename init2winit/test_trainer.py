@@ -24,7 +24,7 @@ import tempfile
 
 from absl import flags
 from absl.testing import absltest
-from flax import nn
+from flax.deprecated import nn
 from init2winit import checkpoint
 from init2winit import hyperparameters
 from init2winit import trainer

@@ -21,7 +21,7 @@ import copy
 
 from absl.testing import absltest
 from absl.testing import parameterized
-from flax import nn
+from flax.deprecated import nn
 from init2winit.model_lib import models
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp

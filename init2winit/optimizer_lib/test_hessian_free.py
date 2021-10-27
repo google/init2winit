@@ -21,7 +21,7 @@ import copy
 from functools import partial  # pylint: disable=g-importing-member
 
 from absl.testing import absltest
-from flax import nn
+from flax.deprecated import nn
 from init2winit.model_lib import models
 from init2winit.optimizer_lib.hessian_free import gvp
 from init2winit.optimizer_lib.hessian_free import hessian_free

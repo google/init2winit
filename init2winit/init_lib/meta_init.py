@@ -27,8 +27,8 @@ import time
 
 from absl import logging
 from flax import jax_utils
-from flax import nn
 from flax import optim as optimizers
+from flax.deprecated import nn
 from init2winit.model_lib import model_utils
 import jax
 from jax import jvp

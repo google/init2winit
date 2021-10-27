@@ -22,8 +22,8 @@ import tempfile
 
 from absl import flags
 from absl.testing import absltest
-from flax import nn
 from flax import optim as optimizers
+from flax.deprecated import nn
 from init2winit import utils
 from jax import test_util as jtu
 import numpy as np

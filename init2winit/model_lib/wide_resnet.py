@@ -15,7 +15,7 @@
 
 """Wide Resnet Model."""
 
-from flax import nn
+from flax.deprecated import nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
