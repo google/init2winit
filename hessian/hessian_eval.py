@@ -22,8 +22,8 @@ from flax import jax_utils
 from init2winit.dataset_lib import data_utils
 import jax
 import jax.numpy as jnp
-import jax.tree_util as tu
 import numpy as np
+import optax
 import spectral_density.hessian_computation as hessian_computation
 from spectral_density.hessian_computation import ravel_pytree
 import spectral_density.lanczos as lanczos
@@ -83,27 +83,27 @@ def _tree_sum(tree_left, tree_right):
   """Computes tree_left + tree_right."""
   def f(x, y):
     return x + y
-  return tu.tree_multimap(f, tree_left, tree_right)
+  return jax.tree_util.tree_multimap(f, tree_left, tree_right)
 
 
 def _tree_sub(tree_left, tree_right):
   """Computes tree_left - tree_right."""
   def f(x, y):
     return x - y
-  return tu.tree_multimap(f, tree_left, tree_right)
+  return jax.tree_util.tree_multimap(f, tree_left, tree_right)
 
 
 def _tree_zeros_like(tree):
   def f(x):
     return jnp.zeros_like(x)
-  return tu.tree_map(f, tree)
+  return jax.tree_util.tree_map(f, tree)
 
 
 def _additive_update(model, update):
   """Computes an updated model for interpolation studies."""
   def f(x, y):
     return x + y
-  new_params = tu.tree_multimap(f, model.params, update)
+  new_params = jax.tree_util.tree_multimap(f, model.params, update)
   return model.replace(params=new_params)
 
 
@@ -112,10 +112,12 @@ def _unreplicate(sharded_array):
   return jax.device_get(temp)
 
 
-def _compute_update(optimizer, gradient):
-  curr_params = optimizer.target.params
-  new_optim = optimizer.apply_gradient(grads=gradient, learning_rate=1.0)
-  new_params = new_optim.target.params
+def _compute_update(
+    flax_module, optimizer_state, gradient, optimizer_update_fn):
+  curr_params = flax_module.params
+  model_updates, _ = optimizer_update_fn(
+      gradient.params, optimizer_state, params=curr_params)
+  new_params = optax.apply_updates(curr_params, model_updates)
   diff = _tree_sub(curr_params, new_params)
   return diff
 
@@ -315,15 +317,19 @@ class CurvatureEvaluator:
       logging.info(row.keys())
     return row
 
-  def compute_dirs(self, optimizer):
+  def compute_dirs(self, flax_module, optimizer_state, optimizer_update_fn):
     """Compute the directions of curvature evaluation.
 
     The function computes:
       1- mini-batch gradients and full-batch gradients and adds them to gdirs.
       2- mini-batch and full-batch update directions and adds them to udirs.
     Args:
-      optimizer: The flax optimizer used for the training. The optimizer has to
-      be already replicated to accommodate pmapping.
+      flax_module: The Flax model. The model has to be already replicated to
+        accommodate pmapping.
+      optimizer_state: The optax optimizer state used for the training. The
+        state has to be already replicated to accommodate pmapping.
+      optimizer_update_fn: The optax optimizer update function. We assume that
+        the learning rate is a constant 1.0.
     Returns:
       gdirs, udirs: two lists of pytrees described above.
     """
@@ -331,16 +337,19 @@ class CurvatureEvaluator:
     udirs = []
     compiled_tree_sum = jax.pmap(_tree_sum)
     compiled_tree_zeros_like = jax.pmap(_tree_zeros_like)
-    compiled_update = jax.pmap(_compute_update)
+    update_fn = functools.partial(
+        _compute_update, optimizer_update_fn=optimizer_update_fn)
+    compiled_update = jax.pmap(update_fn)
     count = 0.0
-    full_grad = compiled_tree_zeros_like(optimizer.target.params)
+    full_grad = compiled_tree_zeros_like(flax_module.params)
     for batch in self.batches_gen():
       # Already pmeaned minibatch gradients
-      minibatch_grad = self.grad_loss(optimizer.target, batch)
+      minibatch_grad = self.grad_loss(flax_module, batch)
       avg_grad = minibatch_grad.params
       if count < self.eval_config['num_eval_draws']:
         gdirs.append(_unreplicate(minibatch_grad.params))
-        minibatch_update = compiled_update(optimizer, minibatch_grad)
+        minibatch_update = compiled_update(
+            flax_module, optimizer_state, minibatch_grad)
         udirs.append(_unreplicate(minibatch_update))
       count += 1.0
       full_grad = compiled_tree_sum(full_grad, avg_grad)
@@ -350,7 +359,8 @@ class CurvatureEvaluator:
     full_grad = jax.tree_map(lambda x: x / count, full_grad)
     gdirs.append(_unreplicate(full_grad))
     full_grad = minibatch_grad.replace(params=full_grad)
-    full_batch_update = compiled_update(optimizer, full_grad)
+    full_batch_update = compiled_update(
+        flax_module, optimizer_state, full_grad)
     udirs.append(_unreplicate(full_batch_update))
 
     if jax.process_index() == 0:

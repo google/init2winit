@@ -178,6 +178,7 @@ def meta_optimize_scales(loss_fn,
   # The flax optimizer expects a Model object. There is no fprop for the
   # meta_model, hence the first argument is None.
   meta_model = nn.Model(None, norms)
+  # TODO(gilmer,znado): update to optax.
   meta_opt = optimizers.Momentum(hps.meta_learning_rate,
                                  hps.meta_momentum).create(
                                      meta_model, focus=traversal)
@@ -199,7 +200,7 @@ def meta_optimize_scales(loss_fn,
     return optimizer, output_and_grad[0]
 
   training_curve = []
-  start = time.clock()
+  start = time.perf_counter()
   for i in range(hps.meta_steps):
     batch_rng = jax.random.fold_in(rng_key, i)
     inputs, targets = get_batch(batch_rng)
@@ -208,7 +209,7 @@ def meta_optimize_scales(loss_fn,
     training_curve.append(loss_value)
     if (jax.process_index() == 0 and
         (i % log_every == 0 or (i + 1) == hps.meta_steps)):
-      end = time.clock()
+      end = time.perf_counter()
       logging.info('Cumulative time (seconds): %d', end-start)
       logging.info('meta_init step %d, loss: %f', i, float(loss_value[0]))
       if metrics_logger is not None:

@@ -146,9 +146,9 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       d1[prefix+key] = d2[key]
     return d1
 
-  def __init__(self, model, optimizer, batch_stats, dataset, hps,
+  def __init__(self, model, flax_module, batch_stats, dataset, hps,
                callback_config, train_dir, rng):
-    del optimizer
+    del flax_module
     del batch_stats
     del train_dir
     del dataset
@@ -158,12 +158,11 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
         model.evaluate_batch, axis_name='batch', donate_argnums=(2,))
     self.dataset = self._get_dataset(hps, rng)
 
-  def run_eval(self, optimizer, batch_stats, global_step):
+  def run_eval(self, flax_module, batch_stats, global_step):
     """Runs the MT models to evals specified by MT model.
 
     Args:
-      optimizer: Replicated optimizer the trainer has (this also has the
-        model parameters).
+      flax_module: Replicated flax module.
       batch_stats: Replicated batch_stats from the trainer.
       global_step: Current training step.
 
@@ -190,7 +189,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     metrics = {}
     for split_name, split_iter in ds_splits_dict.items():
       try:
-        split_metrics = self._evaluate(optimizer.target,
+        split_metrics = self._evaluate(flax_module,
                                        batch_stats,
                                        split_iter,
                                        self.evaluate_batch_pmapped)

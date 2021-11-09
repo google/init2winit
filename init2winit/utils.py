@@ -196,7 +196,7 @@ class TrainingMetricsGrabber:
 
     return TrainingMetricsGrabber(gradient_statistics, config)
 
-  def update(self, model_gradient, old_optimizer, new_optimizer):
+  def update(self, model_gradient, old_flax_module, new_flax_module):
     """Computes a number of statistics from the model params and update.
 
     Statistics computed:
@@ -208,15 +208,15 @@ class TrainingMetricsGrabber:
     Args:
       model_gradient: A pytree of the same shape as the model_params pytree that
         was used when the metrics_grabber object was created.
-      old_optimizer: The optimizer before the param update.
-      new_optimizer: The optimizer after the param update.
+      old_flax_module: The flax_module before the param update.
+      new_flax_module: The flax_module after the param update.
 
     Returns:
       An updated class object.
     """
     grads_flat, treedef = jax.tree_flatten(model_gradient)
-    new_params_flat, _ = jax.tree_flatten(new_optimizer.target.params)
-    old_params_flat, _ = jax.tree_flatten(old_optimizer.target.params)
+    new_params_flat, _ = jax.tree_flatten(new_flax_module.params)
+    old_params_flat, _ = jax.tree_flatten(old_flax_module.params)
 
     # flatten_up_to here is needed to avoid flattening the _MetricsLeafState
     # nodes.

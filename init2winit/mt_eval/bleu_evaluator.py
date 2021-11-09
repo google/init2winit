@@ -28,6 +28,7 @@ from init2winit import utils
 from init2winit.dataset_lib import mt_tokenizer
 from init2winit.mt_eval import decode
 from init2winit.mt_eval import eval_utils
+from init2winit.optimizer_lib import optimizers
 import jax
 import numpy as np
 from tensorflow.io import gfile
@@ -135,10 +136,12 @@ class BLEUEvaluator(object):
           _, params = model.flax_module_def.init_by_shape(
               params_rng, input_specs, train=False, cache=cache_def)
     flax_module = nn.Model(model.flax_module_def, params)
+    self.flax_module = flax_module
     self.batch_stats = jax_utils.replicate(batch_stats)
     self.cache_def = cache_def
-    optimizer = trainer.get_optimizer(self.hps).create(flax_module)
-    self.optimizer = jax_utils.replicate(optimizer)
+    optimizer_init_fn, _ = optimizers.get_optimizer(self.hps)
+    optimizer_state = optimizer_init_fn(flax_module.params)
+    self.optimizer_state = jax_utils.replicate(optimizer_state)
 
   def decode_tokens(self, toks):
     valid_toks = toks[:np.argmax(toks == self.eos_id) + 1].astype(np.int32)
@@ -149,13 +152,14 @@ class BLEUEvaluator(object):
     logging.info('Loading checkpoint from path: %s', checkpoint_path)
     ckpt = checkpoint.load_checkpoint(
         checkpoint_path,
-        target=(self.optimizer, self.batch_stats),
+        target=(self.flax_module, self.optimizer_state, self.batch_stats),
         use_deprecated_checkpointing=True)
     results = trainer.restore_checkpoint(
-        ckpt, (self.optimizer, self.batch_stats),
+        ckpt, (self.flax_module, self.optimizer_state, self.batch_stats),
         use_deprecated_checkpointing=True)
-    optimizer, batch_stats = results[0]
-    self.optimizer = optimizer
+    flax_module, optimizer_state, batch_stats = results[0]
+    self.flax_module = flax_module
+    self.optimizer_state = optimizer_state
     self.batch_stats = batch_stats
 
   def build_cache(self, per_device_batchsize):
@@ -194,9 +198,10 @@ class BLEUEvaluator(object):
           lower_bound=step - self.ckpt_avg_window,
           upper_bound=step)
       logging.info('Current checkpoints: %s', ckpt_paths)
-      self.optimizer, self.batch_stats = eval_utils.average_checkpoints(
+      self.flax_module, self.optimizer_state, self.batch_stats = eval_utils.average_checkpoints(
           checkpoint_paths=ckpt_paths,
-          optimizer=self.optimizer,
+          flax_module=self.flax_module,
+          optimizer_state=self.optimizer_state,
           batch_stats=self.batch_stats)
       sources, references, predictions = [], [], []
       for batch in self.get_ds_iter():
@@ -204,7 +209,7 @@ class BLEUEvaluator(object):
         per_device_batch_size = pred_batch['inputs'].shape[1]
         cache = self.build_cache(per_device_batch_size)
         model_predictions = self.pmapped_predictor(pred_batch,
-                                                   self.optimizer.target, cache,
+                                                   self.flax_module, cache,
                                                    self.max_length)
         predicted = tohost(model_predictions)
         inputs = tohost(pred_batch['inputs'])

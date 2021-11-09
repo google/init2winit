@@ -22,7 +22,6 @@ import tempfile
 
 from absl import flags
 from absl.testing import absltest
-from flax import optim as optimizers
 from flax.deprecated import nn
 from init2winit import utils
 from jax import test_util as jtu
@@ -55,17 +54,11 @@ class TrainingMetricsTest(jtu.JaxTestCase):
     training_metrics_grabber = utils.TrainingMetricsGrabber.create(
         example_grads[0], eval_config)
 
-    # For the purposes of this test, we create fake optimizers to satisfy
-    # metrics grabber API.
     fake_model = nn.Model(None, example_grads[0])
-    new_optimizer = optimizers.GradientDescent(
-        learning_rate=None).create(fake_model)
-    old_optimizer = optimizers.GradientDescent(
-        learning_rate=None).create(fake_model)
 
     for grad in example_grads:
       training_metrics_grabber = training_metrics_grabber.update(
-          grad, old_optimizer, new_optimizer)
+          grad, fake_model, fake_model)
 
     for layer in ['layer1', 'layer2']:
       expected_grad_ema = 1 / 4 * np.zeros(model_size) + 1 / 4 * example_grads[

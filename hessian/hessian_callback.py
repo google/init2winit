@@ -23,7 +23,7 @@ from init2winit.hessian import hessian_eval
 import jax
 
 
-def set_up_hessian_eval(model, optimizer, batch_stats, dataset,
+def set_up_hessian_eval(model, flax_module, batch_stats, dataset,
                         checkpoint_dir, hessian_eval_config):
   """Builds the CurvatureEvaluator object."""
 
@@ -37,7 +37,7 @@ def set_up_hessian_eval(model, optimizer, batch_stats, dataset,
     return model.training_cost(module, batch_stats, batch, rng)[0]
   pytree_path = os.path.join(checkpoint_dir, hessian_eval_config['name'])
   logger = utils.MetricLogger(pytree_path=pytree_path)
-  hessian_evaluator = hessian_eval.CurvatureEvaluator(optimizer.target,
+  hessian_evaluator = hessian_eval.CurvatureEvaluator(flax_module,
                                                       hessian_eval_config,
                                                       dataset, batch_loss)
   return hessian_evaluator, logger
@@ -46,25 +46,24 @@ def set_up_hessian_eval(model, optimizer, batch_stats, dataset,
 class HessianCallback(base_callback.BaseCallBack):
   """Used to run the hessian eval in the trainer binary."""
 
-  def __init__(self, model, optimizer, batch_stats, dataset, hps,
+  def __init__(self, model, flax_module, batch_stats, dataset, hps,
                callback_config, train_dir, rng):
     del hps
     del rng
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
     # copy batch_stats as we close over it, and it gets modified.
     self.hessian_evaluator, self.logger = set_up_hessian_eval(
-        model, optimizer, batch_stats, dataset, checkpoint_dir,
+        model, flax_module, batch_stats, dataset, checkpoint_dir,
         callback_config)
 
-  def run_eval(self, optimizer, batch_stats, global_step):
+  def run_eval(self, flax_module, batch_stats, global_step):
     """Computes the loss hessian and returns the max eigenvalue.
 
     Note, the full lanczos tridiagonal matrix is saved via the logger to
     train_dir/checkpoints/config['name'].
 
     Args:
-      optimizer: Replicated optimizer the trainer has (this also has the
-        model parameters).
+      flax_module: Replicated flax module.
       batch_stats: Replicated batch_stats from the trainer.
       global_step: Current training step.
 
@@ -73,7 +72,7 @@ class HessianCallback(base_callback.BaseCallBack):
     """
     del batch_stats
     hessian_metrics, _, _ = self.hessian_evaluator.evaluate_spectrum(
-        optimizer.target, global_step)
+        flax_module, global_step)
     if jax.host_id() == 0:
       self.logger.append_pytree(hessian_metrics)
 

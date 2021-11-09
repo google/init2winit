@@ -26,7 +26,6 @@ import time
 from absl import flags
 from absl import logging
 from flax import jax_utils
-from flax import optim as optimizers
 from flax.deprecated import nn
 from init2winit import callbacks
 from init2winit import checkpoint
@@ -38,10 +37,12 @@ from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
+from init2winit.optimizer_lib import optimizers
 import jax
 from jax import lax
 import jax.numpy as jnp
 import numpy as np
+import optax
 from tensorflow.io import gfile
 
 
@@ -108,8 +109,23 @@ def evaluate(flax_module, batch_stats, batch_iter, evaluate_batch_pmapped):
   return total_metrics
 
 
+def _inject_learning_rate(optimizer_state, lr):
+  """Inject the given LR into any optimizer state that will accept it."""
+  # The optimizer state should always be an InjectHyperparamsState, and we
+  # inject the learning rate into all states that will accept it. We need to do
+  # this to allow arbitrary (non-jittable) LR schedules.
+  if isinstance(optimizer_state, optax.InjectHyperparamsState):
+    if 'learning_rate' in optimizer_state.hyperparams:
+      optimizer_state.hyperparams['learning_rate'] = lr
+  else:
+    raise ValueError(
+        'Unsupported optimizer_state type given when trying to inject the '
+        'learning rate:\n\n{}.'.format(optimizer_state))
+
+
 def update(
-    optimizer,
+    optimizer_state,
+    flax_module,
     batch_stats,
     batch,
     step,
@@ -118,11 +134,13 @@ def update(
     local_device_index,
     training_metrics_grabber,
     training_cost,
-    grad_clip):
+    grad_clip,
+    optimizer_update_fn):
   """Single step of the training loop.
 
   Args:
-    optimizer: the Flax optimizer used for updates.
+    optimizer_state: the optax optimizer state.
+    flax_module: the current Flax nn.Module.
     batch_stats: a flax.nn.Collection object tracking the model state, usually
       batch norm statistics.
     batch: the per-device batch of data to process.
@@ -141,6 +159,7 @@ def update(
     grad_clip: Clip the l2 norm of the gradient at the specified value. For
       minibatches with gradient norm ||g||_2 > grad_clip, we rescale g to the
       value g / ||g||_2 * grad_clip. If None, then no clipping will be applied.
+    optimizer_update_fn: the optimizer update function.
 
   Returns:
     A tuple of the new optimizer, the new batch stats, the scalar training cost,
@@ -151,28 +170,35 @@ def update(
   rng = jax.random.fold_in(rng, step)
   rng = jax.random.fold_in(rng, local_device_index)
 
-  def opt_cost(flax_module):
-    return training_cost(flax_module, batch_stats, batch, rng)
+  _inject_learning_rate(optimizer_state, lr)
+
+  def opt_cost(model):
+    return training_cost(model, batch_stats, batch, rng)
 
   grad_fn = jax.value_and_grad(opt_cost, has_aux=True)
-  (cost_value, new_batch_stats), grad = grad_fn(optimizer.target)
+  (cost_value, new_batch_stats), grad = grad_fn(flax_module)
 
   cost_value, grad = lax.pmean((cost_value, grad), axis_name='batch')
 
   grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
+  # TODO(znado): move to inside optax gradient clipping.
   if grad_clip:
     scaled_grad = jax.tree_map(
         lambda x: x / (grad_norm + _GRAD_CLIP_EPS) * grad_clip, grad)
     grad = jax.lax.cond(grad_norm > grad_clip, lambda _: scaled_grad,
                         lambda _: grad, None)
+  model_updates, new_optimizer_state = optimizer_update_fn(
+      grad.params, optimizer_state, params=flax_module.params)
+  new_params = optax.apply_updates(flax_module.params, model_updates)
+  new_flax_module = flax_module.replace(params=new_params)
 
-  new_optimizer = optimizer.apply_gradient(grad, learning_rate=lr)
   new_metrics_grabber = None
   if training_metrics_grabber:
     new_metrics_grabber = training_metrics_grabber.update(
-        grad.params, optimizer, new_optimizer)
+        grad.params, flax_module, new_flax_module)
 
-  return new_optimizer, new_batch_stats, cost_value, new_metrics_grabber, grad_norm
+  return (new_optimizer_state, new_flax_module, new_batch_stats, cost_value,
+          new_metrics_grabber, grad_norm)
 
 
 def _merge_and_apply_prefix(d1, d2, prefix):
@@ -239,7 +265,7 @@ def initialize(flax_module_def,
   provided by the initializer arg (the default is noop).
 
   Args:
-    flax_module_def: An uninitialized flax module definition.
+    flax_module_def: An uninitialized flax.nn.Module definition.
     initializer: An initializer defined in init_lib.
     loss_fn: A loss function.
     input_shape: The input shape of a single data example.
@@ -325,6 +351,8 @@ def save_checkpoint(train_dir,
   logging.info('Done saving checkpoint.')
 
 
+# TODO(znado,gilmer,gdahl): make this take the unreplicated pytree to avoid
+# having to store two replicated copies in memory.
 def restore_checkpoint(
     latest,
     replicated_pytree,
@@ -365,8 +393,9 @@ def restore_checkpoint(
   return pytree, latest.pystate
 
 
-def _maybe_restore_latest_checkpoint(
-    unreplicated_optimizer,
+def _replicate_and_maybe_restore_latest_checkpoint(
+    unreplicated_flax_module,
+    unreplicated_optimizer_state,
     unreplicated_batch_stats,
     unreplicated_training_metrics_grabber,
     train_dir,
@@ -374,7 +403,8 @@ def _maybe_restore_latest_checkpoint(
   """Restore from the latest checkpoint, if it exists."""
   unreplicated_checkpoint_state = checkpoint.CheckpointState(
       {
-          'optimizer': unreplicated_optimizer,
+          'flax_module': unreplicated_flax_module,
+          'optimizer_state': unreplicated_optimizer_state,
           'batch_stats': unreplicated_batch_stats,
           'training_metrics_grabber': unreplicated_training_metrics_grabber,
       },
@@ -387,114 +417,33 @@ def _maybe_restore_latest_checkpoint(
       recents_filename='latest',
       use_deprecated_checkpointing=use_deprecated_checkpointing)
 
-  optimizer = jax_utils.replicate(unreplicated_optimizer)
+  flax_module = jax_utils.replicate(unreplicated_flax_module)
+  optimizer_state = jax_utils.replicate(unreplicated_optimizer_state)
   batch_stats = jax_utils.replicate(unreplicated_batch_stats)
   training_metrics_grabber = jax_utils.replicate(
       unreplicated_training_metrics_grabber)
 
   if latest is None:
-    return optimizer, batch_stats, training_metrics_grabber, 0, 0.0, 0, False
+    return flax_module, optimizer_state, batch_stats, training_metrics_grabber, 0, 0.0, 0, False
 
   pytree_dict, extra_state = restore_checkpoint(
       latest,
       replicated_pytree={
-          'optimizer': optimizer,
+          'flax_module': flax_module,
+          'optimizer_state': optimizer_state,
           'batch_stats': batch_stats,
           'training_metrics_grabber': training_metrics_grabber,
       },
       use_deprecated_checkpointing=use_deprecated_checkpointing)
   return (
-      pytree_dict['optimizer'],
+      pytree_dict['flax_module'],
+      pytree_dict['optimizer_state'],
       pytree_dict['batch_stats'],
       pytree_dict['training_metrics_grabber'],
       extra_state['global_step'],
       extra_state['sum_train_cost'],
       extra_state['preemption_count'],
       True)
-
-
-def get_optimizer(hps):
-  """Constructs the optimizer from the given HParams."""
-  # We handle hps.l2_decay_factor in the training cost function base_model.py
-  # and hps.weight_decay in the optimizer. It is almost certainly an error if
-  # both are set.
-  weight_decay = hps.opt_hparams.get('weight_decay', 0)
-  assert hps.l2_decay_factor is None or weight_decay == 0.0
-
-  if hps.optimizer == 'sgd':
-    return optimizers.GradientDescent(learning_rate=None)
-  elif hps.optimizer == 'nesterov':
-    return optimizers.Momentum(learning_rate=None,
-                               beta=hps.opt_hparams['momentum'],
-                               nesterov=True,
-                               weight_decay=weight_decay)
-  elif hps.optimizer == 'momentum':
-    return optimizers.Momentum(learning_rate=None,
-                               beta=hps.opt_hparams['momentum'],
-                               nesterov=False,
-                               weight_decay=weight_decay)
-  elif hps.optimizer == 'lamb':
-    return optimizers.LAMB(
-        learning_rate=None,
-        beta1=hps.opt_hparams['beta1'],
-        beta2=hps.opt_hparams['beta2'],
-        eps=hps.opt_hparams['epsilon'],
-        weight_decay=weight_decay)
-  elif hps.optimizer == 'adam':
-    return optimizers.Adam(
-        learning_rate=None,
-        beta1=hps.opt_hparams['beta1'],
-        beta2=hps.opt_hparams['beta2'],
-        eps=hps.opt_hparams['epsilon'],
-        weight_decay=weight_decay)
-  elif hps.optimizer == 'lars':
-    return optimizers.LARS(
-        learning_rate=None,
-        beta=hps.opt_hparams['beta'],
-        weight_decay=weight_decay)
-  elif hps.optimizer == 'mlperf_lars_resnet':
-    weight_opt_def = optimizers.LARS(
-        learning_rate=None,
-        beta=hps.opt_hparams['beta'],
-        weight_decay=weight_decay)
-    other_opt_def = optimizers.Momentum(
-        learning_rate=None,
-        beta=hps.opt_hparams['beta'],
-        weight_decay=0,
-        nesterov=False)
-
-    def filter_weights(key, _):
-      return 'bias' not in key and 'scale' not in key
-    def filter_other(key, _):
-      return 'bias' in key or 'scale' in key
-    weight_traversal = optimizers.ModelParamTraversal(filter_weights)
-    other_traversal = optimizers.ModelParamTraversal(filter_other)
-    return optimizers.MultiOptimizer((weight_traversal, weight_opt_def),
-                                     (other_traversal, other_opt_def))
-  elif hps.optimizer == 'mlperf_lamb':
-    weight_opt_def = optimizers.LAMB(
-        learning_rate=None,
-        beta1=hps.opt_hparams['beta1'],
-        beta2=hps.opt_hparams['beta2'],
-        eps=hps.opt_hparams['epsilon'],
-        weight_decay=hps.opt_hparams['lamb_weight_decay'])
-    other_opt_def = optimizers.Adam(
-        learning_rate=None,
-        beta1=hps.opt_hparams['beta1'],
-        beta2=hps.opt_hparams['beta2'],
-        eps=hps.opt_hparams['epsilon'],
-        weight_decay=hps.opt_hparams['adam_weight_decay'])
-    def filter_weights(key, _):
-      return 'bias' not in key and 'scale' not in key
-    def filter_other(key, _):
-      return 'bias' in key or 'scale' in key
-    weight_traversal = optimizers.ModelParamTraversal(filter_weights)
-    other_traversal = optimizers.ModelParamTraversal(filter_other)
-    return optimizers.MultiOptimizer((weight_traversal, weight_opt_def),
-                                     (other_traversal, other_opt_def))
-  else:
-    raise NotImplementedError('Optimizer {} not implemented'.format(
-        hps.optimizer))
 
 
 def _log_epoch_report(report, metrics_logger):
@@ -621,30 +570,41 @@ def train(train_dir,
     callback_configs = []
 
   # Maybe run the initializer.
-  flax_module, batch_stats = initialize(model.flax_module_def, initializer,
-                                        model.loss_fn, hps.input_shape,
-                                        hps.output_shape, hps, init_rng,
-                                        init_logger, model.get_fake_batch(hps))
+  unreplicated_flax_module, unreplicated_batch_stats = initialize(
+      model.flax_module_def,
+      initializer,
+      model.loss_fn,
+      hps.input_shape,
+      hps.output_shape,
+      hps,
+      init_rng,
+      init_logger,
+      model.get_fake_batch(hps))
 
   if jax.process_index() == 0:
-    utils.log_pytree_shape_and_statistics(flax_module.params)
+    utils.log_pytree_shape_and_statistics(unreplicated_flax_module.params)
     logging.info('train_size: %d,', hps.train_size)
 
   lr_fn = schedules.get_schedule_fn(hps.lr_hparams, num_train_steps)
 
-  optimizer = get_optimizer(hps).create(flax_module)
+  optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps)
+  unreplicated_optimizer_state = optimizer_init_fn(
+      unreplicated_flax_module.params)
 
-  training_metrics_grabber = None
+  unreplicated_training_metrics_grabber = None
   if training_metrics_config:
-    training_metrics_grabber = utils.TrainingMetricsGrabber.create(
-        optimizer.target.params, training_metrics_config)
+    unreplicated_training_metrics_grabber = utils.TrainingMetricsGrabber.create(
+        unreplicated_flax_module.params, training_metrics_config)
 
-  (optimizer, batch_stats, training_metrics_grabber,
+  (flax_module, optimizer_state, batch_stats, training_metrics_grabber,
    global_step, sum_train_cost,
-   preemption_count, is_restored) = _maybe_restore_latest_checkpoint(
-       unreplicated_optimizer=optimizer,
-       unreplicated_batch_stats=batch_stats,
-       unreplicated_training_metrics_grabber=training_metrics_grabber,
+   preemption_count,
+   is_restored) = _replicate_and_maybe_restore_latest_checkpoint(
+       unreplicated_flax_module=unreplicated_flax_module,
+       unreplicated_optimizer_state=unreplicated_optimizer_state,
+       unreplicated_batch_stats=unreplicated_batch_stats,
+       unreplicated_training_metrics_grabber=(
+           unreplicated_training_metrics_grabber),
        train_dir=train_dir,
        use_deprecated_checkpointing=use_deprecated_checkpointing)
 
@@ -675,19 +635,30 @@ def train(train_dir,
       hps=hps,
   )
 
-  # pmap functions for the training loop
-  # in_axes = (optimizer = 0, batch_stats = 0, batch = 0, step = None,
-  # lr = None, rng = None, local_device_index = 0, training_metrics_grabber = 0,
-  # training_metrics_grabber, training_cost )
+  update_fn = functools.partial(
+      update,
+      training_cost=model.training_cost,
+      grad_clip=hps.get('grad_clip'),
+      optimizer_update_fn=optimizer_update_fn)
+  # in_axes = (
+  #     optimizer_state = 0,
+  #     flax_module = 0,
+  #     batch_stats = 0,
+  #     batch = 0,
+  #     step = None,
+  #     lr = None,
+  #     rng = None,
+  #     local_device_index = 0,
+  #     training_metrics_grabber = 0,
+  #     training_cost,
+  #     grad_clip,
+  #     optimizer_update_fn)
   # Also, we can donate buffers for 'optimizer', 'batch_stats',
   # 'batch' and 'training_metrics_grabber' for update's pmapped computation.
   update_pmapped = jax.pmap(
-      functools.partial(
-          update,
-          training_cost=model.training_cost,
-          grad_clip=hps.get('grad_clip')),
+      update_fn,
       axis_name='batch',
-      in_axes=(0, 0, 0, None, None, None, 0, 0),
+      in_axes=(0, 0, 0, 0, None, None, None, 0, 0),
       donate_argnums=(0, 1, 2, 7))
   # During eval, we can donate the 'batch' buffer. We don't donate the
   # 'flax_module' and 'batch_stats' buffers as we don't re-assign those values
@@ -724,7 +695,7 @@ def train(train_dir,
   callback_rngs = jax.random.split(callback_rng, len(callback_configs))
   for callback_rng, config in zip(callback_rngs, callback_configs):
     eval_callback = callbacks.get_callback(
-        config['callback_name'])(model, optimizer, batch_stats, dataset, hps,
+        config['callback_name'])(model, flax_module, batch_stats, dataset, hps,
                                  config, train_dir, callback_rng)
     eval_callbacks.append(eval_callback)
 
@@ -732,9 +703,10 @@ def train(train_dir,
     if global_step in checkpoint_steps and jax.process_index() == 0:
       save_checkpoint(
           checkpoint_dir, {
-              'optimizer': optimizer,
+              'flax_module': flax_module,
+              'optimizer_state': optimizer_state,
               'batch_stats': batch_stats,
-              'training_metrics_grabber': training_metrics_grabber
+              'training_metrics_grabber': training_metrics_grabber,
           },
           global_step,
           preemption_count,
@@ -743,8 +715,9 @@ def train(train_dir,
           use_deprecated_checkpointing=use_deprecated_checkpointing)
     batch = data_utils.shard(batch)
     lr = lr_fn(global_step)
-    optimizer, batch_stats, cost_val, training_metrics_grabber, grad_norm = update_pmapped(
-        optimizer,
+    optimizer_state, flax_module, batch_stats, cost_val, training_metrics_grabber, grad_norm = update_pmapped(
+        optimizer_state,
+        flax_module,
         batch_stats,
         batch,
         global_step,
@@ -760,7 +733,7 @@ def train(train_dir,
     # eval_steps does nothing.
     if should_eval(global_step, eval_frequency, eval_steps):
       batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
-      report, eval_time = eval_metrics(optimizer.target,
+      report, eval_time = eval_metrics(flax_module,
                                        batch_stats,
                                        dataset,
                                        eval_num_batches,
@@ -777,7 +750,7 @@ def train(train_dir,
                     train_cost=mean_train_cost)
 
       for eval_callback in eval_callbacks:
-        callback_metrics = eval_callback.run_eval(optimizer, batch_stats,
+        callback_metrics = eval_callback.run_eval(flax_module, batch_stats,
                                                   global_step)
         if set(callback_metrics.keys()).intersection(set(report.keys())):
           raise ValueError('There was a collision between the callback metrics'
@@ -789,7 +762,8 @@ def train(train_dir,
         _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
         save_checkpoint(
             train_dir, {
-                'optimizer': optimizer,
+                'flax_module': flax_module,
+                'optimizer_state': optimizer_state,
                 'batch_stats': batch_stats,
                 'training_metrics_grabber': training_metrics_grabber
             },
@@ -805,7 +779,7 @@ def train(train_dir,
   # test.
   if prev_eval_step != num_train_steps:
     batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
-    report, eval_time = eval_metrics(optimizer.target,
+    report, eval_time = eval_metrics(flax_module,
                                      batch_stats,
                                      dataset,
                                      eval_num_batches,
@@ -828,7 +802,8 @@ def train(train_dir,
       _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
       save_checkpoint(
           train_dir, {
-              'optimizer': optimizer,
+              'flax_module': flax_module,
+              'optimizer_state': optimizer_state,
               'batch_stats': batch_stats,
               'training_metrics_grabber': training_metrics_grabber
           },

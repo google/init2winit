@@ -23,7 +23,6 @@ import tempfile
 
 from absl.testing import absltest
 from flax import jax_utils
-from flax import optim
 from flax.deprecated import nn
 from init2winit import checkpoint
 from init2winit import hyperparameters
@@ -37,6 +36,7 @@ from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import jax.random
 import numpy as np
+import optax
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
 
@@ -161,15 +161,16 @@ class TrainerTest(absltest.TestCase):
     self.beta = self.beta.reshape((self.feature_dim, 1))
     self.beta = self.beta.astype(np.float32)
 
-    self.optimizer = optim.GradientDescent(learning_rate=1.0).create(model)
-    self.optimizer = jax_utils.replicate(self.optimizer)
+    optimizer_init_fn, self.optimizer_update_fn = optax.sgd(1.0)
+    self.optimizer_state = jax_utils.replicate(optimizer_init_fn(model.params))
+    self.flax_module = jax_utils.replicate(model)
 
     data_class, self.feature, self.y = _get_synth_data(num_examples,
                                                        self.feature_dim,
                                                        num_outputs,
                                                        self.batch_size)
     self.evaluator = hessian_eval.CurvatureEvaluator(
-        self.optimizer.target,
+        self.flax_module,
         CONFIG,
         data_class(),
         _batch_square_loss)
@@ -294,7 +295,8 @@ class TrainerTest(absltest.TestCase):
     num_batches = CONFIG['num_batches']
     num_draws = CONFIG['num_eval_draws']
 
-    grads, _ = self.evaluator.compute_dirs(self.optimizer)
+    grads, _ = self.evaluator.compute_dirs(
+        self.flax_module, self.optimizer_state, self.optimizer_update_fn)
     # Assert both full and mini batch gradients are accurate
     for i in range(num_draws + 1):
       dir_vec = _to_vec(grads[i])[:, 0]
@@ -322,11 +324,12 @@ class TrainerTest(absltest.TestCase):
     num_draws = CONFIG['num_eval_draws']
     step = 0
 
-    grads, _ = self.evaluator.compute_dirs(self.optimizer)
+    grads, _ = self.evaluator.compute_dirs(
+        self.flax_module, self.optimizer_state, self.optimizer_update_fn)
     _, q = np.linalg.eigh(self.hessian)
     evecs = [q[:, -k] for k in range(CONFIG['num_eigens'], 0, -1)]
     q = q[:, -CONFIG['num_eigens']:]
-    stats_row = self.evaluator.evaluate_stats(self.optimizer.target, grads, [],
+    stats_row = self.evaluator.evaluate_stats(self.flax_module, grads, [],
                                               evecs, [], step)
     # Assert that the statistics are exact
     for i in range(num_draws + 1):
@@ -366,11 +369,12 @@ class TrainerTest(absltest.TestCase):
     step = 0
     num_points = CONFIG['num_points']
 
-    grads, _ = self.evaluator.compute_dirs(self.optimizer)
+    grads, _ = self.evaluator.compute_dirs(
+        self.flax_module, self.optimizer_state, self.optimizer_update_fn)
     _, q = np.linalg.eigh(self.hessian)
     evecs = [q[:, -k] for k in range(CONFIG['num_eigens'], 0, -1)]
     q = q[:, -CONFIG['num_eigens']:]
-    interps_row = self.evaluator.compute_interpolations(self.optimizer.target,
+    interps_row = self.evaluator.compute_interpolations(self.flax_module,
                                                         grads, [], evecs,
                                                         [], step)
 
@@ -407,7 +411,7 @@ class TrainerTest(absltest.TestCase):
     vec_counts = CONFIG['num_eigens']
     step = 0
     # Compute the spectra
-    row, hvex, cvex = self.evaluator.evaluate_spectrum(self.optimizer.target,
+    row, hvex, cvex = self.evaluator.evaluate_spectrum(self.flax_module,
                                                        step)
     # Comparing with the exact Hessian
     num_obs = num_batches * bs
@@ -464,10 +468,11 @@ class TrainerTest(absltest.TestCase):
   def test_update_dirs(self):
     """Testing the statistics computed from optimizer's update directions."""
     step = 0
-    grads, updates = self.evaluator.compute_dirs(self.optimizer)
-    stats_row = self.evaluator.evaluate_stats(self.optimizer.target,
+    grads, updates = self.evaluator.compute_dirs(
+        self.flax_module, self.optimizer_state, self.optimizer_update_fn)
+    stats_row = self.evaluator.evaluate_stats(self.flax_module,
                                               grads, updates, [], [], step)
-    interps_row = self.evaluator.compute_interpolations(self.optimizer.target,
+    interps_row = self.evaluator.compute_interpolations(self.flax_module,
                                                         grads, updates, [], [],
                                                         step)
 
