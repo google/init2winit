@@ -17,6 +17,8 @@
 """Common code used by different models."""
 
 import collections
+from typing import List
+import tensorflow as tf
 import jax
 from jax.nn import one_hot
 import numpy as np
@@ -180,3 +182,26 @@ def tf_to_numpy(tfds_data):
   # Safe because we won't mutate. Avoids an extra copy from tfds.
   convert_data = lambda x: x._numpy()  # pylint: disable=protected-access
   return jax.tree_map(convert_data, tfds_data)
+
+
+def get_sampled_dataset(datasets,
+                        rates: List[int],
+                        is_training: bool,
+                        sample_seed: int,
+                        shuffle_seed: int,
+                        shuffle_buffer_size: int = 1024):
+  """Create a sampled training dataset."""
+  def _shuffle_repeat(dataset, shuffle_seed: int,
+                      shuffle_buffer_size):
+    dataset = dataset.shuffle(shuffle_buffer_size, seed=shuffle_seed)
+    dataset = dataset.repeat()
+    return dataset
+
+  if is_training:
+    datasets = [_shuffle_repeat(data, shuffle_seed=shuffle_seed,
+                                shuffle_buffer_size=shuffle_buffer_size)
+                for data in datasets]
+
+  sampled_datasets = tf.data.experimental.sample_from_datasets(
+      datasets, rates, seed=sample_seed)
+  return sampled_datasets

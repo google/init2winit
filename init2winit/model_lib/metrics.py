@@ -72,6 +72,10 @@ _METRICS = {
     'binary_classification_metrics': {
         'ce_loss': losses.sigmoid_binary_cross_entropy,
         'denominator': num_examples,
+    },
+    'regression_metrics': {
+        'mse_loss': losses.mean_squared_error,
+        'denominator': num_examples,
     }
 }
 

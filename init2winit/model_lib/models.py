@@ -22,6 +22,7 @@ from init2winit.model_lib import autoencoder
 from init2winit.model_lib import convolutional_autoencoder
 from init2winit.model_lib import fully_connected
 from init2winit.model_lib import gnn
+from init2winit.model_lib import linear
 from init2winit.model_lib import max_pooling_cnn
 from init2winit.model_lib import mlperf_resnet
 from init2winit.model_lib import nqm
@@ -58,7 +59,8 @@ _ALL_MODELS = {
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
     'xformer_translate': (xformer_translate.TransformerTranslate,
                           xformer_translate.DEFAULT_HPARAMS),
-    'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS)
+    'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS),
+    'linear': (linear.LinearModel, linear.DEFAULT_HPARAMS),
 }
 
 
