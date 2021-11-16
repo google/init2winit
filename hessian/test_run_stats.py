@@ -172,8 +172,8 @@ class TrainerTest(absltest.TestCase):
     self.evaluator = hessian_eval.CurvatureEvaluator(
         self.flax_module,
         CONFIG,
-        data_class(),
-        _batch_square_loss)
+        dataset=data_class(),
+        loss=_batch_square_loss)
     # Computing the exact full-batch quantities from the linear model
     num_obs = CONFIG['num_batches'] * self.batch_size
     xb = self.feature[:num_obs, :]

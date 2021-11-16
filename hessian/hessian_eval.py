@@ -203,13 +203,37 @@ class CurvatureEvaluator:
   def __init__(self,
                model,
                eval_config,
-               dataset,
-               loss):
+               loss,
+               dataset=None,
+               batches_gen=None):
+    """Creates the CurvatureEvaluator object.
+
+    Args:
+      model: Any pytree which satsifies the API loss(model, batch). Note if
+        config['compute_stats'] = True, additionally we assume that model is a
+        flax.Model class (we will refer to model.params in this case). However,
+        this assumption is not needed for evaluate_spectrum.
+      eval_config: See DEFAULT_EVAL_CONFIG as an example.
+      loss: Any function which satisfies the API loss(model, batch).
+      dataset: An init2winit.dataset_lib.datasets object. Optional if
+        batches_gen is supplied.
+      batches_gen: Any function which yields batches to be fed into the loss.
+        Optional if dataset is supplied. API must satisfy
+        for batch in batches_gen():
+           batch_loss = loss(model, batch)
+    """
+    if batches_gen is None and dataset is None:
+      raise ValueError('Either a dataset or a batches generator must be given'
+                       'when constructing the CurvatureEvaluator')
     self.eval_config = eval_config
     if eval_config['num_batches'] < eval_config['num_eval_draws']:
       raise ValueError('Number of draws is larger than number of batches.')
 
-    self.batches_gen = prepare_batches_gen(dataset, eval_config)
+    if batches_gen:
+      self.batches_gen = batches_gen
+    else:
+      self.batches_gen = prepare_batches_gen(dataset, eval_config)
+
     def avg_loss(module, batch, loss_fn):
       loss_val = loss_fn(module, batch)
       loss_val = jax.lax.pmean(loss_val, axis_name='batch')

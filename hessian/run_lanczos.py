@@ -150,8 +150,8 @@ def eval_checkpoints(
   hessian_evaluator = hessian_eval.CurvatureEvaluator(
       flax_module,
       hessian_eval_config,
-      dataset,
-      batch_loss)
+      dataset=dataset,
+      loss=batch_loss)
   if min_global_step is None:
     suffix = ''
   else:
