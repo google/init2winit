@@ -47,10 +47,9 @@ from ml_collections.config_dict import config_dict
 import numpy as np
 
 _REQUIRED_KEYS = [
-    'dataset_name', 'tfds_dataset_key', 'reverse_translation',
-    'eval_batch_size', 'eval_train_num_batches', 'eval_num_batches',
-    'eval_splits'
-]
+    'dataset_name', 'tfds_dataset_key', 'tfds_eval_dataset_key',
+    'tfds_predict_dataset_key', 'reverse_translation', 'eval_batch_size',
+    'eval_train_num_batches', 'eval_num_batches', 'eval_splits']
 _SPLITS = ['train', 'valid', 'test']
 
 
