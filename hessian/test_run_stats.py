@@ -21,6 +21,7 @@ import os
 import shutil
 import tempfile
 
+from absl import flags
 from absl.testing import absltest
 from flax import jax_utils
 from flax.deprecated import nn
@@ -32,6 +33,7 @@ from init2winit.hessian import hessian_eval
 from init2winit.hessian import run_lanczos
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
+from jax.config import config as jax_config
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import jax.random
@@ -39,6 +41,10 @@ import numpy as np
 import optax
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
+
+FLAGS = flags.FLAGS
+
+jax_config.parse_flags_with_absl()
 
 CONFIG = {
     'num_batches': 25,
@@ -52,6 +58,7 @@ CONFIG = {
     'upper_thresh': 0.1,
     'name': 'stats',
     'eval_hessian': True,
+    'eval_hess_grad_overlap': True,
     'eval_gradient_covariance': True,
     'compute_interps': True,
     'num_lanczos_steps': 40,
@@ -494,6 +501,86 @@ class TrainerTest(absltest.TestCase):
                              stats_row['overlap_u%d'%(i,)], 5)
       self.assertAlmostEqual(stats_row['overlap%d'%(i,)],
                              stats_row['fb_overlap%d'%(i,)], 5)
+
+  def test_eval_hess_grad_overlap(self):
+    """Test gradient overlap calculations."""
+
+    if FLAGS.jax_test_dut == 'tpu':
+      atol = 1e-3
+      rtol = 0.1
+    else:
+      atol = 1e-5
+      rtol = 1e-5
+
+    # dimension of space
+    n_params = 4
+    num_batches = 5
+
+    eval_config = hessian_eval.DEFAULT_EVAL_CONFIG
+    eval_config['eval_hessian'] = False
+    eval_config['eval_gradient_covariance'] = False
+    eval_config['num_eigens'] = 0
+    eval_config['num_lanczos_steps'] = n_params  # max iterations
+    eval_config['num_batches'] = num_batches
+    eval_config['num_eval_draws'] = 1
+
+    key = jax.random.PRNGKey(0)
+    key, split = jax.random.split(key)
+
+    # Diagonal matrix values
+    mat_diag = jax.random.normal(split, (n_params,))
+
+    def batches_gen():
+      for _ in range(num_batches):
+        yield None
+
+    # Model
+    class QuadraticLoss(nn.Module):
+      """Loss function which only depends on parameters."""
+
+      def apply(self, x):
+        del x
+        params = self.param('params', (n_params,), jax.random.normal)
+        return jnp.sum((params**2)*mat_diag)
+
+    def loss(model, _):
+      return model(1.0)
+
+    # model initialization
+    module = QuadraticLoss
+    _, init = module.init_by_shape(key, [((num_batches,), jnp.float32)])
+    model = nn.Model(module, init)
+    param_vec = model.params['params']
+
+    # replicate
+    replicated_model = jax_utils.replicate(model)
+
+    curve_eval = hessian_eval.CurvatureEvaluator(
+        replicated_model,
+        eval_config,
+        loss,
+        dataset=None,
+        batches_gen=batches_gen)
+    row, _, _ = curve_eval.evaluate_spectrum(replicated_model, 0)
+
+    tridiag = row['tridiag_hess_grad_overlap']
+    eigs_triag, vecs_triag = np.linalg.eigh(tridiag)
+
+    # Test eigenvalues
+    np.testing.assert_allclose(
+        eigs_triag, 2*np.sort(mat_diag), atol=atol, rtol=rtol)
+
+    # Compute overlaps
+    weights_triag = vecs_triag[0, :]**2
+    grad_true = 2 * param_vec * mat_diag
+    weight_idx = np.argsort(mat_diag)
+    weights_true = (grad_true)**2 / jnp.dot(grad_true, grad_true)
+    weights_true = weights_true[weight_idx]
+
+    # Test overlaps
+    np.testing.assert_allclose(
+        weights_triag, weights_true, atol=atol, rtol=rtol)
+
 
 if __name__ == '__main__':
   absltest.main()

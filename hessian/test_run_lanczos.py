@@ -253,7 +253,9 @@ class TrainerTest(absltest.TestCase):
     self.assertEqual(saved_steps, checkpoint_steps)
 
     # Check the dict keys.
-    expected_keys = ['step', 'tridiag_hess', 'max_eig_hess']
+    expected_keys = [
+        'step', 'tridiag_hess', 'max_eig_hess', 'tridiag_hess_grad_overlap'
+    ]
     self.assertEqual(set(state_list[0].keys()), set(expected_keys))
 
 

@@ -34,6 +34,7 @@ DEFAULT_EVAL_CONFIG = {
     'num_eval_draws': 3,
     'eval_hessian': True,
     'eval_max_eig': True,
+    'eval_hess_grad_overlap': True,
     'max_eig_num_steps': 30,
     'num_lanczos_steps': 60,
     'rng_key': 0,
@@ -131,6 +132,7 @@ def _tree_normalize(tree):
   return jax.tree_map(norm_fn, tree)
 
 
+# TODO(gilmer): Rewrite API to accept loss as a function of params, batch
 class CurvatureEvaluator:
   """Class for evaluating 2nd-order curvature stats of a model's loss surface.
 
@@ -470,12 +472,30 @@ class CurvatureEvaluator:
       raise ValueError('Provided generator did not yield any data.')
     return total_loss / count
 
+  def _full_batch_grad(self, model):
+    """Compute full batch gradient."""
+    compiled_tree_sum = jax.pmap(_tree_sum)
+    compiled_tree_zeros_like = jax.pmap(_tree_zeros_like)
+
+    count = 0.0
+    full_grad = compiled_tree_zeros_like(model)
+    for batch in self.batches_gen():
+      # Already pmeaned minibatch gradients
+      avg_grad = self.grad_loss(model, batch)
+      if count < self.eval_config['num_eval_draws']:
+        count += 1.0
+        full_grad = compiled_tree_sum(full_grad, avg_grad)
+    full_grad = jax.tree_map(lambda x: x / count, full_grad)
+    full_grad = _unreplicate(full_grad)
+    return full_grad
+
   def evaluate_spectrum(self, model, step):
     """Estimate the eignespectrum of H and C."""
     # Number of upper and lower eigenvectors to be approximated.
     num_evs = self.eval_config['num_eigens']
     hess_evecs = []
     cov_evecs = []
+
     if 2 * num_evs >= self.eval_config['num_lanczos_steps']:
       raise ValueError('Too many eigenvectors requested!')
     hvp_cl = lambda v: self.hvp_fn(model, v)
@@ -494,6 +514,20 @@ class CurvatureEvaluator:
           verbose=True)
       evs = np.linalg.eigvalsh(row['tridiag_hess'])
       row['max_eig_hess'] = np.max(evs)
+
+    if self.eval_config['eval_hess_grad_overlap']:
+      # compute gradient.
+      full_grad = self._full_batch_grad(model)
+      grad_flat, _ = hessian_computation.ravel_pytree(full_grad)
+
+      row['tridiag_hess_grad_overlap'], _ = lanczos.lanczos_np(
+          hvp_cl,
+          self.n_params,
+          self.eval_config['num_lanczos_steps'],
+          num_evs,
+          key,
+          init_vec=grad_flat,
+          verbose=True)
 
     if self.eval_config['eval_gradient_covariance']:
       row['tridiag_cov'], cov_evecs = lanczos.lanczos_np(
