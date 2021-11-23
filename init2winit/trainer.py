@@ -287,8 +287,7 @@ def initialize(flax_module_def,
   if fake_batch:
     with nn.stateful() as batch_stats:
       with nn.stochastic(dropout_rng):
-        _, params = _, params = flax_module_def.init(
-            params_rng, fake_batch, train=False)
+        _, params = flax_module_def.init(params_rng, fake_batch, train=False)
 
   # init_by_shape should either pass in a tuple or a list of tuples.
   # For example, for vision tasks typically input_shape is (image_shape)
