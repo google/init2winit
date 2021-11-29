@@ -18,7 +18,6 @@
 import os
 import pathlib
 
-from flax import jax_utils
 from init2winit import checkpoint
 from init2winit import trainer
 import jax
@@ -107,11 +106,7 @@ def average_checkpoints(
       count=optimizer_state.count,
       hyperparams=optimizer_state.hyperparams,
       inner_state=optimizer_state_inner_state)
-  # Replicate across devices.
-  flax_module, optimizer_state, batch_stats = jax_utils.replicate(
-      (flax_module, optimizer_state, batch_stats))
-
-  return flax_module, optimizer_state, batch_stats
+  return (flax_module, optimizer_state, batch_stats)
 
 
 def get_checkpoints_in_range(checkpoint_dir, lower_bound, upper_bound):

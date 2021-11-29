@@ -22,8 +22,6 @@ from absl import logging
 from flax import jax_utils
 from flax.deprecated import nn
 from flax.training import common_utils
-from init2winit import checkpoint
-from init2winit import trainer
 from init2winit import utils
 from init2winit.dataset_lib import mt_tokenizer
 from init2winit.mt_eval import decode
@@ -135,39 +133,22 @@ class BLEUEvaluator(object):
         with nn.attention.Cache().mutate() as cache_def:
           _, params = model.flax_module_def.init_by_shape(
               params_rng, input_specs, train=False, cache=cache_def)
-    flax_module = nn.Model(model.flax_module_def, params)
-    self.flax_module = flax_module
-    self.batch_stats = jax_utils.replicate(batch_stats)
+    self.flax_module = nn.Model(model.flax_module_def, params)
+    self.batch_stats = batch_stats
     self.cache_def = cache_def
     optimizer_init_fn, _ = optimizers.get_optimizer(self.hps)
-    optimizer_state = optimizer_init_fn(flax_module.params)
-    self.optimizer_state = jax_utils.replicate(optimizer_state)
+    self.optimizer_state = optimizer_init_fn(self.flax_module.params)
 
   def decode_tokens(self, toks):
     valid_toks = toks[:np.argmax(toks == self.eos_id) + 1].astype(np.int32)
     return self.encoder.detokenize(valid_toks).numpy().decode('utf-8')
 
-  def load_checkpoint(self, checkpoint_path):
-    """Load model (and batch stats) from checkpoint."""
-    logging.info('Loading checkpoint from path: %s', checkpoint_path)
-    ckpt = checkpoint.load_checkpoint(
-        checkpoint_path,
-        target=(self.flax_module, self.optimizer_state, self.batch_stats),
-        use_deprecated_checkpointing=True)
-    results = trainer.restore_checkpoint(
-        ckpt, (self.flax_module, self.optimizer_state, self.batch_stats),
-        use_deprecated_checkpointing=True)
-    flax_module, optimizer_state, batch_stats = results[0]
-    self.flax_module = flax_module
-    self.optimizer_state = optimizer_state
-    self.batch_stats = batch_stats
-
   def build_cache(self, per_device_batchsize):
     cache_args = (per_device_batchsize, self.max_length)
     cache = self.cache_def.initialize_cache(
         cache_args, dtype=utils.dtype_from_str(self.hps.model_dtype))
-    cache = jax_utils.replicate(cache)
-    return cache
+    replicated_cache = jax_utils.replicate(cache)
+    return replicated_cache
 
   def current_batch_size(self, batch):
     # we assume first token is non-zero in each target side example.
@@ -198,18 +179,20 @@ class BLEUEvaluator(object):
           lower_bound=step - self.ckpt_avg_window,
           upper_bound=step)
       logging.info('Current checkpoints: %s', ckpt_paths)
-      self.flax_module, self.optimizer_state, self.batch_stats = eval_utils.average_checkpoints(
+      flax_module, _, _ = eval_utils.average_checkpoints(
           checkpoint_paths=ckpt_paths,
           flax_module=self.flax_module,
           optimizer_state=self.optimizer_state,
           batch_stats=self.batch_stats)
+      flax_module_replicated = jax_utils.replicate(flax_module)
       sources, references, predictions = [], [], []
       for batch in self.get_ds_iter():
         pred_batch = common_utils.shard(batch)
         per_device_batch_size = pred_batch['inputs'].shape[1]
-        cache = self.build_cache(per_device_batch_size)
+        replicated_cache = self.build_cache(per_device_batch_size)
         model_predictions = self.pmapped_predictor(pred_batch,
-                                                   self.flax_module, cache,
+                                                   flax_module_replicated,
+                                                   replicated_cache,
                                                    self.max_length)
         predicted = tohost(model_predictions)
         inputs = tohost(pred_batch['inputs'])
