@@ -18,6 +18,7 @@
 from functools import partial  # pylint: disable=g-importing-member
 from typing import NamedTuple
 
+from flax import nn
 import jax
 from jax import jit
 from jax import jvp
@@ -277,15 +278,19 @@ class HessianFreeState(NamedTuple):
   damping: float
 
 
-def hessian_free(loss_fn,
+def hessian_free(flax_module_def,
+                 loss_fn,
+                 learning_rate=1.0,
                  max_iter=100,
-                 tol=1e-6,
+                 tol=0.0005,
                  residual_refresh_frequency=10,
-                 termination_criterion='residual_norm_test'):
+                 termination_criterion='relative_per_iteration_progress_test'):
   """Hessian-free optimizer.
 
   Args:
+    flax_module_def: A flax module definition.
     loss_fn: A loss function.
+    learning_rate: A learning rate.
     max_iter: The number of CG iterations.
     tol: The convergence tolerance.
     residual_refresh_frequency: A frequency to refresh the residual.
@@ -295,12 +300,19 @@ def hessian_free(loss_fn,
     A base.GradientTransformation object of (init_fn, update_fn) tuple.
   """
 
-  def init_fn(p0, damping):
+  def init_fn(params):
     """Initializes the HessianFreeState object for Hessian-free updates."""
-    return HessianFreeState(p0=p0, damping=damping)
+    return HessianFreeState(
+        p0=ravel_pytree(params)[0],
+        damping=1)
 
-  def update_fn(grads, state, forward_fn, batch, params):
+  @jit
+  def update_fn(grads, state, params_batch_tuple):
     """Transforms the grads and updates the HessianFreeState object."""
+    params, batch = params_batch_tuple
+
+    def forward_fn(params, inputs):
+      return nn.base.Model(flax_module_def, params)(inputs)
 
     outputs = forward_fn(params, batch['inputs'])
     flattened_grads, unravel_fn = ravel_pytree(grads)
@@ -321,9 +333,10 @@ def hessian_free(loss_fn,
     reduction_q = jnp.dot(flattened_p,
                           flattened_grads + 0.5 * matmul_fn(flattened_p))
 
-    damping_new = state.damping * jnp.where(
-        reduction_f / reduction_q < 0.25, 3/2, 2/3) * state.damping
+    damping_new = state.damping * jnp.where(reduction_f / reduction_q < 0.25,
+                                            3.0 / 2.0, 2.0 / 3.0)
 
-    return p, HessianFreeState(flattened_p, damping_new)
+    return unravel_fn(learning_rate * flattened_p), HessianFreeState(
+        flattened_p, damping_new)
 
   return base.GradientTransformation(init_fn, update_fn)

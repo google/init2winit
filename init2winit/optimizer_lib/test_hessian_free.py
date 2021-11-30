@@ -152,7 +152,7 @@ class HessianFreeTest(absltest.TestCase):
     def opt_cost(params):
       return model.loss_fn(forward_fn(params, inputs), targets)
 
-    optimizer = hessian_free(model.loss_fn)
+    optimizer = hessian_free(model.flax_module_def, model.loss_fn)
 
     params = {
         'Dense_0': {
@@ -176,14 +176,12 @@ class HessianFreeTest(absltest.TestCase):
 
     v = np.ones(d)
 
-    p0 = np.zeros(d)
-    damping = 1
-    state = optimizer.init(p0, damping)
+    state = optimizer.init(params)
 
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
     partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
 
-    matmul_fn = partial(gvp, params, outputs, damping, partial_forward_fn,
+    matmul_fn = partial(gvp, params, outputs, state.damping, partial_forward_fn,
                         partial_loss_fn)
 
     jacobian = jax.jacfwd(partial_forward_fn)(params)
@@ -199,14 +197,15 @@ class HessianFreeTest(absltest.TestCase):
       hessian = jax.hessian(partial_loss_fn)(outputs[i, None])[0, :, 0, :]
       ggn_matrix += np.transpose(jacobian_matrix) @ hessian @ jacobian_matrix
     ggn_matrix /= n
-    ggn_matrix += damping * np.identity(d)
+    ggn_matrix += state.damping * np.identity(d)
 
     expected = ggn_matrix @ v
 
     # Test the gvp function
     self.assertAlmostEqual(
         jnp.linalg.norm(matmul_fn(v) - expected), 0, places=4)
-    p, state = optimizer.update(grads, state, forward_fn, batch, params)
+
+    p, state = optimizer.update(grads, state, (params, batch))
 
     # Test the damping parameter update
     self.assertEqual(state.damping, 3/2)

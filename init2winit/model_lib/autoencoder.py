@@ -37,14 +37,11 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         activation_function='relu',
         kernel_scales=[0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
         lr_hparams={
-            'base_lr': 0.02,
+            'base_lr': 0.1,
             'schedule': 'constant'
         },
         layer_rescale_factors={},
-        optimizer='momentum',
-        opt_hparams={
-            'momentum': 0.05,
-        },
+        optimizer='hessian_free',
         batch_size=128,
         l2_decay_factor=None,
         l2_decay_rank_threshold=0,

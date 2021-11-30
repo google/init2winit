@@ -188,7 +188,7 @@ def update(
     grad = jax.lax.cond(grad_norm > grad_clip, lambda _: scaled_grad,
                         lambda _: grad, None)
   model_updates, new_optimizer_state = optimizer_update_fn(
-      grad.params, optimizer_state, params=flax_module.params)
+      grad.params, optimizer_state, flax_module.params, batch)
   new_params = optax.apply_updates(flax_module.params, model_updates)
   new_flax_module = flax_module.replace(params=new_params)
 
@@ -586,7 +586,7 @@ def train(train_dir,
 
   lr_fn = schedules.get_schedule_fn(hps.lr_hparams, num_train_steps)
 
-  optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps)
+  optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps, model)
   unreplicated_optimizer_state = optimizer_init_fn(
       unreplicated_flax_module.params)
 

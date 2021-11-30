@@ -15,6 +15,8 @@
 
 """Getter function for selecting optimizers."""
 
+from init2winit.optimizer_lib.hessian_free import hessian_free
+import numpy as np
 import optax
 
 
@@ -47,7 +49,7 @@ def sgd(learning_rate, weight_decay, momentum=None, nesterov=False):
   )
 
 
-def get_optimizer(hps):
+def get_optimizer(hps, model=None):
   """Constructs the optax optimizer from the given HParams.
 
   We use optax.inject_hyperparams to wrap the optimizer transformations that
@@ -60,6 +62,7 @@ def get_optimizer(hps):
 
   Args:
     hps: the experiment hyperparameters, as a ConfigDict.
+    model: the model to be trained.
   Returns:
     A tuple of the initialization and update functions returned by optax.
   """
@@ -89,8 +92,35 @@ def get_optimizer(hps):
         b2=hps.opt_hparams['beta2'],
         eps=hps.opt_hparams['epsilon'],
         weight_decay=weight_decay)
+  elif hps.optimizer == 'hessian_free':
+    if model is None:
+      raise ValueError(
+          'Model info should be provided for hessian free optimizer.')
+    opt_init, opt_update = optax.inject_hyperparams(
+        hessian_free,
+        ['flax_module_def', 'loss_fn', 'max_iter'])(
+            flax_module_def=model.flax_module_def,
+            loss_fn=model.loss_fn,
+            learning_rate=0.0,  # Manually injected on each train step.
+            max_iter=np.prod(hps.output_shape))
 
   if opt_init is None or opt_update is None:
     raise NotImplementedError('Optimizer {} not implemented'.format(
         hps.optimizer))
-  return opt_init, opt_update
+  return opt_init, _wrap_update_fn(hps.optimizer, opt_update)
+
+
+def _wrap_update_fn(opt_name, opt_update):
+  """Wraps the optimizer update function to have the same function signiture.
+
+  Args:
+    opt_name: the optimizer name.
+    opt_update: the optimizer update function.
+  Returns:
+    A wrapped optimizer update function.
+  """
+  def update_fn(grads, optimizer_state, params, batch=None):
+    if opt_name == 'hessian_free':
+      return opt_update(grads, optimizer_state, params=(params, batch))
+    return opt_update(grads, optimizer_state, params=params)
+  return update_fn
