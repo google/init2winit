@@ -16,8 +16,8 @@
 """Hessian-free optimization algorithm."""
 
 from functools import partial  # pylint: disable=g-importing-member
+import math
 from typing import NamedTuple
-
 from flax import nn
 import jax
 from jax import jit
@@ -70,7 +70,8 @@ def relative_per_iteration_progress_test(step, rs_norm, obj_val, obj_arr, tol):
   """
   del rs_norm
 
-  k = jnp.where(jnp.less(10, step // 10), step // 10, 10)
+  # k = max(10, ceil(0.1 * step))
+  k = lax.max(10, jnp.int32(lax.ceil(0.1 * step)))
   arr_len = len(obj_arr)
 
   step_condition = jnp.less(k, step)
@@ -178,8 +179,24 @@ def mf_conjgrad_solver(matmul_fn,
   obj_arr = jnp.array([])
 
   if use_obj_arr:
-    obj_arr = jnp.zeros(max(10, max_iter // 10))
+    obj_arr = jnp.zeros(max(10, math.ceil(0.1 * max_iter)))
   arr_len = len(obj_arr)
+
+  # define an array to save iterates for CG backtracking
+  # an iterate at every ceil(initial_save_step * gamma^j)-th step where j >= 0,
+  # and the last iterate will be saved.
+  # if the last iteration is ceil(initial_save_step * gamma^j*) for some j*,
+  # only one copy will be saved.
+  # the max number of copies is ceil(log(max_iter / initial_save_step, gamma))
+  # this amounts to 10/13/16/19/28 copies for 50/100/200/500/5000 max_iter
+  # when gamma = 1.3 and initial_save_step = 5
+  gamma = 1.3
+  initial_save_step = 5.0
+  x_arr = jnp.zeros(
+      (math.ceil(math.log(max_iter / initial_save_step, gamma)) + 1, len(x0)))
+  # index to track the last saved element in the array
+  x_arr_idx = -1
+  next_save_step = initial_save_step
 
   def termination_condition(state):
     *_, step, rs_norm, obj_val, obj_arr = state
@@ -187,7 +204,7 @@ def mf_conjgrad_solver(matmul_fn,
         jnp.less(step, max_iter),
         jnp.equal(
             termination_criterion_fn(
-                rs_norm=rs_norm, tol=tol, step=step-1,
+                rs_norm=rs_norm, tol=tol, step=step,
                 obj_val=obj_val, obj_arr=obj_arr), False))
 
   def update_obj_arr(step, obj_val, obj_arr):
@@ -195,12 +212,16 @@ def mf_conjgrad_solver(matmul_fn,
       return obj_arr.at[step % arr_len].set(obj_val)
     return obj_arr
 
+  def update_x_arr(x, x_arr, x_arr_idx):
+    return x_arr.at[x_arr_idx, :].set(x)
+
   @jit
   def one_step_conjgrad(state):
     """One step of conjugate gradient iteration."""
-    x, r, y, p, alpha, beta, step, rs_norm, obj_val, obj_arr = state
-
+    x, x_arr, x_arr_idx, save_step, next_save_step, r, y, p, alpha, beta, step, rs_norm, obj_val, obj_arr = state
     obj_arr = update_obj_arr(step, obj_val, obj_arr)
+
+    step += 1
 
     # Compute Ap
     matmul_product = matmul_fn(p)
@@ -225,12 +246,25 @@ def mf_conjgrad_solver(matmul_fn,
     beta = rs_norm_new / rs_norm
     p = beta * p - y
 
-    return (x, r, y, p, alpha, beta, step + 1, rs_norm_new, obj_val, obj_arr)
+    # Save iterates for CG backtracking
+    save_step = jnp.equal(step, jnp.int32(lax.ceil(next_save_step)))
+    x_arr_idx = jnp.where(save_step, x_arr_idx + 1, x_arr_idx)
+    x_arr = jnp.where(save_step, update_x_arr(x, x_arr, x_arr_idx), x_arr)
+    next_save_step *= jnp.where(save_step, gamma, 1)
 
-  init_state = x, r, y, p, alpha, beta, 0, rs_norm, obj_val, obj_arr
-  x, *_ = lax.while_loop(termination_condition, one_step_conjgrad, init_state)
+    return (x, x_arr, x_arr_idx, save_step, next_save_step, r, y, p, alpha,
+            beta, step, rs_norm_new, obj_val, obj_arr)
 
-  return x
+  init_state = x, x_arr, x_arr_idx, False, next_save_step, r, y, p, alpha, beta, 0, rs_norm, obj_val, obj_arr
+  x, x_arr, x_arr_idx, save_step, *_ = lax.while_loop(termination_condition,
+                                                      one_step_conjgrad,
+                                                      init_state)
+
+  # Save the last iterate if not saved yet.
+  x_arr_idx = jnp.where(save_step, x_arr_idx, x_arr_idx + 1)
+  x_arr = jnp.where(save_step, x_arr, update_x_arr(x, x_arr, x_arr_idx))
+
+  return x_arr, x_arr_idx
 
 
 def hvp(f, x, v):
@@ -266,6 +300,60 @@ def gvp(params, outputs, damping, forward_fn, loss_fn, v):
   hjv = hvp(loss_fn, outputs, jv)
   gvp_fn = vjp(forward_fn, params)[1]
   return ravel_pytree(gvp_fn(hjv)[0])[0] + damping * v
+
+
+def cg_backtracking(p_arr, p_arr_idx, forward_fn, loss_fn, params, unravel_fn):
+  """Backtracks CG iterates (Section 4.6, Martens (2010)).
+
+  This function iteratively compares the function values of two consecutive
+  iterates. If the function value of the iterate at idx is smaller than the
+  function value of the iterate at idx - 1, then the iterate at idx is returned
+  as a search direction. Otherwise, we decrease idx by 1 and repeat the
+  comparison. If no iterate satisfies the condition, the first element in p_arr
+  will be returned.
+
+  Args:
+    p_arr: An array of CG iterates of shape (m, n).
+    p_arr_idx: The index of the last element in p_arr.
+    forward_fn: A function that maps params to outputs.
+    loss_fn: A function that maps outputs to a loss value.
+    params: A pytree of parameters.
+    unravel_fn: A function that maps a numpy vector of shape (n,) to a pytree.
+
+  Returns:
+    The backtracked iterate as a pytree and a vector with its function value.
+  """
+  # initialize the search direction and compute the objective value along it.
+  flattened_p = p_arr[p_arr_idx]
+  obj_val = loss_fn(forward_fn(apply_updates(params, unravel_fn(flattened_p))))
+
+  def termination_condition_cg_backtracking(state):
+    *_, idx, keep_backtracking = state
+    return jnp.logical_and(keep_backtracking, jnp.greater_equal(idx, 0))
+
+  def one_step_cg_backtracking(state):
+    """One step of cg backtracking iteration."""
+    flattened_p, obj_val, idx, keep_backtracking = state
+
+    # compute the objective value for the iterate to be compared with
+    flattened_p_prev = p_arr[idx]
+    obj_val_prev = loss_fn(
+        forward_fn(apply_updates(params, unravel_fn(flattened_p_prev))))
+
+    # compare the objective values
+    keep_backtracking = jnp.greater_equal(obj_val, obj_val_prev)
+
+    # update flattened_p and obj_val if obj_val >= obj_val_prev
+    flattened_p = jnp.where(keep_backtracking, flattened_p_prev, flattened_p)
+    obj_val = jnp.where(keep_backtracking, obj_val_prev, obj_val)
+
+    return flattened_p, obj_val, idx - 1, keep_backtracking
+
+  init_state = flattened_p, obj_val, p_arr_idx - 1, True
+  flattened_p, obj_val, *_ = lax.while_loop(
+      termination_condition_cg_backtracking, one_step_cg_backtracking,
+      init_state)
+  return flattened_p, obj_val
 
 
 class HessianFreeState(NamedTuple):
@@ -322,21 +410,30 @@ def hessian_free(flax_module_def,
 
     matmul_fn = partial(gvp, params, outputs, state.damping, partial_forward_fn,
                         partial_loss_fn)
-    flattened_p = mf_conjgrad_solver(matmul_fn, -flattened_grads, state.p0,
-                                     max_iter, tol, residual_refresh_frequency,
-                                     None, termination_criterion)
-    p = unravel_fn(flattened_p)
+    p_arr, p_arr_idx = mf_conjgrad_solver(matmul_fn, -flattened_grads, state.p0,
+                                          max_iter, tol,
+                                          residual_refresh_frequency, None,
+                                          termination_criterion)
+    ## CG backtracking
+    # CG solution to be used to initialize the next CG run.
+    p_sol = p_arr[p_arr_idx]
+    # CG backtracking uses a logarithmic amount of memory to save CG iterates.
+    # If this causes OOM, we can consider computing the objective value at
+    # each save step in the CG loop and keeping the best one.
+    flattened_p, obj_val = cg_backtracking(p_arr, p_arr_idx,
+                                           partial_forward_fn,
+                                           partial_loss_fn, params,
+                                           unravel_fn)
 
     # update the damping parameter
-    reduction_f = partial_loss_fn(
-        partial_forward_fn(apply_updates(params, p))) - partial_loss_fn(outputs)
+    reduction_f = obj_val - partial_loss_fn(outputs)
     reduction_q = jnp.dot(flattened_p,
                           flattened_grads + 0.5 * matmul_fn(flattened_p))
 
     damping_new = state.damping * jnp.where(reduction_f / reduction_q < 0.25,
                                             3.0 / 2.0, 2.0 / 3.0)
 
-    return unravel_fn(learning_rate * flattened_p), HessianFreeState(
-        flattened_p, damping_new)
+    return unravel_fn(flattened_p * learning_rate), HessianFreeState(
+        p_sol, damping_new)
 
   return base.GradientTransformation(init_fn, update_fn)

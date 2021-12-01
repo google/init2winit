@@ -23,6 +23,7 @@ from functools import partial  # pylint: disable=g-importing-member
 from absl.testing import absltest
 from flax.deprecated import nn
 from init2winit.model_lib import models
+from init2winit.optimizer_lib.hessian_free import cg_backtracking
 from init2winit.optimizer_lib.hessian_free import gvp
 from init2winit.optimizer_lib.hessian_free import hessian_free
 from init2winit.optimizer_lib.hessian_free import mf_conjgrad_solver
@@ -32,6 +33,7 @@ import jax
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import numpy as np
+from optax import apply_updates
 
 
 def get_pd_mat(mat):
@@ -74,8 +76,9 @@ class HessianFreeTest(absltest.TestCase):
     x0 = np.ones(n)
 
     test_matmul_fn = lambda x: mat @ x
-    x = mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10, None,
-                           'residual_norm_test')
+    x_arr, x_arr_idx = mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10,
+                                          None, 'residual_norm_test')
+    x = x_arr[x_arr_idx]
     self.assertAlmostEqual(np.linalg.norm(test_matmul_fn(x) - b), 0, places=3)
 
   def test_conjgrad_preconditioning(self):
@@ -100,8 +103,9 @@ class HessianFreeTest(absltest.TestCase):
 
     test_matmul_fn = lambda x: mat @ x
     test_precond_fn = lambda x: precond_mat @ x
-    x = mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10, test_precond_fn,
-                           'residual_norm_test')
+    x_arr, x_arr_idx = mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10,
+                                          test_precond_fn, 'residual_norm_test')
+    x = x_arr[x_arr_idx]
     self.assertAlmostEqual(np.linalg.norm(test_matmul_fn(x) - b), 0, places=3)
 
   def test_conjgrad_martens_termination_criterion(self):
@@ -114,10 +118,80 @@ class HessianFreeTest(absltest.TestCase):
 
     test_mvm_fn = lambda x: mat @ x
 
-    x = mf_conjgrad_solver(test_mvm_fn, b, x0, n, 1e-6, 500, None,
-                           'relative_per_iteration_progress_test')
+    x_arr, x_arr_idx = mf_conjgrad_solver(
+        test_mvm_fn, b, x0, n, 1e-6, 500, None,
+        'relative_per_iteration_progress_test')
+    x = x_arr[x_arr_idx]
     f_value = np.dot(x, test_mvm_fn(x) - 2 * b) / 2
-    self.assertAlmostEqual(f_value, -0.223612323, places=8)
+    self.assertAlmostEqual(f_value, -0.223612576, places=8)
+
+  def test_cg_backtracking(self):
+    """Tests CG backtracking."""
+
+    model_str = 'autoencoder'
+    model_cls = models.get_model(model_str)
+    model_hps = models.get_model_hparams(model_str)
+
+    loss = 'sigmoid_binary_cross_entropy'
+    metrics = 'binary_autoencoder_metrics'
+
+    input_shape = (2, 2, 1)
+    output_shape = (4,)
+
+    hps = copy.copy(model_hps)
+    hps.update({
+        'hid_sizes': [2],
+        'activation_function': 'id',
+        'input_shape': input_shape,
+        'output_shape': output_shape
+    })
+
+    model = model_cls(hps, {}, loss, metrics)
+
+    inputs = jnp.array([[[1, 0], [1, 1]], [[1, 0], [0, 1]]])
+    targets = inputs.reshape(tuple([inputs.shape[0]] + list(output_shape)))
+    batch = {'inputs': inputs, 'targets': targets}
+
+    def forward_fn(params, inputs):
+      return nn.base.Model(model.flax_module_def, params)(inputs)
+
+    def opt_cost(params):
+      return model.loss_fn(forward_fn(params, inputs), targets)
+
+    params = {
+        'Dense_0': {
+            'kernel': jnp.array([[-1., 2.], [2., 0.], [-1., 3.], [-2., 2.]]),
+            'bias': jnp.array([0., 0.])
+        },
+        'Dense_1': {
+            'kernel': jnp.array([[4., 2., -2., 4.], [-3., 1., 2., -4.]]),
+            'bias': jnp.array([0., 0., 0., 0.])
+        }
+    }
+    unravel_fn = ravel_pytree(params)[1]
+
+    p1 = np.array([
+        0.5, 0.2, 0.1, -0.4, -0.6, 0.4, 0.6, -0.7, 0.0, 0.5, -0.7, 0.2, 0.1,
+        -0.2, 0.4, -0.6, -0.8, 0.7, 0.2, 0.9, -0.1, 0.5
+    ])
+    p2 = np.array([
+        0.3, -0.1, -0.5, 0.2, -0.4, 0.8, -0.2, 0.0, 0.2, -0.4, 0.6, -0.2, -0.4,
+        0.2, 0.3, 0.2, -0.2, -0.4, -0.5, 0.2, 0.2, -0.4
+    ])
+
+    p_arr = jnp.array([p1, p2])
+    p_arr_idx = 1
+
+    partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
+    partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
+
+    flattened_p, obj_val = cg_backtracking(p_arr, p_arr_idx,
+                                           partial_forward_fn,
+                                           partial_loss_fn, params,
+                                           unravel_fn)
+    # Test the backtracking function
+    self.assertSameElements(flattened_p, p1)
+    self.assertEqual(opt_cost(apply_updates(params, unravel_fn(p1))), obj_val)
 
   def test_hessian_free_optimizer(self):
     """Tests the Hessian-free optimizer."""
