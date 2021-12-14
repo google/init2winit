@@ -14,20 +14,19 @@
 # limitations under the License.
 
 r"""BLEU evaluator container class."""
-
+import copy
 import functools
 import os
 
 from absl import logging
 from flax import jax_utils
-from flax.deprecated import nn
 from flax.training import common_utils
-from init2winit import utils
 from init2winit.dataset_lib import mt_tokenizer
 from init2winit.mt_eval import decode
 from init2winit.mt_eval import eval_utils
 from init2winit.optimizer_lib import optimizers
 import jax
+import jax.numpy as jnp
 import numpy as np
 from tensorflow.io import gfile
 
@@ -123,45 +122,42 @@ class BLEUEvaluator(object):
     """Initialie model, especially cache for fast auto-regressive decoding."""
     loss_name = 'cross_entropy'
     metrics_name = 'classification_metrics'
-    model = model_cls(self.hps, dataset_meta_data, loss_name, metrics_name)
-    model_dtype = utils.dtype_from_str(self.hps.model_dtype)
-    input_shape = self.hps.input_shape
-    input_specs = [((self.hps.batch_size, *x), model_dtype) for x in input_shape
-                  ]
-    with nn.stateful() as batch_stats:
-      with nn.stochastic(dropout_rng):
-        with nn.attention.Cache().mutate() as cache_def:
-          _, params = model.flax_module_def.init_by_shape(
-              params_rng, input_specs, train=False, cache=cache_def)
-    self.flax_module = nn.Model(model.flax_module_def, params)
-    self.batch_stats = batch_stats
-    self.cache_def = cache_def
+    hps = copy.deepcopy(self.hps)
+    hps = hps.unlock()
+    hps.decode = True
+    hps = hps.lock()
+    model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
+    xs = [np.zeros((self.hps.batch_size, *x)) for x in self.hps.input_shape]
+    model_init_fn = jax.jit(
+        functools.partial(model.flax_module.init, train=False))
+    init_dict = model_init_fn(
+        {'params': params_rng, 'dropout': dropout_rng}, *xs)
+    params = init_dict['params']
+    batch_stats = init_dict.get('batch_stats', {})
+    cache = jax.tree_map(lambda _: jnp.array(0, jnp.uint32), init_dict['cache'])
+    self.replicated_cache = jax_utils.replicate(cache)
+    self.flax_module = model.flax_module
+    self.params = params
+    self.batch_stats = jax_utils.replicate(batch_stats)
     optimizer_init_fn, _ = optimizers.get_optimizer(self.hps)
-    self.optimizer_state = optimizer_init_fn(self.flax_module.params)
+    optimizer_state = optimizer_init_fn(params)
+    self.optimizer_state = jax_utils.replicate(optimizer_state)
 
   def decode_tokens(self, toks):
     valid_toks = toks[:np.argmax(toks == self.eos_id) + 1].astype(np.int32)
     return self.encoder.detokenize(valid_toks).numpy().decode('utf-8')
-
-  def build_cache(self, per_device_batchsize):
-    cache_args = (per_device_batchsize, self.max_length)
-    cache = self.cache_def.initialize_cache(
-        cache_args, dtype=utils.dtype_from_str(self.hps.model_dtype))
-    replicated_cache = jax_utils.replicate(cache)
-    return replicated_cache
 
   def current_batch_size(self, batch):
     # we assume first token is non-zero in each target side example.
     return int(batch['weights'][:, 0].sum())
 
   def build_predictor(self):
-    pmap_kwargs = {'axis_name': 'batch', 'static_broadcasted_argnums': (3,)}
     decoder = functools.partial(
         decode.decode_step,
         eos_id=self.eos_id,
-        use_bfloat16=False,
         beam_size=self.beam_size)
-    self.pmapped_predictor = jax.pmap(decoder, **pmap_kwargs)
+    self.pmapped_predictor = jax.pmap(
+        decoder, axis_name='batch', static_broadcasted_argnums=(1, 4))
 
   def translate_and_calculate_bleu(self):
     """Iterate over all checkpoints and calculate BLEU."""
@@ -179,20 +175,19 @@ class BLEUEvaluator(object):
           lower_bound=step - self.ckpt_avg_window,
           upper_bound=step)
       logging.info('Current checkpoints: %s', ckpt_paths)
-      flax_module, _, _ = eval_utils.average_checkpoints(
+      params, _, _ = eval_utils.average_checkpoints(
           checkpoint_paths=ckpt_paths,
-          flax_module=self.flax_module,
+          params=self.params,
           optimizer_state=self.optimizer_state,
           batch_stats=self.batch_stats)
-      flax_module_replicated = jax_utils.replicate(flax_module)
+      params_replicated = jax_utils.replicate(params)
       sources, references, predictions = [], [], []
       for batch in self.get_ds_iter():
         pred_batch = common_utils.shard(batch)
-        per_device_batch_size = pred_batch['inputs'].shape[1]
-        replicated_cache = self.build_cache(per_device_batch_size)
         model_predictions = self.pmapped_predictor(pred_batch,
-                                                   flax_module_replicated,
-                                                   replicated_cache,
+                                                   self.flax_module,
+                                                   params_replicated,
+                                                   self.replicated_cache,
                                                    self.max_length)
         predicted = tohost(model_predictions)
         inputs = tohost(pred_batch['inputs'])

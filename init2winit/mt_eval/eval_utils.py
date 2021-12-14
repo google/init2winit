@@ -54,50 +54,56 @@ def save_evals(ckpt_dir, ckpt_step, eval_split, bleu_score):
     f.write(str(bleu_score))
 
 
-def _load_checkpoint(checkpoint_path, flax_module, optimizer, batch_stats,
+def _load_checkpoint(checkpoint_path, params, optimizer_state, batch_stats,
                      replicate=True):
   """Load model (and batch stats) from checkpoint."""
+  target = {
+      'optimizer_state': optimizer_state,
+      'params': params,
+      'batch_stats': batch_stats,
+      'training_metrics_grabber': None,
+  }
   ckpt = checkpoint.load_checkpoint(
       checkpoint_path,
-      target=(flax_module, optimizer, batch_stats),
+      target=target,
       use_deprecated_checkpointing=True
   )
   results = trainer.restore_checkpoint(
       ckpt,
-      (flax_module, optimizer, batch_stats),
+      target,
       replicate=replicate,
       use_deprecated_checkpointing=True
   )
-  flax_module, optimizer, batch_stats = results[0]
-  return flax_module, optimizer, batch_stats
+  params = results[0]['params']
+  optimizer_state = results[0]['optimizer_state']
+  batch_stats = results[0]['batch_stats']
+  return params, optimizer_state, batch_stats
 
 
 def average_checkpoints(
-    checkpoint_paths, flax_module, optimizer_state, batch_stats):
+    checkpoint_paths, params, optimizer_state, batch_stats):
   """Averages a set of checkpoints in input checkpoints."""
   assert len(checkpoint_paths) >= 1
   # Sum parameters of separate models together.
-  flax_module, optimizer_state, batch_stats = _load_checkpoint(
-      checkpoint_paths[0], flax_module, optimizer_state, batch_stats,
+  params, optimizer_state, batch_stats = _load_checkpoint(
+      checkpoint_paths[0], params, optimizer_state, batch_stats,
       replicate=False)
   optimizer_state_inner_state = optimizer_state.inner_state
   for checkpoint_path in checkpoint_paths[1:]:
-    flax_module_update, optimizer_state_update, _ = _load_checkpoint(
-        checkpoint_path, flax_module, optimizer_state, batch_stats,
+    params_update, optimizer_state_update, _ = _load_checkpoint(
+        checkpoint_path, params, optimizer_state, batch_stats,
         replicate=False)
     # TODO(dxin): Make this averaging process more numerically stable.
-    target_params_update = jax.tree_map(
-        lambda x, y: x + y, flax_module.params,
-        flax_module_update.params)
+    params = jax.tree_map(
+        lambda x, y: x + y, params, params_update)
     optimizer_state_inner_state = jax.tree_map(
         lambda x, y: x + y, optimizer_state_inner_state,
         optimizer_state_update.inner_state)
-    flax_module.replace(params=target_params_update)
 
   # Average checkpoints.
-  flax_module.replace(params=jax.tree_map(
+  params = jax.tree_map(
       lambda x: x / float(len(checkpoint_paths)),
-      flax_module.params))
+      params)
   optimizer_state_inner_state = jax.tree_map(
       lambda x: x / float(len(checkpoint_paths)),
       optimizer_state_inner_state)
@@ -106,7 +112,7 @@ def average_checkpoints(
       count=optimizer_state.count,
       hyperparams=optimizer_state.hyperparams,
       inner_state=optimizer_state_inner_state)
-  return (flax_module, optimizer_state, batch_stats)
+  return (params, optimizer_state, batch_stats)
 
 
 def get_checkpoints_in_range(checkpoint_dir, lower_bound, upper_bound):

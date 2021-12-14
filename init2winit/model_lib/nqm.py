@@ -17,9 +17,10 @@
 r"""NQM Model.
 
 """
-from flax.deprecated import nn
-from flax.deprecated.nn import initializers
+from flax import linen as nn
 from init2winit.model_lib import base_model
+from init2winit.model_lib import model_utils
+from jax.nn import initializers
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import numpy as np
@@ -54,34 +55,38 @@ class NQMLoss(nn.Module):
   params. To sample Gaussian noise with covariance C, we first sample
   z ~ N(0, I), then define eps = Nz, where N^T N = C. N is passed to apply as
   the noise_scaling matrix.
-  """
 
-  def apply(self,
-            noise_input,
-            hessian,
-            noise_scaling,
-            train=True):
+  Attrs:
+    hessian: dxd psd matrix representing the loss hessian.
+    noise_scaling: dxd matrix used to scale noise_input. This is a matrix N
+      s.t. N^T N = C, where C will be the covariance of the scaled noise.
+    train: Ignored, we add this to conform to the i2w model API. noise_input =
+      jnp.asarray(noise_input) x = self.param('x', (noise_input.shape[-1],),
+      initializers.ones)
+  """
+  hessian: model_utils.Array
+  noise_scaling: model_utils.Array
+  train: bool = True
+
+  @nn.compact
+  def __call__(self, noise_input, train):
     """Returns the NQM loss.
 
     Args:
       noise_input: Sample from a d-dimensional isotropic Gaussian (this will be
         scaled by the noise_scaling matrix).
-      hessian: dxd psd matrix representing the loss hessian.
-      noise_scaling: dxd matrix used to scale noise_input. This is a matrix N
-        s.t. N^T N = C, where C will be the covariance of the scaled noise.
-      train: Ignored, we add this to conform to the i2w model API. noise_input =
-        jnp.asarray(noise_input) x = self.param('x', (noise_input.shape[-1],),
-        initializers.ones)
+      train: unused.
 
     Returns: The resulting scalar valued loss.
     """
+    del train
     noise_eps = jnp.asarray(noise_input)
-    x = self.param('x', (noise_eps.shape[-1],), initializers.ones)
+    x = self.param('x', initializers.ones, (noise_eps.shape[-1],))
 
     # NQM loss = 1/2 x^T hessian x + x.T noise_scaling noise_input
     # this gives grad loss = hessian x + eps, where eps ~ N(0, C)
-    return jnp.dot(jnp.dot(x.T, hessian), x) / 2 + jnp.mean(
-        jnp.dot(jnp.dot(noise_input, noise_scaling), x))
+    return jnp.dot(jnp.dot(x.T, self.hessian), x) / 2 + jnp.mean(
+        jnp.dot(jnp.dot(noise_input, self.noise_scaling), x))
 
 
 def quadratic_form(u, sigma):
@@ -182,19 +187,21 @@ class NQM(base_model.BaseModel):
 
     self.hps = hps
     self.dataset_meta_data = dataset_meta_data
-    self.flax_module_def = self.build_flax_module()
+    self.flax_module = self.build_flax_module()
 
-  def evaluate_batch(self, flax_module, batch_stats, batch):
+  def evaluate_batch(self, params, batch_stats, batch):
     """Evals the NQM loss."""
-
+    logits = self.flax_module.apply(
+        {'params': params}, batch['inputs'], train=False)
+    # Trainer eval assumes eval function sums, not averages.
+    loss = logits * batch['inputs'].shape[0]
     metrics = {
-        # Trainer eval assumes eval function sums, not averages.
-        'loss': flax_module(batch['inputs']) * batch['inputs'].shape[0],
+        'loss': loss,
         'denominator': batch['inputs'].shape[0]
     }
     return metrics
 
-  def training_cost(self, flax_module, batch_stats, batch, dropout_rng):
+  def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Returns the NQM loss.
 
     L = noise_input^T H x / 2 + x^T sqrtC eps. Where x is the model params
@@ -202,22 +209,22 @@ class NQM(base_model.BaseModel):
     sqrtC^T sqrtC = C.
 
     Args:
-      flax_module: Must be NQMLoss class.
-      batch_stats: ignored.
+      params: The model parameters.
       batch: Assumes 'inputs' is isotropic noise.
+      batch_stats: ignored.
       dropout_rng: ignored.
 
     Returns:
-      loss, (batch_stats)
+      loss, batch_stats
     """
-
-    average_loss = flax_module(batch['inputs'])
-
-    return average_loss, (batch_stats)
+    del dropout_rng
+    average_loss = self.flax_module.apply(
+        {'params': params}, batch['inputs'], train=True)
+    return average_loss, batch_stats
 
   def build_flax_module(self):
     hessian, noise_scaling = _get_nqm_matrices(self.hps.input_shape[0],
                                                self.hps.hessian_decay_power,
                                                self.hps.noise_decay_power,
                                                self.hps.nqm_mode)
-    return NQMLoss.partial(hessian=hessian, noise_scaling=noise_scaling)
+    return NQMLoss(hessian=hessian, noise_scaling=noise_scaling)

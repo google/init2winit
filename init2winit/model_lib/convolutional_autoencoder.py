@@ -20,7 +20,9 @@ images as outputs.
 
 """
 
-from flax.deprecated import nn
+from typing import Any, Dict, Sequence
+
+from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 
@@ -75,55 +77,64 @@ class ConvAutoEncoder(nn.Module):
   [batch_size_per_device, *input_shape] where input_shape may be of arbitrary
   rank. The model flatten the input before applying a dense layer.
   """
+  output_shape: Sequence[int]
+  encoder: Dict[str, Any]
+  decoder: Dict[str, Any]
 
-  def apply(self,
-            x,
-            output_shape,
-            encoder,
-            decoder,
-            train=True):
-    if not len(encoder['filter_sizes']) == len(encoder['kernel_sizes']) == len(
-        encoder['kernel_paddings']) == len(encoder['window_sizes']) == len(
-            encoder['window_paddings']) == len(encoder['strides']) == len(
-                encoder['activations']):
+  @nn.compact
+  def __call__(self, x, train):
+    del train
+    encoder_keys = [
+        'filter_sizes',
+        'kernel_sizes',
+        'kernel_paddings',
+        'window_sizes',
+        'window_paddings',
+        'strides',
+        'activations',
+    ]
+    if len(set(len(self.encoder[k]) for k in encoder_keys)) > 1:
       raise ValueError(
           'The elements in encoder dict do not have the same length.')
 
-    if not len(decoder['filter_sizes']) == len(decoder['kernel_sizes']) == len(
-        decoder['window_sizes']) == len(decoder['paddings']) == len(
-            decoder['activations']):
+    decoder_keys = [
+        'filter_sizes',
+        'kernel_sizes',
+        'window_sizes',
+        'paddings',
+        'activations',
+    ]
+    if len(set(len(self.decoder[k]) for k in decoder_keys)) > 1:
       raise ValueError(
           'The elements in decoder dict do not have the same length.')
 
     # encoder
-    for i in range(len(encoder['filter_sizes'])):
+    for i in range(len(self.encoder['filter_sizes'])):
       x = nn.Conv(
-          x,
-          encoder['filter_sizes'][i],
-          encoder['kernel_sizes'][i],
-          padding=encoder['kernel_paddings'][i])
-      x = model_utils.ACTIVATIONS[encoder['activations'][i]](x)
+          self.encoder['filter_sizes'][i],
+          self.encoder['kernel_sizes'][i],
+          padding=self.encoder['kernel_paddings'][i])(x)
+      x = model_utils.ACTIVATIONS[self.encoder['activations'][i]](x)
       x = nn.max_pool(
-          x, encoder['window_sizes'][i],
-          strides=encoder['strides'][i],
-          padding=encoder['window_paddings'][i])
+          x, self.encoder['window_sizes'][i],
+          strides=self.encoder['strides'][i],
+          padding=self.encoder['window_paddings'][i])
 
     # decoder
-    for i in range(len(decoder['filter_sizes'])):
+    for i in range(len(self.decoder['filter_sizes'])):
       x = nn.ConvTranspose(
-          x,
-          decoder['filter_sizes'][i],
-          decoder['kernel_sizes'][i],
-          decoder['window_sizes'][i],
-          padding=decoder['paddings'][i])
-      x = model_utils.ACTIVATIONS[decoder['activations'][i]](x)
+          self.decoder['filter_sizes'][i],
+          self.decoder['kernel_sizes'][i],
+          self.decoder['window_sizes'][i],
+          padding=self.decoder['paddings'][i])(x)
+      x = model_utils.ACTIVATIONS[self.decoder['activations'][i]](x)
     return x
 
 
 class ConvAutoEncoderModel(base_model.BaseModel):
 
   def build_flax_module(self):
-    return ConvAutoEncoder.partial(
+    return ConvAutoEncoder(
         output_shape=self.hps.output_shape,
         encoder=self.hps.encoder,
         decoder=self.hps.decoder)

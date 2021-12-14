@@ -29,9 +29,10 @@ https://arxiv.org/abs/1608.06993?source=post_page---------------------------
 
 """
 
+import functools
 import math
 
-from flax.deprecated import nn
+from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax.numpy as jnp
@@ -74,28 +75,26 @@ class BottleneckBlock(nn.Module):
   preceded by 1x1 convoluational operation (and the correpsonding batch
   normalization and ReLU).
   """
+  growth_rate: int
+  dtype: model_utils.Dtype = jnp.float32
+  normalizer: str = 'batch_norm'
 
-  def apply(self,
-            x,
-            growth_rate,
-            train=True,
-            dtype=jnp.float32,
-            normalizer='batch_norm'):
-    conv = nn.Conv.partial(bias=False, dtype=dtype)
-    maybe_normalize = model_utils.get_normalizer(normalizer, train)
+  @nn.compact
+  def __call__(self, x, train):
+    conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
+    maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
 
-    y = maybe_normalize(x)
+    y = maybe_normalize()(x)
     y = nn.relu(y)
-    y = conv(y, features=4 * growth_rate, kernel_size=(1, 1), name='conv1')
+    y = conv(features=4 * self.growth_rate, kernel_size=(1, 1), name='conv1')(y)
 
-    y = maybe_normalize(y)
+    y = maybe_normalize()(y)
     y = nn.relu(y)
     y = conv(
-        y,
-        features=growth_rate,
+        features=self.growth_rate,
         kernel_size=(3, 3),
         padding=((1, 1), (1, 1)),
-        name='conv2')
+        name='conv2')(y)
 
     # Concatenate the output and input along the features dimension.
     y = jnp.concatenate([y, x], axis=3)
@@ -108,19 +107,18 @@ class TransitionBlock(nn.Module):
   Downsampling is achieved by a 1x1 convoluationl layer (with the associated
   batch norm and ReLU) and a 2x2 average pooling layer.
   """
+  num_features: int
+  dtype: model_utils.Dtype = jnp.float32
+  normalizer: str = 'batch_norm'
 
-  def apply(self,
-            x,
-            num_features,
-            train=True,
-            dtype=jnp.float32,
-            normalizer='batch_norm'):
-    conv = nn.Conv.partial(bias=False, dtype=dtype)
-    maybe_normalize = model_utils.get_normalizer(normalizer, train)
+  @nn.compact
+  def __call__(self, x, train):
+    conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
+    maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
 
-    y = maybe_normalize(x)
+    y = maybe_normalize()(x)
     y = nn.relu(y)
-    y = conv(y, features=num_features, kernel_size=(1, 1))
+    y = conv(features=self.num_features, kernel_size=(1, 1))(y)
     y = nn.avg_pool(y, window_shape=(2, 2))
     return y
 
@@ -131,20 +129,18 @@ class DenseNet(nn.Module):
   The network consists of an inital convolutaional layer, four dense blocks
   connected by transition blocks, a pooling layer and a classification layer.
   """
+  num_layers: int
+  num_outputs: int
+  growth_rate: int
+  reduction: int
+  normalizer: str = 'batch_norm'
+  dtype: model_utils.Dtype = jnp.float32
 
-  def apply(self,
-            x,
-            num_layers,
-            num_outputs,
-            growth_rate,
-            reduction,
-            normalizer='batch_norm',
-            dtype='float32',
-            train=True):
-
+  @nn.compact
+  def __call__(self, x, train):
     def dense_layers(y, block, num_blocks, growth_rate):
       for _ in range(num_blocks):
-        y = block(y, growth_rate)
+        y = block(growth_rate)(y, train=train)
       return y
 
     def update_num_features(num_features, num_blocks, growth_rate, reduction):
@@ -154,38 +150,40 @@ class DenseNet(nn.Module):
       return num_features
 
     # Initial convolutional layer
-    num_features = 2 * growth_rate
-    conv = nn.Conv.partial(bias=False, dtype=dtype)
+    num_features = 2 * self.growth_rate
+    conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
     y = conv(
-        x,
         features=num_features,
         kernel_size=(3, 3),
         padding=((1, 1), (1, 1)),
-        name='conv1')
+        name='conv1')(x)
 
     # Internal dense and transtion blocks
-    num_blocks = _block_size_options[num_layers]
-    block = BottleneckBlock.partial(
-        train=train, dtype=dtype, normalizer=normalizer)
+    num_blocks = _block_size_options[self.num_layers]
+    block = functools.partial(
+        BottleneckBlock,
+        dtype=self.dtype,
+        normalizer=self.normalizer)
     for i in range(3):
-      y = dense_layers(y, block, num_blocks[i], growth_rate)
+      y = dense_layers(y, block, num_blocks[i], self.growth_rate)
       num_features = update_num_features(num_features, num_blocks[i],
-                                         growth_rate, reduction)
+                                         self.growth_rate, self.reduction)
       y = TransitionBlock(
-          y, num_features, train=train, dtype=dtype, normalizer=normalizer)
+          num_features, dtype=self.dtype, normalizer=self.normalizer)(
+              y, train=train)
 
     # Final dense block
-    y = dense_layers(y, block, num_blocks[3], growth_rate)
+    y = dense_layers(y, block, num_blocks[3], self.growth_rate)
 
     # Final pooling
-    maybe_normalize = model_utils.get_normalizer(normalizer, train)
-    y = maybe_normalize(y)
+    maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
+    y = maybe_normalize()(y)
     y = nn.relu(y)
     y = nn.avg_pool(y, window_shape=(4, 4))
 
     # Classification layer
     y = jnp.reshape(y, (y.shape[0], -1))
-    y = nn.Dense(y, num_outputs)
+    y = nn.Dense(self.num_outputs)(y)
     return y
 
 
@@ -204,7 +202,7 @@ class AdaBeliefDensenetModel(base_model.BaseModel):
 
   def build_flax_module(self):
     """Adabelief DenseNet."""
-    return DenseNet.partial(
+    return DenseNet(
         num_layers=self.hps.num_layers,
         num_outputs=self.hps['output_shape'][-1],
         growth_rate=self.hps.growth_rate,

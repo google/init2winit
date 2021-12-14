@@ -18,10 +18,10 @@
 """
 
 import copy
+import functools
 
 from absl.testing import absltest
 from absl.testing import parameterized
-from flax.deprecated import nn
 from init2winit.model_lib import models
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
@@ -75,29 +75,34 @@ class ModelsTest(parameterized.TestCase):
     hps = copy.copy(model_hps)
     hps.update({'output_shape': OUTPUT_SHAPE['classification']})
     rng = jax.random.PRNGKey(0)
+    dropout_rng, params_rng = jax.random.split(rng)
     model = model_cls(hps, {}, loss, metrics)
     xs = jnp.array(np.random.normal(size=INPUT_SHAPE['classification']))
-    rng, params_rng = jax.random.split(rng)
-    with nn.stateful() as batch_stats:
-      with nn.stochastic(params_rng):
-        _, flax_module = model.flax_module_def.create(params_rng, xs)
+    model_init_fn = jax.jit(
+        functools.partial(model.flax_module.init, train=False))
+    init_dict = model_init_fn({'params': params_rng}, xs)
+    params = init_dict['params']
+    batch_stats = init_dict.get('batch_stats', {})
 
     # Check that the forward pass works with mutated batch_stats.
-    with nn.stateful(batch_stats) as new_batch_stats:
-      with nn.stochastic(params_rng):
-        outputs = flax_module(xs)
-        self.assertEqual(outputs.shape, (INPUT_SHAPE['classification'][0],
-                                         OUTPUT_SHAPE['classification'][-1]))
+    outputs, new_batch_stats = model.flax_module.apply(
+        {'params': params, 'batch_stats': batch_stats},
+        xs,
+        mutable=['batch_stats'],
+        rngs={'dropout': dropout_rng},
+        train=True)
+    self.assertEqual(outputs.shape, (INPUT_SHAPE['classification'][0],
+                                     OUTPUT_SHAPE['classification'][-1]))
 
     # If it's a batch norm model check the batch stats changed.
-    if batch_stats.as_dict():
+    if batch_stats:
       bflat, _ = ravel_pytree(batch_stats)
       new_bflat, _ = ravel_pytree(new_batch_stats)
       self.assertFalse(jnp.array_equal(bflat, new_bflat))
 
     # Test batch_norm in inference mode.
-    with nn.stateful(batch_stats, mutable=False):
-      outputs = flax_module(xs, train=False)
+    outputs = model.flax_module.apply(
+        {'params': params, 'batch_stats': batch_stats}, xs, train=False)
     self.assertEqual(
         outputs.shape,
         (INPUT_SHAPE['classification'][0], OUTPUT_SHAPE['classification'][-1]))
@@ -130,7 +135,8 @@ class ModelsTest(parameterized.TestCase):
         },
         'output_shape': (vocab_size,),
         # Training HParams.
-        'l2_decay_factor': 1e-4
+        'l2_decay_factor': 1e-4,
+        'decode': False,
     })
 
     text_input_shape = (32, 64)  # batch_size, max_target_length
@@ -145,34 +151,39 @@ class ModelsTest(parameterized.TestCase):
     }, loss, metrics)
     xs = jnp.array(
         np.random.randint(size=text_input_shape, low=1, high=vocab_size))
-    rng, params_rng = jax.random.split(rng)
-    rng, dropout_rng = jax.random.split(rng)
+    dropout_rng, params_rng = jax.random.split(rng)
 
-    with nn.stateful() as batch_stats:
-      _, flax_module = model.flax_module_def.create_by_shape(
-          params_rng, [(text_input_shape, jnp.float32)], train=False)
+    model_init_fn = jax.jit(
+        functools.partial(model.flax_module.init, train=False))
+    init_dict = model_init_fn({'params': params_rng}, xs)
+    params = init_dict['params']
+    batch_stats = init_dict.get('batch_stats', {})
 
     # Check that the forward pass works with mutated batch_stats.
     # Due to a bug in flax, this jit is required, otherwise the model errors.
     @jax.jit
-    def forward_pass(flax_module, xs, dropout_rng):
-      with batch_stats.mutate() as new_batch_stats:
-        with nn.stochastic(dropout_rng):
-          return flax_module(xs, train=True), new_batch_stats
+    def forward_pass(params, xs, dropout_rng):
+      outputs, new_batch_stats = model.flax_module.apply(
+          {'params': params, 'batch_stats': batch_stats},
+          xs,
+          mutable=['batch_stats'],
+          rngs={'dropout': dropout_rng},
+          train=True)
+      return outputs, new_batch_stats
 
-    outputs, new_batch_stats = forward_pass(flax_module, xs, dropout_rng)
+    outputs, new_batch_stats = forward_pass(params, xs, dropout_rng)
     self.assertEqual(outputs.shape,
                      (text_input_shape[0], text_input_shape[1], vocab_size))
 
     # If it's a batch norm model check the batch stats changed.
-    if batch_stats.as_dict():
+    if batch_stats:
       bflat, _ = ravel_pytree(batch_stats)
       new_bflat, _ = ravel_pytree(new_batch_stats)
       self.assertFalse(jnp.array_equal(bflat, new_bflat))
 
     # Test batch_norm in inference mode.
-    with nn.stateful(batch_stats, mutable=False):
-      outputs = flax_module(xs, train=False)
+    outputs = model.flax_module.apply(
+        {'params': params, 'batch_stats': batch_stats}, xs, train=False)
     self.assertEqual(outputs.shape,
                      (text_input_shape[0], text_input_shape[1], vocab_size))
 
@@ -207,7 +218,8 @@ class ModelsTest(parameterized.TestCase):
         'l2_decay_factor': 1e-4,
         'enc_self_attn_kernel_init': 'xavier_uniform',
         'dec_self_attn_kernel_init': 'xavier_uniform',
-        'dec_cross_attn_kernel_init': 'xavier_uniform'
+        'dec_cross_attn_kernel_init': 'xavier_uniform',
+        'decode': False,
     })
     text_src_input_shape = (32, 64)  # batch_size, max_source_length
     text_tgt_input_shape = (32, 40)  # batch_size, max_target_length
@@ -223,22 +235,24 @@ class ModelsTest(parameterized.TestCase):
         np.random.randint(size=text_src_input_shape, low=1, high=vocab_size))
     ys = jnp.array(
         np.random.randint(size=text_tgt_input_shape, low=1, high=vocab_size))
-    rng, params_rng = jax.random.split(rng)
-    rng, dropout_rng = jax.random.split(rng)
-    with nn.stateful() as batch_stats:
-      _, flax_module = model.flax_module_def.create_by_shape(
-          params_rng, [(text_src_input_shape, jnp.float32),
-                       (text_tgt_input_shape, jnp.float32)],
-          train=False)
+    dropout_rng, params_rng = jax.random.split(rng)
+    model_init_fn = jax.jit(
+        functools.partial(model.flax_module.init, train=False))
+    init_dict = model_init_fn({'params': params_rng}, xs, ys)
+    params = init_dict['params']
 
     # Test forward pass.
     @jax.jit
-    def forward_pass(flax_module, xs, ys, dropout_rng):
-      with batch_stats.mutate() as new_batch_stats:
-        with nn.stochastic(dropout_rng):
-          return flax_module(xs, ys, train=True), new_batch_stats
+    def forward_pass(params, xs, ys, dropout_rng):
+      outputs = model.flax_module.apply(
+          {'params': params},
+          xs,
+          ys,
+          rngs={'dropout': dropout_rng},
+          train=True)
+      return outputs
 
-    logits, _ = forward_pass(flax_module, xs, ys, dropout_rng)
+    logits = forward_pass(params, xs, ys, dropout_rng)
     # Testing only train mode
     # TODO(ankugarg): Add tests for individual encoder/decoder (inference mode).
     self.assertEqual(
@@ -261,19 +275,19 @@ class ModelsTest(parameterized.TestCase):
         ))
 
     model_cls = models.get_model('nqm')
-    rng = jax.random.PRNGKey(0)
+    params_rng = jax.random.PRNGKey(0)
     model = model_cls(model_hps, {}, None, None)
     noise_eps = jnp.array(np.random.normal(size=(batch_size, dim)))
-    rng, params_rng = jax.random.split(rng)
-    _, flax_module = model.flax_module_def.create_by_shape(
-        params_rng, [(batch_size, dim)])
+    xs = np.zeros((batch_size, dim))
+    model_init_fn = jax.jit(
+        functools.partial(model.flax_module.init, train=False))
+    params = model_init_fn({'params': params_rng}, xs)['params']
+    model_x = params['x']
 
-    model_x = flax_module.params['x']
+    def loss(params, inputs):
+      return model.training_cost(params, batch=inputs)
 
-    def loss(model, inputs):
-      return model(inputs)
-
-    grad_loss = jax.grad(loss)
+    grad_loss = jax.grad(loss, has_aux=True)
 
     hessian = np.diag(
         np.array([
@@ -292,7 +306,7 @@ class ModelsTest(parameterized.TestCase):
     # NQM gradient = Hx + eps   where eps ~ N(0, C / batch_size).
     expected_grad = np.dot(hessian, model_x) + mean_noise
 
-    g = grad_loss(flax_module, noise_eps).params['x']
+    g = grad_loss(params, {'inputs': noise_eps})[0]['x']
 
     grad_error = np.sum(np.abs(g - expected_grad))
     self.assertAlmostEqual(grad_error, 0.0, places=5)
@@ -307,31 +321,34 @@ class ModelsTest(parameterized.TestCase):
     metrics = 'binary_autoencoder_metrics'
     hps = copy.copy(model_hps)
     hps.update({'output_shape': OUTPUT_SHAPE[model_str]})
-    rng = jax.random.PRNGKey(0)
+    params_rng = jax.random.PRNGKey(0)
     model = model_cls(hps, {}, loss, metrics)
     xs = jnp.array(np.random.normal(size=INPUT_SHAPE[model_str]))
-    rng, params_rng = jax.random.split(rng)
-    with nn.stateful() as batch_stats:
-      with nn.stochastic(params_rng):
-        _, flax_module = model.flax_module_def.create(params_rng, xs)
+    model_init_fn = jax.jit(
+        functools.partial(model.flax_module.init, train=False))
+    init_dict = model_init_fn({'params': params_rng}, xs)
+    params = init_dict['params']
+    batch_stats = init_dict.get('batch_stats', {})
 
     # Check that the forward pass works with mutated batch_stats.
-    with nn.stateful(batch_stats) as new_batch_stats:
-      with nn.stochastic(params_rng):
-        outputs = flax_module(xs)
-        self.assertEqual(
-            outputs.shape,
-            tuple([INPUT_SHAPE[model_str][0]] + list(OUTPUT_SHAPE[model_str])))
+    outputs, new_batch_stats = model.flax_module.apply(
+        {'params': params, 'batch_stats': batch_stats},
+        xs,
+        mutable=['batch_stats'],
+        train=True)
+    self.assertEqual(
+        outputs.shape,
+        tuple([INPUT_SHAPE[model_str][0]] + list(OUTPUT_SHAPE[model_str])))
 
     # If it's a batch norm model check the batch stats changed.
-    if batch_stats.as_dict():
+    if batch_stats:
       bflat, _ = ravel_pytree(batch_stats)
       new_bflat, _ = ravel_pytree(new_batch_stats)
       self.assertFalse(jnp.array_equal(bflat, new_bflat))
 
     # Test batch_norm in inference mode.
-    with nn.stateful(batch_stats, mutable=False):
-      outputs = flax_module(xs, train=False)
+    outputs = model.flax_module.apply(
+        {'params': params, 'batch_stats': batch_stats}, xs, train=False)
     self.assertEqual(
         outputs.shape,
         tuple([INPUT_SHAPE[model_str][0]] + list(OUTPUT_SHAPE[model_str])))
@@ -346,6 +363,7 @@ class ModelsTest(parameterized.TestCase):
     model_hps.update({'output_shape': output_shape})
     model_cls = models.get_model(model_str)
     rng = jax.random.PRNGKey(0)
+    dropout_rng, params_rng = jax.random.split(rng)
     loss = 'sigmoid_binary_cross_entropy'
     metrics = 'binary_classification_metrics'
     model = model_cls(model_hps, {}, loss, metrics)
@@ -362,16 +380,20 @@ class ModelsTest(parameterized.TestCase):
     inputs = inputs._replace(
         edges=np.ones((num_graphs * edge_per_graph,) + edge_input_shape))
     padded_inputs = jraph.pad_with_graphs(inputs, 20, 50, 7)
-    rng, params_rng = jax.random.split(rng)
-    with nn.stateful() as batch_stats:
-      _, flax_module = model.flax_module_def.create(
-          params_rng, padded_inputs, train=False)
+    model_init_fn = jax.jit(
+        functools.partial(model.flax_module.init, train=False))
+    init_dict = model_init_fn({'params': params_rng}, padded_inputs)
+    params = init_dict['params']
+    batch_stats = init_dict['batch_stats']
 
     # Check that the forward pass works with mutated batch_stats.
-    with nn.stateful(batch_stats) as _:
-      with nn.stochastic(params_rng):
-        outputs = flax_module(padded_inputs)
-        self.assertEqual(outputs.shape, (7,) + output_shape)
+    outputs, _ = model.flax_module.apply(
+        {'params': params, 'batch_stats': batch_stats},
+        padded_inputs,
+        mutable=['batch_stats'],
+        rngs={'dropout': dropout_rng},
+        train=True)
+    self.assertEqual(outputs.shape, (7,) + output_shape)
 
 
 if __name__ == '__main__':

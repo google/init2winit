@@ -17,6 +17,7 @@ r"""Tests for initializers.py.
 
 """
 import copy
+import functools
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -57,10 +58,12 @@ def _load_model(model_name):
   model = model_cls(hps, {}, loss_name, metrics_name)
 
   input_shape = (BATCH_SIZE,) + MODEL_TO_INPUT_SHAPE[model_name]
-  _, flax_module = model.flax_module_def.create_by_shape(
-      rng, [input_shape], train=True)
-  utils.log_pytree_shape_and_statistics(flax_module.params)
-  return flax_module, input_shape, hps
+  model_init_fn = jax.jit(functools.partial(model.flax_module.init, train=True))
+  init_dict = model_init_fn({'params': rng}, jnp.zeros(input_shape))
+  # Trainable model parameters.
+  params = init_dict['params']
+  utils.log_pytree_shape_and_statistics(params)
+  return model.flax_module, params, input_shape, hps
 
 
 class InitializersTest(parameterized.TestCase):
@@ -71,24 +74,26 @@ class InitializersTest(parameterized.TestCase):
     """Test that each initializer runs, and the output is a valid pytree."""
 
     rng = jax.random.PRNGKey(0)
-    flax_module, input_shape, model_hps = _load_model('fully_connected')
+    flax_module, params, input_shape, model_hps = _load_model('fully_connected')
     _, init_rng = jax.random.split(rng)
     initializer = initializers.get_initializer(init)
     init_hps = initializers.get_initializer_hparams(init)
     init_hps.update(model_hps)
     loss_name = 'cross_entropy'
     loss_fn = losses.get_loss_fn(loss_name)
-    new_model = initializer(
+    new_params = initializer(
         loss_fn=loss_fn,
-        model=flax_module,
+        flax_module=flax_module,
+        params=params,
         hps=init_hps,
         input_shape=input_shape[1:],
         output_shape=OUTPUT_SHAPE,
         rng_key=init_rng)
 
     # Check new params are still valid params
-    outputs = new_model(jnp.ones(input_shape))
-    utils.log_pytree_shape_and_statistics(new_model.params)
+    outputs = flax_module.apply(
+        {'params': new_params}, jnp.ones(input_shape), train=True)
+    utils.log_pytree_shape_and_statistics(new_params)
     self.assertEqual(outputs.shape, (input_shape[0], OUTPUT_SHAPE[-1]))
 
   @parameterized.named_parameters(('test_{}'.format(model_name), model_name)
@@ -97,16 +102,16 @@ class InitializersTest(parameterized.TestCase):
     """Test that meta_init does not update the bias scalars."""
 
     rng = jax.random.PRNGKey(0)
-    flax_module, input_shape, _ = _load_model(model_name)
+    flax_module, params, input_shape, _ = _load_model(model_name)
     norms = jax.tree_map(lambda node: jnp.linalg.norm(node.reshape(-1)),
-                         flax_module.params)
+                         params)
     normalized_params = jax.tree_map(meta_init.normalize,
-                                     flax_module.params)
+                                     params)
     loss_name = 'cross_entropy'
     loss_fn = losses.get_loss_fn(loss_name)
     learned_norms, _ = meta_init.meta_optimize_scales(
         loss_fn=loss_fn,
-        fprop=flax_module.module.call,
+        fprop=flax_module.apply,
         normalized_params=normalized_params,
         norms=norms,
         hps=meta_init.DEFAULT_HPARAMS,
@@ -125,28 +130,29 @@ class InitializersTest(parameterized.TestCase):
     """Test that sparse_init produces sparse params."""
 
     rng = jax.random.PRNGKey(0)
-    flax_module, input_shape, model_hps = _load_model('fully_connected')
+    flax_module, params, input_shape, model_hps = _load_model('fully_connected')
     non_zero_connection_weights = 3
     init_hps = sparse_init.DEFAULT_HPARAMS
     init_hps['non_zero_connection_weights'] = non_zero_connection_weights
     init_hps.update(model_hps)
     loss_name = 'cross_entropy'
     loss_fn = losses.get_loss_fn(loss_name)
-    new_model = sparse_init.sparse_init(
+    new_params = sparse_init.sparse_init(
         loss_fn=loss_fn,
-        model=flax_module,
+        flax_module=flax_module,
+        params=params,
         hps=init_hps,
         input_shape=input_shape[1:],
         output_shape=OUTPUT_SHAPE,
         rng_key=rng)
 
     # Check new params are sparse
-    for key in new_model.params:
-      num_units = new_model.params[key]['kernel'].shape[0]
+    for key in new_params:
+      num_units = new_params[key]['kernel'].shape[0]
       self.assertEqual(
-          jnp.count_nonzero(new_model.params[key]['kernel']),
+          jnp.count_nonzero(new_params[key]['kernel']),
           num_units * non_zero_connection_weights)
-      self.assertEqual(jnp.count_nonzero(new_model.params[key]['bias']), 0)
+      self.assertEqual(jnp.count_nonzero(new_params[key]['bias']), 0)
 
 
 if __name__ == '__main__':

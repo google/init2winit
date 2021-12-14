@@ -16,7 +16,6 @@
 # Lint as: python3
 """Base class for all classification models."""
 
-from flax.deprecated import nn
 from init2winit.model_lib import losses
 from init2winit.model_lib import metrics
 from init2winit.model_lib import model_utils
@@ -25,7 +24,7 @@ from jax.nn import one_hot
 import jax.numpy as jnp
 
 
-def _evaluate_batch(flax_module, batch_stats, batch, metrics_bundle,
+def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
                     apply_one_hot_in_loss):
   """Evaluates metrics on the given batch.
 
@@ -39,8 +38,11 @@ def _evaluate_batch(flax_module, batch_stats, batch, metrics_bundle,
   the mean of each metric.
 
   Args:
-    flax_module: A flax.nn.Module
-    batch_stats: A flax.nn.Collection object tracking batch_stats.
+    flax_module: the Flax linen.nn.Module.
+    params: A dict of trainable model parameters. Passed as {'params': params}
+      into flax_module.apply().
+    batch_stats: A dict of non-trainable model state. Passed as
+      {'batch_stats': batch_stats} into flax_module.apply().
     batch: A dictionary with keys 'inputs', 'targets', 'weights'.
     metrics_bundle: A group of metrics to use for evaluation.
     apply_one_hot_in_loss: Indicates whether or not the targets are one hot
@@ -49,10 +51,10 @@ def _evaluate_batch(flax_module, batch_stats, batch, metrics_bundle,
   Returns:
     A dictionary with the same keys as metrics, but mapping to the summed metric
     across the sharded batch_dim.
-
   """
-  with nn.stateful(batch_stats, mutable=False):
-    logits = flax_module(batch['inputs'], train=False)
+  variables = {'params': params, 'batch_stats': batch_stats}
+  logits = flax_module.apply(
+      variables, batch['inputs'], mutable=False, train=False)
   targets = batch['targets']
 
   if apply_one_hot_in_loss:
@@ -81,6 +83,7 @@ def _evaluate_batch(flax_module, batch_stats, batch, metrics_bundle,
 
 
 def _predict_batch(flax_module,
+                   params,
                    batch_stats,
                    batch,
                    output_activation_fn=None):
@@ -89,16 +92,19 @@ def _predict_batch(flax_module,
   NOTE: We assume that batch_stats has been sync'ed.
 
   Args:
-    flax_module: A flax.nn.Module
-    batch_stats: A flax.nn.Collection object tracking batch_stats.
+    flax_module: the evaluation Flax nn.Module (with train=False).
+    params: A dict of trainable model parameters. Passed as {'params': params}
+      into flax_module.apply().
+    batch_stats: A dict of non-trainable model state. Passed as
+      {'batch_stats': batch_stats} into flax_module.apply().
     batch: A dictionary with keys 'inputs', 'targets', 'weights'.
     output_activation_fn: An output activation function from jax.nn.functions
 
   Returns:
     An array of shape [batch_size, num_classes] that contains all the logits.
   """
-  with nn.stateful(batch_stats, mutable=False):
-    logits = flax_module(batch['inputs'], train=False)
+  variables = {'params': params, 'batch_stats': batch_stats}
+  logits = flax_module.apply(variables, batch['inputs'], mutable=False)
   if output_activation_fn:
     return output_activation_fn(logits)
   return logits
@@ -140,17 +146,33 @@ class BaseModel(object):
   training_cost defines a loss with weight decay, where the
   weight decay factor is determined by hps.l2_decay_factor.
 
-  flax_module_def is returned from the build_flax_module function. A typical
+  flax_module is returned from the build_flax_module function. A typical
   usage pattern will be:
-
+  ```
     model, hps = model_lib.get_model('fully_connected')
     ...  # possibly modify the default hps.
     model = model(hps, dataset.meta_data)
-    with nn.stateful(batch_stats) as new_batch_stats:
-      _, flax_module = model.flax_module_def.create(
-          params_rng, inputs, batch_stats=new_batch_stats)
+    model_init_fn = jax.jit(functools.partial(flax_module.init, train=False))
+    init_dict = model_init_fn(
+        {'params': params_rng, 'dropout': dropout_rng},
+        fake_input_batch)
+    # Trainable model parameters.
+    params = init_dict['params']
+    batch_stats = init_dict.get('batch_stats', {})
 
-    logits = flax_module(inputs)  # this is how to call the model fprop.
+    # this is how to call the model fprop.
+    logits, vars = flax_module.apply(
+        {'params': params, 'batch_stats': batch_stats},
+        batch,
+        mutable=['batch_stats'],
+        rngs={'dropout': dropout_rng},
+        train=True))
+    new_batch_stats = vars['batch_stats']
+  ```
+
+  Note for models without batch norm, `flax_module.apply` will only return a
+  single value (logits). See the Flax docs for more info:
+  https://flax.readthedocs.io/en/latest/flax.linen.html#flax.linen.Module.apply.
   """
 
   def __init__(self, hps, dataset_meta_data, loss_name, metrics_name):
@@ -159,30 +181,46 @@ class BaseModel(object):
     self.loss_fn = losses.get_loss_fn(loss_name)
     self.output_activation_fn = losses.get_output_activation_fn(loss_name)
     self.metrics_bundle = metrics.get_metrics(metrics_name)
-    self.flax_module_def = self.build_flax_module()
+    self.flax_module = self.build_flax_module()
 
-  def evaluate_batch(self, flax_module, batch_stats, batch):
+  def evaluate_batch(self, params, batch_stats, batch):
     """Evaluates metrics under self.metrics_name on the given batch."""
-    return _evaluate_batch(flax_module, batch_stats, batch, self.metrics_bundle,
-                           self.dataset_meta_data['apply_one_hot_in_loss'])
+    return _evaluate_batch(
+        self.flax_module,
+        params,
+        batch_stats,
+        batch,
+        self.metrics_bundle,
+        self.dataset_meta_data['apply_one_hot_in_loss'])
 
   def predict_batch(self,
-                    flax_module,
+                    params,
                     batch_stats,
                     batch,
                     apply_output_activation_fn=False):
     """Returns predictions from all the model outputs on the given batch."""
     if apply_output_activation_fn:
-      return _predict_batch(flax_module, batch_stats, batch,
+      return _predict_batch(self.flax_module, batch_stats, batch,
                             self.output_activation_fn)
     else:
-      return _predict_batch(flax_module, batch_stats, batch)
+      return _predict_batch(self.flax_module, params, batch_stats, batch)
 
-  def training_cost(self, flax_module, batch_stats, batch, dropout_rng):
-    """Return loss with an L2 penalty on the weights."""
-    with nn.stateful(batch_stats) as new_batch_stats:
-      with nn.stochastic(dropout_rng):
-        logits = flax_module(batch['inputs'], train=True)
+  def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
+    """Return loss with an optional L2 penalty on the weights."""
+    all_variables = {'params': params}
+    apply_kwargs = {'train': True}
+
+    if batch_stats is not None:
+      all_variables['batch_stats'] = batch_stats
+      apply_kwargs['mutable'] = ['batch_stats']
+
+    if dropout_rng is not None:
+      apply_kwargs['rngs'] = {'dropout': dropout_rng}
+
+    # For more information on flax.linen.Module.apply, see the docs at
+    # https://flax.readthedocs.io/en/latest/flax.linen.html#flax.linen.Module.apply.
+    logits, new_batch_stats = self.flax_module.apply(
+        all_variables, batch['inputs'], **apply_kwargs)
     weights = batch.get('weights')
     targets = batch['targets']
     if self.dataset_meta_data['apply_one_hot_in_loss']:
@@ -194,15 +232,16 @@ class BaseModel(object):
     total_loss = self.loss_fn(logits, targets, weights)
 
     if self.hps.get('l2_decay_factor'):
-      l2_loss = model_utils.l2_regularization(flax_module.params,
+      l2_loss = model_utils.l2_regularization(params,
                                               self.hps.l2_decay_rank_threshold)
       total_loss += 0.5 * self.hps.l2_decay_factor * l2_loss
 
-    return total_loss, (new_batch_stats)
+    return total_loss, new_batch_stats
 
   def get_fake_batch(self, hps):
     del hps
     return None
 
   def build_flax_module(self):
+    """The flax module must accept a kwarg `train` in `__call__`."""
     raise NotImplementedError('Subclasses must implement build_flax_module().')

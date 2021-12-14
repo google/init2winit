@@ -21,7 +21,6 @@ import copy
 from functools import partial  # pylint: disable=g-importing-member
 
 from absl.testing import absltest
-from flax.deprecated import nn
 from init2winit.model_lib import models
 from init2winit.optimizer_lib.hessian_free import cg_backtracking
 from init2winit.optimizer_lib.hessian_free import gvp
@@ -152,8 +151,9 @@ class HessianFreeTest(absltest.TestCase):
     targets = inputs.reshape(tuple([inputs.shape[0]] + list(output_shape)))
     batch = {'inputs': inputs, 'targets': targets}
 
-    def forward_fn(params, inputs):
-      return nn.base.Model(model.flax_module_def, params)(inputs)
+    def forward_fn(variables, inputs):
+      logits = model.flax_module.apply(variables, inputs, train=False)
+      return logits
 
     def opt_cost(params):
       return model.loss_fn(forward_fn(params, inputs), targets)
@@ -187,11 +187,12 @@ class HessianFreeTest(absltest.TestCase):
 
     flattened_p, obj_val = cg_backtracking(p_arr, p_arr_idx,
                                            partial_forward_fn,
-                                           partial_loss_fn, params,
+                                           partial_loss_fn, {'params': params},
                                            unravel_fn)
-    # Test the backtracking function
+    # Test the backtracking function.
     self.assertSameElements(flattened_p, p1)
-    self.assertEqual(opt_cost(apply_updates(params, unravel_fn(p1))), obj_val)
+    updated_params = apply_updates(params, unravel_fn(p1))
+    self.assertEqual(opt_cost({'params': updated_params}), obj_val)
 
   def test_hessian_free_optimizer(self):
     """Tests the Hessian-free optimizer."""
@@ -220,13 +221,14 @@ class HessianFreeTest(absltest.TestCase):
     targets = inputs.reshape(tuple([inputs.shape[0]] + list(output_shape)))
     batch = {'inputs': inputs, 'targets': targets}
 
-    def forward_fn(params, inputs):
-      return nn.base.Model(model.flax_module_def, params)(inputs)
+    def forward_fn(variables, inputs):
+      logits = model.flax_module.apply(variables, inputs, train=True)
+      return logits
 
-    def opt_cost(params):
-      return model.loss_fn(forward_fn(params, inputs), targets)
+    def opt_cost(variables):
+      return model.loss_fn(forward_fn(variables, inputs), targets)
 
-    optimizer = hessian_free(model.flax_module_def, model.loss_fn)
+    optimizer = hessian_free(model.flax_module, model.loss_fn)
 
     params = {
         'Dense_0': {
@@ -238,11 +240,12 @@ class HessianFreeTest(absltest.TestCase):
             'bias': jnp.array([0., 0., 0., 0.])
         }
     }
+    variables = {'params': params}
 
     grad_fn = jax.grad(opt_cost)
-    grads = grad_fn(params)
+    grads = grad_fn(variables)['params']
 
-    outputs = forward_fn(params, batch['inputs'])
+    outputs = forward_fn(variables, batch['inputs'])
 
     n = inputs.shape[0]
     m = outputs.shape[-1]
@@ -255,10 +258,10 @@ class HessianFreeTest(absltest.TestCase):
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
     partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
 
-    matmul_fn = partial(gvp, params, outputs, state.damping, partial_forward_fn,
-                        partial_loss_fn)
+    matmul_fn = partial(gvp, variables, outputs, state.damping,
+                        partial_forward_fn, partial_loss_fn)
 
-    jacobian = jax.jacfwd(partial_forward_fn)(params)
+    jacobian = jax.jacfwd(partial_forward_fn)(variables)['params']
     jacobian_tensor = np.concatenate((
         jacobian['Dense_0']['bias'].reshape(n, m, -1),
         jacobian['Dense_0']['kernel'].reshape(n, m, -1),
@@ -279,7 +282,7 @@ class HessianFreeTest(absltest.TestCase):
     self.assertAlmostEqual(
         jnp.linalg.norm(matmul_fn(v) - expected), 0, places=4)
 
-    p, state = optimizer.update(grads, state, (params, batch))
+    p, state = optimizer.update(grads, state, (variables, batch))
 
     # Test the damping parameter update
     self.assertEqual(state.damping, 3/2)

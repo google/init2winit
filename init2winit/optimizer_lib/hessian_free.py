@@ -18,7 +18,6 @@
 from functools import partial  # pylint: disable=g-importing-member
 import math
 from typing import NamedTuple
-from flax import nn
 import jax
 from jax import jit
 from jax import jvp
@@ -281,11 +280,12 @@ def hvp(f, x, v):
   return jax.jvp(jax.grad(f), [x], [v])[1]
 
 
-def gvp(params, outputs, damping, forward_fn, loss_fn, v):
+def gvp(variables, outputs, damping, forward_fn, loss_fn, v):
   """Returns the product of generalized Gauss-Newton matrix and a vector.
 
   Args:
-    params: A pytree of parameters.
+    variables: A dict of variables is passed directly into flax_module.apply,
+      required to have a key 'params' that is a pytree of model parameters.
     outputs: A numpy vector of network outputs computed by forward_fn(params).
     damping: A damping parameter.
     forward_fn: A function that maps params to outputs.
@@ -295,14 +295,15 @@ def gvp(params, outputs, damping, forward_fn, loss_fn, v):
   Returns:
     The product of Generalized Gauss-Newton matrix and a vector
   """
-  _, unravel_fn = ravel_pytree(params)
-  jv = jvp(forward_fn, [params], [unravel_fn(v)])[1]
+  _, unravel_fn = ravel_pytree(variables)
+  jv = jvp(forward_fn, [variables], [unravel_fn(v)])[1]
   hjv = hvp(loss_fn, outputs, jv)
-  gvp_fn = vjp(forward_fn, params)[1]
+  gvp_fn = vjp(forward_fn, variables)[1]
   return ravel_pytree(gvp_fn(hjv)[0])[0] + damping * v
 
 
-def cg_backtracking(p_arr, p_arr_idx, forward_fn, loss_fn, params, unravel_fn):
+def cg_backtracking(
+    p_arr, p_arr_idx, forward_fn, loss_fn, variables, unravel_fn):
   """Backtracks CG iterates (Section 4.6, Martens (2010)).
 
   This function iteratively compares the function values of two consecutive
@@ -317,15 +318,29 @@ def cg_backtracking(p_arr, p_arr_idx, forward_fn, loss_fn, params, unravel_fn):
     p_arr_idx: The index of the last element in p_arr.
     forward_fn: A function that maps params to outputs.
     loss_fn: A function that maps outputs to a loss value.
-    params: A pytree of parameters.
+    variables: A dict of variables is passed directly into flax_module.apply,
+      required to have a key 'params' that is a pytree of model parameters.
     unravel_fn: A function that maps a numpy vector of shape (n,) to a pytree.
 
   Returns:
     The backtracked iterate as a pytree and a vector with its function value.
   """
-  # initialize the search direction and compute the objective value along it.
+  # Initialize the search direction and compute the objective value along it.
   flattened_p = p_arr[p_arr_idx]
-  obj_val = loss_fn(forward_fn(apply_updates(params, unravel_fn(flattened_p))))
+
+  # We need to make a new dict in order to avoid possible unintended
+  # side-effects in the calling function that could happen if we reassigned the
+  # keys of "variables", but to avoid copying all the (possibly large) values in
+  # the original "variables" we reassign them in the new dict instead of using
+  # copy.deepcopy. We should only be calling with train=False in the forward_fn
+  # so there should not be any updates to possible "batch_stats" in variables.
+  updated_variables = {
+      'params': apply_updates(variables['params'], unravel_fn(flattened_p))
+  }
+  for k, v in variables.items():
+    if k != 'params':
+      updated_variables[k] = v
+  obj_val = loss_fn(forward_fn(updated_variables))
 
   def termination_condition_cg_backtracking(state):
     *_, idx, keep_backtracking = state
@@ -335,15 +350,21 @@ def cg_backtracking(p_arr, p_arr_idx, forward_fn, loss_fn, params, unravel_fn):
     """One step of cg backtracking iteration."""
     flattened_p, obj_val, idx, keep_backtracking = state
 
-    # compute the objective value for the iterate to be compared with
+    # Compute the objective value for the iterate to be compared with.
     flattened_p_prev = p_arr[idx]
-    obj_val_prev = loss_fn(
-        forward_fn(apply_updates(params, unravel_fn(flattened_p_prev))))
+    updated_variables = {
+        'params': apply_updates(
+            variables['params'], unravel_fn(flattened_p_prev))
+    }
+    for k, v in variables.items():
+      if k != 'params':
+        updated_variables[k] = v
+    obj_val_prev = loss_fn(forward_fn(updated_variables))
 
-    # compare the objective values
+    # Compare the objective values.
     keep_backtracking = jnp.greater_equal(obj_val, obj_val_prev)
 
-    # update flattened_p and obj_val if obj_val >= obj_val_prev
+    # Update flattened_p and obj_val if obj_val >= obj_val_prev.
     flattened_p = jnp.where(keep_backtracking, flattened_p_prev, flattened_p)
     obj_val = jnp.where(keep_backtracking, obj_val_prev, obj_val)
 
@@ -366,7 +387,7 @@ class HessianFreeState(NamedTuple):
   damping: float
 
 
-def hessian_free(flax_module_def,
+def hessian_free(flax_module,
                  loss_fn,
                  learning_rate=1.0,
                  max_iter=100,
@@ -376,7 +397,7 @@ def hessian_free(flax_module_def,
   """Hessian-free optimizer.
 
   Args:
-    flax_module_def: A flax module definition.
+    flax_module: A flax linen.nn.module.
     loss_fn: A loss function.
     learning_rate: A learning rate.
     max_iter: The number of CG iterations.
@@ -395,21 +416,33 @@ def hessian_free(flax_module_def,
         damping=1)
 
   @jit
-  def update_fn(grads, state, params_batch_tuple):
-    """Transforms the grads and updates the HessianFreeState object."""
-    params, batch = params_batch_tuple
+  def update_fn(grads, state, variables_batch_tuple):
+    """Transforms the grads and updates the HessianFreeState object.
 
-    def forward_fn(params, inputs):
-      return nn.base.Model(flax_module_def, params)(inputs)
+    Args:
+      grads: pytree of model parameter gradients.
+      state: optimizer state (damping and p0 are the used attributes).
+      variables_batch_tuple: a tuple of (Dict[str, Any], batch) where the dict
+        of variables is passed directly into flax_module.apply, and batch is the
+        current minibatch. It is required to have a key 'params'. We need to put
+        these into a tuple here so that we can be compatible with the optax API.
 
-    outputs = forward_fn(params, batch['inputs'])
+    Returns:
+      A tuple of (pytree of the model updates, new HessianFreeState).
+    """
+    variables, batch = variables_batch_tuple
+
+    def forward_fn(variables, inputs):
+      return flax_module.apply(variables, inputs, train=False)
+
+    outputs = forward_fn(variables, batch['inputs'])
     flattened_grads, unravel_fn = ravel_pytree(grads)
 
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
     partial_loss_fn = partial(loss_fn, targets=batch['targets'])
 
-    matmul_fn = partial(gvp, params, outputs, state.damping, partial_forward_fn,
-                        partial_loss_fn)
+    matmul_fn = partial(gvp, variables, outputs, state.damping,
+                        partial_forward_fn, partial_loss_fn)
     p_arr, p_arr_idx = mf_conjgrad_solver(matmul_fn, -flattened_grads, state.p0,
                                           max_iter, tol,
                                           residual_refresh_frequency, None,
@@ -420,9 +453,11 @@ def hessian_free(flax_module_def,
     # CG backtracking uses a logarithmic amount of memory to save CG iterates.
     # If this causes OOM, we can consider computing the objective value at
     # each save step in the CG loop and keeping the best one.
-    flattened_p, obj_val = cg_backtracking(p_arr, p_arr_idx,
+    flattened_p, obj_val = cg_backtracking(p_arr,
+                                           p_arr_idx,
                                            partial_forward_fn,
-                                           partial_loss_fn, params,
+                                           partial_loss_fn,
+                                           variables,
                                            unravel_fn)
 
     # update the damping parameter

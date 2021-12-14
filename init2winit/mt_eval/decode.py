@@ -373,15 +373,14 @@ def beam_search(inputs,
 
 
 def decode_step(batch,
-                model,
+                flax_module,
+                params,
                 cache,
                 max_decode_len,
                 eos_id=EOS_ID,
-                use_bfloat16=False,
                 beam_size=4):
   """Predict translation with fast decoding beam search on a batch."""
   inputs = batch['inputs']
-  batch_size = inputs.shape[0]
 
   # Prepare transformer fast-decoder call for beam search: for beam search, we
   # need to set up our decoder model to handle a batch size equal to
@@ -389,26 +388,27 @@ def decode_step(batch,
   # rather than tiled.
   # i.e. if we denote each batch element subtensor as el[n]:
   # [el0, el1, el2] --> beamsize=2 --> [el0,el0,el1,el1,el2,el2]
-  src_padding_mask = flat_batch_beam_expand((inputs > 0)[..., None], beam_size)
-  tgt_padding_mask = flat_batch_beam_expand(
-      jnp.ones((batch_size, 1, 1)), beam_size)
-  encoded_inputs = flat_batch_beam_expand(
-      model.encode(inputs, use_bfloat16=use_bfloat16, train=False, cache=None),
-      beam_size)
+  encoded_inputs = flax_module.apply(
+      {'params': params},
+      inputs,
+      train=False,
+      method=flax_module.encode)
+  encoded_inputs = flat_batch_beam_expand(encoded_inputs, beam_size)
 
   def tokens_ids_to_logits(flat_ids, flat_cache):
     """Token slice to logits from decoder model."""
     # --> [batch * beam, 1, vocab]
-    with flat_cache.mutate() as new_flat_cache:
-      flat_logits = model.decode(
-          encoded_inputs,
-          src_padding_mask,
-          flat_ids,
-          cache=new_flat_cache,
-          shift=False,
-          train=False,
-          use_bfloat16=use_bfloat16,
-          tgt_padding_mask=tgt_padding_mask)
+    flat_logits, new_vars = flax_module.apply(
+        {'params': params, 'cache': flat_cache},
+        encoded=encoded_inputs,
+        # Tile the inputs so that they have the same leading dim as flat_ids so
+        # that the masking that is calculated from them is correctly shaped.
+        inputs=jnp.tile(inputs, (beam_size, 1)),
+        targets=flat_ids,
+        train=False,
+        mutable=['cache'],
+        method=flax_module.decode)
+    new_flat_cache = new_vars['cache']
     # Remove singleton sequence-length dimension:
     # [batch * beam, 1, vocab] --> [batch * beam, vocab]
     flat_logits = flat_logits.squeeze(axis=1)

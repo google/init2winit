@@ -32,14 +32,16 @@ from ml_collections.config_dict import config_dict
 # pylint: disable=unused-argument
 def noop(
     loss_fn=None,
-    model=None,
+    flax_module=None,
+    params=None,
     hps=None,
     input_shape=None,
     output_shape=None,
     rng_key=None,
     metrics_logger=None,
 ):
-  return model
+  """No-op init."""
+  return params
 # pylint: enable=unused-argument
 
 DEFAULT_HPARAMS = config_dict.ConfigDict()

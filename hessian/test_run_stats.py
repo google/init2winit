@@ -17,6 +17,7 @@
 
 """
 
+import functools
 import os
 import shutil
 import tempfile
@@ -24,7 +25,7 @@ import tempfile
 from absl import flags
 from absl.testing import absltest
 from flax import jax_utils
-from flax.deprecated import nn
+from flax import linen as nn
 from init2winit import checkpoint
 from init2winit import hyperparameters
 from init2winit import trainer
@@ -67,7 +68,7 @@ CONFIG = {
     'num_eigens': 3}
 
 
-def _batch_square_loss(flax_module, batch):
+def _batch_square_loss(flax_module, params, batch):
   """Helper function to compute square loss of model on the given batch.
 
   The function computes frac{1}{B} sum_{i=1}^B (y - hat{y})^2 where B is the
@@ -75,6 +76,7 @@ def _batch_square_loss(flax_module, batch):
 
   Args:
     flax_module: The flax module representing the model.
+    params: The model parameters.
     batch: A dictionary with keys 'inputs' and 'targets'.
 
   Returns:
@@ -83,7 +85,8 @@ def _batch_square_loss(flax_module, batch):
   batch, rng = batch
   del rng
   batch_size = batch['targets'].shape[0]
-  preds = flax_module(batch['inputs']).reshape((batch_size, -1))
+  preds = flax_module.apply(
+      {'params': params}, batch['inputs'], train=True).reshape((batch_size, -1))
   batch_targets = batch['targets'].reshape((batch_size, -1))
   square_loss = jnp.mean(jnp.sum(jnp.square(preds - batch_targets), axis=1))
   total_loss = square_loss
@@ -97,10 +100,13 @@ class LinearModel(nn.Module):
   [batch_size_per_device, feature_dim]. The model flatten the input before
   applying a dense layer.
   """
+  num_outputs: int
 
-  def apply(self, x, num_outputs):
+  @nn.compact
+  def __call__(self, x, train):
+    del train
     x = jnp.reshape(x, (x.shape[0], -1))
-    x = nn.Dense(x, features=num_outputs, bias=False)
+    x = nn.Dense(features=self.num_outputs, use_bias=False)(x)
     return x
 
 
@@ -155,32 +161,32 @@ class TrainerTest(absltest.TestCase):
     num_examples = 2048
 
     def create_model(key):
-      module = LinearModel.partial(num_outputs=num_outputs)
-      _, init = module.init_by_shape(key,
-                                     [((self.batch_size, self.feature_dim),
-                                       jnp.float32)])
-      model = nn.Model(module, init)
-      return model
+      flax_module = LinearModel(num_outputs=num_outputs)
+      model_init_fn = jax.jit(functools.partial(flax_module.init, train=False))
+      fake_input_batch = np.zeros((self.batch_size, self.feature_dim))
+      init_dict = model_init_fn({'params': key}, fake_input_batch)
+      params = init_dict['params']
+      return flax_module, params
 
-    model = create_model(rng)
+    flax_module, params = create_model(rng)
     # Linear model coefficients
-    self.beta = model.params['Dense_0']['kernel']
+    self.beta = params['Dense_0']['kernel']
     self.beta = self.beta.reshape((self.feature_dim, 1))
     self.beta = self.beta.astype(np.float32)
 
     optimizer_init_fn, self.optimizer_update_fn = optax.sgd(1.0)
-    self.optimizer_state = jax_utils.replicate(optimizer_init_fn(model.params))
-    self.flax_module = jax_utils.replicate(model)
+    self.optimizer_state = jax_utils.replicate(optimizer_init_fn(params))
+    self.params = jax_utils.replicate(params)
 
     data_class, self.feature, self.y = _get_synth_data(num_examples,
                                                        self.feature_dim,
                                                        num_outputs,
                                                        self.batch_size)
     self.evaluator = hessian_eval.CurvatureEvaluator(
-        self.flax_module,
+        self.params,
         CONFIG,
         dataset=data_class(),
-        loss=_batch_square_loss)
+        loss=functools.partial(_batch_square_loss, flax_module))
     # Computing the exact full-batch quantities from the linear model
     num_obs = CONFIG['num_batches'] * self.batch_size
     xb = self.feature[:num_obs, :]
@@ -303,7 +309,7 @@ class TrainerTest(absltest.TestCase):
     num_draws = CONFIG['num_eval_draws']
 
     grads, _ = self.evaluator.compute_dirs(
-        self.flax_module, self.optimizer_state, self.optimizer_update_fn)
+        self.params, self.optimizer_state, self.optimizer_update_fn)
     # Assert both full and mini batch gradients are accurate
     for i in range(num_draws + 1):
       dir_vec = _to_vec(grads[i])[:, 0]
@@ -332,11 +338,11 @@ class TrainerTest(absltest.TestCase):
     step = 0
 
     grads, _ = self.evaluator.compute_dirs(
-        self.flax_module, self.optimizer_state, self.optimizer_update_fn)
+        self.params, self.optimizer_state, self.optimizer_update_fn)
     _, q = np.linalg.eigh(self.hessian)
     evecs = [q[:, -k] for k in range(CONFIG['num_eigens'], 0, -1)]
     q = q[:, -CONFIG['num_eigens']:]
-    stats_row = self.evaluator.evaluate_stats(self.flax_module, grads, [],
+    stats_row = self.evaluator.evaluate_stats(self.params, grads, [],
                                               evecs, [], step)
     # Assert that the statistics are exact
     for i in range(num_draws + 1):
@@ -377,11 +383,11 @@ class TrainerTest(absltest.TestCase):
     num_points = CONFIG['num_points']
 
     grads, _ = self.evaluator.compute_dirs(
-        self.flax_module, self.optimizer_state, self.optimizer_update_fn)
+        self.params, self.optimizer_state, self.optimizer_update_fn)
     _, q = np.linalg.eigh(self.hessian)
     evecs = [q[:, -k] for k in range(CONFIG['num_eigens'], 0, -1)]
     q = q[:, -CONFIG['num_eigens']:]
-    interps_row = self.evaluator.compute_interpolations(self.flax_module,
+    interps_row = self.evaluator.compute_interpolations(self.params,
                                                         grads, [], evecs,
                                                         [], step)
 
@@ -418,8 +424,7 @@ class TrainerTest(absltest.TestCase):
     vec_counts = CONFIG['num_eigens']
     step = 0
     # Compute the spectra
-    row, hvex, cvex = self.evaluator.evaluate_spectrum(self.flax_module,
-                                                       step)
+    row, hvex, cvex = self.evaluator.evaluate_spectrum(self.params, step)
     # Comparing with the exact Hessian
     num_obs = num_batches * bs
     xb = self.feature[:num_obs, :]
@@ -476,10 +481,10 @@ class TrainerTest(absltest.TestCase):
     """Testing the statistics computed from optimizer's update directions."""
     step = 0
     grads, updates = self.evaluator.compute_dirs(
-        self.flax_module, self.optimizer_state, self.optimizer_update_fn)
-    stats_row = self.evaluator.evaluate_stats(self.flax_module,
+        self.params, self.optimizer_state, self.optimizer_update_fn)
+    stats_row = self.evaluator.evaluate_stats(self.params,
                                               grads, updates, [], [], step)
-    interps_row = self.evaluator.compute_interpolations(self.flax_module,
+    interps_row = self.evaluator.compute_interpolations(self.params,
                                                         grads, updates, [], [],
                                                         step)
 
@@ -538,30 +543,34 @@ class TrainerTest(absltest.TestCase):
     class QuadraticLoss(nn.Module):
       """Loss function which only depends on parameters."""
 
-      def apply(self, x):
+      @nn.compact
+      def __call__(self, x):
         del x
-        params = self.param('params', (n_params,), jax.random.normal)
-        return jnp.sum((params**2)*mat_diag)
+        w = self.param('w', jax.random.normal, (n_params,))
+        return jnp.sum((w ** 2) * mat_diag)
 
-    def loss(model, _):
-      return model(1.0)
+    flax_module = QuadraticLoss()
 
-    # model initialization
-    module = QuadraticLoss
-    _, init = module.init_by_shape(key, [((num_batches,), jnp.float32)])
-    model = nn.Model(module, init)
-    param_vec = model.params['params']
+    def loss(params, _):
+      # 1.0 is required but unused.
+      return flax_module.apply({'params': params}, 1.0)
+
+    # Model initialization.
+    model_init_fn = jax.jit(flax_module.init)
+    init_dict = model_init_fn(
+        {'params': key}, np.zeros((num_batches,), jnp.float32))
+    params = init_dict['params']
 
     # replicate
-    replicated_model = jax_utils.replicate(model)
+    replicated_params = jax_utils.replicate(params)
 
     curve_eval = hessian_eval.CurvatureEvaluator(
-        replicated_model,
+        replicated_params,
         eval_config,
         loss,
         dataset=None,
         batches_gen=batches_gen)
-    row, _, _ = curve_eval.evaluate_spectrum(replicated_model, 0)
+    row, _, _ = curve_eval.evaluate_spectrum(replicated_params, 0)
 
     tridiag = row['tridiag_hess_grad_overlap']
     eigs_triag, vecs_triag = np.linalg.eigh(tridiag)
@@ -572,7 +581,7 @@ class TrainerTest(absltest.TestCase):
 
     # Compute overlaps
     weights_triag = vecs_triag[0, :]**2
-    grad_true = 2 * param_vec * mat_diag
+    grad_true = 2 * params['w'] * mat_diag
     weight_idx = np.argsort(mat_diag)
     weights_true = (grad_true)**2 / jnp.dot(grad_true, grad_true)
     weights_true = weights_true[weight_idx]

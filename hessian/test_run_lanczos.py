@@ -36,16 +36,16 @@ import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
 
 
-class TrainerTest(absltest.TestCase):
-  """Tests training for 2 epochs on MNIST."""
+class RunLanczosTest(absltest.TestCase):
+  """Tests run_lanczos.py."""
 
   def setUp(self):
-    super(TrainerTest, self).setUp()
+    super(RunLanczosTest, self).setUp()
     self.test_dir = tempfile.mkdtemp()
 
   def tearDown(self):
     shutil.rmtree(self.test_dir)
-    super(TrainerTest, self).tearDown()
+    super(RunLanczosTest, self).tearDown()
 
   def test_run_lanczos(self):
     """Test training for two epochs on MNIST with a small model."""

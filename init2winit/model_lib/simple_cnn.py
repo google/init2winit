@@ -14,8 +14,9 @@
 # limitations under the License.
 
 """Simple convnet classifier."""
+from typing import Sequence
 
-from flax.deprecated import nn
+from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
@@ -53,26 +54,26 @@ class SimpleCNN(nn.Module):
 
   The model assumes the input shape is [batch, H, W, C].
   """
+  num_outputs: int
+  num_filters: Sequence[int]
+  kernel_sizes: Sequence[int]
+  activation_function: int
+  kernel_init: model_utils.Initializer = initializers.lecun_normal()
+  bias_init: model_utils.Initializer = initializers.zeros
 
-  def apply(self,
-            x,
-            num_outputs,
-            num_filters,
-            kernel_sizes,
-            activation_function,
-            kernel_init=initializers.lecun_normal(),
-            bias_init=initializers.zeros,
-            train=True):
-
-    for num_filters, kernel_size in zip(num_filters, kernel_sizes):
+  @nn.compact
+  def __call__(self, x, train):
+    for num_filters, kernel_size in zip(self.num_filters, self.kernel_sizes):
       x = nn.Conv(
-          x,
           num_filters, (kernel_size, kernel_size), (1, 1),
-          kernel_init=kernel_init,
-          bias_init=bias_init)
-      x = model_utils.ACTIVATIONS[activation_function](x)
+          kernel_init=self.kernel_init,
+          bias_init=self.bias_init)(x)
+      x = model_utils.ACTIVATIONS[self.activation_function](x)
     x = jnp.reshape(x, (x.shape[0], -1))
-    x = nn.Dense(x, num_outputs, kernel_init=kernel_init, bias_init=bias_init)
+    x = nn.Dense(
+        self.num_outputs,
+        kernel_init=self.kernel_init,
+        bias_init=self.bias_init)(x)
     return x
 
 
@@ -80,7 +81,7 @@ class SimpleCNNModel(base_model.BaseModel):
 
   def build_flax_module(self):
     """Simple CNN with a set of conv layers followed by fully connected layers."""
-    return SimpleCNN.partial(
+    return SimpleCNN(
         num_outputs=self.hps['output_shape'][-1],
         num_filters=self.hps.num_filters,
         kernel_sizes=self.hps.kernel_sizes,

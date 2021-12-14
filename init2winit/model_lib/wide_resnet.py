@@ -14,8 +14,9 @@
 # limitations under the License.
 
 """Wide Resnet Model."""
+from typing import Tuple
 
-from flax.deprecated import nn
+from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
@@ -56,142 +57,125 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
 
 class WideResnetBlock(nn.Module):
   """Defines a single WideResnetBlock."""
+  channels: int
+  strides: Tuple[int, int] = (1, 1)
+  conv_kernel_init: model_utils.Initializer = initializers.lecun_normal()
+  normalizer: str = 'batch_norm'
+  dropout_rate: float = 0.0
+  activation_function: str = 'relu'
 
-  def apply(self,
-            x,
-            channels,
-            strides=(1, 1),
-            conv_kernel_init=initializers.lecun_normal(),
-            normalizer='batch_norm',
-            dropout_rate=0.0,
-            activation_function='relu',
-            train=True):
-    maybe_normalize = model_utils.get_normalizer(normalizer, train)
-    y = maybe_normalize(x, name='bn1')
-    y = model_utils.ACTIVATIONS[activation_function](y)
+  @nn.compact
+  def __call__(self, x, train):
+    maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
+    y = maybe_normalize(name='bn1')(x)
+    y = model_utils.ACTIVATIONS[self.activation_function](y)
 
     # Apply an up projection in case of channel mismatch
-    if (x.shape[-1] != channels) or strides != (1, 1):
+    if (x.shape[-1] != self.channels) or self.strides != (1, 1):
       x = nn.Conv(
-          y,
-          channels,
+          self.channels,
           (1, 1),  # Note: Some implementations use (3, 3) here.
-          strides,
+          self.strides,
           padding='SAME',
-          kernel_init=conv_kernel_init,
-          bias=False)
+          kernel_init=self.conv_kernel_init,
+          use_bias=False)(y)
 
     y = nn.Conv(
-        y,
-        channels,
+        self.channels,
         (3, 3),
-        strides,
+        self.strides,
         padding='SAME',
         name='conv1',
-        kernel_init=conv_kernel_init,
-        bias=False)
-    y = nn.dropout(y, rate=dropout_rate, deterministic=not train)
-    y = maybe_normalize(y, name='bn2')
-    y = model_utils.ACTIVATIONS[activation_function](y)
+        kernel_init=self.conv_kernel_init,
+        use_bias=False)(y)
+    y = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(y)
+    y = maybe_normalize(name='bn2')(y)
+    y = model_utils.ACTIVATIONS[self.activation_function](y)
     y = nn.Conv(
-        y,
-        channels,
+        self.channels,
         (3, 3),
         padding='SAME',
         name='conv2',
-        kernel_init=conv_kernel_init,
-        bias=False)
+        kernel_init=self.conv_kernel_init,
+        use_bias=False)(y)
 
-    if normalizer == 'none':
-      y = model_utils.ScalarMultiply(y)
+    if self.normalizer == 'none':
+      y = model_utils.ScalarMultiply()(y)
 
     return x + y
 
 
 class WideResnetGroup(nn.Module):
   """Defines a WideResnetGroup."""
+  blocks_per_group: int
+  channels: int
+  strides: Tuple[int, int] = (1, 1)
+  conv_kernel_init: model_utils.Initializer = initializers.lecun_normal()
+  normalizer: str = 'batch_norm'
+  dropout_rate: float = 0.0
+  activation_function: str = 'relu'
 
-  def apply(self,
-            x,
-            blocks_per_group,
-            channels,
-            strides=(1, 1),
-            conv_kernel_init=initializers.lecun_normal(),
-            normalizer='batch_norm',
-            dropout_rate=0.0,
-            activation_function='relu',
-            train=True):
-    for i in range(blocks_per_group):
+  @nn.compact
+  def __call__(self, x, train):
+    for i in range(self.blocks_per_group):
       x = WideResnetBlock(
-          x,
-          channels,
-          strides if i == 0 else (1, 1),
-          conv_kernel_init=conv_kernel_init,
-          normalizer=normalizer,
-          dropout_rate=dropout_rate,
-          activation_function=activation_function,
-          train=train)
+          self.channels,
+          self.strides if i == 0 else (1, 1),
+          conv_kernel_init=self.conv_kernel_init,
+          normalizer=self.normalizer,
+          dropout_rate=self.dropout_rate,
+          activation_function=self.activation_function)(x, train=train)
     return x
 
 
 class WideResnet(nn.Module):
   """Defines the WideResnet Model."""
+  blocks_per_group: int
+  channel_multiplier: int
+  num_outputs: int
+  conv_kernel_init: model_utils.Initializer = initializers.lecun_normal()
+  dense_kernel_init: model_utils.Initializer = initializers.lecun_normal()
+  normalizer: str = 'batch_norm'
+  dropout_rate: float = 0.0
+  activation_function: str = 'relu'
 
-  def apply(
-      self,
-      x,
-      blocks_per_group,
-      channel_multiplier,
-      num_outputs,
-      conv_kernel_init=initializers.lecun_normal(),
-      dense_kernel_init=initializers.lecun_normal(),
-      normalizer='batch_norm',
-      dropout_rate=0.0,
-      activation_function='relu',
-      train=True,
-  ):
-
+  @nn.compact
+  def __call__(self, x, train):
     x = nn.Conv(
-        x,
         16,
         (3, 3),
         padding='SAME',
         name='init_conv',
-        kernel_init=conv_kernel_init,
-        bias=False)
+        kernel_init=self.conv_kernel_init,
+        use_bias=False)(x)
     x = WideResnetGroup(
-        x,
-        blocks_per_group,
-        16 * channel_multiplier,
-        conv_kernel_init=conv_kernel_init,
-        normalizer=normalizer,
-        dropout_rate=dropout_rate,
-        activation_function=activation_function,
-        train=train)
+        self.blocks_per_group,
+        16 * self.channel_multiplier,
+        conv_kernel_init=self.conv_kernel_init,
+        normalizer=self.normalizer,
+        dropout_rate=self.dropout_rate,
+        activation_function=self.activation_function)(x, train=train)
     x = WideResnetGroup(
-        x,
-        blocks_per_group,
-        32 * channel_multiplier, (2, 2),
-        conv_kernel_init=conv_kernel_init,
-        normalizer=normalizer,
-        dropout_rate=dropout_rate,
-        activation_function=activation_function,
-        train=train)
+        self.blocks_per_group,
+        32 * self.channel_multiplier,
+        (2, 2),
+        conv_kernel_init=self.conv_kernel_init,
+        normalizer=self.normalizer,
+        dropout_rate=self.dropout_rate,
+        activation_function=self.activation_function)(x, train=train)
     x = WideResnetGroup(
-        x,
-        blocks_per_group,
-        64 * channel_multiplier, (2, 2),
-        conv_kernel_init=conv_kernel_init,
-        dropout_rate=dropout_rate,
-        normalizer=normalizer,
-        activation_function=activation_function,
-        train=train)
-    maybe_normalize = model_utils.get_normalizer(normalizer, train)
-    x = maybe_normalize(x)
-    x = model_utils.ACTIVATIONS[activation_function](x)
+        self.blocks_per_group,
+        64 * self.channel_multiplier,
+        conv_kernel_init=self.conv_kernel_init,
+        dropout_rate=self.dropout_rate,
+        normalizer=self.normalizer,
+        activation_function=self.activation_function)(x, train=train)
+    maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
+    x = maybe_normalize()(x)
+    x = model_utils.ACTIVATIONS[self.activation_function](x)
     x = nn.avg_pool(x, (8, 8))
     x = x.reshape((x.shape[0], -1))
-    x = nn.Dense(x, num_outputs, kernel_init=dense_kernel_init)
+    x = nn.Dense(self.num_outputs, kernel_init=self.dense_kernel_init)(x)
     return x
 
 
@@ -199,15 +183,14 @@ class WideResnetModel(base_model.BaseModel):
 
   def build_flax_module(self):
     """Wide Resnet."""
-    hps = self.hps
-    return WideResnet.partial(
-        blocks_per_group=hps.blocks_per_group,
-        channel_multiplier=hps.channel_multiplier,
+    return WideResnet(
+        blocks_per_group=self.hps.blocks_per_group,
+        channel_multiplier=self.hps.channel_multiplier,
         num_outputs=self.hps['output_shape'][-1],
-        conv_kernel_init=model_utils.INITIALIZERS[hps.conv_kernel_init](
-            hps.conv_kernel_scale),
-        dense_kernel_init=model_utils.INITIALIZERS[hps.dense_kernel_init](
-            hps.dense_kernel_scale),
-        dropout_rate=hps.dropout_rate,
+        conv_kernel_init=model_utils.INITIALIZERS[self.hps.conv_kernel_init](
+            self.hps.conv_kernel_scale),
+        dense_kernel_init=model_utils.INITIALIZERS[self.hps.dense_kernel_init](
+            self.hps.dense_kernel_scale),
+        dropout_rate=self.hps.dropout_rate,
         normalizer=self.hps.normalizer,
         activation_function=self.hps.activation_function)

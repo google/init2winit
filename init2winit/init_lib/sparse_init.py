@@ -20,6 +20,8 @@ For more information, see Section 5 of (Martens, 2010), which can be found at
 https://www.cs.toronto.edu/~jmartens/docs/Deep_HessianFree.pdf.
 """
 
+from flax.core import frozen_dict
+from flax.core import unfreeze
 from ml_collections.config_dict import config_dict
 import numpy as np
 
@@ -27,7 +29,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(non_zero_connection_weights=15,))
 
 
 def sparse_init(loss_fn,
-                model,
+                flax_module,
+                params,
                 hps,
                 input_shape,
                 output_shape,
@@ -38,7 +41,8 @@ def sparse_init(loss_fn,
 
   Args:
     loss_fn: Loss function.
-    model: Flax Model class.
+    flax_module: Flax nn.Module class.
+    params: The dict of model parameters.
     hps: HParam object. Required hparams are meta_learning_rate,
       meta_batch_size, meta_steps, and epsilon.
     input_shape: Must agree with batch[0].shape[1:].
@@ -51,14 +55,15 @@ def sparse_init(loss_fn,
     A Flax model with sparse initialization.
   """
 
-  del loss_fn, input_shape, output_shape, rng_key, metrics_logger, log_every
+  del flax_module, loss_fn, input_shape, output_shape, rng_key, metrics_logger, log_every
 
+  params = unfreeze(params)
   activation_functions = hps.activation_function
   num_hidden_layers = len(hps.hid_sizes)
   if isinstance(hps.activation_function, str):
     activation_functions = [hps.activation_function] * num_hidden_layers
-  for i, key in enumerate(model.params):
-    num_units, num_weights = model.params[key]['kernel'].shape
+  for i, key in enumerate(params):
+    num_units, num_weights = params[key]['kernel'].shape
     mask = np.zeros((num_units, num_weights), dtype=bool)
     for k in range(num_units):
       if num_weights >= hps.non_zero_connection_weights:
@@ -67,9 +72,9 @@ def sparse_init(loss_fn,
       else:
         sample = np.random.choice(num_weights, hps.non_zero_connection_weights)
       mask[k, sample] = True
-    model.params[key]['kernel'] = model.params[key]['kernel'].at[~mask].set(0.0)
+    params[key]['kernel'] = params[key]['kernel'].at[~mask].set(0.0)
     if i < num_hidden_layers and activation_functions[i] == 'tanh':
-      model.params[key]['bias'] = model.params[key]['bias'].at[:].set(0.5)
+      params[key]['bias'] = params[key]['bias'].at[:].set(0.5)
     else:
-      model.params[key]['bias'] = model.params[key]['bias'].at[:].set(0.0)
-  return model
+      params[key]['bias'] = params[key]['bias'].at[:].set(0.0)
+  return frozen_dict.freeze(params)

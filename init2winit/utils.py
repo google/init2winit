@@ -196,7 +196,7 @@ class TrainingMetricsGrabber:
 
     return TrainingMetricsGrabber(gradient_statistics, config)
 
-  def update(self, model_gradient, old_flax_module, new_flax_module):
+  def update(self, model_gradient, old_params, new_params):
     """Computes a number of statistics from the model params and update.
 
     Statistics computed:
@@ -208,15 +208,15 @@ class TrainingMetricsGrabber:
     Args:
       model_gradient: A pytree of the same shape as the model_params pytree that
         was used when the metrics_grabber object was created.
-      old_flax_module: The flax_module before the param update.
-      new_flax_module: The flax_module after the param update.
+      old_params: The params before the param update.
+      new_params: The params after the param update.
 
     Returns:
       An updated class object.
     """
     grads_flat, treedef = jax.tree_flatten(model_gradient)
-    new_params_flat, _ = jax.tree_flatten(new_flax_module.params)
-    old_params_flat, _ = jax.tree_flatten(old_flax_module.params)
+    new_params_flat, _ = jax.tree_flatten(new_params)
+    old_params_flat, _ = jax.tree_flatten(old_params)
 
     # flatten_up_to here is needed to avoid flattening the _MetricsLeafState
     # nodes.
@@ -444,14 +444,13 @@ def log_pytree_shape_and_statistics(pytree, json_path=None):
     return
 
   if json_path:
-    shape_dict = json.dumps(jax.tree_map(lambda x: x.shape, pytree))
+    shape_dict = jax.tree_map(lambda x: x.shape, pytree).pretty_repr()
     with gfile.GFile(json_path, 'w') as json_file:
       json_file.write(shape_dict)
 
   absl_logging.info('Printing model param shapes.')
   shape_dict = jax.tree_map(_summary_str, pytree)
-  # We use json.dumps for pretty printing nested dicts.
-  absl_logging.info(json.dumps(shape_dict, sort_keys=True, indent=4))
+  absl_logging.info(shape_dict.pretty_repr())
   total_params = jax.tree_util.tree_reduce(
       operator.add, jax.tree_map(lambda x: x.size, pytree))
   absl_logging.info('Total params: %d', total_params)

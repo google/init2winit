@@ -30,23 +30,23 @@ import spectral_density.lanczos as lanczos
 
 
 DEFAULT_EVAL_CONFIG = {
-    'num_batches': 10,
-    'num_eval_draws': 3,
+    'average_hosts': True,
+    'compute_interps': False,
+    'compute_stats': False,
+    'eval_gradient_covariance': False,
+    'eval_hess_grad_overlap': True,
     'eval_hessian': True,
     'eval_max_eig': True,
-    'eval_hess_grad_overlap': True,
+    'hparam_overrides': {},
     'max_eig_num_steps': 30,
+    'name': 'hessian',
+    'num_batches': 10,
+    'num_eigens': 5,
+    'num_eval_draws': 3,
     'num_lanczos_steps': 60,
     'rng_key': 0,
-    'use_training_gen': True,
-    'name': 'hessian',
-    'eval_gradient_covariance': False,
-    'compute_stats': False,
-    'compute_interps': False,
     'update_stats': False,
-    'hparam_overrides': {},
-    'average_hosts': True,
-    'num_eigens': 5
+    'use_training_gen': True,
 }
 
 
@@ -100,12 +100,12 @@ def _tree_zeros_like(tree):
   return jax.tree_util.tree_map(f, tree)
 
 
-def _additive_update(model, update):
+def _additive_update(params, update):
   """Computes an updated model for interpolation studies."""
   def f(x, y):
     return x + y
-  new_params = jax.tree_util.tree_multimap(f, model.params, update)
-  return model.replace(params=new_params)
+  new_params = jax.tree_util.tree_multimap(f, params, update)
+  return new_params
 
 
 def _unreplicate(sharded_array):
@@ -114,10 +114,9 @@ def _unreplicate(sharded_array):
 
 
 def _compute_update(
-    flax_module, optimizer_state, gradient, optimizer_update_fn):
-  curr_params = flax_module.params
+    curr_params, optimizer_state, gradient, optimizer_update_fn):
   model_updates, _ = optimizer_update_fn(
-      gradient.params, optimizer_state, params=curr_params)
+      gradient, optimizer_state, params=curr_params)
   new_params = optax.apply_updates(curr_params, model_updates)
   diff = _tree_sub(curr_params, new_params)
   return diff
@@ -203,7 +202,7 @@ class CurvatureEvaluator:
   """
 
   def __init__(self,
-               model,
+               params,
                eval_config,
                loss,
                dataset=None,
@@ -211,18 +210,15 @@ class CurvatureEvaluator:
     """Creates the CurvatureEvaluator object.
 
     Args:
-      model: Any pytree which satsifies the API loss(model, batch). Note if
-        config['compute_stats'] = True, additionally we assume that model is a
-        flax.Model class (we will refer to model.params in this case). However,
-        this assumption is not needed for evaluate_spectrum.
+      params: A pytree of model parameters.
       eval_config: See DEFAULT_EVAL_CONFIG as an example.
-      loss: Any function which satisfies the API loss(model, batch).
+      loss: Any function which satisfies the API loss(params, batch).
       dataset: An init2winit.dataset_lib.datasets object. Optional if
         batches_gen is supplied.
       batches_gen: Any function which yields batches to be fed into the loss.
         Optional if dataset is supplied. API must satisfy
         for batch in batches_gen():
-           batch_loss = loss(model, batch)
+           batch_loss = loss(params, batch)
     """
     if batches_gen is None and dataset is None:
       raise ValueError('Either a dataset or a batches generator must be given'
@@ -236,13 +232,13 @@ class CurvatureEvaluator:
     else:
       self.batches_gen = prepare_batches_gen(dataset, eval_config)
 
-    def avg_loss(module, batch, loss_fn):
-      loss_val = loss_fn(module, batch)
+    def avg_loss(params, batch, loss_fn):
+      loss_val = loss_fn(params, batch)
       loss_val = jax.lax.pmean(loss_val, axis_name='batch')
       return loss_val
 
-    def avg_grad(module, batch, loss_fn):
-      grad_loss = jax.grad(loss_fn)(module, batch)
+    def avg_grad(params, batch, loss_fn):
+      grad_loss = jax.grad(loss_fn)(params, batch)
       grad_loss = jax.lax.pmean(grad_loss, axis_name='batch')
       return grad_loss
 
@@ -251,11 +247,11 @@ class CurvatureEvaluator:
     self.loss = jax.pmap(functools.partial(avg_loss, loss_fn=loss),
                          axis_name='batch')
     self.hvp_fn, self.unravel, self.n_params = hessian_computation.get_hvp_fn(
-        loss, model, self.batches_gen, use_pmap=True)
+        loss, params, self.batches_gen, use_pmap=True)
     self.update_model = jax.pmap(_additive_update)
     self.gvp_fn, _, n_params = hessian_computation.get_gradient_covariance_vp_fn(
         loss,
-        model,
+        params,
         self.batches_gen,
         use_pmap=True,
         average_hosts=eval_config['average_hosts'])
@@ -264,12 +260,12 @@ class CurvatureEvaluator:
       logging.info('CurvatureEvaluator build with config: %r', eval_config)
       logging.info('n_params: %d', self.n_params)
 
-  def evaluate_stats(self, model, gdirs, udirs, hvex, cvex, step):
+  def evaluate_stats(self, params, gdirs, udirs, hvex, cvex, step):
     """Compute the curvature statistics.
 
     Args:
-      model: A flax model. Model should be replicated already to accommodate
-        pmapping.
+      params: The current model parameters. Must be already replicated to
+        accommodate pmapping.
       gdirs: List of pytrees corresponding to the mini/full batch gradients.
       udirs: List of pytrees corresponding to the optimizer's update directions.
       hvex: List of Hessian Eigenvectors represented as 1D Numpy arrays.
@@ -284,7 +280,7 @@ class CurvatureEvaluator:
     if not gdirs:
       raise ValueError('Full-batch gradient is necessary!')
     # Returns a 1D vector. If needed, v would be replicated inside the function.
-    hvp_cl = lambda v: self.hvp_fn(model, v)
+    hvp_cl = lambda v: self.hvp_fn(params, v)
     fullbatch_grad, _ = ravel_pytree(gdirs[-1])
     for i, dir_dict in enumerate(gdirs):
       update, _ = ravel_pytree(dir_dict)
@@ -343,14 +339,14 @@ class CurvatureEvaluator:
       logging.info(row.keys())
     return row
 
-  def compute_dirs(self, flax_module, optimizer_state, optimizer_update_fn):
+  def compute_dirs(self, params, optimizer_state, optimizer_update_fn):
     """Compute the directions of curvature evaluation.
 
     The function computes:
       1- mini-batch gradients and full-batch gradients and adds them to gdirs.
       2- mini-batch and full-batch update directions and adds them to udirs.
     Args:
-      flax_module: The Flax model. The model has to be already replicated to
+      params: The current model parameters. Must be already replicated to
         accommodate pmapping.
       optimizer_state: The optax optimizer state used for the training. The
         state has to be already replicated to accommodate pmapping.
@@ -367,15 +363,14 @@ class CurvatureEvaluator:
         _compute_update, optimizer_update_fn=optimizer_update_fn)
     compiled_update = jax.pmap(update_fn)
     count = 0.0
-    full_grad = compiled_tree_zeros_like(flax_module.params)
+    full_grad = compiled_tree_zeros_like(params)
     for batch in self.batches_gen():
       # Already pmeaned minibatch gradients
-      minibatch_grad = self.grad_loss(flax_module, batch)
-      avg_grad = minibatch_grad.params
+      avg_grad = self.grad_loss(params, batch)
       if count < self.eval_config['num_eval_draws']:
-        gdirs.append(_unreplicate(minibatch_grad.params))
+        gdirs.append(_unreplicate(avg_grad))
         minibatch_update = compiled_update(
-            flax_module, optimizer_state, minibatch_grad)
+            params, optimizer_state, avg_grad)
         udirs.append(_unreplicate(minibatch_update))
       count += 1.0
       full_grad = compiled_tree_sum(full_grad, avg_grad)
@@ -384,16 +379,15 @@ class CurvatureEvaluator:
     # Compute the full-batch counterparts
     full_grad = jax.tree_map(lambda x: x / count, full_grad)
     gdirs.append(_unreplicate(full_grad))
-    full_grad = minibatch_grad.replace(params=full_grad)
     full_batch_update = compiled_update(
-        flax_module, optimizer_state, full_grad)
+        params, optimizer_state, full_grad)
     udirs.append(_unreplicate(full_batch_update))
 
     if jax.process_index() == 0:
       logging.info('Update directions successfully computed')
     return gdirs, udirs
 
-  def compute_interpolations(self, model, gdirs, udirs, hvex, cvex, step):
+  def compute_interpolations(self, params, gdirs, udirs, hvex, cvex, step):
     """Compute the linear interpolation along directions of gdirs or udirs."""
     row = {'step': step}
     if not self.eval_config['compute_interps']:
@@ -408,7 +402,7 @@ class CurvatureEvaluator:
       loss_values = np.zeros(shape=(num_points,))
       for j in range(num_points):
         eta = etas[j]
-        loss_values[j] = self._full_batch_eval(model, u_dir, eta)
+        loss_values[j] = self._full_batch_eval(params, u_dir, eta)
       row['loss%d' % (i,)] = np.copy(loss_values)
     if jax.process_index() == 0:
       logging.info('Loss interpolation along gradients finished.')
@@ -418,7 +412,7 @@ class CurvatureEvaluator:
       loss_values = np.zeros(shape=(num_points,))
       for j in range(num_points):
         eta = etas[j]
-        loss_values[j] = self._full_batch_eval(model, u_dir, eta)
+        loss_values[j] = self._full_batch_eval(params, u_dir, eta)
       row['loss_u%d' % (i,)] = np.copy(loss_values)
     if jax.process_index() == 0:
       logging.info('Loss interpolation along optimizer directions finished.')
@@ -429,7 +423,7 @@ class CurvatureEvaluator:
       u_dir = unflatten(u_dir)
       for j in range(num_points):
         eta = etas[j]
-        loss_values[j] = self._full_batch_eval(model, u_dir, eta)
+        loss_values[j] = self._full_batch_eval(params, u_dir, eta)
       row['loss_hvec%d' % (i,)] = np.copy(loss_values)
 
     for i, u_dir in enumerate(cvex):
@@ -437,7 +431,7 @@ class CurvatureEvaluator:
       u_dir = unflatten(u_dir)
       for j in range(num_points):
         eta = etas[j]
-        loss_values[j] = self._full_batch_eval(model, u_dir, eta)
+        loss_values[j] = self._full_batch_eval(params, u_dir, eta)
       row['loss_cvec%d' % (i,)] = np.copy(loss_values)
 
     if jax.process_index() == 0:
@@ -445,13 +439,14 @@ class CurvatureEvaluator:
       logging.info(row.keys())
     return row
 
-  def _full_batch_eval(self, model, update_dir, eta):
+  def _full_batch_eval(self, params, update_dir, eta):
     """Compute the full-batch loss at theta = theta_0 + eta * update_dir.
 
     The function assumes that self.loss is returning the loss averaged over the
     batch.
     Args:
-      model: A flax model.
+      params: The current model parameters. Must be already replicated to
+        accommodate pmapping.
       update_dir: A pytree corresponding to the update direction.
       eta: A scalar corresponding to the step-size.
     Returns:
@@ -459,12 +454,12 @@ class CurvatureEvaluator:
     """
     update_dir = jax.tree_map(lambda x: x * eta, update_dir)
     update_dir = jax_utils.replicate(update_dir)
-    new_model = self.update_model(model, update_dir)
+    new_params = self.update_model(params, update_dir)
 
     count = 0.0
     total_loss = 0.0
     for batch in self.batches_gen():
-      sharded_loss = self.loss(new_model, batch)
+      sharded_loss = self.loss(new_params, batch)
       avg_loss = _unreplicate(sharded_loss)
       count += 1.0
       total_loss += jax.device_get(avg_loss)
@@ -472,16 +467,16 @@ class CurvatureEvaluator:
       raise ValueError('Provided generator did not yield any data.')
     return total_loss / count
 
-  def _full_batch_grad(self, model):
+  def _full_batch_grad(self, params):
     """Compute full batch gradient."""
     compiled_tree_sum = jax.pmap(_tree_sum)
     compiled_tree_zeros_like = jax.pmap(_tree_zeros_like)
 
     count = 0.0
-    full_grad = compiled_tree_zeros_like(model)
+    full_grad = compiled_tree_zeros_like(params)
     for batch in self.batches_gen():
       # Already pmeaned minibatch gradients
-      avg_grad = self.grad_loss(model, batch)
+      avg_grad = self.grad_loss(params, batch)
       if count < self.eval_config['num_eval_draws']:
         count += 1.0
         full_grad = compiled_tree_sum(full_grad, avg_grad)
@@ -489,7 +484,7 @@ class CurvatureEvaluator:
     full_grad = _unreplicate(full_grad)
     return full_grad
 
-  def evaluate_spectrum(self, model, step):
+  def evaluate_spectrum(self, params, step):
     """Estimate the eignespectrum of H and C."""
     # Number of upper and lower eigenvectors to be approximated.
     num_evs = self.eval_config['num_eigens']
@@ -498,8 +493,8 @@ class CurvatureEvaluator:
 
     if 2 * num_evs >= self.eval_config['num_lanczos_steps']:
       raise ValueError('Too many eigenvectors requested!')
-    hvp_cl = lambda v: self.hvp_fn(model, v)
-    gvp_cl = lambda v: self.gvp_fn(model, v)
+    hvp_cl = lambda v: self.hvp_fn(params, v)
+    gvp_cl = lambda v: self.gvp_fn(params, v)
 
     key = jax.random.PRNGKey(0)
 
@@ -517,7 +512,7 @@ class CurvatureEvaluator:
 
     if self.eval_config['eval_hess_grad_overlap']:
       # compute gradient.
-      full_grad = self._full_batch_grad(model)
+      full_grad = self._full_batch_grad(params)
       grad_flat, _ = hessian_computation.ravel_pytree(full_grad)
 
       row['tridiag_hess_grad_overlap'], _ = lanczos.lanczos_np(

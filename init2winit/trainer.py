@@ -26,7 +26,6 @@ import time
 from absl import flags
 from absl import logging
 from flax import jax_utils
-from flax.deprecated import nn
 from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import hyperparameters
@@ -51,14 +50,18 @@ FLAGS = flags.FLAGS
 _GRAD_CLIP_EPS = 1e-6
 
 
-def evaluate(flax_module, batch_stats, batch_iter, evaluate_batch_pmapped):
+def evaluate(
+    params,
+    batch_stats,
+    batch_iter,
+    evaluate_batch_pmapped):
   """Compute aggregated metrics on the given data iterator.
 
   WARNING: The caller is responsible for synchronizing the batch norm statistics
   before calling this function!
 
   Assumed API of evaluate_batch_pmapped:
-  metrics = evaluate_batch_pmapped(flax_module, batch_stats, batch)
+  metrics = evaluate_batch_pmapped(params, batch_stats, batch)
   where batch is yielded by the batch iterator, and metrics is a dictionary
   mapping metric name to a vector of per example measurements. The metric
   'denominator' must also be defined. evaluate will aggregate (by summing)
@@ -69,15 +72,17 @@ def evaluate(flax_module, batch_stats, batch_iter, evaluate_batch_pmapped):
   classification_metrics.py for a definition of evaluate_batch.
 
   Args:
-    flax_module: A flax.nn.Module
-    batch_stats: A flax.nn.Collection object tracking batch_stats.
+    params: a dict of trainable model parameters. Passed as {'params': params}
+      into flax_module.apply().
+    batch_stats: a dict of non-trainable model state. Passed as
+      {'batch_stats': batch_stats} into flax_module.apply().
     batch_iter: Generator which yields batches. Must support the API
       for b in batch_iter:
     evaluate_batch_pmapped: A function with API
-       evaluate_batch_pmapped(flax_module, batch_stats, batch). Returns a
-       dictionary mapping keys to the summed metric across the sharded batch.
-       The key 'denominator' is required, as this indicates how many real
-       samples were in the sharded batch.
+       evaluate_batch_pmapped(params, batch_stats, batch). Returns a dictionary
+       mapping keys to the summed metric across the sharded batch. The key
+       'denominator' is required, as this indicates how many real samples were
+       in the sharded batch.
 
   Returns:
     A dictionary of aggregated metrics. The keys will match the keys returned by
@@ -89,7 +94,8 @@ def evaluate(flax_module, batch_stats, batch_iter, evaluate_batch_pmapped):
   total_metrics = collections.defaultdict(float)
   for batch in batch_iter:
     batch = data_utils.shard(batch)
-    computed_metrics = evaluate_batch_pmapped(flax_module, batch_stats, batch)
+    computed_metrics = evaluate_batch_pmapped(
+        params=params, batch_stats=batch_stats, batch=batch)
     for key in computed_metrics:
       # The shape of computed_metrics[key] is [n_local_devices]. However,
       # because evaluate_batch_pmapped has a psum, we have already summed
@@ -125,7 +131,7 @@ def _inject_learning_rate(optimizer_state, lr):
 
 def update(
     optimizer_state,
-    flax_module,
+    params,
     batch_stats,
     batch,
     step,
@@ -140,9 +146,12 @@ def update(
 
   Args:
     optimizer_state: the optax optimizer state.
-    flax_module: the current Flax nn.Module.
-    batch_stats: a flax.nn.Collection object tracking the model state, usually
-      batch norm statistics.
+    params: a dict of trainable model parameters. Passed into training_cost(...)
+      which then passes into flax_module.apply() as {'params': params} as part
+      of the variables dict.
+    batch_stats: a dict of non-trainable model state. Passed into
+      training_cost(...) which then passes into flax_module.apply() as
+      {'batch_stats': batch_stats} as part of the variables dict.
     batch: the per-device batch of data to process.
     step: the current global step of this update. Used to fold in to `rng` to
       produce a unique per-device, per-step RNG.
@@ -155,7 +164,7 @@ def update(
     training_metrics_grabber: See the TrainingMetricsGrabber in utils.py
     training_cost: a function used to calculate the training objective that will
       be differentiated to generate updates. Takes
-      (`flax_module`, `batch_stats`, `batch`, `rng`) as inputs.
+      (`params`, `batch`, `batch_stats`, `dropout_rng`) as inputs.
     grad_clip: Clip the l2 norm of the gradient at the specified value. For
       minibatches with gradient norm ||g||_2 > grad_clip, we rescale g to the
       value g / ||g||_2 * grad_clip. If None, then no clipping will be applied.
@@ -172,11 +181,13 @@ def update(
 
   _inject_learning_rate(optimizer_state, lr)
 
-  def opt_cost(model):
-    return training_cost(model, batch_stats, batch, rng)
+  def opt_cost(params):
+    return training_cost(
+        params, batch=batch, batch_stats=batch_stats, dropout_rng=rng)
 
   grad_fn = jax.value_and_grad(opt_cost, has_aux=True)
-  (cost_value, new_batch_stats), grad = grad_fn(flax_module)
+  (cost_value, new_batch_stats), grad = grad_fn(params)
+  new_batch_stats = new_batch_stats.get('batch_stats', None)
 
   cost_value, grad = lax.pmean((cost_value, grad), axis_name='batch')
 
@@ -188,16 +199,19 @@ def update(
     grad = jax.lax.cond(grad_norm > grad_clip, lambda _: scaled_grad,
                         lambda _: grad, None)
   model_updates, new_optimizer_state = optimizer_update_fn(
-      grad.params, optimizer_state, flax_module.params, batch)
-  new_params = optax.apply_updates(flax_module.params, model_updates)
-  new_flax_module = flax_module.replace(params=new_params)
+      grad,
+      optimizer_state,
+      params=params,
+      batch=batch,
+      batch_stats=new_batch_stats)
+  new_params = optax.apply_updates(params, model_updates)
 
   new_metrics_grabber = None
   if training_metrics_grabber:
     new_metrics_grabber = training_metrics_grabber.update(
-        grad.params, flax_module, new_flax_module)
+        grad, params, new_params)
 
-  return (new_optimizer_state, new_flax_module, new_batch_stats, cost_value,
+  return (new_optimizer_state, new_params, new_batch_stats, cost_value,
           new_metrics_grabber, grad_norm)
 
 
@@ -209,7 +223,7 @@ def _merge_and_apply_prefix(d1, d2, prefix):
 
 
 @utils.timed
-def eval_metrics(flax_module, batch_stats, dataset, eval_num_batches,
+def eval_metrics(params, batch_stats, dataset, eval_num_batches,
                  eval_train_num_batches, evaluate_batch_pmapped):
   """Evaluates the given network on the train, validation, and test sets.
 
@@ -221,8 +235,10 @@ def eval_metrics(flax_module, batch_stats, dataset, eval_num_batches,
   {train, valid, test} and measurement in the set {loss, error_rate}.
 
   Args:
-    flax_module: A flax.nn.Module
-    batch_stats: A flax.nn.Collection object tracking batch_stats.
+    params: a dict of trainable model parameters. Passed as {'params': params}
+      into flax_module.apply().
+    batch_stats: a dict of non-trainable model state. Passed as
+      {'batch_stats': batch_stats} into flax_module.apply().
     dataset: Dataset returned from datasets.get_dataset. train, validation, and
       test sets.
     eval_num_batches: (int) The batch size used for evaluating on validation,
@@ -241,14 +257,14 @@ def eval_metrics(flax_module, batch_stats, dataset, eval_num_batches,
   metrics = {}
   for split_iter, split_name in zip([train_iter, valid_iter, test_iter],
                                     ['train', 'valid', 'test']):
-    split_metrics = evaluate(flax_module, batch_stats, split_iter,
+    split_metrics = evaluate(params, batch_stats, split_iter,
                              evaluate_batch_pmapped)
     metrics = _merge_and_apply_prefix(metrics, split_metrics,
                                       (split_name + '/'))
   return metrics
 
 
-def initialize(flax_module_def,
+def initialize(flax_module,
                initializer,
                loss_fn,
                input_shape,
@@ -265,7 +281,7 @@ def initialize(flax_module_def,
   provided by the initializer arg (the default is noop).
 
   Args:
-    flax_module_def: An uninitialized flax.nn.Module definition.
+    flax_module: The Flax nn.Module.
     initializer: An initializer defined in init_lib.
     loss_fn: A loss function.
     input_shape: The input shape of a single data example.
@@ -281,38 +297,47 @@ def initialize(flax_module_def,
     flax.nn.Model and batch_stats is the collection used for batch norm.
   """
   model_dtype = utils.dtype_from_str(hps.model_dtype)
-  params_rng, init_rng, dropout_rng = jax.random.split(rng, num=3)
-
-  # TODO(mbadura): After the Linen upgrade, all models will provide a fake batch
-  if fake_batch:
-    with nn.stateful() as batch_stats:
-      with nn.stochastic(dropout_rng):
-        _, params = flax_module_def.init(params_rng, fake_batch, train=False)
-
   # init_by_shape should either pass in a tuple or a list of tuples.
   # For example, for vision tasks typically input_shape is (image_shape)
   # For seq2seq tasks, shape can be a list of two tuples corresponding to
   # input_sequence_shape for encoder and output_sequence_shape for decoder.
   # TODO(gilmer,ankugarg): Support initializers for list of tuples.
+  #
+  # Note that this fake input batch will be optimized away because the init
+  # function is jitted. However, this can still cause memory issues if it is
+  # large because it is passed in as an XLA argument. Therefore we use a fake
+  # batch size of 2 (we do not want to use 1 in case there is any np.squeeze
+  # calls that would remove it), because we assume that there is no dependence
+  # on the batch size with the model (batch norm reduces across a batch dim of
+  # any size). This is similar to how the Flax examples initialize models:
+  # https://github.com/google/flax/blob/44ee6f2f4130856d47159dc58981fb26ea2240f4/examples/imagenet/train.py#L70.
+  if fake_batch:
+    fake_input_batch = fake_batch
+  elif isinstance(input_shape, list):  # Typical case for seq2seq models
+    fake_input_batch = [
+        np.zeros((2, *x), model_dtype) for x in input_shape
+    ]
+  else:  # Typical case for classification models
+    fake_input_batch = [np.zeros((2, *input_shape), model_dtype)]
+  params_rng, init_rng, dropout_rng = jax.random.split(rng, num=3)
 
-  else:
-    if isinstance(input_shape, list):  # Typical case for seq2seq models
-      input_specs = [((hps.batch_size, *x), model_dtype) for x in input_shape]
-    else:  # Typical case for classification models
-      input_specs = [((hps.batch_size, *input_shape), model_dtype)]
-
-    with nn.stateful() as batch_stats:
-      with nn.stochastic(dropout_rng):
-        # Using flax_module_def.create can OOM for larger models, so we must use
-        # create by shape here.
-        # TODO(gilmer) Link to flax issue when bug reporting process finalizes.
-        _, params = flax_module_def.init_by_shape(
-            params_rng, input_specs, train=False)
-
-  model = nn.Model(flax_module_def, params)
+  # By jitting the model init function, we initialize the model parameters
+  # lazily without computing a full forward pass. For further documentation, see
+  # https://flax.readthedocs.io/en/latest/flax.linen.html?highlight=jax.jit#flax.linen.Module.init.
+  # We need to close over train=False here because otherwise the jitted init
+  # function will convert the train Python bool to a jax boolean, which will
+  # mess up Pythonic boolean statements like `not train` inside the model
+  # construction.
+  model_init_fn = jax.jit(functools.partial(flax_module.init, train=False))
+  init_dict = model_init_fn(
+      {'params': params_rng, 'dropout': dropout_rng},
+      *fake_input_batch)
+  # Trainable model parameters.
+  params = init_dict['params']
+  batch_stats = init_dict.get('batch_stats', {})
 
   if hps.get('layer_rescale_factors'):
-    model = model_utils.rescale_layers(model, hps.layer_rescale_factors)
+    params = model_utils.rescale_layers(params, hps.layer_rescale_factors)
   # We don't pass batch_stats to the initializer, the initializer will just
   # run batch_norm in train mode and does not need to maintain the batch_stats.
   # TODO(gilmer): We hardcode here weighted_cross_entropy, but this will need
@@ -320,10 +345,10 @@ def initialize(flax_module_def,
   # hyper_param?
   # TODO(gilmer): instead of passing in weighted_xent, pass in the model and get
   # the loss from that.
-  new_model = initializer(loss_fn, model, hps, input_shape, output_shape,
-                          init_rng, metrics_logger)
+  params = initializer(loss_fn, flax_module, params, hps, input_shape,
+                       output_shape, init_rng, metrics_logger)
 
-  return new_model, batch_stats
+  return params, batch_stats
 
 
 def save_checkpoint(train_dir,
@@ -393,8 +418,8 @@ def restore_checkpoint(
 
 
 def _replicate_and_maybe_restore_latest_checkpoint(
-    unreplicated_flax_module,
     unreplicated_optimizer_state,
+    unreplicated_params,
     unreplicated_batch_stats,
     unreplicated_training_metrics_grabber,
     train_dir,
@@ -402,8 +427,8 @@ def _replicate_and_maybe_restore_latest_checkpoint(
   """Restore from the latest checkpoint, if it exists."""
   unreplicated_checkpoint_state = checkpoint.CheckpointState(
       {
-          'flax_module': unreplicated_flax_module,
           'optimizer_state': unreplicated_optimizer_state,
+          'params': unreplicated_params,
           'batch_stats': unreplicated_batch_stats,
           'training_metrics_grabber': unreplicated_training_metrics_grabber,
       },
@@ -416,27 +441,27 @@ def _replicate_and_maybe_restore_latest_checkpoint(
       recents_filename='latest',
       use_deprecated_checkpointing=use_deprecated_checkpointing)
 
-  flax_module = jax_utils.replicate(unreplicated_flax_module)
   optimizer_state = jax_utils.replicate(unreplicated_optimizer_state)
+  params = jax_utils.replicate(unreplicated_params)
   batch_stats = jax_utils.replicate(unreplicated_batch_stats)
   training_metrics_grabber = jax_utils.replicate(
       unreplicated_training_metrics_grabber)
 
   if latest is None:
-    return flax_module, optimizer_state, batch_stats, training_metrics_grabber, 0, 0.0, 0, False
+    return optimizer_state, params, batch_stats, training_metrics_grabber, 0, 0.0, 0, False
 
   pytree_dict, extra_state = restore_checkpoint(
       latest,
       replicated_pytree={
-          'flax_module': flax_module,
           'optimizer_state': optimizer_state,
+          'params': params,
           'batch_stats': batch_stats,
           'training_metrics_grabber': training_metrics_grabber,
       },
       use_deprecated_checkpointing=use_deprecated_checkpointing)
   return (
-      pytree_dict['flax_module'],
       pytree_dict['optimizer_state'],
+      pytree_dict['params'],
       pytree_dict['batch_stats'],
       pytree_dict['training_metrics_grabber'],
       extra_state['global_step'],
@@ -471,11 +496,10 @@ def _maybe_sync_batchnorm_stats(batch_stats):
   """Sync batch_stats across devices."""
   # We first check that batch_stats is used (pmap will throw an error if
   # it's a non batch norm model). If batch norm is not used then
-  # batch_stats.state = [{}] which will evaluate to False here. Note that, in
-  # the case of using our implementation of virtual batch norm, this will also
-  # handle synchronizing the multiple moving averages on each device before
-  # doing a cross-host sync.
-  if batch_stats.as_dict():
+  # batch_stats = None. Note that, in the case of using our implementation of
+  # virtual batch norm, this will also handle synchronizing the multiple moving
+  # averages on each device before doing a cross-host sync.
+  if batch_stats:
     batch_stats = jax.pmap(
         model_utils.sync_batchnorm_stats, axis_name='batch')(
             batch_stats)
@@ -569,8 +593,8 @@ def train(train_dir,
     callback_configs = []
 
   # Maybe run the initializer.
-  unreplicated_flax_module, unreplicated_batch_stats = initialize(
-      model.flax_module_def,
+  unreplicated_params, unreplicated_batch_stats = initialize(
+      model.flax_module,
       initializer,
       model.loss_fn,
       hps.input_shape,
@@ -581,26 +605,25 @@ def train(train_dir,
       model.get_fake_batch(hps))
 
   if jax.process_index() == 0:
-    utils.log_pytree_shape_and_statistics(unreplicated_flax_module.params)
+    utils.log_pytree_shape_and_statistics(unreplicated_params)
     logging.info('train_size: %d,', hps.train_size)
 
   lr_fn = schedules.get_schedule_fn(hps.lr_hparams, num_train_steps)
 
   optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps, model)
-  unreplicated_optimizer_state = optimizer_init_fn(
-      unreplicated_flax_module.params)
+  unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
 
   unreplicated_training_metrics_grabber = None
   if training_metrics_config:
     unreplicated_training_metrics_grabber = utils.TrainingMetricsGrabber.create(
-        unreplicated_flax_module.params, training_metrics_config)
+        unreplicated_params, training_metrics_config)
 
-  (flax_module, optimizer_state, batch_stats, training_metrics_grabber,
+  (optimizer_state, params, batch_stats, training_metrics_grabber,
    global_step, sum_train_cost,
    preemption_count,
    is_restored) = _replicate_and_maybe_restore_latest_checkpoint(
-       unreplicated_flax_module=unreplicated_flax_module,
        unreplicated_optimizer_state=unreplicated_optimizer_state,
+       unreplicated_params=unreplicated_params,
        unreplicated_batch_stats=unreplicated_batch_stats,
        unreplicated_training_metrics_grabber=(
            unreplicated_training_metrics_grabber),
@@ -641,7 +664,7 @@ def train(train_dir,
       optimizer_update_fn=optimizer_update_fn)
   # in_axes = (
   #     optimizer_state = 0,
-  #     flax_module = 0,
+  #     params = 0,
   #     batch_stats = 0,
   #     batch = 0,
   #     step = None,
@@ -660,16 +683,15 @@ def train(train_dir,
       in_axes=(0, 0, 0, 0, None, None, None, 0, 0),
       donate_argnums=(0, 1, 2, 7))
   # During eval, we can donate the 'batch' buffer. We don't donate the
-  # 'flax_module' and 'batch_stats' buffers as we don't re-assign those values
-  # in eval, we do that only in train.
+  # 'params' and 'batch_stats' buffers as we don't re-assign those values in
+  # eval, we do that only in train.
   evaluate_batch_pmapped = jax.pmap(
-      model.evaluate_batch, axis_name='batch',
-      donate_argnums=(2,))
+      model.evaluate_batch, axis_name='batch', donate_argnums=(2,))
   start_time = time.time()
   start_step = global_step
   prev_eval_step = start_step
   def get_step_frequency(cur_step):
-    return float(cur_step - start_step)/(time.time() - start_time)
+    return float(cur_step - start_step) / (time.time() - start_time)
 
   if jax.process_index() == 0:
     logging.info('Starting training!')
@@ -694,16 +716,16 @@ def train(train_dir,
   callback_rngs = jax.random.split(callback_rng, len(callback_configs))
   for callback_rng, config in zip(callback_rngs, callback_configs):
     eval_callback = callbacks.get_callback(
-        config['callback_name'])(model, flax_module, batch_stats, dataset, hps,
-                                 config, train_dir, callback_rng)
+        config['callback_name'])(model, params, batch_stats,
+                                 dataset, hps, config, train_dir, callback_rng)
     eval_callbacks.append(eval_callback)
 
   for batch in train_iter:
     if global_step in checkpoint_steps and jax.process_index() == 0:
       save_checkpoint(
           checkpoint_dir, {
-              'flax_module': flax_module,
               'optimizer_state': optimizer_state,
+              'params': params,
               'batch_stats': batch_stats,
               'training_metrics_grabber': training_metrics_grabber,
           },
@@ -714,9 +736,9 @@ def train(train_dir,
           use_deprecated_checkpointing=use_deprecated_checkpointing)
     batch = data_utils.shard(batch)
     lr = lr_fn(global_step)
-    optimizer_state, flax_module, batch_stats, cost_val, training_metrics_grabber, grad_norm = update_pmapped(
+    optimizer_state, params, batch_stats, cost_val, training_metrics_grabber, grad_norm = update_pmapped(
         optimizer_state,
-        flax_module,
+        params,
         batch_stats,
         batch,
         global_step,
@@ -725,14 +747,14 @@ def train(train_dir,
         local_device_indices,
         training_metrics_grabber)
     # Calling float is needed since cost_val is a shape (1,) DeviceArray.
-    sum_train_cost += float(jnp.mean(cost_val))
+    sum_train_cost += float(np.mean(cost_val))
     global_step += 1
     # TODO(gdahl, gilmer): consider moving this test up.
     # NB: Since this test is after we increment global_step, having 0 in
     # eval_steps does nothing.
     if should_eval(global_step, eval_frequency, eval_steps):
       batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
-      report, eval_time = eval_metrics(flax_module,
+      report, eval_time = eval_metrics(params,
                                        batch_stats,
                                        dataset,
                                        eval_num_batches,
@@ -749,7 +771,7 @@ def train(train_dir,
                     train_cost=mean_train_cost)
 
       for eval_callback in eval_callbacks:
-        callback_metrics = eval_callback.run_eval(flax_module, batch_stats,
+        callback_metrics = eval_callback.run_eval(params, batch_stats,
                                                   global_step)
         if set(callback_metrics.keys()).intersection(set(report.keys())):
           raise ValueError('There was a collision between the callback metrics'
@@ -761,8 +783,8 @@ def train(train_dir,
         _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
         save_checkpoint(
             train_dir, {
-                'flax_module': flax_module,
                 'optimizer_state': optimizer_state,
+                'params': params,
                 'batch_stats': batch_stats,
                 'training_metrics_grabber': training_metrics_grabber
             },
@@ -778,7 +800,7 @@ def train(train_dir,
   # test.
   if prev_eval_step != num_train_steps:
     batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
-    report, eval_time = eval_metrics(flax_module,
+    report, eval_time = eval_metrics(params,
                                      batch_stats,
                                      dataset,
                                      eval_num_batches,
@@ -801,8 +823,8 @@ def train(train_dir,
       _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
       save_checkpoint(
           train_dir, {
-              'flax_module': flax_module,
               'optimizer_state': optimizer_state,
+              'params': params,
               'batch_stats': batch_stats,
               'training_metrics_grabber': training_metrics_grabber
           },

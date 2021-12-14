@@ -22,7 +22,6 @@ import tempfile
 
 from absl import flags
 from absl.testing import absltest
-from flax.deprecated import nn
 from init2winit import utils
 from jax import test_util as jtu
 import numpy as np
@@ -54,11 +53,9 @@ class TrainingMetricsTest(jtu.JaxTestCase):
     training_metrics_grabber = utils.TrainingMetricsGrabber.create(
         example_grads[0], eval_config)
 
-    fake_model = nn.Model(None, example_grads[0])
-
     for grad in example_grads:
       training_metrics_grabber = training_metrics_grabber.update(
-          grad, fake_model, fake_model)
+          grad, example_grads[0], example_grads[0])
 
     for layer in ['layer1', 'layer2']:
       expected_grad_ema = 1 / 4 * np.zeros(model_size) + 1 / 4 * example_grads[

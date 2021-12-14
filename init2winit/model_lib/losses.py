@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Registry for the available loss functions we can use for training models."""
-from flax.deprecated import nn
+from flax import linen as nn
 import jax
 import jax.numpy as jnp
 

@@ -15,9 +15,10 @@
 
 """Tests for normalization.py."""
 
+import functools
 from absl.testing import absltest
 
-from flax.deprecated import nn
+from flax import linen as nn
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import normalization
 
@@ -29,16 +30,18 @@ import numpy as np
 jax.config.parse_flags_with_absl()
 
 
-def _init(model_cls, rng, input_shape):
-  with nn.stateful() as init_state:
-    _, initial_params = model_cls.init_by_shape(
-        rng, [(input_shape, np.float32)])
-    model = nn.Model(model_cls, initial_params)
-  return model, init_state
+def _init(flax_module, rng, input_shape):
+  model_init_fn = jax.jit(
+      functools.partial(flax_module.init, use_running_average=False))
+  xs = np.zeros(input_shape)
+  init_dict = model_init_fn({'params': rng}, xs)
+  params = init_dict['params']
+  batch_stats = init_dict['batch_stats']
+  return params, batch_stats
 
 
 def _run_sync_ema(
-    vbn_model_cls,
+    vbn_flax_module,
     input_shape,
     x,
     virtual_means,
@@ -46,15 +49,19 @@ def _run_sync_ema(
     num_steps):
   """Run num_steps forward passes, syncing state every sync_frequency steps."""
   rng = jax.random.PRNGKey(0)
-  vbn_model, vbn_state = _init(vbn_model_cls, rng, input_shape)
+  vbn_params, vbn_state = _init(vbn_flax_module, rng, input_shape)
   for t in range(num_steps):
     # Note that in trainer.py, we synchronize after calling `model(x)`, but
     # the ordering below tests the same functionality and simplifies our
     # calculations.
     if t % sync_frequency == 0:
       vbn_state = model_utils.sync_local_batch_norm_stats(vbn_state)
-    with nn.stateful(vbn_state) as vbn_state:
-      vbn_model(x)
+    _, vbn_state = vbn_flax_module.apply(
+        {'params': vbn_params, 'batch_stats': vbn_state},
+        x,
+        mutable=['batch_stats'],
+        use_running_average=False)
+    vbn_state = vbn_state['batch_stats']
   # Always do a final sync at the end of training.
   vbn_state = model_utils.sync_local_batch_norm_stats(vbn_state)
 
@@ -73,14 +80,14 @@ def _run_sync_ema(
     ema_means = (
         0.9 ** sync_frequency * x_0 +
         virtual_means * (1 - 0.9 ** sync_frequency))
-  feature_size = vbn_state['/']['batch_norm_running_mean'].shape[-1]
+  feature_size = vbn_state['batch_norm_running_mean'].shape[-1]
   # Always do a final sync at the end of training.
   ema_means = jnp.mean(ema_means) * jnp.ones((3,))
   expected_synced_ema_means = jnp.stack(
       [m * jnp.ones((feature_size,)) for m in ema_means])
 
   np.testing.assert_allclose(
-      vbn_state['/']['batch_norm_running_mean'],
+      vbn_state['batch_norm_running_mean'],
       expected_synced_ema_means,
       atol=1e-4)
   return vbn_state
@@ -100,34 +107,50 @@ class NormalizationTest(absltest.TestCase):
     nines = 9.0 * jnp.ones(half_input_shape)
     x = jnp.concatenate((twos, nines))
 
-    bn_model_cls = nn.BatchNorm.partial(momentum=0.9)
-    bn_model, bn_state = _init(bn_model_cls, rng, input_shape)
+    bn_flax_module = nn.BatchNorm(momentum=0.9)
+    bn_params, bn_state = _init(bn_flax_module, rng, input_shape)
 
-    vbn_model_cls = normalization.VirtualBatchNorm.partial(
+    vbn_flax_module = normalization.VirtualBatchNorm(
         momentum=0.9, virtual_batch_size=batch_size, data_format='NHWC')
-    vbn_model, vbn_state = _init(vbn_model_cls, rng, input_shape)
+    vbn_params, vbn_state = _init(vbn_flax_module, rng, input_shape)
 
-    with nn.stateful(bn_state) as bn_state:
-      bn_y = bn_model(x)
-    with nn.stateful(bn_state) as bn_state:
-      bn_y = bn_model(x)
+    _, bn_state = bn_flax_module.apply(
+        {'params': bn_params, 'batch_stats': bn_state},
+        x,
+        mutable=['batch_stats'],
+        use_running_average=False)
+    bn_state = bn_state['batch_stats']
+    bn_y, bn_state = bn_flax_module.apply(
+        {'params': bn_params, 'batch_stats': bn_state},
+        x,
+        mutable=['batch_stats'],
+        use_running_average=False)
+    bn_state = bn_state['batch_stats']
 
-    with nn.stateful(vbn_state) as vbn_state:
-      vbn_y = vbn_model(x)
-    with nn.stateful(vbn_state) as vbn_state:
-      vbn_y = vbn_model(x)
+    _, vbn_state = vbn_flax_module.apply(
+        {'params': vbn_params, 'batch_stats': vbn_state},
+        x,
+        mutable=['batch_stats'],
+        use_running_average=False)
+    vbn_state = vbn_state['batch_stats']
+    vbn_y, vbn_state = vbn_flax_module.apply(
+        {'params': vbn_params, 'batch_stats': vbn_state},
+        x,
+        mutable=['batch_stats'],
+        use_running_average=False)
+    vbn_state = vbn_state['batch_stats']
 
     # Test that the layer forward passes are the same.
     np.testing.assert_allclose(bn_y, vbn_y, atol=1e-4)
 
     # Test that virtual and regular BN produce the same EMAs.
     np.testing.assert_allclose(
-        bn_state['/']['mean'],
-        np.squeeze(vbn_state['/']['batch_norm_running_mean'], 0),
+        bn_state['mean'],
+        np.squeeze(vbn_state['batch_norm_running_mean'], 0),
         atol=1e-4)
     np.testing.assert_allclose(
-        bn_state['/']['var'],
-        np.squeeze(vbn_state['/']['batch_norm_running_var'], 0),
+        bn_state['var'],
+        np.squeeze(vbn_state['batch_norm_running_var'], 0),
         atol=1e-4)
 
   def test_forward_pass(self):
@@ -152,24 +175,37 @@ class NormalizationTest(absltest.TestCase):
     expected_bn_y = jnp.concatenate(
         (jnp.ones(half_input_shape) * -1.0, jnp.ones(half_input_shape)))
 
-    bn_model_cls = nn.BatchNorm.partial(momentum=0.9)
-    bn_model, bn_state = _init(bn_model_cls, rng, input_shape)
+    bn_flax_module = nn.BatchNorm(momentum=0.9)
+    bn_params, bn_state = _init(bn_flax_module, rng, input_shape)
 
-    vbn_model_cls = normalization.VirtualBatchNorm.partial(
+    vbn_flax_module = normalization.VirtualBatchNorm(
         momentum=0.9, virtual_batch_size=batch_size, data_format='NHWC')
-    vbn_model, vbn_state = _init(vbn_model_cls, rng, input_shape)
+    vbn_params, vbn_state = _init(vbn_flax_module, rng, input_shape)
 
-    with nn.stateful(bn_state):
-      bn_y1 = bn_model(x1)
+    bn_y1, _ = bn_flax_module.apply(
+        {'params': bn_params, 'batch_stats': bn_state},
+        x1,
+        mutable=['batch_stats'],
+        use_running_average=False)
 
-    with nn.stateful(bn_state):
-      bn_y2 = bn_model(x2)
+    bn_y2, _ = bn_flax_module.apply(
+        {'params': bn_params, 'batch_stats': bn_state},
+        x2,
+        mutable=['batch_stats'],
+        use_running_average=False)
 
-    with nn.stateful(bn_state):
-      bn_y_both = bn_model(x_both)
+    bn_y_both, _ = bn_flax_module.apply(
+        {'params': bn_params, 'batch_stats': bn_state},
+        x_both,
+        mutable=['batch_stats'],
+        use_running_average=False)
 
-    with nn.stateful(vbn_state) as vbn_state:
-      vbn_y_both = vbn_model(x_both)
+    vbn_y_both, vbn_state = vbn_flax_module.apply(
+        {'params': vbn_params, 'batch_stats': vbn_state},
+        x_both,
+        mutable=['batch_stats'],
+        use_running_average=False)
+    vbn_state = vbn_state['batch_stats']
 
     # Test that the layer forward passes behave as expected.
     np.testing.assert_allclose(bn_y1, expected_bn_y, atol=1e-4)
@@ -183,8 +219,13 @@ class NormalizationTest(absltest.TestCase):
     np.testing.assert_array_less(
         -jnp.abs(vbn_y_both - bn_y_both), jnp.zeros_like(vbn_y_both))
 
-    with nn.stateful(vbn_state) as vbn_state:
-      vbn_model(x_both)
+    _, vbn_state = vbn_flax_module.apply(
+        {'params': vbn_params, 'batch_stats': vbn_state},
+        x_both,
+        mutable=['batch_stats'],
+        use_running_average=False)
+    vbn_state = vbn_state['batch_stats']
+
     # The mean running average stats at 0.0, and the variance starts at 1.0. So
     # after two applications of the same batch we should expect the value to be
     # mean_ema = 0.9 * (0.9 * 0.0 + 0.1 * mean) + 0.1 * mean = 0.19 * mean
@@ -200,11 +241,11 @@ class NormalizationTest(absltest.TestCase):
     expected_var_ema_both = jnp.stack(
         (expected_var_ema_x1, expected_var_ema_x2))
     np.testing.assert_allclose(
-        vbn_state['/']['batch_norm_running_mean'],
+        vbn_state['batch_norm_running_mean'],
         expected_mean_ema_both,
         atol=1e-4)
     np.testing.assert_allclose(
-        vbn_state['/']['batch_norm_running_var'],
+        vbn_state['batch_norm_running_var'],
         expected_var_ema_both,
         atol=1e-4)
 
@@ -233,29 +274,29 @@ class NormalizationTest(absltest.TestCase):
     # Calculate the means/variances of each virtual batch.
     virtual_means = jnp.array([1.5, 4.0, 8.5])
 
-    vbn_model_cls = normalization.VirtualBatchNorm.partial(
+    vbn_flax_module = normalization.VirtualBatchNorm(
         momentum=0.9, virtual_batch_size=virtual_batch_size, data_format='NHWC')
     vbn_state_sync_5 = _run_sync_ema(
-        vbn_model_cls,
+        vbn_flax_module,
         input_shape,
         x,
         virtual_means,
         sync_frequency=5,
         num_steps=20)
     vbn_state_sync_10 = _run_sync_ema(
-        vbn_model_cls,
+        vbn_flax_module,
         input_shape,
         x,
         virtual_means,
         sync_frequency=10,
         num_steps=20)
     np.testing.assert_allclose(
-        vbn_state_sync_5['/']['batch_norm_running_mean'],
-        vbn_state_sync_10['/']['batch_norm_running_mean'],
+        vbn_state_sync_5['batch_norm_running_mean'],
+        vbn_state_sync_10['batch_norm_running_mean'],
         atol=1e-4)
     np.testing.assert_allclose(
-        vbn_state_sync_5['/']['batch_norm_running_var'],
-        vbn_state_sync_10['/']['batch_norm_running_var'],
+        vbn_state_sync_5['batch_norm_running_var'],
+        vbn_state_sync_10['batch_norm_running_var'],
         atol=1e-4)
 
   def test_different_eval_batch_size(self):
@@ -266,15 +307,21 @@ class NormalizationTest(absltest.TestCase):
     input_shape = (batch_size, 3, 3, feature_size)
     x = 2.0 * jnp.ones(input_shape)
 
-    vbn_model_cls = normalization.VirtualBatchNorm.partial(
+    vbn_flax_module = normalization.VirtualBatchNorm(
         momentum=0.9, virtual_batch_size=batch_size, data_format='NHWC')
-    vbn_model, vbn_state = _init(vbn_model_cls, rng, input_shape)
+    vbn_params, vbn_state = _init(vbn_flax_module, rng, input_shape)
 
-    with nn.stateful(vbn_state) as vbn_state:
-      vbn_model(x)
+    _, vbn_state = vbn_flax_module.apply(
+        {'params': vbn_params, 'batch_stats': vbn_state},
+        x,
+        mutable=['batch_stats'],
+        use_running_average=False)
+    vbn_state = vbn_state['batch_stats']
 
-    with nn.stateful(vbn_state) as vbn_state:
-      vbn_model(jnp.ones((13, 3, 3, feature_size)), use_running_average=True)
+    vbn_flax_module.apply(
+        {'params': vbn_params, 'batch_stats': vbn_state},
+        jnp.ones((13, 3, 3, feature_size)),
+        use_running_average=True)
 
 
 if __name__ == '__main__':

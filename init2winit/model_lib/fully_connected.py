@@ -14,8 +14,9 @@
 # limitations under the License.
 
 """Simple fully connected feedforward neural network classifier."""
+from typing import Any, Tuple
 
-from flax.deprecated import nn
+from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
@@ -56,29 +57,32 @@ class FullyConnected(nn.Module):
   [batch_size_per_device, *input_shape] where input_shape may be of arbitrary
   rank. The model flatten the input before applying a dense layer.
   """
+  num_outputs: int
+  hid_sizes: Tuple[int]
+  activation_function: Any
+  kernel_inits: Tuple[model_utils.Initializer]
+  bias_init: model_utils.Initializer = initializers.zeros
 
-  def apply(self,
-            x,
-            num_outputs,
-            hid_sizes,
-            activation_function,
-            kernel_inits,
-            bias_init=initializers.zeros,
-            train=True):
-    if not isinstance(activation_function, str):
-      if len(activation_function) != len(hid_sizes):
+  @nn.compact
+  def __call__(self, x, train):
+    del train
+    if not isinstance(self.activation_function, str):
+      if len(self.activation_function) != len(self.hid_sizes):
         raise ValueError(
             'The number of activation functions must be equal to the number '
             'of hidden layers')
     else:
-      activation_function = [activation_function] * len(hid_sizes)
+      activation_function = [self.activation_function] * len(self.hid_sizes)
 
     x = jnp.reshape(x, (x.shape[0], -1))
-    for i, (num_hid, init) in enumerate(zip(hid_sizes, kernel_inits[:-1])):
-      x = nn.Dense(x, num_hid, kernel_init=init, bias_init=bias_init)
+    for i, (num_hid, init) in enumerate(
+        zip(self.hid_sizes, self.kernel_inits[:-1])):
+      x = nn.Dense(num_hid, kernel_init=init, bias_init=self.bias_init)(x)
       x = model_utils.ACTIVATIONS[activation_function[i]](x)
     x = nn.Dense(
-        x, num_outputs, kernel_init=kernel_inits[-1], bias_init=bias_init)
+        self.num_outputs,
+        kernel_init=self.kernel_inits[-1],
+        bias_init=self.bias_init)(x)
     return x
 
 
@@ -89,8 +93,8 @@ class FullyConnectedModel(base_model.BaseModel):
         initializers.variance_scaling(scale, 'fan_in', 'truncated_normal')
         for scale in self.hps.kernel_scales
     ]
-    return FullyConnected.partial(
+    return FullyConnected(
         num_outputs=self.hps['output_shape'][-1],
-        hid_sizes=self.hps.hid_sizes,
+        hid_sizes=tuple(self.hps.hid_sizes),
         activation_function=self.hps.activation_function,
-        kernel_inits=kernel_inits)
+        kernel_inits=tuple(kernel_inits))

@@ -14,16 +14,24 @@
 # limitations under the License.
 
 """Common code used by different models."""
-
 import functools
 
+from typing import Any, Callable, Iterable
+
 from absl import logging
+from flax import core
+from flax import linen as nn
 from flax import optim
-from flax.deprecated import nn
 import jax
 from jax import lax
 from jax.nn import initializers
 import jax.numpy as jnp
+
+PRNGKey = Any
+Shape = Iterable[int]
+Dtype = Any  # this could be a real type?
+Array = Any
+Initializer = Callable[[PRNGKey, Shape, Dtype], Array]
 
 ACTIVATIONS = {
     'relu': jax.nn.relu,
@@ -47,15 +55,32 @@ INITIALIZERS = {
 }
 
 
-class ScalarMultiply(nn.base.Module):
+class ScalarMultiply(nn.Module):
   """Layer which multiplies by a single scalar."""
+  scale_init: Any = initializers.ones
 
-  def apply(self, x, scale_init=initializers.ones):
-    return x * self.param('scale', (), scale_init)
+  @nn.compact
+  def __call__(self, x):
+    return x * self.param('scale', (), self.scale_init)
 
 
 def get_normalizer(normalizer, train):
   """Maps a string to the given normalizer function.
+
+  We return a function that returns the normalization module, deferring the
+  creation of the module to when the returned function is called. This is done
+  because if we returned the module directly and then used it multiple times
+  in the model (as is common in our codebase), the same module variables would
+  be reused across call sites. This means that the common use case will be like:
+
+    maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
+    x = maybe_normalize()(x)
+
+  Relevant Flax Linen documentation for how to handle the train argument:
+  https://flax.readthedocs.io/en/latest/design_notes/arguments.html. We take it
+  as an input to get_normalizer because it is only used in the BatchNorm case
+  (the alternative of only passing it as maybe_normalize(train) would result
+  in an error in the LayerNorm case).
 
   Args:
     normalizer: One of ['batch_norm', 'layer_norm', 'none'].
@@ -63,24 +88,29 @@ def get_normalizer(normalizer, train):
       for batch norm.
 
   Returns:
-    The normalizer function.
+    A function that when called will create the normalizer module/function.
 
   Raises:
     ValueError if normalizer not recognized.
   """
-
   if normalizer == 'batch_norm':
-    return nn.BatchNorm.partial(
+    return functools.partial(
+        nn.BatchNorm,
         use_running_average=not train,
         momentum=0.9,
         epsilon=1e-5)
   elif normalizer in ['layer_norm', 'pre_layer_norm', 'post_layer_norm']:
     return nn.LayerNorm
   elif normalizer == 'none':
-    def identity(x, name=None):
-      del name
-      return x
-    return identity
+    def identity_wrapper(*args, **kwargs):
+      del args
+      del kwargs
+      def identity(x, *args, **kwargs):
+        del args
+        del kwargs
+        return x
+      return identity
+    return identity_wrapper
   else:
     raise ValueError('Unknown normalizer: {}'.format(normalizer))
 
@@ -132,7 +162,7 @@ def apply_label_smoothing(one_hot_targets, label_smoothing):
   return one_hot_targets
 
 
-def _sync_local_batch_norm_stats_helper(x):
+def _average_local_batch_norm_stats(x):
   """Average local BN EMAs along the 0-th axis, tile back to the same shape."""
   shape = x.shape
   # The state is replicated across devices on the first axis, so the
@@ -150,18 +180,22 @@ def _sync_local_batch_norm_stats_helper(x):
   return x
 
 
-def sync_local_batch_norm_stats(batch_stats):
+def _sync_local_batch_norm_stats_helper(d):
+  """Recursively iterate over the state pytree and only sync BN keys."""
+  for key, value in d.items():
+    if isinstance(value, dict):
+      d[key] = _sync_local_batch_norm_stats_helper(value)
+    elif key.startswith('batch_norm_running_'):
+      d[key] = _average_local_batch_norm_stats(value)
+    return d
+
+
+def sync_local_batch_norm_stats(locally_synced_batch_stats):
   """Sync the multiple local BN EMAs when using virual bs < per-device bs."""
-  with batch_stats.mutate() as locally_synced_batch_stats:
-    for state_values in locally_synced_batch_stats.as_dict().values():
-      filtered_values = {
-          k: v for k, v in state_values.items()
-          if k.startswith('batch_norm_running_')
-      }
-      # This will overwrite values in state_values with those from the tree_map.
-      state_values.update(
-          jax.tree_map(_sync_local_batch_norm_stats_helper, filtered_values))
-    return locally_synced_batch_stats
+  locally_synced_batch_stats = locally_synced_batch_stats.unfreeze()
+  locally_synced_batch_stats = _sync_local_batch_norm_stats_helper(
+      locally_synced_batch_stats)
+  return core.FrozenDict(locally_synced_batch_stats)
 
 
 def sync_batchnorm_stats(state):
@@ -230,11 +264,11 @@ def flatten_dict(nested_dict, sep='/'):
   return return_dict
 
 
-def rescale_layers(flax_module, layer_rescale_factors):
+def rescale_layers(params, layer_rescale_factors):
   """Rescales the model variables by given multiplicative factors.
 
   Args:
-    flax_module: A flax module where params is a nested dictionary.
+    params: a dict of trainable model parameters.
     layer_rescale_factors: A dictionary mapping flat keys to a multiplicative
       rescale factor. The corresponding params in the module pytree will be
       changed from x -> a * x for rescale factor a. The keys of the dictionary
@@ -243,16 +277,13 @@ def rescale_layers(flax_module, layer_rescale_factors):
   Returns:
     A new flax module with the corresponding params rescaled.
   """
-  all_keys = flatten_dict(flax_module.params).keys()
+  all_keys = flatten_dict(params).keys()
   logging.info('All keys:')
   for key in all_keys:
     logging.info(key)
 
   for key in layer_rescale_factors:
-    if key not in all_keys:
-      raise ValueError('Module does not have key: {}'.format(key))
     logging.info('Rescaling %s by factor %f', key, layer_rescale_factors[key])
     traversal = optim.ModelParamTraversal(lambda path, _: path == key)
-    flax_module = traversal.update(lambda x: x * layer_rescale_factors[key],
-                                   flax_module)
-  return flax_module
+    params = traversal.update(lambda x: x * layer_rescale_factors[key], params)
+  return params

@@ -119,8 +119,11 @@ def _wrap_update_fn(opt_name, opt_update):
   Returns:
     A wrapped optimizer update function.
   """
-  def update_fn(grads, optimizer_state, params, batch=None):
+  def update_fn(grads, optimizer_state, params, batch=None, batch_stats=None):
     if opt_name == 'hessian_free':
-      return opt_update(grads, optimizer_state, params=(params, batch))
+      variables = {'params': params}
+      if batch_stats is not None:
+        variables['batch_stats'] = batch_stats
+      return opt_update(grads, optimizer_state, params=(variables, batch))
     return opt_update(grads, optimizer_state, params=params)
   return update_fn

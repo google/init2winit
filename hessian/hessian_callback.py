@@ -34,7 +34,9 @@ def set_up_hessian_eval(model, flax_module, batch_stats, dataset,
   batch_stats = jax.tree_map(lambda x: x[:][0], batch_stats)
   def batch_loss(module, batch_rng):
     batch, rng = batch_rng
-    return model.training_cost(module, batch_stats, batch, rng)[0]
+    return model.training_cost(
+        module, batch, batch_stats=batch_stats, dropout_rng=rng)[0]
+
   pytree_path = os.path.join(checkpoint_dir, hessian_eval_config['name'])
   logger = utils.MetricLogger(pytree_path=pytree_path)
   hessian_evaluator = hessian_eval.CurvatureEvaluator(

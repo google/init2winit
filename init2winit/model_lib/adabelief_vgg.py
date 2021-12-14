@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Lint as: python3
 """Flax implementation of Adabelief VGG.
 
 This module ports the Adabelief implemetation of VGG to Flax.  The
@@ -28,7 +27,9 @@ The original VGGNet paper can be found here:
 https://arxiv.org/abs/1409.1556
 """
 
-from flax.deprecated import nn
+import functools
+
+from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax.numpy as jnp
@@ -63,13 +64,13 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
 def classifier(x, num_outputs, dropout_rate, deterministic):
   """Implements the classification portion of the network."""
 
-  x = nn.dropout(x, rate=dropout_rate, deterministic=deterministic)
-  x = nn.Dense(x, 512)
+  x = nn.Dropout(rate=dropout_rate, deterministic=deterministic)(x)
+  x = nn.Dense(512)(x)
   x = nn.relu(x)
-  x = nn.dropout(x, rate=dropout_rate, deterministic=deterministic)
-  x = nn.Dense(x, 512)
+  x = nn.Dropout(rate=dropout_rate, deterministic=deterministic)(x)
+  x = nn.Dense(512)(x)
   x = nn.relu(x)
-  x = nn.Dense(x, num_outputs)
+  x = nn.Dense(num_outputs)(x)
   return x
 
 
@@ -77,31 +78,31 @@ def features(x, num_layers, normalizer, dtype, train):
   """Implements the feature extraction portion of the network."""
 
   layers = _layer_size_options[num_layers]
-  conv = nn.Conv.partial(bias=False, dtype=dtype)
+  conv = functools.partial(nn.Conv, use_bias=False, dtype=dtype)
   maybe_normalize = model_utils.get_normalizer(normalizer, train)
   for l in layers:
     if l == 'M':
       x = nn.max_pool(x, window_shape=(2, 2), strides=(2, 2))
     else:
-      x = conv(x, features=l, kernel_size=(3, 3), padding=((1, 1), (1, 1)))
-      x = maybe_normalize(x)
+      x = conv(features=l, kernel_size=(3, 3), padding=((1, 1), (1, 1)))(x)
+      x = maybe_normalize()(x)
       x = nn.relu(x)
   return x
 
 
 class VGG(nn.Module):
   """Adabelief VGG."""
+  num_layers: int
+  num_outputs: int
+  normalizer: str = 'none'
+  dtype: str = 'float32'
 
-  def apply(self,
-            x,
-            num_layers,
-            num_outputs,
-            normalizer='none',
-            dtype='float32',
-            train=True):
-    x = features(x, num_layers, normalizer, dtype, train)
+  @nn.compact
+  def __call__(self, x, train):
+    x = features(x, self.num_layers, self.normalizer, self.dtype, train)
     x = jnp.reshape(x, (x.shape[0], -1))
-    x = classifier(x, num_outputs, dropout_rate=0.5, deterministic=not train)
+    x = classifier(
+        x, self.num_outputs, dropout_rate=0.5, deterministic=not train)
     return x
 
 
@@ -129,7 +130,7 @@ class AdaBeliefVGGModel(base_model.BaseModel):
 
   def build_flax_module(self):
     """Adabelief VGG."""
-    return VGG.partial(
+    return VGG(
         num_layers=self.hps.num_layers,
         num_outputs=self.hps['output_shape'][-1],
         dtype=self.hps.model_dtype,

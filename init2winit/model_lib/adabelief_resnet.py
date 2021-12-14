@@ -34,9 +34,13 @@ https://github.com/juntang-zhuang/Adabelief-Optimizer/blob/update_0.1.0/PyTorch_
 
 """
 
-from flax.deprecated import nn
+import functools
+from typing import Optional, Tuple
+
+from flax import linen as nn
 from init2winit import utils
 from init2winit.model_lib import base_model
+from init2winit.model_lib import model_utils
 from init2winit.model_lib import normalization
 import jax.numpy as jnp
 
@@ -74,142 +78,130 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
 
 class BasicResidualBlock(nn.Module):
   """Basic ResNet block."""
+  filters: int
+  strides: Tuple[int, int] = (1, 1)
+  dtype: model_utils.Dtype = jnp.float32
+  batch_norm_momentum: float = 0.9
+  batch_norm_epsilon: float = 1e-5
+  virtual_batch_size: Optional[int] = None
+  data_format: Optional[str] = None
 
-  def apply(self,
-            x,
-            filters,
-            strides=(1, 1),
-            train=True,
-            batch_stats=None,
-            dtype=jnp.float32,
-            batch_norm_momentum=0.9,
-            batch_norm_epsilon=1e-5,
-            virtual_batch_size=None,
-            data_format=None):
-    needs_projection = x.shape[-1] != filters or strides != (1, 1)
-    batch_norm = normalization.VirtualBatchNorm.partial(
-        batch_stats=batch_stats,
-        use_running_average=not train,
-        momentum=batch_norm_momentum,
-        epsilon=batch_norm_epsilon,
-        dtype=dtype,
-        virtual_batch_size=virtual_batch_size,
-        data_format=data_format)
-    conv = nn.Conv.partial(bias=False, dtype=dtype)
+  @nn.compact
+  def __call__(self, x, train):
+    needs_projection = x.shape[-1] != self.filters or self.strides != (1, 1)
+    batch_norm = functools.partial(
+        normalization.VirtualBatchNorm,
+        momentum=self.batch_norm_momentum,
+        epsilon=self.batch_norm_epsilon,
+        dtype=self.dtype,
+        virtual_batch_size=self.virtual_batch_size,
+        data_format=self.data_format)
+    conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
 
     residual = x
     if needs_projection:
       residual = conv(
-          residual, filters, (1, 1), strides, 'VALID', name='proj_conv')
-      residual = batch_norm(residual, name='proj_bn')
+          self.filters, (1, 1), self.strides, 'VALID',
+          name='proj_conv')(residual)
+      residual = batch_norm(name='proj_bn')(
+          residual, use_running_average=not train)
 
-    y = conv(x, filters, (3, 3), strides, 'SAME', name='conv1')
-    y = batch_norm(y, name='bn1')
+    y = conv(self.filters, (3, 3), self.strides, 'SAME', name='conv1')(x)
+    y = batch_norm(name='bn1')(y, use_running_average=not train)
     y = nn.relu(y)
-    y = conv(y, filters, (3, 3), (1, 1), 'SAME', name='conv2')
-    y = batch_norm(y, name='bn2')
+    y = conv(self.filters, (3, 3), (1, 1), 'SAME', name='conv2')(y)
+    y = batch_norm(name='bn2')(y, use_running_average=not train)
     y = nn.relu(residual + y)
     return y
 
 
 class BottleneckResidualBlock(nn.Module):
   """Bottleneck ResNet block."""
+  filters: int
+  strides: Tuple[int, int] = (1, 1)
+  dtype: model_utils.Dtype = jnp.float32
+  batch_norm_momentum: float = 0.9
+  batch_norm_epsilon: float = 1e-5
+  virtual_batch_size: Optional[int] = None
+  data_format: Optional[str] = None
 
-  def apply(
-      self,
-      x,
-      filters,
-      strides=(1, 1),
-      train=True,
-      batch_stats=None,
-      dtype=jnp.float32,
-      batch_norm_momentum=0.9,
-      batch_norm_epsilon=1e-5,
-      virtual_batch_size=None,
-      data_format=None):
-    needs_projection = x.shape[-1] != filters * 4 or strides != (1, 1)
-    batch_norm = normalization.VirtualBatchNorm.partial(
-        batch_stats=batch_stats,
-        use_running_average=not train,
-        momentum=batch_norm_momentum,
-        epsilon=batch_norm_epsilon,
-        dtype=dtype,
-        virtual_batch_size=virtual_batch_size,
-        data_format=data_format)
-    conv = nn.Conv.partial(bias=False, dtype=dtype)
+  @nn.compact
+  def __call__(self, x, train):
+    needs_projection = x.shape[-1] != self.filters * 4 or self.strides != (1, 1)
+    batch_norm = functools.partial(
+        normalization.VirtualBatchNorm,
+        momentum=self.batch_norm_momentum,
+        epsilon=self.batch_norm_epsilon,
+        dtype=self.dtype,
+        virtual_batch_size=self.virtual_batch_size,
+        data_format=self.data_format)
+    conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
 
     residual = x
     if needs_projection:
-      residual = conv(residual, filters * 4, (1, 1), strides, name='proj_conv')
-      residual = batch_norm(residual, name='proj_bn')
+      residual = conv(
+          self.filters * 4, (1, 1), self.strides, name='proj_conv')(residual)
+      residual = batch_norm(name='proj_bn')(
+          residual, use_running_average=not train)
 
-    y = conv(x, filters, (1, 1), name='conv1')
-    y = batch_norm(y, name='bn1')
+    y = conv(self.filters, (1, 1), name='conv1')(x)
+    y = batch_norm(name='bn1')(y, use_running_average=not train)
     y = nn.relu(y)
-    y = conv(y, filters, (3, 3), strides, name='conv2')
-    y = batch_norm(y, name='bn2')
+    y = conv(self.filters, (3, 3), self.strides, name='conv2')(y)
+    y = batch_norm(name='bn2')(y, use_running_average=not train)
     y = nn.relu(y)
-    y = conv(y, filters * 4, (1, 1), name='conv3')
+    y = conv(self.filters * 4, (1, 1), name='conv3')(y)
 
-    y = batch_norm(y, name='bn3', scale_init=nn.initializers.zeros)
+    y = batch_norm(name='bn3', scale_init=nn.initializers.zeros)(
+        y, use_running_average=not train)
     y = nn.relu(residual + y)
     return y
 
 
 class ResNet(nn.Module):
   """Adabelief ResNetV1."""
+  num_outputs: int
+  num_filters: int = 64
+  num_layers: int = 50
+  dtype: model_utils.Dtype = jnp.float32
+  batch_norm_momentum: float = 0.9
+  batch_norm_epsilon: float = 1e-5
+  virtual_batch_size: Optional[int] = None
+  data_format: Optional[str] = None
 
-  def apply(
-      self,
-      x,
-      num_outputs,
-      num_filters=64,
-      num_layers=50,
-      train=True,
-      batch_stats=None,
-      dtype=jnp.float32,
-      batch_norm_momentum=0.9,
-      batch_norm_epsilon=1e-5,
-      virtual_batch_size=None,
-      data_format=None):
-    if num_layers not in _block_size_options:
+  @nn.compact
+  def __call__(self, x, train):
+    if self.num_layers not in _block_size_options:
       raise ValueError('Please provide a valid number of layers')
-    block_sizes = _block_size_options[num_layers]
+    block_sizes = _block_size_options[self.num_layers]
     x = nn.Conv(
-        x,
-        num_filters, (3, 3), (1, 1),
+        self.num_filters, (3, 3), (1, 1),
         'SAME',
-        bias=False,
-        dtype=dtype,
-        name='init_conv')
+        use_bias=False,
+        dtype=self.dtype,
+        name='init_conv')(x)
     x = normalization.VirtualBatchNorm(
-        x,
-        batch_stats=batch_stats,
-        use_running_average=not train,
-        momentum=batch_norm_momentum,
-        epsilon=batch_norm_epsilon,
-        dtype=dtype,
+        momentum=self.batch_norm_momentum,
+        epsilon=self.batch_norm_epsilon,
+        dtype=self.dtype,
         name='init_bn',
-        virtual_batch_size=virtual_batch_size,
-        data_format=data_format)
+        virtual_batch_size=self.virtual_batch_size,
+        data_format=self.data_format)(x, use_running_average=not train)
     x = nn.relu(x)
-    residual_block = block_type_options[num_layers]
+    residual_block = block_type_options[self.num_layers]
     for i, block_size in enumerate(block_sizes):
       for j in range(block_size):
         strides = (2, 2) if i > 0 and j == 0 else (1, 1)
         x = residual_block(
-            x,
-            num_filters * 2**i,
+            self.num_filters * 2**i,
             strides=strides,
-            train=train,
-            batch_stats=batch_stats,
-            dtype=dtype,
-            batch_norm_momentum=batch_norm_momentum,
-            batch_norm_epsilon=batch_norm_epsilon,
-            virtual_batch_size=virtual_batch_size,
-            data_format=data_format)
+            dtype=self.dtype,
+            batch_norm_momentum=self.batch_norm_momentum,
+            batch_norm_epsilon=self.batch_norm_epsilon,
+            virtual_batch_size=self.virtual_batch_size,
+            data_format=self.data_format)(x, train=train)
     x = jnp.mean(x, axis=(1, 2))
-    x = nn.Dense(x, num_outputs, dtype=dtype)
+    x = nn.Dense(self.num_outputs, dtype=self.dtype)(x)
     return x
 
 
@@ -240,7 +232,7 @@ class AdaBeliefResnetModel(base_model.BaseModel):
 
   def build_flax_module(self):
     """Adabelief ResNetV1."""
-    return ResNet.partial(
+    return ResNet(
         num_filters=self.hps.num_filters,
         num_layers=self.hps.num_layers,
         num_outputs=self.hps['output_shape'][-1],

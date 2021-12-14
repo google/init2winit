@@ -90,21 +90,22 @@ def eval_checkpoints(
   model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
 
   # Maybe run the initializer.
-  flax_module, batch_stats = trainer.initialize(model.flax_module_def,
-                                                initializer, model.loss_fn,
-                                                hps.input_shape,
-                                                hps.output_shape, hps, init_rng,
-                                                None)
+  params, batch_stats = trainer.initialize(model.flax_module,
+                                           initializer, model.loss_fn,
+                                           hps.input_shape,
+                                           hps.output_shape, hps, init_rng,
+                                           None)
 
   # Fold in a the unreplicated batch_stats and rng into the loss used by
   # hessian eval.
-  def batch_loss(module, batch_rng):
+  def batch_loss(params, batch_rng):
     batch, rng = batch_rng
-    return model.training_cost(module, batch_stats, batch, rng)[0]
+    return model.training_cost(
+        params, batch, batch_stats=batch_stats, dropout_rng=rng)[0]
   batch_stats = jax_utils.replicate(batch_stats)
 
   if jax.process_index() == 0:
-    utils.log_pytree_shape_and_statistics(flax_module.params)
+    utils.log_pytree_shape_and_statistics(params)
     logging.info('train_size: %d,', hps.train_size)
     logging.info(hps)
     # Save the hessian computation hps to the experiment directory
@@ -120,7 +121,7 @@ def eval_checkpoints(
         f.write(json.dumps(hessian_eval_config))
 
   optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps)
-  optimizer_state = optimizer_init_fn(flax_module.params)
+  optimizer_state = optimizer_init_fn(params)
   # Note that we do not use the learning rate.
   # The optimizer state is a list of all the optax transformation states, and
   # we inject the learning rate into all states that will accept it.
@@ -129,7 +130,7 @@ def eval_checkpoints(
         'learning_rate' in state.hyperparams):
       state.hyperparams['learning_rate'] = jax_utils.replicate(1.0)
   optimizer_state = jax_utils.replicate(optimizer_state)
-  flax_module = jax_utils.replicate(flax_module)
+  params = jax_utils.replicate(params)
   data_rng = jax.random.fold_in(data_rng, 0)
 
   assert hps.batch_size % (jax.device_count()) == 0
@@ -148,7 +149,7 @@ def eval_checkpoints(
     logging.info('Number of hosts: %d', jax.process_count())
 
   hessian_evaluator = hessian_eval.CurvatureEvaluator(
-      flax_module,
+      params,
       hessian_eval_config,
       dataset=dataset,
       loss=batch_loss)
@@ -164,7 +165,7 @@ def eval_checkpoints(
                                                    max_global_step):
     unreplicated_checkpoint_state = checkpoint.CheckpointState(
         {
-            'flax_module': flax_module,
+            'params': params,
             'optimizer_state': optimizer_state,
             'batch_stats': batch_stats,
         },
@@ -178,18 +179,18 @@ def eval_checkpoints(
     results, _ = trainer.restore_checkpoint(
         ckpt,
         {
-            'flax_module': flax_module,
+            'params': params,
             'optimizer_state': optimizer_state,
             'batch_stats': batch_stats,
         },
         use_deprecated_checkpointing=use_deprecated_checkpointing)
-    flax_module = results['flax_module']
+    params = results['params']
     optimizer_state = results['optimizer_state']
     batch_stats = results['batch_stats']
     # pylint: disable=protected-access
     batch_stats = trainer._maybe_sync_batchnorm_stats(batch_stats)
     # pylint: enable=protected-access
-    report, _ = trainer.eval_metrics(flax_module, batch_stats, dataset,
+    report, _ = trainer.eval_metrics(params, batch_stats, dataset,
                                      eval_num_batches, eval_num_batches,
                                      evaluate_batch_pmapped)
     if jax.process_index() == 0:
@@ -199,16 +200,16 @@ def eval_checkpoints(
     grads, updates = [], []
     hess_evecs, cov_evecs = [], []
     stats, hess_evecs, cov_evecs = hessian_evaluator.evaluate_spectrum(
-        flax_module, step)
+        params, step)
     row.update(stats)
     if hessian_eval_config[
         'compute_stats'] or hessian_eval_config['compute_interps']:
       grads, updates = hessian_evaluator.compute_dirs(
-          flax_module, optimizer_state, optimizer_update_fn)
-    row.update(hessian_evaluator.evaluate_stats(flax_module, grads,
+          params, optimizer_state, optimizer_update_fn)
+    row.update(hessian_evaluator.evaluate_stats(params, grads,
                                                 updates, hess_evecs,
                                                 cov_evecs, step))
-    row.update(hessian_evaluator.compute_interpolations(flax_module, grads,
+    row.update(hessian_evaluator.compute_interpolations(params, grads,
                                                         updates, hess_evecs,
                                                         cov_evecs, step))
     if jax.process_index() == 0:

@@ -16,6 +16,7 @@
 """Tests for checkpoint.py."""
 
 import copy
+import functools
 import shutil
 import tempfile
 
@@ -59,7 +60,10 @@ class CheckpointTest(parameterized.TestCase):
     model = model(hps, {}, loss_name, metrics_name)
     xs = jnp.array(np.random.normal(size=INPUT_SHAPE))
     rng, params_rng = jax.random.split(rng)
-    _, self.flax_module = model.flax_module_def.create(params_rng, xs)
+    model_init_fn = jax.jit(
+        functools.partial(model.flax_module.init, train=False))
+    init_dict = model_init_fn({'params': params_rng}, xs)
+    self.params = init_dict['params']
 
   def tearDown(self):
     shutil.rmtree(self.test_dir)
@@ -71,7 +75,7 @@ class CheckpointTest(parameterized.TestCase):
   def test_save_load_roundtrip(self, use_deprecated_checkpointing):
     """Test that saving and loading produces the original state."""
     baz = ['a', 'b', 'ccc']
-    state = checkpoint.CheckpointState(self.flax_module.params,
+    state = checkpoint.CheckpointState(self.params,
                                        global_step=5, completed_epochs=4,
                                        baz=baz)
     checkpoint.save_checkpoint(
@@ -85,7 +89,7 @@ class CheckpointTest(parameterized.TestCase):
         use_deprecated_checkpointing=use_deprecated_checkpointing)
 
     self.assertEqual(latest.pystate['baz'], baz)
-    assert pytree_equal(latest.pytree, self.flax_module.params)
+    assert pytree_equal(latest.pytree, self.params)
     self.assertEqual(latest.pystate['global_step'], 5)
     self.assertEqual(latest.pystate['completed_epochs'], 4)
 
@@ -94,7 +98,7 @@ class CheckpointTest(parameterized.TestCase):
     # Checkpoint error is not raised when it actually happens, but when we next
     # write a checkpoint.
     baz = ['a', 'b', 'ccc']
-    state = checkpoint.CheckpointState(self.flax_module.params,
+    state = checkpoint.CheckpointState(self.params,
                                        global_step=5, completed_epochs=4,
                                        baz=baz)
     checkpoint.save_checkpoint_background(

@@ -60,7 +60,7 @@ class AutoEncoderModel(base_model.BaseModel):
         for scale in self.hps.kernel_scales
     ]
 
-    return FullyConnected.partial(
+    return FullyConnected(
         num_outputs=self.hps['output_shape'][-1],
         hid_sizes=self.hps.hid_sizes,
         activation_function=self.hps.activation_function,

@@ -28,13 +28,14 @@ import time
 from absl import logging
 from flax import jax_utils
 from flax import optim as optimizers
-from flax.deprecated import nn
+from flax.core import unfreeze
 from init2winit.model_lib import model_utils
 import jax
 from jax import jvp
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import numpy as np
+import optax
 
 
 # Small hparams for quicker tests.
@@ -175,29 +176,33 @@ def meta_optimize_scales(loss_fn,
   traversal = optimizers.ModelParamTraversal(
       lambda path, _: path in non_bias_and_scalar_keys)
 
-  # The flax optimizer expects a Model object. There is no fprop for the
-  # meta_model, hence the first argument is None.
-  meta_model = nn.Model(None, norms)
-  # TODO(gilmer,znado): update to optax.
-  meta_opt = optimizers.Momentum(hps.meta_learning_rate,
-                                 hps.meta_momentum).create(
-                                     meta_model, focus=traversal)
-  meta_opt = jax_utils.replicate(meta_opt)
+  # Non-bias, non-scalar norms.
+  meta_params = traversal.update(lambda x: x, norms)
+  meta_opt_init_fn, meta_opt_update_fn = optax.sgd(
+      learning_rate=hps.meta_learning_rate,
+      momentum=hps.meta_momentum)
+  meta_optimizer_state = meta_opt_init_fn(meta_params)
+  meta_optimizer_state = jax_utils.replicate(meta_optimizer_state)
+  meta_params = jax_utils.replicate(meta_params)
 
   # Make a closure over the static variables (model, normalized_params, hps).
   @functools.partial(jax.pmap, axis_name='batch')
-  def update(optimizer, inputs, targets):
+  def update(meta_params, optimizer_state, inputs, targets):
     """Update step."""
-    params_to_loss = lambda params: loss_fn(fprop(params, inputs), targets)
+    def params_to_loss(params):
+      return loss_fn(fprop({'params': params}, inputs, train=True), targets)
 
-    def _meta_loss(meta_model):
-      return meta_loss(params_to_loss, meta_model.params, normalized_params,
-                       hps.epsilon), None
-    output_and_grad = optimizer.compute_gradient(_meta_loss)
-    grads = model_utils.cross_device_avg(output_and_grad[-1])
+    def _meta_loss(params):
+      return meta_loss(params_to_loss, params, normalized_params, hps.epsilon)
+
+    grad_fn = jax.value_and_grad(_meta_loss, has_aux=False)
+    loss, grads = grad_fn(meta_params)
+    grads = model_utils.cross_device_avg(grads)
     grads = jax.tree_map(jnp.sign, grads)
-    optimizer = optimizer.apply_gradient(grads)
-    return optimizer, output_and_grad[0]
+    meta_updates, new_meta_optimizer_state = meta_opt_update_fn(
+        grads, optimizer_state, params=meta_params)
+    new_meta_params = optax.apply_updates(meta_params, meta_updates)
+    return new_meta_params, new_meta_optimizer_state, loss
 
   training_curve = []
   start = time.perf_counter()
@@ -205,7 +210,8 @@ def meta_optimize_scales(loss_fn,
     batch_rng = jax.random.fold_in(rng_key, i)
     inputs, targets = get_batch(batch_rng)
 
-    meta_opt, loss_value = update(meta_opt, inputs, targets)
+    meta_params, meta_optimizer_state, loss_value = update(
+        meta_params, meta_optimizer_state, inputs, targets)
     training_curve.append(loss_value)
     if (jax.process_index() == 0 and
         (i % log_every == 0 or (i + 1) == hps.meta_steps)):
@@ -218,22 +224,23 @@ def meta_optimize_scales(loss_fn,
             'meta_loss': float(loss_value[0])
         })
 
-  # Create a new model with the learned init
-  learned_norms = jax_utils.unreplicate(meta_opt).target.params
+  # Create a new model with the learned init.
+  learned_norms = jax_utils.unreplicate(meta_params)
   return learned_norms, training_curve
 
 
 def _log_shape_and_norms(pytree, metrics_logger, key):
   shape_and_norms = jax.tree_map(
       lambda x: (str(x.shape), str(np.linalg.norm(x.reshape(-1)))),
-      pytree)
+      unfreeze(pytree))
   logging.info(json.dumps(shape_and_norms, sort_keys=True, indent=4))
   if metrics_logger is not None:
     metrics_logger.append_json_object({'key': key, 'value': shape_and_norms})
 
 
 def meta_init(loss_fn,
-              model,
+              flax_module,
+              params,
               hps,
               input_shape,
               output_shape,
@@ -244,7 +251,8 @@ def meta_init(loss_fn,
 
   Args:
     loss_fn: Loss function.
-    model: Flax Model class.
+    flax_module: Flax nn.Module class.
+    params: The dict of model parameters.
     hps: HParam object. Required hparams are meta_learning_rate,
       meta_batch_size, meta_steps, and epsilon.
     input_shape: Must agree with batch[0].shape[1:].
@@ -254,22 +262,22 @@ def meta_init(loss_fn,
     log_every: Print meta loss every k steps.
 
   Returns:
-    A Flax model with the learned initialization.
+    A Flax module with the learned initialization.
   """
   # Pretty print the preinitialized norms with the variable shapes.
   if jax.process_index() == 0:
     logging.info('Preinitialized norms:')
-    _log_shape_and_norms(model.params, metrics_logger, key='init_norms')
+    _log_shape_and_norms(params, metrics_logger, key='init_norms')
     # First grab the norms of all weights and rescale params to have norm 1.
     logging.info('Running meta init')
   norms = jax.tree_map(lambda node: jnp.linalg.norm(node.reshape(-1)),
-                       model.params)
+                       params)
 
-  normalized_params = jax.tree_map(normalize, model.params)
+  normalized_params = jax.tree_map(normalize, params)
 
   learned_norms, _ = meta_optimize_scales(
       loss_fn,
-      model.module.call,
+      flax_module.apply,
       normalized_params,
       norms,
       hps,
@@ -278,11 +286,11 @@ def meta_init(loss_fn,
       rng_key,
       metrics_logger=metrics_logger,
       log_every=log_every)
-  new_init = scale_params(normalized_params, learned_norms)
+  new_params = scale_params(normalized_params, learned_norms)
 
   if jax.process_index() == 0:
     # Pretty print the meta init norms with the variable shapes.
     logging.info('Learned norms from meta_init:')
-    _log_shape_and_norms(new_init, metrics_logger, key='meta_init_norms')
+    _log_shape_and_norms(new_params, metrics_logger, key='meta_init_norms')
 
-  return nn.Model(model.module, new_init)
+  return new_params
