@@ -166,6 +166,7 @@ class WideResnet(nn.Module):
     x = WideResnetGroup(
         self.blocks_per_group,
         64 * self.channel_multiplier,
+        (2, 2),
         conv_kernel_init=self.conv_kernel_init,
         dropout_rate=self.dropout_rate,
         normalizer=self.normalizer,
