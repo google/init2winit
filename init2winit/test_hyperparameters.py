@@ -21,7 +21,7 @@ import tensorflow.compat.v1 as tf
 
 
 class HyperParameterTest(absltest.TestCase):
-  """Tests training for 2 epochs on MNIST."""
+  """Tests hyperparameter overrides."""
 
   def test_override(self):
     """Test polynomial schedule works correctly."""
