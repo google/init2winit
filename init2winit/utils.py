@@ -306,6 +306,17 @@ def add_log_file(logfile):
   absl_logger.addHandler(handler)
 
 
+def load_pytrees(pytree_path):
+  # Note that this assumes each pytree is some nested dict of arrays, which
+  # don't need to be individually restored.
+  state_dict = checkpoint.load_latest_checkpoint(
+      pytree_path, prefix='training_metrics')
+  if state_dict:
+    pytree = state_dict['pytree']
+    return [pytree[str(i)] for i in range(len(pytree))]
+  return []
+
+
 # TODO(gdahl,gilmer): Use atomic writes to avoid file corruptions due to
 # preemptions.
 class MetricLogger(object):
@@ -320,7 +331,7 @@ class MetricLogger(object):
                json_path='',
                pytree_path='',
                events_dir=None,
-               use_deprecated_checkpointing=True,
+               use_deprecated_checkpointing=False,
                **logger_kwargs):
     """Create a recorder for metrics, as CSV or JSON.
 
@@ -398,7 +409,7 @@ class MetricLogger(object):
     # Read the latest (and only) checkpoint, then append the new state to it
     # before saving back to disk.
     old_state = flax_checkpoints.restore_checkpoint(
-        self._pytree_path, target=None)
+        self._pytree_path, target=None, prefix='training_metrics')
     # Because we pass target=None, flax checkpointing will return the raw state
     # dict, where 'pytree' will be a dict with keys ['0', '1', ...] instead of a
     # list.
@@ -408,13 +419,13 @@ class MetricLogger(object):
     else:
       state_list = []
     state_list.append(pytree)
-    state = checkpoint.CheckpointState(state_list)
+    state = dict(pytree=state_list)
     checkpoint.save_checkpoint(
         self._pytree_path,
         'training_metrics',
         state,
         max_to_keep=None,
-        use_deprecated_checkpointing=self._use_deprecated_checkpointing)
+        use_deprecated_checkpointing=False)
 
   def append_json_object(self, json_obj):
     """Append a json serializable object to the json file."""

@@ -92,9 +92,10 @@ class UtilsTest(parameterized.TestCase):
     for pytree in pytrees:
       logger.append_pytree(pytree)
 
-    latest = checkpoint.load_latest_checkpoint(pytree_path)
-    saved_pytrees = latest.pytree if latest else []
-    self.assertEqual(pytrees, saved_pytrees)
+    latest = checkpoint.load_latest_checkpoint(pytree_path, prefix='')
+    saved_pytrees = latest['pytree'] if latest else []
+    self.assertEqual(
+        pytrees, [saved_pytrees[str(i)] for i in range(len(saved_pytrees))])
 
 
 if __name__ == '__main__':

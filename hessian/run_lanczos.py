@@ -54,7 +54,7 @@ def eval_checkpoints(
     hessian_eval_config,
     min_global_step=None,
     max_global_step=None,
-    use_deprecated_checkpointing=True,
+    use_deprecated_checkpointing=False,
 ):
   """Evaluate the Hessian of the given checkpoints.
 
@@ -90,22 +90,23 @@ def eval_checkpoints(
   model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
 
   # Maybe run the initializer.
-  params, batch_stats = trainer.initialize(model.flax_module,
-                                           initializer, model.loss_fn,
-                                           hps.input_shape,
-                                           hps.output_shape, hps, init_rng,
-                                           None)
+  unreplicated_params, unreplicated_batch_stats = trainer.initialize(
+      model.flax_module,
+      initializer, model.loss_fn,
+      hps.input_shape,
+      hps.output_shape, hps, init_rng,
+      None)
 
   # Fold in a the unreplicated batch_stats and rng into the loss used by
   # hessian eval.
   def batch_loss(params, batch_rng):
     batch, rng = batch_rng
     return model.training_cost(
-        params, batch, batch_stats=batch_stats, dropout_rng=rng)[0]
-  batch_stats = jax_utils.replicate(batch_stats)
+        params, batch, batch_stats=unreplicated_batch_stats, dropout_rng=rng)[0]
+  batch_stats = jax_utils.replicate(unreplicated_batch_stats)
 
   if jax.process_index() == 0:
-    utils.log_pytree_shape_and_statistics(params)
+    utils.log_pytree_shape_and_statistics(unreplicated_params)
     logging.info('train_size: %d,', hps.train_size)
     logging.info(hps)
     # Save the hessian computation hps to the experiment directory
@@ -121,16 +122,16 @@ def eval_checkpoints(
         f.write(json.dumps(hessian_eval_config))
 
   optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps)
-  optimizer_state = optimizer_init_fn(params)
+  unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
   # Note that we do not use the learning rate.
   # The optimizer state is a list of all the optax transformation states, and
   # we inject the learning rate into all states that will accept it.
-  for state in optimizer_state:
+  for state in unreplicated_optimizer_state:
     if (isinstance(state, optax.InjectHyperparamsState) and
         'learning_rate' in state.hyperparams):
       state.hyperparams['learning_rate'] = jax_utils.replicate(1.0)
-  optimizer_state = jax_utils.replicate(optimizer_state)
-  params = jax_utils.replicate(params)
+  optimizer_state = jax_utils.replicate(unreplicated_optimizer_state)
+  params = jax_utils.replicate(unreplicated_params)
   data_rng = jax.random.fold_in(data_rng, 0)
 
   assert hps.batch_size % (jax.device_count()) == 0
@@ -163,12 +164,10 @@ def eval_checkpoints(
   for checkpoint_path, step in iterate_checkpoints(checkpoint_dir,
                                                    min_global_step,
                                                    max_global_step):
-    unreplicated_checkpoint_state = checkpoint.CheckpointState(
-        {
-            'params': params,
-            'optimizer_state': optimizer_state,
-            'batch_stats': batch_stats,
-        },
+    unreplicated_checkpoint_state = dict(
+        params=unreplicated_params,
+        optimizer_state=unreplicated_optimizer_state,
+        batch_stats=unreplicated_batch_stats,
         global_step=0,
         preemption_count=0,
         sum_train_cost=0.0)
@@ -178,11 +177,7 @@ def eval_checkpoints(
         use_deprecated_checkpointing=use_deprecated_checkpointing)
     results, _ = trainer.restore_checkpoint(
         ckpt,
-        {
-            'params': params,
-            'optimizer_state': optimizer_state,
-            'batch_stats': batch_stats,
-        },
+        pytree_keys=['params', 'optimizer_state', 'batch_stats'],
         use_deprecated_checkpointing=use_deprecated_checkpointing)
     params = results['params']
     optimizer_state = results['optimizer_state']

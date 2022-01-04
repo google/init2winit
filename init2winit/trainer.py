@@ -14,7 +14,6 @@
 # limitations under the License.
 
 """Trainer for the init2winit project."""
-
 import collections
 import functools
 import itertools
@@ -22,6 +21,7 @@ import json
 import os
 import struct
 import time
+from typing import Any, Dict, Optional, Sequence
 
 from absl import flags
 from absl import logging
@@ -352,20 +352,31 @@ def initialize(flax_module,
 
 
 def save_checkpoint(train_dir,
-                    pytree,
+                    optimizer_state,
+                    params,
+                    batch_stats,
+                    training_metrics_grabber,
                     global_step,
                     preemption_count,
                     sum_train_cost,
                     max_to_keep=1,
-                    use_deprecated_checkpointing=True):
-  """Saves the pytree to train_dir."""
+                    use_deprecated_checkpointing=False):
+  """Saves pytree, step, preemption_count, and sum_train_cost to train_dir."""
   checkpoint_name = 'ckpt_{}'.format(global_step)
   logging.info('Saving checkpoint to %s', checkpoint_name)
-  unstructured_state = jax.device_get([x[0] for x in jax.tree_leaves(pytree)])
-  state = checkpoint.CheckpointState(pytree=unstructured_state,
-                                     global_step=global_step,
-                                     preemption_count=preemption_count,
-                                     sum_train_cost=sum_train_cost)
+  unreplicated_optimizer_state = jax.device_get(
+      jax_utils.unreplicate(optimizer_state))
+  unreplicated_params = jax.device_get(jax_utils.unreplicate(params))
+  unreplicated_batch_stats = jax.device_get(jax_utils.unreplicate(batch_stats))
+  unreplicated_training_metrics_grabber = jax.device_get(
+      jax_utils.unreplicate(training_metrics_grabber))
+  state = dict(global_step=global_step,
+               preemption_count=preemption_count,
+               sum_train_cost=sum_train_cost,
+               optimizer_state=unreplicated_optimizer_state,
+               params=unreplicated_params,
+               batch_stats=unreplicated_batch_stats,
+               training_metrics_grabber=unreplicated_training_metrics_grabber)
   checkpoint.save_checkpoint_background(
       train_dir,
       checkpoint_name,
@@ -375,20 +386,22 @@ def save_checkpoint(train_dir,
   logging.info('Done saving checkpoint.')
 
 
-# TODO(znado,gilmer,gdahl): make this take the unreplicated pytree to avoid
-# having to store two replicated copies in memory.
 def restore_checkpoint(
     latest,
-    replicated_pytree,
+    pytree_keys: Sequence[str],
     replicate=True,
-    use_deprecated_checkpointing=True):
+    deprecated_replicated_state: Optional[Dict[str, Any]] = None,
+    use_deprecated_checkpointing=False):
   """Restores from the provided checkpoint.
 
   Args:
-    latest: A checkpoint.CheckpointState representing the state of the
+    latest: A dict representing the state of the
       checkpoint we want to restore.
-    replicated_pytree: The pytree with the structure we expect to restore to.
-    replicate: If set, replicate the pytree across devices.
+    pytree_keys: A sequence of keys into `latest` that are pytrees, which will
+      be replicated if replicate=True.
+    replicate: If set, replicate the state across devices.
+    deprecated_replicated_state: A dict with the state with the replicated
+      structure we expect to restore to when using deprecated checkpointing.
     use_deprecated_checkpointing: Whether to use deprecated checkpointing.
 
   Returns:
@@ -403,18 +416,22 @@ def restore_checkpoint(
   # train() function will break. Evals and curvature stuff should be fine,
   # however.
   expected = ['global_step', 'preemption_count', 'sum_train_cost']
-  if any(k not in latest.pystate for k in expected):
-    logging.warn('Checkpoint pystate missing keys, obtained %s expected %s',
-                 list(latest.pystate.keys()), expected)
-  unstructured_pytree = latest.pytree
-  if replicate:
-    unstructured_pytree = jax_utils.replicate(unstructured_pytree)
+  if any(k not in latest for k in expected):
+    logging.warn('Checkpoint state missing keys, obtained %s expected %s',
+                 list(latest.keys()), expected)
   if use_deprecated_checkpointing:
-    structure = jax.tree_util.tree_structure(replicated_pytree)
+    unstructured_pytree = latest.pytree
+    if replicate:
+      unstructured_pytree = jax_utils.replicate(unstructured_pytree)
+    structure = jax.tree_util.tree_structure(deprecated_replicated_state)
     pytree = jax.tree_unflatten(structure, unstructured_pytree)
-  else:
-    pytree = unstructured_pytree
-  return pytree, latest.pystate
+    return pytree, latest.pystate
+
+  pytree = {k: latest[k] for k in pytree_keys}
+  if replicate:
+    pytree = jax_utils.replicate(pytree)
+  extra_dict = {k: latest[k] for k in latest.keys() if k not in pytree_keys}
+  return pytree, extra_dict
 
 
 def _replicate_and_maybe_restore_latest_checkpoint(
@@ -425,14 +442,13 @@ def _replicate_and_maybe_restore_latest_checkpoint(
     train_dir,
     use_deprecated_checkpointing):
   """Restore from the latest checkpoint, if it exists."""
-  unreplicated_checkpoint_state = checkpoint.CheckpointState(
-      {
-          'optimizer_state': unreplicated_optimizer_state,
-          'params': unreplicated_params,
-          'batch_stats': unreplicated_batch_stats,
-          'training_metrics_grabber': unreplicated_training_metrics_grabber,
-      },
-      global_step=0,
+  uninitialized_global_step = -1
+  unreplicated_checkpoint_state = dict(
+      params=unreplicated_params,
+      optimizer_state=unreplicated_optimizer_state,
+      batch_stats=unreplicated_batch_stats,
+      training_metrics_grabber=unreplicated_training_metrics_grabber,
+      global_step=uninitialized_global_step,
       preemption_count=0,
       sum_train_cost=0.0)
   latest = checkpoint.load_latest_checkpoint(
@@ -440,6 +456,8 @@ def _replicate_and_maybe_restore_latest_checkpoint(
       target=unreplicated_checkpoint_state,
       recents_filename='latest',
       use_deprecated_checkpointing=use_deprecated_checkpointing)
+  # found_checkpoint = latest.global_step != uninitialized_global_step
+  found_checkpoint = latest['global_step'] != uninitialized_global_step
 
   optimizer_state = jax_utils.replicate(unreplicated_optimizer_state)
   params = jax_utils.replicate(unreplicated_params)
@@ -447,17 +465,25 @@ def _replicate_and_maybe_restore_latest_checkpoint(
   training_metrics_grabber = jax_utils.replicate(
       unreplicated_training_metrics_grabber)
 
-  if latest is None:
-    return optimizer_state, params, batch_stats, training_metrics_grabber, 0, 0.0, 0, False
+  if not found_checkpoint:
+    return (
+        optimizer_state,
+        params,
+        batch_stats,
+        training_metrics_grabber,
+        0,  # global_step
+        0.0,  # sum_train_cost
+        0,  # preemption_count
+        False)  # is_restored
 
   pytree_dict, extra_state = restore_checkpoint(
       latest,
-      replicated_pytree={
-          'optimizer_state': optimizer_state,
-          'params': params,
-          'batch_stats': batch_stats,
-          'training_metrics_grabber': training_metrics_grabber,
-      },
+      pytree_keys=[
+          'optimizer_state',
+          'params',
+          'batch_stats',
+          'training_metrics_grabber',
+      ],
       use_deprecated_checkpointing=use_deprecated_checkpointing)
   return (
       pytree_dict['optimizer_state'],
@@ -529,7 +555,7 @@ def train(train_dir,
           init_logger=None,
           training_metrics_config=None,
           callback_configs=None,
-          use_deprecated_checkpointing=True):
+          use_deprecated_checkpointing=False):
   """Main training loop.
 
   Trains the given network on the specified dataset for the given number of
@@ -723,12 +749,11 @@ def train(train_dir,
   for batch in train_iter:
     if global_step in checkpoint_steps and jax.process_index() == 0:
       save_checkpoint(
-          checkpoint_dir, {
-              'optimizer_state': optimizer_state,
-              'params': params,
-              'batch_stats': batch_stats,
-              'training_metrics_grabber': training_metrics_grabber,
-          },
+          checkpoint_dir,
+          optimizer_state,
+          params,
+          batch_stats,
+          training_metrics_grabber,
           global_step,
           preemption_count,
           sum_train_cost,
@@ -782,12 +807,11 @@ def train(train_dir,
         _log_epoch_report(report, metrics_logger)
         _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
         save_checkpoint(
-            train_dir, {
-                'optimizer_state': optimizer_state,
-                'params': params,
-                'batch_stats': batch_stats,
-                'training_metrics_grabber': training_metrics_grabber
-            },
+            train_dir,
+            optimizer_state,
+            params,
+            batch_stats,
+            training_metrics_grabber,
             global_step,
             preemption_count,
             sum_train_cost,
@@ -822,12 +846,11 @@ def train(train_dir,
       _log_epoch_report(report, metrics_logger)
       _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
       save_checkpoint(
-          train_dir, {
-              'optimizer_state': optimizer_state,
-              'params': params,
-              'batch_stats': batch_stats,
-              'training_metrics_grabber': training_metrics_grabber
-          },
+          train_dir,
+          optimizer_state,
+          params,
+          batch_stats,
+          training_metrics_grabber,
           global_step,
           preemption_count,
           sum_train_cost,
@@ -837,7 +860,7 @@ def train(train_dir,
 
 
 def set_up_loggers(
-    train_dir, xm_work_unit=None, use_deprecated_checkpointing=True):
+    train_dir, xm_work_unit=None, use_deprecated_checkpointing=False):
   """Creates a logger for eval metrics as well as initialization metrics."""
   csv_path = os.path.join(train_dir, 'measurements.csv')
   pytree_path = os.path.join(train_dir, 'training_metrics')

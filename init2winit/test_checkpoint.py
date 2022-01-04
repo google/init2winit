@@ -69,38 +69,62 @@ class CheckpointTest(parameterized.TestCase):
     shutil.rmtree(self.test_dir)
     super(CheckpointTest, self).tearDown()
 
-  # TODO(gdahl): should we test that the accumulators get restored properly?
-  # We could supply the params pytree as a fake gradient and do an update.
-  @parameterized.named_parameters(('deprecated', True), ('flax', False))
-  def test_save_load_roundtrip(self, use_deprecated_checkpointing):
+  def test_save_load_roundtrip_deprecated(self):
     """Test that saving and loading produces the original state."""
     baz = ['a', 'b', 'ccc']
-    state = checkpoint.CheckpointState(self.params,
-                                       global_step=5, completed_epochs=4,
-                                       baz=baz)
+    state = dict(pytree=self.params,
+                 pystate={
+                     'global_step': 5,
+                     'completed_epochs': 4,
+                     'baz': baz
+                 })
     checkpoint.save_checkpoint(
         self.test_dir,
         'checkpoint',
         state,
-        use_deprecated_checkpointing=use_deprecated_checkpointing)
+        use_deprecated_checkpointing=True)
     latest = checkpoint.load_latest_checkpoint(
         self.test_dir,
         target=state,
-        use_deprecated_checkpointing=use_deprecated_checkpointing)
+        use_deprecated_checkpointing=True)
 
-    self.assertEqual(latest.pystate['baz'], baz)
-    assert pytree_equal(latest.pytree, self.params)
-    self.assertEqual(latest.pystate['global_step'], 5)
-    self.assertEqual(latest.pystate['completed_epochs'], 4)
+    self.assertEqual(latest['baz'], baz)
+    assert pytree_equal(latest['pytree'], self.params)
+    self.assertEqual(latest['global_step'], 5)
+    self.assertEqual(latest['completed_epochs'], 4)
+
+  # TODO(gdahl): should we test that the accumulators get restored properly?
+  # We could supply the params pytree as a fake gradient and do an update.
+  def test_save_load_roundtrip_flax(self):
+    """Test that saving and loading produces the original state."""
+    baz = ['a', 'b', 'ccc']
+    state = dict(params=self.params,
+                 global_step=5,
+                 completed_epochs=4,
+                 baz=baz)
+    checkpoint.save_checkpoint(
+        self.test_dir,
+        'checkpoint',
+        state,
+        use_deprecated_checkpointing=False)
+    latest = checkpoint.load_latest_checkpoint(
+        self.test_dir,
+        target=state,
+        use_deprecated_checkpointing=False)
+
+    self.assertEqual(latest['baz'], baz)
+    assert pytree_equal(latest['params'], self.params)
+    self.assertEqual(latest['global_step'], 5)
+    self.assertEqual(latest['completed_epochs'], 4)
 
   def test_save_checkpoint_background_reraises_error(self):
     """Test than an error while saving a checkpoint is re-raised later."""
     # Checkpoint error is not raised when it actually happens, but when we next
     # write a checkpoint.
     baz = ['a', 'b', 'ccc']
-    state = checkpoint.CheckpointState(self.params,
-                                       global_step=5, completed_epochs=4,
-                                       baz=baz)
+    state = dict(params=self.params,
+                 global_step=5, completed_epochs=4,
+                 baz=baz)
     checkpoint.save_checkpoint_background(
         '/forbidden_directory/', 'checkpoint', state)
     with self.assertRaisesRegex(BaseException, r'Permission\sdenied'):

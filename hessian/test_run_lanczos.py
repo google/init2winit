@@ -22,9 +22,9 @@ import shutil
 import tempfile
 
 from absl.testing import absltest
-from init2winit import checkpoint
 from init2winit import hyperparameters
 from init2winit import trainer
+from init2winit import utils
 from init2winit.dataset_lib import datasets
 from init2winit.hessian import hessian_eval
 from init2winit.hessian import run_lanczos
@@ -145,12 +145,10 @@ class RunLanczosTest(absltest.TestCase):
     )
 
     # Load the saved file.
-    hessian_file = os.path.join(checkpoint_dir, 'hessian')
-    latest = checkpoint.load_latest_checkpoint(hessian_file)
-    state_list = latest.pytree if latest else []
-
+    hessian_dir = os.path.join(checkpoint_dir, 'hessian')
+    pytree_list = utils.load_pytrees(hessian_dir)
     # Test that the logged steps are correct.
-    saved_steps = [row['step'] for row in state_list]
+    saved_steps = [row['step'] for row in pytree_list]
     self.assertEqual(saved_steps, checkpoint_steps)
 
   def test_hessian_callback(self):
@@ -244,19 +242,17 @@ class RunLanczosTest(absltest.TestCase):
 
     checkpoint_dir = os.path.join(self.test_dir, 'checkpoints')
     # Load the saved file.
-    hessian_file = os.path.join(checkpoint_dir, hessian_save_name)
-    latest = checkpoint.load_latest_checkpoint(hessian_file)
-    state_list = latest.pytree if latest else []
-
+    hessian_dir = os.path.join(checkpoint_dir, hessian_save_name)
+    pytree_list = utils.load_pytrees(hessian_dir)
     # Test that the logged steps are correct.
-    saved_steps = [int(row['step']) for row in state_list]
+    saved_steps = [int(row['step']) for row in pytree_list]
     self.assertEqual(saved_steps, checkpoint_steps)
 
     # Check the dict keys.
     expected_keys = [
         'step', 'tridiag_hess', 'max_eig_hess', 'tridiag_hess_grad_overlap'
     ]
-    self.assertEqual(set(state_list[0].keys()), set(expected_keys))
+    self.assertEqual(set(pytree_list[0].keys()), set(expected_keys))
 
 
 if __name__ == '__main__':

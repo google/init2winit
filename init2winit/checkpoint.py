@@ -18,7 +18,6 @@
 This is useful for training neural networks with stax, where model parameters
 are nested numpy arrays.
 """
-
 import codecs
 import copy
 import os
@@ -27,7 +26,6 @@ import threading
 
 from absl import flags
 from absl import logging
-from flax import serialization
 from flax.training import checkpoints as flax_checkpoints
 
 import msgpack
@@ -41,54 +39,6 @@ _save_checkpoint_background_error = None
 _save_checkpoint_background_lock = threading.RLock()
 
 
-
-
-class CheckpointState(object):
-  """Object to package up the state we load and restore.
-
-  We save generic python state using msgpack. We assume any kwarg other than
-  pytree is just extra python state and not a pytree. pytree contains
-  all state that must be replicated across devices (presumably only Jax arrays).
-  """
-
-  def __init__(self, pytree, **kwargs):
-    self.pytree = pytree
-    # TODO(znado): rename to be more descriptive/distinct.
-    self.pystate = kwargs
-
-
-def _ckpt_state_dict(checkpoint_state):
-  return serialization.to_state_dict({
-      'pytree': serialization.to_state_dict(
-          checkpoint_state.pytree),
-      'pystate': serialization.to_state_dict(checkpoint_state.pystate),
-  })
-
-
-def _ckpt_restore_state(checkpoint_state, state_dict):
-  """Restore the state from the state dict.
-
-  Allows for checkpointing the class object.
-
-  Args:
-    checkpoint_state: an instance of a CheckpointState.
-    state_dict: a state dict containing the desired new state of the object.
-
-  Returns:
-    The restored class object.
-  """
-  checkpoint_state.pytree = serialization.from_state_dict(
-      checkpoint_state.pytree, state_dict['pytree'])
-  checkpoint_state.pystate = serialization.from_state_dict(
-      checkpoint_state.pystate, state_dict['pystate'])
-  return checkpoint_state
-
-
-# Note that this will only be used if we call
-# `flax_checkpoints.restore_checkpoint` with the `target` arg set to a
-# CheckpointState object to be filled in with values.
-serialization.register_serialization_state(
-    CheckpointState, _ckpt_state_dict, _ckpt_restore_state, override=True)
 
 
 def _save_checkpoint_background_catch_error(*args, **kwargs):
@@ -145,7 +95,7 @@ def save_checkpoint(train_dir,
                     state,
                     max_to_keep=None,
                     recents_filename='latest',
-                    use_deprecated_checkpointing=True):
+                    use_deprecated_checkpointing=False):
   """Saves checkpoint to train_dir/checkpoint_name.
 
   A list of checkpoints will be stored in train_dir/recents_filename. The user
@@ -157,7 +107,7 @@ def save_checkpoint(train_dir,
   Args:
     train_dir: (str) Directory to create the checkpoint directory in.
     checkpoint_name: (str) Name of the checkpoint.
-    state: (CheckpointState) The state to save.
+    state: (dict) The state to save.
     max_to_keep: (int) Checkpoints older than the max_to_keep'th will be
       deleted. Defaults to never deleting.
     recents_filename: (str) Filename to keep track of the most recent
@@ -186,11 +136,15 @@ def save_checkpoint(train_dir,
 
 
 def load_checkpoint(
-    checkpoint_path, target=None, use_deprecated_checkpointing=True):
+    checkpoint_path,
+    target=None,
+    prefix='ckpt_',
+    use_deprecated_checkpointing=False):
   """Loads the specified checkpoint."""
   checkpoint_type_str = 'deprecated' if use_deprecated_checkpointing else 'Flax'
   logging.info('Using %s checkpointing format.', checkpoint_type_str)
-  restored = flax_checkpoints.restore_checkpoint(checkpoint_path, target=target)
+  restored = flax_checkpoints.restore_checkpoint(
+      checkpoint_path, target=target, prefix=prefix)
   return restored
 
 
@@ -198,7 +152,8 @@ def load_latest_checkpoint(
     train_dir,
     recents_filename='latest',
     target=None,
-    use_deprecated_checkpointing=True):
+    prefix='ckpt_',
+    use_deprecated_checkpointing=False):
   """Loads the most recent checkpoint listed in train_dir/recents_filename.
 
   Args:
@@ -207,6 +162,8 @@ def load_latest_checkpoint(
       inside train_dir that contains the path to the most recent checkpoint.
     target: used for Flax checkpointing, a pytree whose structure will be used
       to structure the restored checkpoint data.
+    prefix: used for Flax checkpointing (use_deprecated_checkpointing=False),
+      the prefix of the names of checkpoint files.
     use_deprecated_checkpointing: whether or not to use Flax checkpointing, or
       the previous deprecated checkpointing.
 
@@ -218,5 +175,6 @@ def load_latest_checkpoint(
   """
   checkpoint_type_str = 'deprecated' if use_deprecated_checkpointing else 'Flax'
   logging.info('Using %s checkpointing format.', checkpoint_type_str)
-  restored = flax_checkpoints.restore_checkpoint(train_dir, target=target)
+  restored = flax_checkpoints.restore_checkpoint(
+      train_dir, target=target, prefix=prefix)
   return restored

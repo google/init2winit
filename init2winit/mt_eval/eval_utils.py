@@ -57,22 +57,23 @@ def save_evals(ckpt_dir, ckpt_step, eval_split, bleu_score):
 def _load_checkpoint(checkpoint_path, params, optimizer_state, batch_stats,
                      replicate=True):
   """Load model (and batch stats) from checkpoint."""
-  target = {
-      'optimizer_state': optimizer_state,
-      'params': params,
-      'batch_stats': batch_stats,
-      'training_metrics_grabber': None,
-  }
+  target = dict(
+      params=params,
+      optimizer_state=optimizer_state,
+      batch_stats=batch_stats,
+      global_step=-1,
+      preemption_count=0,
+      sum_train_cost=0.0)
   ckpt = checkpoint.load_checkpoint(
       checkpoint_path,
       target=target,
-      use_deprecated_checkpointing=True
+      use_deprecated_checkpointing=False
   )
   results = trainer.restore_checkpoint(
       ckpt,
-      target,
+      pytree_keys=['params', 'optimizer_state', 'batch_stats'],
       replicate=replicate,
-      use_deprecated_checkpointing=True
+      use_deprecated_checkpointing=False
   )
   params = results[0]['params']
   optimizer_state = results[0]['optimizer_state']

@@ -37,7 +37,7 @@ os.environ['FLAX_PROFILE'] = 'true'
 
 flags.DEFINE_boolean(
     'use_deprecated_checkpointing',
-    True,
+    False,
     'Whether or not to use deprecated checkpointing.')
 flags.DEFINE_string('model', 'fully_connected', 'Name of the model to train')
 flags.DEFINE_string('loss', 'cross_entropy', 'Loss function')
