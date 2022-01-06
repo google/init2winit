@@ -456,8 +456,8 @@ def _replicate_and_maybe_restore_latest_checkpoint(
       target=unreplicated_checkpoint_state,
       recents_filename='latest',
       use_deprecated_checkpointing=use_deprecated_checkpointing)
-  # found_checkpoint = latest.global_step != uninitialized_global_step
-  found_checkpoint = latest['global_step'] != uninitialized_global_step
+  found_checkpoint = (
+      latest and latest['global_step'] != uninitialized_global_step)
 
   optimizer_state = jax_utils.replicate(unreplicated_optimizer_state)
   params = jax_utils.replicate(unreplicated_params)
