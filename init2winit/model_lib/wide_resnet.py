@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Wide Resnet Model."""
-from typing import Tuple
+from typing import Tuple, List
 
 from flax import linen as nn
 from init2winit.model_lib import base_model
@@ -52,13 +52,15 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         use_shallue_label_smoothing=False,
         model_dtype='float32',
         grad_clip=None,
-        activation_function='relu'))
+        activation_function='relu',
+        group_strides=[(1, 1), (2, 2), (2, 2)])
+)
 
 
 class WideResnetBlock(nn.Module):
   """Defines a single WideResnetBlock."""
   channels: int
-  strides: Tuple[int, int] = (1, 1)
+  strides: List[Tuple[int]]
   conv_kernel_init: model_utils.Initializer = initializers.lecun_normal()
   normalizer: str = 'batch_norm'
   dropout_rate: float = 0.0
@@ -132,6 +134,7 @@ class WideResnet(nn.Module):
   """Defines the WideResnet Model."""
   blocks_per_group: int
   channel_multiplier: int
+  group_strides: List[Tuple[int]]
   num_outputs: int
   conv_kernel_init: model_utils.Initializer = initializers.lecun_normal()
   dense_kernel_init: model_utils.Initializer = initializers.lecun_normal()
@@ -151,6 +154,7 @@ class WideResnet(nn.Module):
     x = WideResnetGroup(
         self.blocks_per_group,
         16 * self.channel_multiplier,
+        self.group_strides[0],
         conv_kernel_init=self.conv_kernel_init,
         normalizer=self.normalizer,
         dropout_rate=self.dropout_rate,
@@ -158,7 +162,7 @@ class WideResnet(nn.Module):
     x = WideResnetGroup(
         self.blocks_per_group,
         32 * self.channel_multiplier,
-        (2, 2),
+        self.group_strides[1],
         conv_kernel_init=self.conv_kernel_init,
         normalizer=self.normalizer,
         dropout_rate=self.dropout_rate,
@@ -166,7 +170,7 @@ class WideResnet(nn.Module):
     x = WideResnetGroup(
         self.blocks_per_group,
         64 * self.channel_multiplier,
-        (2, 2),
+        self.group_strides[2],
         conv_kernel_init=self.conv_kernel_init,
         dropout_rate=self.dropout_rate,
         normalizer=self.normalizer,
@@ -187,6 +191,7 @@ class WideResnetModel(base_model.BaseModel):
     return WideResnet(
         blocks_per_group=self.hps.blocks_per_group,
         channel_multiplier=self.hps.channel_multiplier,
+        group_strides=self.hps.group_strides,
         num_outputs=self.hps['output_shape'][-1],
         conv_kernel_init=model_utils.INITIALIZERS[self.hps.conv_kernel_init](
             self.hps.conv_kernel_scale),
