@@ -20,6 +20,7 @@ import numpy as np
 import optax
 
 
+
 def sgd(learning_rate, weight_decay, momentum=None, nesterov=False):
   r"""A customizable gradient descent optimizer.
 
@@ -85,6 +86,62 @@ def get_optimizer(hps, model=None):
         weight_decay=weight_decay,
         momentum=hps.opt_hparams['momentum'],
         nesterov=(hps.optimizer == 'nesterov'))
+  elif hps.optimizer == 'distributed_shampoo':
+    static_args = [
+        'block_size',
+        'beta1',
+        'beta2',
+        'diagonal_epsilon',
+        'matrix_epsilon',
+        'weight_decay',
+        'start_preconditioning_step',
+        'preconditioning_compute_steps',
+        'statistics_compute_steps',
+        'best_effort_shape_interpretation',
+        'graft_type',
+        'nesterov',
+        'exponent_override',
+        'batch_axis_name',
+        'mesh_axis_names',
+        'num_devices_for_pjit',
+        'shard_optimizer_states',
+        'inverse_failure_threshold',
+        'moving_average_for_momentum',
+        'skip_preconditioning_dim_size_gt',
+        'clip_by_scaled_gradient_norm',
+    ]
+    opt_init, opt_update = optax.inject_hyperparams(
+        distributed_shampoo.distributed_shampoo, static_args=static_args
+    )(learning_rate=0.0,
+      block_size=hps.opt_hparams['block_size'],
+      beta1=hps.opt_hparams['beta1'],
+      beta2=hps.opt_hparams['beta2'],
+      diagonal_epsilon=hps.opt_hparams['diagonal_epsilon'],
+      matrix_epsilon=hps.opt_hparams['matrix_epsilon'],
+      weight_decay=hps.opt_hparams['weight_decay'],
+      start_preconditioning_step=hps.opt_hparams['start_preconditioning_step'],
+      preconditioning_compute_steps=hps
+      .opt_hparams['preconditioning_compute_steps'],
+      statistics_compute_steps=hps.opt_hparams['statistics_compute_steps'],
+      best_effort_shape_interpretation=hps
+      .opt_hparams['best_effort_shape_interpretation'],
+      graft_type=hps.opt_hparams['graft_type'],
+      nesterov=hps.opt_hparams['nesterov'],
+      exponent_override=hps.opt_hparams['exponent_override'],
+      batch_axis_name=hps.opt_hparams['batch_axis_name'],
+      mesh_axis_names=hps.opt_hparams['mesh_axis_names'],
+      num_devices_for_pjit=hps.opt_hparams['num_devices_for_pjit'],
+      shard_optimizer_states=hps.opt_hparams['shard_optimizer_states'],
+      best_effort_memory_usage_reduction=hps
+      .opt_hparams['best_effort_memory_usage_reduction'],
+      inverse_failure_threshold=hps.opt_hparams['inverse_failure_threshold'],
+      moving_average_for_momentum=hps
+      .opt_hparams['moving_average_for_momentum'],
+      skip_preconditioning_dim_size_gt=hps
+      .opt_hparams['no_preconditioning_for_layers_with_dim'],
+      clip_by_scaled_gradient_norm=hps
+      .opt_hparams['clip_by_scaled_gradient_norm'],
+      precision=hps.opt_hparams['precision'])
   elif hps.optimizer == 'adam':
     opt_init, opt_update = optax.inject_hyperparams(optax.adamw)(
         learning_rate=0.0,  # Manually injected on each train step.
@@ -95,7 +152,7 @@ def get_optimizer(hps, model=None):
   elif hps.optimizer == 'hessian_free':
     if model is None:
       raise ValueError(
-          'Model info should be provided for hessian free optimizer.')
+          'Model info should be provided for using the hessian free optimizer.')
     opt_init, opt_update = optax.inject_hyperparams(
         hessian_free,
         ['flax_module_def', 'loss_fn', 'max_iter'])(
