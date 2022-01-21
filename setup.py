@@ -24,6 +24,8 @@ setup(
         'jraph',
         'ml_collections',
         'numpy>=1.7',
+        'optax',
+        'optax-shampoo',
         'pandas',
         'sentencepiece',
         'tensorboard',

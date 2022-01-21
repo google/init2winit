@@ -14,11 +14,18 @@
 # limitations under the License.
 
 """Getter function for selecting optimizers."""
+from absl import logging
 
 from init2winit.optimizer_lib.hessian_free import hessian_free
 import numpy as np
 import optax
 
+distributed_shampoo = None
+try:
+  from optax_shampoo import distributed_shampoo  # pylint: disable=g-import-not-at-top
+except ModuleNotFoundError:
+  distributed_shampoo = None
+  logging.exception('\n\nUnable to import distributed_shampoo.\n\n')
 
 
 def sgd(learning_rate, weight_decay, momentum=None, nesterov=False):
@@ -137,7 +144,7 @@ def get_optimizer(hps, model=None):
             moving_average_for_momentum=hps.opt_hparams['moving_average_for_momentum'],
             skip_preconditioning_dim_size_gt=hps.opt_hparams['skip_preconditioning_dim_size_gt'],
             clip_by_scaled_gradient_norm=hps.opt_hparams['clip_by_scaled_gradient_norm'])
-  # pylint: enable=line-too-long
+    # pylint: enable=line-too-long
   elif hps.optimizer == 'adam':
     opt_init, opt_update = optax.inject_hyperparams(optax.adamw)(
         learning_rate=0.0,  # Manually injected on each train step.
