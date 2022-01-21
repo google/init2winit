@@ -21,7 +21,7 @@ import json
 import os
 import struct
 import time
-from typing import Any, Dict, Optional, Sequence
+from typing import Sequence
 
 from absl import flags
 from absl import logging
@@ -359,11 +359,9 @@ def save_checkpoint(train_dir,
                     global_step,
                     preemption_count,
                     sum_train_cost,
-                    max_to_keep=1,
-                    use_deprecated_checkpointing=False):
+                    max_to_keep=1):
   """Saves pytree, step, preemption_count, and sum_train_cost to train_dir."""
-  checkpoint_name = 'ckpt_{}'.format(global_step)
-  logging.info('Saving checkpoint to %s', checkpoint_name)
+  logging.info('Saving checkpoint to ckpt_%d', global_step)
   unreplicated_optimizer_state = jax.device_get(
       jax_utils.unreplicate(optimizer_state))
   unreplicated_params = jax.device_get(jax_utils.unreplicate(params))
@@ -379,19 +377,16 @@ def save_checkpoint(train_dir,
                training_metrics_grabber=unreplicated_training_metrics_grabber)
   checkpoint.save_checkpoint_background(
       train_dir,
-      checkpoint_name,
+      global_step,
       state,
-      max_to_keep=max_to_keep,
-      use_deprecated_checkpointing=use_deprecated_checkpointing)
+      max_to_keep=max_to_keep)
   logging.info('Done saving checkpoint.')
 
 
 def restore_checkpoint(
     latest,
     pytree_keys: Sequence[str],
-    replicate=True,
-    deprecated_replicated_state: Optional[Dict[str, Any]] = None,
-    use_deprecated_checkpointing=False):
+    replicate=True):
   """Restores from the provided checkpoint.
 
   Args:
@@ -400,9 +395,6 @@ def restore_checkpoint(
     pytree_keys: A sequence of keys into `latest` that are pytrees, which will
       be replicated if replicate=True.
     replicate: If set, replicate the state across devices.
-    deprecated_replicated_state: A dict with the state with the replicated
-      structure we expect to restore to when using deprecated checkpointing.
-    use_deprecated_checkpointing: Whether to use deprecated checkpointing.
 
   Returns:
     Tuple of (pytree, extra_dict) where pytree is a JAX pytree holding the
@@ -419,13 +411,6 @@ def restore_checkpoint(
   if any(k not in latest for k in expected):
     logging.warn('Checkpoint state missing keys, obtained %s expected %s',
                  list(latest.keys()), expected)
-  if use_deprecated_checkpointing:
-    unstructured_pytree = latest.pytree
-    if replicate:
-      unstructured_pytree = jax_utils.replicate(unstructured_pytree)
-    structure = jax.tree_util.tree_structure(deprecated_replicated_state)
-    pytree = jax.tree_unflatten(structure, unstructured_pytree)
-    return pytree, latest.pystate
 
   pytree = {k: latest[k] for k in pytree_keys}
   if replicate:
@@ -439,8 +424,7 @@ def _replicate_and_maybe_restore_latest_checkpoint(
     unreplicated_params,
     unreplicated_batch_stats,
     unreplicated_training_metrics_grabber,
-    train_dir,
-    use_deprecated_checkpointing):
+    train_dir):
   """Restore from the latest checkpoint, if it exists."""
   uninitialized_global_step = -1
   unreplicated_checkpoint_state = dict(
@@ -453,9 +437,7 @@ def _replicate_and_maybe_restore_latest_checkpoint(
       sum_train_cost=0.0)
   latest = checkpoint.load_latest_checkpoint(
       train_dir,
-      target=unreplicated_checkpoint_state,
-      recents_filename='latest',
-      use_deprecated_checkpointing=use_deprecated_checkpointing)
+      target=unreplicated_checkpoint_state)
   found_checkpoint = (
       latest and latest['global_step'] != uninitialized_global_step)
 
@@ -483,8 +465,7 @@ def _replicate_and_maybe_restore_latest_checkpoint(
           'params',
           'batch_stats',
           'training_metrics_grabber',
-      ],
-      use_deprecated_checkpointing=use_deprecated_checkpointing)
+      ])
   return (
       pytree_dict['optimizer_state'],
       pytree_dict['params'],
@@ -554,8 +535,7 @@ def train(train_dir,
           metrics_logger=None,
           init_logger=None,
           training_metrics_config=None,
-          callback_configs=None,
-          use_deprecated_checkpointing=False):
+          callback_configs=None):
   """Main training loop.
 
   Trains the given network on the specified dataset for the given number of
@@ -591,7 +571,6 @@ def train(train_dir,
     callback_configs: List of configs specifying general callbacks to run
       during the eval phase. Empty list means no callbacks are run. See
       callbacks.py for details on what is expected in a config.
-    use_deprecated_checkpointing: Whether to use deprecated checkpointing.
 
   Yields:
     metrics: A dictionary of all eval metrics from the given epoch.
@@ -653,8 +632,7 @@ def train(train_dir,
        unreplicated_batch_stats=unreplicated_batch_stats,
        unreplicated_training_metrics_grabber=(
            unreplicated_training_metrics_grabber),
-       train_dir=train_dir,
-       use_deprecated_checkpointing=use_deprecated_checkpointing)
+       train_dir=train_dir)
 
   if is_restored:
     preemption_count += 1
@@ -757,8 +735,7 @@ def train(train_dir,
           global_step,
           preemption_count,
           sum_train_cost,
-          max_to_keep=None,
-          use_deprecated_checkpointing=use_deprecated_checkpointing)
+          max_to_keep=None)
     batch = data_utils.shard(batch)
     lr = lr_fn(global_step)
     optimizer_state, params, batch_stats, cost_val, training_metrics_grabber, grad_norm = update_pmapped(
@@ -814,8 +791,7 @@ def train(train_dir,
             training_metrics_grabber,
             global_step,
             preemption_count,
-            sum_train_cost,
-            use_deprecated_checkpointing=use_deprecated_checkpointing)
+            sum_train_cost)
       sum_train_cost = 0.0
       prev_eval_step = global_step
 
@@ -853,14 +829,12 @@ def train(train_dir,
           training_metrics_grabber,
           global_step,
           preemption_count,
-          sum_train_cost,
-          use_deprecated_checkpointing=use_deprecated_checkpointing)
+          sum_train_cost)
   # To make sure the last checkpoint was correctly saved.
   checkpoint.wait_for_checkpoint_save()
 
 
-def set_up_loggers(
-    train_dir, xm_work_unit=None, use_deprecated_checkpointing=False):
+def set_up_loggers(train_dir, xm_work_unit=None):
   """Creates a logger for eval metrics as well as initialization metrics."""
   csv_path = os.path.join(train_dir, 'measurements.csv')
   pytree_path = os.path.join(train_dir, 'training_metrics')
@@ -868,16 +842,14 @@ def set_up_loggers(
       csv_path=csv_path,
       pytree_path=pytree_path,
       xm_work_unit=xm_work_unit,
-      events_dir=train_dir,
-      use_deprecated_checkpointing=use_deprecated_checkpointing)
+      events_dir=train_dir)
 
   init_csv_path = os.path.join(train_dir, 'init_measurements.csv')
   init_json_path = os.path.join(train_dir, 'init_scalars.json')
   init_logger = utils.MetricLogger(
       csv_path=init_csv_path,
       json_path=init_json_path,
-      xm_work_unit=xm_work_unit,
-      use_deprecated_checkpointing=use_deprecated_checkpointing)
+      xm_work_unit=xm_work_unit)
   return metrics_logger, init_logger
 
 
@@ -911,8 +883,7 @@ def run(
     experiment_dir,
     worker_id,
     training_metrics_config,
-    callback_configs,
-    use_deprecated_checkpointing):
+    callback_configs):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
   initializer = initializers.get_initializer(initializer_name)
@@ -949,8 +920,7 @@ def run(
     xm_work_unit = None
     metrics_logger, init_logger = set_up_loggers(
         trial_dir,
-        xm_work_unit,
-        use_deprecated_checkpointing)
+        xm_work_unit)
     hparams_fname = os.path.join(trial_dir, 'hparams.json')
     logging.info('saving hparams to %s', hparams_fname)
     with gfile.GFile(hparams_fname, 'w') as f:
@@ -979,7 +949,6 @@ def run(
             init_logger,
             training_metrics_config=training_metrics_config,
             callback_configs=callback_configs,
-            use_deprecated_checkpointing=use_deprecated_checkpointing,
         ))
     logging.info(epoch_reports)
     meta_data['status'] = 'done'

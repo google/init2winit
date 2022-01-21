@@ -17,6 +17,7 @@
 
 import copy
 import functools
+import os.path
 import shutil
 import tempfile
 
@@ -28,6 +29,7 @@ from init2winit.model_lib import models
 import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
+from tensorflow.io import gfile
 
 FLAGS = flags.FLAGS
 
@@ -69,33 +71,9 @@ class CheckpointTest(parameterized.TestCase):
     shutil.rmtree(self.test_dir)
     super(CheckpointTest, self).tearDown()
 
-  def test_save_load_roundtrip_deprecated(self):
-    """Test that saving and loading produces the original state."""
-    baz = ['a', 'b', 'ccc']
-    state = dict(pytree=self.params,
-                 pystate={
-                     'global_step': 5,
-                     'completed_epochs': 4,
-                     'baz': baz
-                 })
-    checkpoint.save_checkpoint(
-        self.test_dir,
-        'checkpoint',
-        state,
-        use_deprecated_checkpointing=True)
-    latest = checkpoint.load_latest_checkpoint(
-        self.test_dir,
-        target=state,
-        use_deprecated_checkpointing=True)
-
-    self.assertEqual(latest['baz'], baz)
-    assert pytree_equal(latest['pytree'], self.params)
-    self.assertEqual(latest['global_step'], 5)
-    self.assertEqual(latest['completed_epochs'], 4)
-
   # TODO(gdahl): should we test that the accumulators get restored properly?
   # We could supply the params pytree as a fake gradient and do an update.
-  def test_save_load_roundtrip_flax(self):
+  def test_save_load_roundtrip(self):
     """Test that saving and loading produces the original state."""
     baz = ['a', 'b', 'ccc']
     state = dict(params=self.params,
@@ -104,18 +82,36 @@ class CheckpointTest(parameterized.TestCase):
                  baz=baz)
     checkpoint.save_checkpoint(
         self.test_dir,
-        'checkpoint',
-        state,
-        use_deprecated_checkpointing=False)
-    latest = checkpoint.load_latest_checkpoint(
-        self.test_dir,
-        target=state,
-        use_deprecated_checkpointing=False)
+        0,
+        state)
+    latest = checkpoint.load_latest_checkpoint(self.test_dir, target=state)
 
     self.assertEqual(latest['baz'], baz)
     assert pytree_equal(latest['params'], self.params)
     self.assertEqual(latest['global_step'], 5)
     self.assertEqual(latest['completed_epochs'], 4)
+
+  def test_delete_old_checkpoints(self):
+    """Test that old checkpoints are deleted."""
+    state1 = dict(params=self.params,
+                  global_step=5,
+                  completed_epochs=4)
+    checkpoint.save_checkpoint(
+        self.test_dir,
+        0,
+        state1,
+        max_to_keep=1)
+
+    state2 = dict(params=self.params,
+                  global_step=10,
+                  completed_epochs=8)
+    checkpoint.save_checkpoint(
+        self.test_dir,
+        1,
+        state2,
+        max_to_keep=1)
+    dir_contents = gfile.glob(os.path.join(self.test_dir, '*'))
+    self.assertLen(dir_contents, 1)
 
   def test_save_checkpoint_background_reraises_error(self):
     """Test than an error while saving a checkpoint is re-raised later."""
@@ -126,9 +122,10 @@ class CheckpointTest(parameterized.TestCase):
                  global_step=5, completed_epochs=4,
                  baz=baz)
     checkpoint.save_checkpoint_background(
-        '/forbidden_directory/', 'checkpoint', state)
+        '/forbidden_directory/', 0, state)
     with self.assertRaisesRegex(BaseException, r'Permission\sdenied'):
-      checkpoint.save_checkpoint_background(self.test_dir, 'checkpoint', state)
+      checkpoint.save_checkpoint_background(
+          self.test_dir, 0, state)
 
 
 if __name__ == '__main__':

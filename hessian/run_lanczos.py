@@ -54,7 +54,6 @@ def eval_checkpoints(
     hessian_eval_config,
     min_global_step=None,
     max_global_step=None,
-    use_deprecated_checkpointing=False,
 ):
   """Evaluate the Hessian of the given checkpoints.
 
@@ -77,7 +76,6 @@ def eval_checkpoints(
     min_global_step: Lower bound on what steps to filter checkpoints. Set to
       None to evaluate all checkpoints in the directory.
     max_global_step: Upper bound on what steps to filter checkpoints.
-    use_deprecated_checkpointing: Whether to use deprecated checkpointing.
   """
   rng, init_rng = jax.random.split(rng)
   rng = jax.random.fold_in(rng, jax.process_index())
@@ -173,12 +171,10 @@ def eval_checkpoints(
         sum_train_cost=0.0)
     ckpt = checkpoint.load_checkpoint(
         checkpoint_path,
-        target=unreplicated_checkpoint_state,
-        use_deprecated_checkpointing=use_deprecated_checkpointing)
+        target=unreplicated_checkpoint_state)
     results, _ = trainer.restore_checkpoint(
         ckpt,
-        pytree_keys=['params', 'optimizer_state', 'batch_stats'],
-        use_deprecated_checkpointing=use_deprecated_checkpointing)
+        pytree_keys=['params', 'optimizer_state', 'batch_stats'])
     params = results['params']
     optimizer_state = results['optimizer_state']
     batch_stats = results['batch_stats']

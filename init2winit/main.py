@@ -35,10 +35,6 @@ tf.config.experimental.set_visible_devices([], 'GPU')
 # Enable flax xprof trace labelling.
 os.environ['FLAX_PROFILE'] = 'true'
 
-flags.DEFINE_boolean(
-    'use_deprecated_checkpointing',
-    False,
-    'Whether or not to use deprecated checkpointing.')
 flags.DEFINE_string('model', 'fully_connected', 'Name of the model to train')
 flags.DEFINE_string('loss', 'cross_entropy', 'Loss function')
 flags.DEFINE_string('metrics', 'classification_metrics',
@@ -86,10 +82,6 @@ flags.DEFINE_integer('worker_id', 1,
                      'Client id for hparam sweeps and tuning studies.')
 
 FLAGS = flags.FLAGS
-
-set_new_checkpointing_default = True
-if set_new_checkpointing_default:
-  FLAGS.use_deprecated_checkpointing = False
 
 
 def main(unused_argv):
@@ -140,8 +132,7 @@ def main(unused_argv):
         experiment_dir=FLAGS.experiment_dir,
         worker_id=FLAGS.worker_id,
         training_metrics_config=training_metrics_config,
-        callback_configs=callback_configs,
-        use_deprecated_checkpointing=FLAGS.use_deprecated_checkpointing)
+        callback_configs=callback_configs)
 
 
 if __name__ == '__main__':

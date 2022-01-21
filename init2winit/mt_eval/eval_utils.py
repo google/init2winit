@@ -67,13 +67,11 @@ def _load_checkpoint(checkpoint_path, params, optimizer_state, batch_stats,
   ckpt = checkpoint.load_checkpoint(
       checkpoint_path,
       target=target,
-      use_deprecated_checkpointing=False
   )
   results = trainer.restore_checkpoint(
       ckpt,
       pytree_keys=['params', 'optimizer_state', 'batch_stats'],
       replicate=replicate,
-      use_deprecated_checkpointing=False
   )
   params = results[0]['params']
   optimizer_state = results[0]['optimizer_state']

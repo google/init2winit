@@ -37,10 +37,6 @@ import tensorflow.compat.v2 as tf
 # Enable flax xprof trace labelling.
 os.environ['FLAX_PROFILE'] = 'true'
 
-flags.DEFINE_boolean(
-    'use_deprecated_checkpointing',
-    True,
-    'Whether or not to use deprecated checkpointing.')
 flags.DEFINE_integer('eval_num_batches', 10, 'How many batches to evaluate.')
 flags.DEFINE_string('checkpoint_dir', '',
                     'Path to the checkpoint to evaluate.')
@@ -123,8 +119,7 @@ def main(unused_argv):
       dataset_meta_data,
       hessian_eval_config,
       FLAGS.min_global_step,
-      FLAGS.max_global_step,
-      FLAGS.use_deprecated_checkpointing)
+      FLAGS.max_global_step)
 
 
 if __name__ == '__main__':

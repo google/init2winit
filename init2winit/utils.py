@@ -331,7 +331,6 @@ class MetricLogger(object):
                json_path='',
                pytree_path='',
                events_dir=None,
-               use_deprecated_checkpointing=False,
                **logger_kwargs):
     """Create a recorder for metrics, as CSV or JSON.
 
@@ -342,7 +341,6 @@ class MetricLogger(object):
       pytree_path: Where to save trees of numeric arrays.
       events_dir: Optional. If specified, save tfevents summaries to this
         directory.
-      use_deprecated_checkpointing: Whether to use deprecated checkpointing.
       **logger_kwargs: Optional keyword arguments, whose only valid parameter
         name is an optional XM WorkUnit used to also record metrics to XM as
         MeasurementSeries.
@@ -351,7 +349,6 @@ class MetricLogger(object):
     self._csv_path = csv_path
     self._json_path = json_path
     self._pytree_path = pytree_path
-    self._use_deprecated_checkpointing = use_deprecated_checkpointing
     if logger_kwargs:
       if len(logger_kwargs.keys()) > 1 or 'xm_work_unit' not in logger_kwargs:
         raise ValueError(
@@ -422,10 +419,10 @@ class MetricLogger(object):
     state = dict(pytree=state_list)
     checkpoint.save_checkpoint(
         self._pytree_path,
-        'training_metrics',
-        state,
-        max_to_keep=None,
-        use_deprecated_checkpointing=False)
+        step='',
+        state=state,
+        prefix='training_metrics',
+        max_to_keep=None)
 
   def append_json_object(self, json_obj):
     """Append a json serializable object to the json file."""
