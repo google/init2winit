@@ -40,6 +40,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         # experiments.translate dir.
         # TODO(ankugarg): Generate vocab with determinism.
         rates=[0.5, 0.5],
+        loss_weights=None,
         # If 'rates' is None defaults to uniform.
         add_language_token=False,
         vocab_path=None,
@@ -106,37 +107,33 @@ def _get_translate_wmt(per_host_batch_size,
 
   def train_iterator_fn():
     for batch in iter(train_ds):
-      yield data_utils.maybe_pad_batch(
+      yield mt_pipeline.maybe_pad_batch(
           data_utils.tf_to_numpy(batch),
           per_host_batch_size,
-          data_format=None,
           mask_key='targets')
 
   def eval_train_epoch(num_batches=None):
     eval_train_iter = iter(train_ds)
     for batch in itertools.islice(eval_train_iter, num_batches):
-      yield data_utils.maybe_pad_batch(
+      yield mt_pipeline.maybe_pad_batch(
           data_utils.tf_to_numpy(batch),
           per_host_batch_size,
-          data_format=None,
           mask_key='targets')
 
   def valid_epoch(num_batches=None):
     valid_iter = iter(eval_ds)
     for batch in itertools.islice(valid_iter, num_batches):
-      yield data_utils.maybe_pad_batch(
+      yield mt_pipeline.maybe_pad_batch(
           data_utils.tf_to_numpy(batch),
           per_host_eval_batch_size,
-          data_format=None,
           mask_key='targets')
 
   def test_epoch(num_batches=None):
     predict_iter = iter(predict_ds)
     for batch in itertools.islice(predict_iter, num_batches):
-      yield data_utils.maybe_pad_batch(
+      yield mt_pipeline.maybe_pad_batch(
           data_utils.tf_to_numpy(batch),
           per_host_eval_batch_size,
-          data_format=None,
           mask_key='targets')
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)

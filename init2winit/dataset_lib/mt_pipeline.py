@@ -20,9 +20,12 @@ from typing import Dict, List, Optional, Union
 
 from clu import deterministic_data
 from init2winit.dataset_lib import mt_tokenizer as tokenizer
+import jax
 from ml_collections.config_dict import config_dict
+import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
+
 
 AUTOTUNE = tf.data.AUTOTUNE
 Features = Dict[str, tf.Tensor]
@@ -62,6 +65,72 @@ class TaskTokenOp:
   def __call__(self, features):
     features['inputs'] = self.token_lang + ' ' + features['inputs']
     return features
+
+
+# TODO(dxin): Rewrite this as a ds.map w/ functools.
+class ImportanceSamplingOp:
+  """Adds '2xx' task token to 'inputs'."""
+
+  def __init__(self, weight):
+    self.weight = weight
+
+  def __call__(self, features):
+    features['weights'] = np.array([self.weight], dtype=np.float32)
+    return features
+
+
+def maybe_pad_batch(batch,
+                    desired_batch_size,
+                    mask_key='targets'):
+  """Zero pad the batch on the right to desired_batch_size.
+
+  All keys in the batch dictionary will have their corresponding arrays padded.
+  Will return a dictionary with the same keys, additionally with the key
+  'weights' added, with 1.0 indicating indices which are true data and 0.0
+  indicating a padded index.
+
+  Args:
+    batch: A dictionary mapping keys to arrays. We assume that inputs is one of
+      the keys.
+    desired_batch_size: All arrays in the dict will be padded to have first
+      dimension equal to desired_batch_size.
+    mask_key: Typically used for text datasets, it's either 'inputs' (for
+      encoder only models like language models) or 'targets'
+      (for encoder-decoder models like seq2seq tasks) to decide weights for
+      padded sequence. For Image datasets, this will be (most likely) unused.
+
+  Returns:
+    A dictionary mapping the same keys to the padded batches. Additionally we
+    add a key representing weights, to indicate how the batch was padded.
+  """
+  batch_size = batch['inputs'].shape[0]
+  batch_pad = desired_batch_size - batch_size
+
+  if mask_key not in ['targets', 'inputs']:
+    raise ValueError(f'Incorrect mask key {mask_key}.')
+
+  if 'weights' in batch:
+    batch['weights'] = np.multiply(batch['weights'],
+                                   np.where(batch[mask_key] > 0, 1, 0))
+  else:
+    batch['weights'] = np.where(batch[mask_key] > 0, 1, 0)
+
+  # Most batches will not need padding so we quickly return to avoid slowdown.
+  if batch_pad == 0:
+    new_batch = jax.tree_map(lambda x: x, batch)
+    return new_batch
+
+  def zero_pad(ar, pad_axis):
+    pw = [(0, 0)] * ar.ndim
+    pw[pad_axis] = (0, batch_pad)
+    return np.pad(ar, pw, mode='constant')
+
+  padded_batch = {'inputs': zero_pad(batch['inputs'], 0)}
+  batch_keys = list(batch.keys())
+  batch_keys.remove('inputs')
+  for key in batch_keys:
+    padded_batch[key] = zero_pad(batch[key], 0)
+  return padded_batch
 
 
 def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
@@ -299,6 +368,7 @@ def get_sampled_dataset(ds_builders,
                         rates: List[int],
                         reverse_translation: bool,
                         add_language_token: bool,
+                        loss_weights: List[float],
                         is_training: bool,
                         sample_seed: int,
                         shuffle_seed: int,
@@ -310,6 +380,11 @@ def get_sampled_dataset(ds_builders,
         builder, split,
         reverse_translation=reverse_translation,
         add_language_token=add_language_token))
+
+  if loss_weights is not None:
+    raw_data = [ds.map(ImportanceSamplingOp(weight),
+                       num_parallel_calls=AUTOTUNE) for ds, weight
+                in zip(raw_data, loss_weights)]
 
   def _shuffle_repeat(dataset, shuffle_seed: int,
                       shuffle_buffer_size):
@@ -350,17 +425,32 @@ def preprocess_wmt_data(dataset,
     dataset = pack_dataset(dataset, max_length)
     dataset = dataset.batch(batch_size, drop_remainder=False)
   else:  # simple (static-shape) padded batching
-    dataset = dataset.padded_batch(
-        batch_size,
-        padded_shapes={
-            'inputs': max_length,
-            'targets': max_length
-        },
-        padding_values={
-            'inputs': 0,
-            'targets': 0
-        },
-        drop_remainder=False)
+    if 'weights' in dataset.element_spec:
+      dataset = dataset.padded_batch(
+          batch_size,
+          padded_shapes={
+              'inputs': max_length,
+              'targets': max_length,
+              'weights': (1,)
+          },
+          padding_values={
+              'inputs': 0,
+              'targets': 0,
+              'weights': 0.0
+          },
+          drop_remainder=False)
+    else:
+      dataset = dataset.padded_batch(
+          batch_size,
+          padded_shapes={
+              'inputs': max_length,
+              'targets': max_length
+          },
+          padding_values={
+              'inputs': 0,
+              'targets': 0
+          },
+          drop_remainder=False)
 
   if prefetch_size:
     dataset = dataset.prefetch(prefetch_size)
@@ -405,6 +495,7 @@ def get_wmt_datasets(config: config_dict.ConfigDict,
   sampled_train_data = get_sampled_dataset(
       train_ds_builders, config.train_split, dataset_rates,
       config.reverse_translation, config.add_language_token,
+      loss_weights=config.loss_weights,
       is_training=True, sample_seed=sample_seed,
       shuffle_seed=shuffle_seed)
 

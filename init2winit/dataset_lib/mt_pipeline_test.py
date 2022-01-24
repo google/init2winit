@@ -144,8 +144,11 @@ class MTSamplePipelineTest(absltest.TestCase):
 
       sampled_train_data = mt_pipeline.get_sampled_dataset(
           train_ds_builders, config.train_split, config.rates,
-          reverse_translation=True, add_language_token=True,
-          is_training=True, sample_seed=sample_seed,
+          reverse_translation=True,
+          add_language_token=True,
+          loss_weights=[0.5, 0.5],
+          is_training=True,
+          sample_seed=sample_seed,
           shuffle_seed=shuffle_seed)
 
     # Get the language task ids.
