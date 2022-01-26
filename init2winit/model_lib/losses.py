@@ -14,9 +14,13 @@
 # limitations under the License.
 
 """Registry for the available loss functions we can use for training models."""
+from clu import metrics
+import flax
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
+import numpy as np
+import sklearn.metrics
 
 
 def sigmoid_binary_cross_entropy(logits, targets, weights=None):
@@ -154,3 +158,40 @@ def get_output_activation_fn(loss_name):
     return _ALL_LOSS_FUNCTIONS[loss_name][1]
   except KeyError:
     raise ValueError('Unrecognized loss function: {}'.format(loss_name))
+
+
+# Following the Flax OGB example:
+# https://github.com/google/flax/blob/main/examples/ogbg_molpcba/train.py
+@flax.struct.dataclass
+class MeanAveragePrecision(
+    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))):
+  """Computes the mean average precision (mAP) over different tasks."""
+
+  def compute(self):
+    # Matches the official OGB evaluation scheme for mean average precision.
+    targets = self.values['targets']
+    logits = self.values['logits']
+    weights = self.values['weights']
+
+    assert logits.shape == targets.shape == weights.shape
+    assert len(logits.shape) == 2
+    assert np.logical_or(weights == 1, weights == 0).all()
+    weights = weights.astype(np.bool)
+
+    probs = jax.nn.sigmoid(logits)
+    num_tasks = targets.shape[1]
+    average_precisions = np.full(num_tasks, np.nan)
+
+    for task in range(num_tasks):
+      # AP is only defined when there is at least one negative data
+      # and at least one positive data.
+      if np.sum(targets[:, task] == 0) > 0 and np.sum(targets[:,
+                                                              task] == 1) > 0:
+        is_labeled = weights[:, task]
+        average_precisions[task] = sklearn.metrics.average_precision_score(
+            targets[is_labeled, task], probs[is_labeled, task])
+
+    # When all APs are NaNs, return NaN. This avoids raising a RuntimeWarning.
+    if np.isnan(average_precisions).all():
+      return np.nan
+    return np.nanmean(average_precisions)

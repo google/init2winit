@@ -95,7 +95,8 @@ _METRICS = {
         metrics.Collection.create(
             ce_loss=metrics.Average.from_fun(
                 losses.sigmoid_binary_cross_entropy),
-            num_examples=NumExamples)
+            num_examples=NumExamples,
+            average_precision=losses.MeanAveragePrecision)
 }
 
 
