@@ -35,8 +35,6 @@ A typical callback_config would be a `list` of following-such dicts.
 
 }
 """
-import collections
-
 from absl import logging
 from init2winit import base_callback
 from init2winit import utils
@@ -98,36 +96,31 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       batch_iter: Generator which yields batches. Must support the API
         for b in batch_iter:
       evaluate_batch_pmapped: A function with API
-         evaluate_batch_pmapped(flax_module, batch_stats, batch). Returns a
-         dictionary mapping keys to the summed metric across the sharded batch.
-         The key 'denominator' is required, as this indicates how many real
-         samples were in the sharded batch.
+       evaluate_batch_pmapped(params, batch_stats, batch). Returns a dictionary
+       mapping keys to the metric values across the sharded batch.
 
     Returns:
       A dictionary of aggregated metrics. The keys will match the keys returned
       by evaluate_batch_pmapped.
     """
-    total_metrics = collections.defaultdict(float)
+    metrics = None
     for batch in batch_iter:
       batch = data_utils.shard(batch)
-      computed_metrics = evaluate_batch_pmapped(flax_module, batch_stats, batch)
-      for key in computed_metrics:
-        # The shape of computed_metrics[key] is [n_local_devices]. However,
-        # because evaluate_batch_pmapped has a psum, we have already summed
-        # across the whole sharded batch, and what's returned is n_local_devices
-        # copies of the same summed metric. So here we just grab the 0'th entry.
-        total_metrics[key] += np.float32(computed_metrics[key][0])
+      computed_metrics = evaluate_batch_pmapped(
+          params=flax_module, batch_stats=batch_stats, batch=batch)
+      if metrics is None:
+        metrics = computed_metrics
+      else:
+        metrics = metrics.merge(computed_metrics)
 
     # For data splits with no data (e.g. Imagenet no test set) no values
     # will appear for that split.
-    for key in total_metrics:
-      # Convert back to numpy
-      if np.isnan(total_metrics[key]):
-        raise utils.TrainingDivergedError('NaN detected in {}'.format(key))
-      if key != 'denominator':
-        total_metrics[key] = total_metrics[key] / np.float32(
-            total_metrics['denominator'])
-    return total_metrics
+    if metrics is not None:
+      metrics = metrics.unreplicate().compute()
+      for key, val in metrics.items():
+        if np.isnan(val):
+          raise utils.TrainingDivergedError('NaN detected in {}'.format(key))
+    return metrics
 
   def _merge_and_apply_prefix(self, d1, d2, prefix):
     """Merges metrics from one dict into another global metrics dict.

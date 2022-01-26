@@ -19,7 +19,6 @@
 from init2winit.model_lib import losses
 from init2winit.model_lib import metrics
 from init2winit.model_lib import model_utils
-from jax import lax
 from jax.nn import one_hot
 import jax.numpy as jnp
 
@@ -28,14 +27,9 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
                     apply_one_hot_in_loss):
   """Evaluates metrics on the given batch.
 
-  Currently we assume each metric_fn in metrics_bundle has the API:
-    metric_fn(logits, targets, weights)
-  and returns an array of shape [batch_size]. We also assume that to compute
-  the aggregate metric, one should sum across all batches, then divide by the
-  total samples seen (calculated by the 'denominator' metric). In this way we
-  currently only support metrics of the 1/N sum f(inputs, targets). Note, the
-  caller is responsible for dividing by metrics['denominator'] when computing
-  the mean of each metric.
+  We use the CLU metrics library to evaluate the metrics, and we require that
+  each metric_fn in metrics_bundle has the API:
+    metric_fn(logits, targets, weights), including the argument names.
 
   Args:
     flax_module: the Flax linen.nn.Module.
@@ -66,20 +60,10 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
   if weights is None:
     weights = jnp.ones(eval_batch_size)
 
-  # This psum is required to correctly evaluate with multihost. Only host 0
-  # will report the metrics, so we must aggregate across all hosts. The psum
-  # will map an array of shape [n_global_devices, batch_size] -> [batch_size]
-  # by summing across the devices dimension. The outer sum then sums across the
-  # batch dim. The result is the we have summed across all samples in the
-  # sharded batch.
-
-  evaluated_metrics = {}
-  for key in metrics_bundle:
-    per_example_metrics = metrics_bundle[key](logits, targets, weights)
-    evaluated_metrics[key] = jnp.sum(
-        lax.psum(per_example_metrics, axis_name='batch'))
-
-  return evaluated_metrics
+  # We don't use CLU's `mask` argument here, we handle it ourselves through
+  # `weights`.
+  return metrics_bundle.gather_from_model_output(
+      logits=logits, targets=targets, weights=weights, axis_name='batch')
 
 
 def _predict_batch(flax_module,

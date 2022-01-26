@@ -61,9 +61,9 @@ def get_column_names():
       'train/error_rate',
       'valid/error_rate',
       'test/error_rate',
-      'train/denominator',
-      'valid/denominator',
-      'test/denominator',
+      'train/num_examples',
+      'valid/num_examples',
+      'test/num_examples',
       'train/ce_loss',
       'valid/ce_loss',
       'test/ce_loss',
@@ -317,7 +317,7 @@ class TrainerTest(absltest.TestCase):
     self.assertEqual(expected_error_rate, evaluated_metrics['error_rate'])
     self.assertAlmostEqual(
         expected_ce_loss, evaluated_metrics['ce_loss'], places=4)
-    self.assertEqual(16, evaluated_metrics['denominator'])
+    self.assertEqual(16, evaluated_metrics['num_examples'])
 
   def test_graph_model_trainer(self):
     """Tests that graph model training decreases loss."""
@@ -493,7 +493,7 @@ class TrainerTest(absltest.TestCase):
       self.assertLess(train_loss, 1.35)
 
       self.assertEqual(
-          df['valid/denominator'].values[-1],
+          df['valid/num_examples'].values[-1],
           eval_num_batches * eval_batch_size * _MAX_LEN)
       # Check that the correct learning rate was saved in the measurements file.
       final_step = df['global_step'].values[-1]
@@ -635,7 +635,7 @@ class TrainerTest(absltest.TestCase):
       self.assertLess(train_err, 0.35)
       self.assertLess(train_loss, 0.1)
 
-      self.assertEqual(df['valid/denominator'].values[-1],
+      self.assertEqual(df['valid/num_examples'].values[-1],
                        eval_num_batches * eval_batch_size)
       self.assertEqual(df['preemption_count'].values[-1], 1)
       # Check that the correct learning rate was saved in the measurements file.
@@ -651,6 +651,36 @@ class TrainerTest(absltest.TestCase):
                        hps.lr_hparams['base_lr'] * decay_factor)
 
     self.assertEqual(set(df.columns.values), set(get_column_names()))
+
+  def test_evaluate(self):
+    """Test metrics merging and evaluation including zero weights."""
+
+    def mock_evaluate_batch(params, batch_stats, batch):
+      del params, batch_stats
+      metrics_bundle = metrics.get_metrics('classification_metrics')
+
+      return metrics_bundle.gather_from_model_output(
+          logits=np.ones(batch.get('targets').shape),
+          targets=batch.get('targets'),
+          weights=batch.get('weights'))
+
+    targets = np.split(
+        np.expand_dims(np.array([1, 1, 0, 0, 1, 1, 1, 0]), -1), 2)
+    weights = np.split(np.array([1, 0, 0, 0, 1, 1, 1, 0]), 2)
+    # pylint: disable=g-complex-comprehension
+    batch_iter = [{
+        'targets': ts,
+        'weights': ws
+    } for ts, ws in zip(targets, weights)]
+
+    result = trainer.evaluate(
+        params=None,
+        batch_stats=None,
+        batch_iter=batch_iter,
+        evaluate_batch_pmapped=jax.pmap(mock_evaluate_batch, axis_name='batch'))
+
+    self.assertAlmostEqual(result['error_rate'], 0)
+    self.assertAlmostEqual(result['num_examples'], 4)
 
 
 if __name__ == '__main__':

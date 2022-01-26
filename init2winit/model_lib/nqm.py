@@ -197,7 +197,7 @@ class NQM(base_model.BaseModel):
     loss = logits * batch['inputs'].shape[0]
     metrics = {
         'loss': loss,
-        'denominator': batch['inputs'].shape[0]
+        'num_examples': batch['inputs'].shape[0]
     }
     return metrics
 

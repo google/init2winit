@@ -71,7 +71,7 @@ def sigmoid_mean_squared_error(logits, targets, weights=None):
   return jnp.sum(jnp.dot(loss, weights))
 
 
-def weighted_unnormalized_cross_entropy(logits, one_hot_targets, weights=None):
+def weighted_unnormalized_cross_entropy(logits, targets, weights=None):
   """Compute weighted cross entropy and entropy for log probs and targets.
 
   This computes sum_(x,y) ce(x, y) for a single, potentially padded minibatch.
@@ -80,36 +80,36 @@ def weighted_unnormalized_cross_entropy(logits, one_hot_targets, weights=None):
 
   Args:
    logits: [batch, length, num_classes] float array.
-   one_hot_targets: one hot vector of shape [batch, ..., num_classes].
+   targets: one hot vector of shape [batch, ..., num_classes].
    weights: None or array of shape [batch x ...] (rank of one_hot_targets -1).
 
   Returns:
     Cross entropy loss computed per example, shape [batch, ...].
   """
-  if logits.ndim != one_hot_targets.ndim:
+  if logits.ndim != targets.ndim:
     raise ValueError(
-        'Incorrect shapes. Got shape %s logits and %s one_hot_targets' %
-        (str(logits.shape), str(one_hot_targets.shape)))
+        'Incorrect shapes. Got shape %s logits and %s targets' %
+        (str(logits.shape), str(targets.shape)))
 
-  loss = -jnp.sum(one_hot_targets * nn.log_softmax(logits), axis=-1)
+  loss = -jnp.sum(targets * nn.log_softmax(logits), axis=-1)
   if weights is not None:
-    if weights.ndim != one_hot_targets.ndim - 1:
+    if weights.ndim != targets.ndim - 1:
       raise ValueError(
-          'Incorrect shapes. Got shape %s weights and %s one_hot_targets' %
-          (str(weights.shape), str(one_hot_targets.shape)))
+          'Incorrect shapes. Got shape %s weights and %s targets' %
+          (str(weights.shape), str(targets.shape)))
     loss = loss * weights
 
   return loss
 
 
-def weighted_cross_entropy(logits, one_hot_targets, weights=None):
+def weighted_cross_entropy(logits, targets, weights=None):
   """Same as weighted_unnormalized, but additionally takes the mean."""
   if weights is None:
-    normalization = one_hot_targets.shape[0]
+    normalization = targets.shape[0]
   else:
     normalization = weights.sum()
   unnormalized_cross_entropy = weighted_unnormalized_cross_entropy(
-      logits, one_hot_targets, weights)
+      logits, targets, weights)
   return jnp.sum(unnormalized_cross_entropy) / normalization
 
 

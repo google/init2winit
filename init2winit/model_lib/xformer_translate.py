@@ -873,13 +873,8 @@ class TransformerTranslate(base_model.BaseModel):
       targets = one_hot(batch['targets'], logits.shape[-1])
 
     # Add log-perplexity metric.
-    evaluated_metrics = {}
-    for key in self.metrics_bundle:
-      per_example_metrics = self.metrics_bundle[key](logits, targets, weights)
-      evaluated_metrics[key] = jnp.sum(
-          lax.psum(per_example_metrics, axis_name='batch'))
-
-    return evaluated_metrics
+    return self.metrics_bundle.gather_from_model_output(
+        logits=logits, targets=targets, weights=weights, axis_name='batch')
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return cross entropy loss with (optional) L2 penalty on the weights."""
@@ -946,4 +941,3 @@ class TransformerTranslate(base_model.BaseModel):
         dec_cross_attn_kernel_init_fn=dec_cross_attn_kernel_init_fn,
         should_decode=self.hps.decode,
     )
-

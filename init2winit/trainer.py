@@ -14,7 +14,6 @@
 # limitations under the License.
 
 """Trainer for the init2winit project."""
-import collections
 import functools
 import itertools
 import json
@@ -63,12 +62,8 @@ def evaluate(
   Assumed API of evaluate_batch_pmapped:
   metrics = evaluate_batch_pmapped(params, batch_stats, batch)
   where batch is yielded by the batch iterator, and metrics is a dictionary
-  mapping metric name to a vector of per example measurements. The metric
-  'denominator' must also be defined. evaluate will aggregate (by summing)
-  all per example measurements and divide by the aggregated denominator.
-  For each given metric we compute
-    1/N sum_{b in batch_iter} metric(b).
-  Where N will be the sum of 'denominator' over all batches. See
+  mapping metric name to a vector of per example measurements. The metrics are
+  merged using the CLU metrics logic for that metric type. See
   classification_metrics.py for a definition of evaluate_batch.
 
   Args:
@@ -80,39 +75,36 @@ def evaluate(
       for b in batch_iter:
     evaluate_batch_pmapped: A function with API
        evaluate_batch_pmapped(params, batch_stats, batch). Returns a dictionary
-       mapping keys to the summed metric across the sharded batch. The key
-       'denominator' is required, as this indicates how many real samples were
-       in the sharded batch.
+       mapping keys to the metric values across the sharded batch.
 
   Returns:
     A dictionary of aggregated metrics. The keys will match the keys returned by
     evaluate_batch_pmapped.
   """
-  # TODO(gilmer) Currently we only support metrics of the form 1/N sum f(x_i).
-  # May need a more general framework to stuff like precision and recall.
-  # np allows for the total_losses += syntax to work (array assignment).
-  total_metrics = collections.defaultdict(float)
+  metrics = None
   for batch in batch_iter:
     batch = data_utils.shard(batch)
+    # Returns a clu.metrics.Collection object.
     computed_metrics = evaluate_batch_pmapped(
         params=params, batch_stats=batch_stats, batch=batch)
-    for key in computed_metrics:
-      # The shape of computed_metrics[key] is [n_local_devices]. However,
-      # because evaluate_batch_pmapped has a psum, we have already summed
-      # across the whole sharded batch, and what's returned is n_local_devices
-      # copies of the same summed metric. So here we just grab the 0'th entry.
-      total_metrics[key] += np.float32(computed_metrics[key][0])
+    if metrics is None:
+      metrics = computed_metrics
+    else:
+      # `merge` aggregates the metrics across batches.
+      metrics = metrics.merge(computed_metrics)
 
   # For data splits with no data (e.g. Imagenet no test set) no values
   # will appear for that split.
-  for key in total_metrics:
-    # Convert back to numpy
-    if np.isnan(total_metrics[key]):
-      raise utils.TrainingDivergedError('NaN detected in {}'.format(key))
-    if key != 'denominator':
-      total_metrics[key] = total_metrics[key] / np.float32(
-          total_metrics['denominator'])
-  return total_metrics
+  if metrics is not None:
+    # `evaluate_batch_pmpapped` calls CLU's `gather_from_model_outputs`, which
+    # runs `all_gather` to replicate the values on all devices. Unreplicate
+    # removes that unnecessary dimension. `compute` aggregates the metrics
+    # across batches into a single value.
+    metrics = metrics.unreplicate().compute()
+    for key, val in metrics.items():
+      if np.isnan(val):
+        raise utils.TrainingDivergedError('NaN detected in {}'.format(key))
+  return metrics
 
 
 def _inject_learning_rate(optimizer_state, lr):
@@ -259,8 +251,10 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
                                     ['train', 'valid', 'test']):
     split_metrics = evaluate(params, batch_stats, split_iter,
                              evaluate_batch_pmapped)
-    metrics = _merge_and_apply_prefix(metrics, split_metrics,
-                                      (split_name + '/'))
+    # Metrics are None if the dataset doesn't have that split
+    if split_metrics is not None:
+      metrics = _merge_and_apply_prefix(metrics, split_metrics,
+                                        (split_name + '/'))
   return metrics
 
 
