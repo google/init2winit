@@ -14,11 +14,13 @@
 # limitations under the License.
 
 """Getter function for selecting optimizers."""
-from absl import logging
 
+from absl import logging
+from init2winit.optimizer_lib import optmaximus
 from init2winit.optimizer_lib.hessian_free import hessian_free
 import numpy as np
 import optax
+
 
 distributed_shampoo = None
 try:
@@ -163,6 +165,8 @@ def get_optimizer(hps, model=None):
             loss_fn=model.loss_fn,
             learning_rate=0.0,  # Manually injected on each train step.
             max_iter=np.prod(hps.output_shape))
+  elif hps.optimizer == 'kitchen_sink':
+    opt_init, opt_update = optmaximus.from_hparams(hps.opt_hparams)
 
   if opt_init is None or opt_update is None:
     raise NotImplementedError('Optimizer {} not implemented'.format(

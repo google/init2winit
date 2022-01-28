@@ -47,7 +47,7 @@ def scale_by_learning_rate(learning_rate, flip_sign=True):
 
 
 def nesterov(
-    decay: float = 0.1,
+    decay: float = 0.9,
     accumulator_dtype: Optional[Any] = None,
 ) -> optax.GradientTransformation:
 
@@ -56,7 +56,7 @@ def nesterov(
 
 
 def polyak_hb(
-    decay: float = 0.1,
+    decay: float = 0.9,
     accumulator_dtype: Optional[Any] = None,
 ) -> optax.GradientTransformation:
 
@@ -65,7 +65,7 @@ def polyak_hb(
 
 
 def polyak_ema(
-    decay: float = 0.1,
+    decay: float = 0.9,
     accumulator_dtype: Optional[Any] = None,
 ) -> optax.GradientTransformation:
 
@@ -156,7 +156,7 @@ class BiasCorrectionState(NamedTuple):
 
 
 def bias_correction(
-    decay: float = 0.1,
+    decay: float = 0.9,
     accumulator_dtype: Optional[Any] = None) -> optax.GradientTransformation:
   """Compute the Adam style bias correction.
 
