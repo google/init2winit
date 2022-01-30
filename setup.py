@@ -30,7 +30,7 @@ setup(
         'sentencepiece',
         'tensorboard',
         'tensorflow-datasets',
-        'tensorflow-text==2.5.0-rc0',
+        'tensorflow-text==2.5.0',
         'tensorflow==2.5.0',
     ],
     extras_require={},
