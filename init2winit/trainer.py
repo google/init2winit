@@ -288,7 +288,7 @@ def initialize(flax_module,
 
   Returns:
     A tuple (model, batch_stats), where model is the initialized
-    flax.nn.Model and batch_stats is the collection used for batch norm.
+    flax.deprecated.nn.Model and batch_stats is the collection used for batch norm.
   """
   model_dtype = utils.dtype_from_str(hps.model_dtype)
   # init_by_shape should either pass in a tuple or a list of tuples.
