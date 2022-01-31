@@ -91,8 +91,8 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     TODO(ankugarg@): Refactor this function somewhere into eval_commons.py
 
     Args:
-      flax_module: A flax.nn.Module
-      batch_stats: A flax.nn.Collection object tracking batch_stats.
+      flax_module: A flax module.
+      batch_stats: A dict of batch_stats.
       batch_iter: Generator which yields batches. Must support the API
         for b in batch_iter:
       evaluate_batch_pmapped: A function with API

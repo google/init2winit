@@ -275,7 +275,7 @@ def initialize(flax_module,
   provided by the initializer arg (the default is noop).
 
   Args:
-    flax_module: The Flax nn.Module.
+    flax_module: The flax module.
     initializer: An initializer defined in init_lib.
     loss_fn: A loss function.
     input_shape: The input shape of a single data example.
@@ -287,8 +287,8 @@ def initialize(flax_module,
       init_by_shape.
 
   Returns:
-    A tuple (model, batch_stats), where model is the initialized
-    flax.nn.Model and batch_stats is the collection used for batch norm.
+    A tuple (model, batch_stats), where model is the initialized flax model and
+    batch_stats is the collection used for batch norm.
   """
   model_dtype = utils.dtype_from_str(hps.model_dtype)
   # init_by_shape should either pass in a tuple or a list of tuples.
