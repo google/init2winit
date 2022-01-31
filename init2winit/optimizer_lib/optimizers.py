@@ -139,6 +139,7 @@ def get_optimizer(hps, model=None):
             nesterov=hps.opt_hparams['nesterov'],
             exponent_override=hps.opt_hparams['exponent_override'],
             batch_axis_name='batch',
+            graft_type=hps.opt_hparams['graft_type'],
             num_devices_for_pjit=hps.opt_hparams['num_devices_for_pjit'],
             shard_optimizer_states=hps.opt_hparams['shard_optimizer_states'],
             best_effort_memory_usage_reduction=hps.opt_hparams['best_effort_memory_usage_reduction'],
