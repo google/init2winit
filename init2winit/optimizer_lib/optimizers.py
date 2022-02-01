@@ -16,8 +16,10 @@
 """Getter function for selecting optimizers."""
 
 from absl import logging
+from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optmaximus
 from init2winit.optimizer_lib.hessian_free import hessian_free
+import jax
 import numpy as np
 import optax
 
@@ -159,15 +161,32 @@ def get_optimizer(hps, model=None):
     if model is None:
       raise ValueError(
           'Model info should be provided for using the hessian free optimizer.')
+    # Thest arguments are ignored by inject_hyperparams, which should only set
+    # a schedule for learning_rate.
+    static_args = ['flax_module_def', 'loss_fn', 'max_iter']
     opt_init, opt_update = optax.inject_hyperparams(
         hessian_free,
-        ['flax_module_def', 'loss_fn', 'max_iter'])(
+        static_args=static_args)(
             flax_module_def=model.flax_module_def,
             loss_fn=model.loss_fn,
             learning_rate=0.0,  # Manually injected on each train step.
             max_iter=np.prod(hps.output_shape))
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = optmaximus.from_hparams(hps.opt_hparams)
+
+  if hps.get('total_accumulated_batch_size', None) is not None:
+    # We do not synchronize batch norm stats across devices, so if there is no
+    # virtual_batch_size set in the hyperparameters, the per-core batch size
+    # (hps.batch_size // num_hosts) is used as the virtual batch size.
+    virtual_batch_size = hps.get('virtual_batch_size', None)
+    if virtual_batch_size is not None:
+      virtual_batch_size = hps.batch_size // jax.process_count()
+    opt_init, opt_update = gradient_accumulator.accumulate_gradients(
+        per_step_batch_size=hps.batch_size,
+        total_batch_size=hps.total_accumulated_batch_size,
+        virtual_batch_size=virtual_batch_size,
+        base_opt_init_fn=opt_init,
+        base_opt_update_fn=opt_update)
 
   if opt_init is None or opt_update is None:
     raise NotImplementedError('Optimizer {} not implemented'.format(

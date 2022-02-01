@@ -72,6 +72,37 @@ class LearningRateTest(absltest.TestCase):
           power=hps['power'])().numpy()
       self.assertAlmostEqual(lr_fn(step), expected_learning_rate)
 
+  def test_schedule_stretching(self):
+    """Test that schedules can be properly stretched."""
+    max_training_steps = 100
+    lr_hparams = config_dict.ConfigDict({
+        'schedule': 'mlperf_polynomial',
+        'base_lr': 10.0,
+        'warmup_steps': 10,
+        'decay_end': -1,
+        'end_lr': 1e-4,
+        'power': 2.0,
+        'start_lr': 0.0,
+        'warmup_power': 1.0,
+    })
+    lr_fn = schedules.get_schedule_fn(lr_hparams, max_training_steps)
+    stretch_factor = 3
+    stretched_lr_fn = schedules.get_schedule_fn(
+        lr_hparams, max_training_steps, stretch_factor=stretch_factor)
+    lrs = [lr_fn(t) for t in range(max_training_steps)]
+    stretched_lrs = [
+        stretched_lr_fn(t) for t in range(stretch_factor * max_training_steps)
+    ]
+    self.assertEqual(lrs, stretched_lrs[::stretch_factor])
+    self.assertEqual(lrs, stretched_lrs[1::stretch_factor])
+    self.assertEqual(lrs, stretched_lrs[2::stretch_factor])
+    # Assert that the stretched schedule has proper staircase behavior.
+    for update_step in range(max_training_steps):
+      start = update_step * stretch_factor
+      end = (update_step + 1) * stretch_factor
+      expected = [lrs[update_step]] * stretch_factor
+      self.assertEqual(stretched_lrs[start:end], expected)
+
   def test_mlperf_schedule(self):
     """Test there are no changes to the MLPerf polynomial decay schedule."""
     expected_lrs = [
@@ -159,6 +190,7 @@ class LearningRateTest(absltest.TestCase):
     # This should raise an exception due to the mutually exclusive hparams.
     with self.assertRaises(ValueError):
       schedules.get_schedule_fn(bad_hps2.lr_hparams, 1)
+
 
 if __name__ == '__main__':
   tf.enable_v2_behavior()

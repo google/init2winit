@@ -49,6 +49,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     # Make this a string to avoid having to import jnp into the configs.
     model_dtype='float32',
     virtual_batch_size=64,
+    total_accumulated_batch_size=None,
     data_format='NHWC',
     block_type='post_activation',  # either pre_activation or post_activation
     bn_relu_conv=True,  # only used for block_type='pre_activation'
@@ -72,7 +73,9 @@ class PreActResidualBlock(nn.Module):
   dtype: model_utils.Dtype = jnp.float32
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
+  batch_size: Optional[int] = None
   virtual_batch_size: Optional[int] = None
+  total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
   bn_relu_conv: bool = True
   use_bn: bool = True
@@ -87,7 +90,9 @@ class PreActResidualBlock(nn.Module):
             momentum=self.batch_norm_momentum,
             epsilon=self.batch_norm_epsilon,
             dtype=self.dtype,
+            batch_size=self.batch_size,
             virtual_batch_size=self.virtual_batch_size,
+            total_batch_size=self.total_batch_size,
             data_format=self.data_format,
             name=name)
       else:
@@ -128,7 +133,9 @@ class ResidualBlock(nn.Module):
   dtype: model_utils.Dtype = jnp.float32
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
+  batch_size: Optional[int] = None
   virtual_batch_size: Optional[int] = None
+  total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
   use_bn: bool = True
   bn_relu_conv: bool = True  # Unused.
@@ -143,7 +150,9 @@ class ResidualBlock(nn.Module):
             momentum=self.batch_norm_momentum,
             epsilon=self.batch_norm_epsilon,
             dtype=self.dtype,
+            batch_size=self.batch_size,
             virtual_batch_size=self.virtual_batch_size,
+            total_batch_size=self.total_batch_size,
             data_format=self.data_format,
             scale_init=scale_init,
             name=name)
@@ -181,7 +190,9 @@ class ResNet(nn.Module):
   dtype: model_utils.Dtype = jnp.float32
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
+  batch_size: Optional[int] = None
   virtual_batch_size: Optional[int] = None
+  total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
   block_type: str = 'post_activation'
   bn_relu_conv: bool = True
@@ -205,7 +216,9 @@ class ResNet(nn.Module):
           epsilon=self.batch_norm_epsilon,
           dtype=self.dtype,
           name='init_bn',
+          batch_size=self.batch_size,
           virtual_batch_size=self.virtual_batch_size,
+          total_batch_size=self.total_batch_size,
           data_format=self.data_format)(x, use_running_average=not train)
     x = nn.max_pool(x, (3, 3), strides=(2, 2), padding='SAME')
     if self.block_type == 'post_activation':
@@ -225,7 +238,9 @@ class ResNet(nn.Module):
             dtype=self.dtype,
             batch_norm_momentum=self.batch_norm_momentum,
             batch_norm_epsilon=self.batch_norm_epsilon,
+            batch_size=self.batch_size,
             virtual_batch_size=self.virtual_batch_size,
+            total_batch_size=self.total_batch_size,
             data_format=self.data_format,
             bn_relu_conv=self.bn_relu_conv,
             use_bn=self.use_bn,
@@ -262,7 +277,9 @@ class ResnetModel(base_model.BaseModel):
         dtype=utils.dtype_from_str(self.hps.model_dtype),
         batch_norm_momentum=self.hps.batch_norm_momentum,
         batch_norm_epsilon=self.hps.batch_norm_epsilon,
+        batch_size=self.hps.batch_size,
         virtual_batch_size=self.hps.virtual_batch_size,
+        total_batch_size=self.hps.total_accumulated_batch_size,
         data_format=self.hps.data_format,
         block_type=self.hps.block_type,
         bn_relu_conv=self.hps.bn_relu_conv,

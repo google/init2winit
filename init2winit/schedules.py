@@ -291,12 +291,26 @@ lr_fn_dict = {
 }
 
 
-def get_schedule_fn(schedule_hparams, max_training_steps):
+def schedule_stretcher(schedule_fn, stretch_factor):
+  """Stretch a schedule and return the stretched schedule fn."""
+  if stretch_factor == 1 or stretch_factor is None:
+    return schedule_fn
+
+  def _schedule(global_step):
+    return schedule_fn(global_step // stretch_factor)
+
+  return _schedule
+
+
+def get_schedule_fn(schedule_hparams, max_training_steps, stretch_factor=1):
+  """Retrieve a schedule function."""
   warmup_suffix = '_warmup'
   if schedule_hparams['schedule'][-len(warmup_suffix):] == warmup_suffix:
     base_name = schedule_hparams['schedule'][:-len(warmup_suffix)]
     base_lr_schedule = lr_fn_dict[base_name]
-    return prepend_linear_warmup(schedule_hparams, max_training_steps,
-                                 base_lr_schedule)
-  return lr_fn_dict[schedule_hparams['schedule']](schedule_hparams,
-                                                  max_training_steps)
+    schedule_fn = prepend_linear_warmup(
+        schedule_hparams, max_training_steps, base_lr_schedule)
+  else:
+    schedule_fn = lr_fn_dict[schedule_hparams['schedule']](
+        schedule_hparams, max_training_steps)
+  return schedule_stretcher(schedule_fn, stretch_factor)

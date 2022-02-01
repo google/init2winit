@@ -30,6 +30,7 @@ import numpy as np
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
+uniref = None
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(

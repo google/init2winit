@@ -84,6 +84,7 @@ MLPERF_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     batch_norm_epsilon=1e-5,
     model_dtype='float32',
     virtual_batch_size=64,
+    total_accumulated_batch_size=None,
     data_format='NHWC',
 ))
 
@@ -105,7 +106,9 @@ class ResidualBlock(nn.Module):
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
   bn_output_scale: float = 0.0
+  batch_size: Optional[int] = None
   virtual_batch_size: Optional[int] = None
+  total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
 
   @nn.compact
@@ -118,7 +121,9 @@ class ResidualBlock(nn.Module):
         axis_name=self.axis_name,
         axis_index_groups=self.axis_index_groups,
         dtype=self.dtype,
+        batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
+        total_batch_size=self.total_batch_size,
         data_format=self.data_format)
     conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
     residual = x
@@ -152,7 +157,9 @@ class ResNet(nn.Module):
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
   bn_output_scale: float = 0.0
+  batch_size: Optional[int] = None
   virtual_batch_size: Optional[int] = None
+  total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
 
   @nn.compact
@@ -170,7 +177,9 @@ class ResNet(nn.Module):
         axis_name=self.axis_name,
         axis_index_groups=self.axis_index_groups,
         dtype=self.dtype,
+        batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
+        total_batch_size=self.total_batch_size,
         data_format=self.data_format)(x, use_running_average=not train)
     x = nn.relu(x)  # MLPerf-required
     x = nn.max_pool(x, (3, 3), strides=(2, 2), padding='SAME')
@@ -186,7 +195,9 @@ class ResNet(nn.Module):
             batch_norm_momentum=self.batch_norm_momentum,
             batch_norm_epsilon=self.batch_norm_epsilon,
             bn_output_scale=self.bn_output_scale,
+            batch_size=self.batch_size,
             virtual_batch_size=self.virtual_batch_size,
+            total_batch_size=self.total_batch_size,
             data_format=self.data_format)(x, train=train)
     x = jnp.mean(x, axis=(1, 2))
     x = nn.Dense(self.num_classes, kernel_init=nn.initializers.normal(),
@@ -240,7 +251,9 @@ class ResnetModelMLPerf(base_model.BaseModel):
         batch_norm_momentum=self.hps.batch_norm_momentum,
         batch_norm_epsilon=self.hps.batch_norm_epsilon,
         bn_output_scale=self.hps.bn_output_scale,
+        batch_size=self.hps.batch_size,
         virtual_batch_size=self.hps.virtual_batch_size,
+        total_batch_size=self.hps.total_accumulated_batch_size,
         data_format=self.hps.data_format)
 
 

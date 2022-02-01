@@ -14,10 +14,9 @@
 # limitations under the License.
 
 """Virtual Batch Normalization Flax module."""
-from typing import Any, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from flax import linen as nn
-from init2winit.model_lib import model_utils
 
 from jax import lax
 from jax.nn import initializers
@@ -61,23 +60,28 @@ def _get_batch_axis(
     if x.shape[batch_axis] % virtual_batch_size != 0:
       raise ValueError(
           '`virtual_batch_size={}` must evenly divide '
-          '`x.shape[batch_axis]={}`.'.format(
+          '`x.shape[batch_axis]={}`. You are likely running with a per-core '
+          'batch size < hps.virtual_batch_size; either decrease the number of '
+          'cores, increase the total batch size, or decrease '
+          'hps.virtual_batch_size.'.format(
               virtual_batch_size, x.shape[batch_axis]))
   return batch_axis
+
+
+Initializer = Callable[[Any, Iterable[int], Any], Any]
 
 
 class VirtualBatchNorm(nn.Module):
   """VirtualBatchNorm Module. Normalizes the input using batch statistics.
 
   Forked from the original flax nn.BatchNorm layer, this allows users to have
-  multiple EMAs per device, one for each virtual batch size. For example, if
-  the per-device batch size is 128 and the user specifies
-  `virtual_batch_size=32`, 4 EMAs will be created on each device, each updated
-  with 1/4 of the per-device batch on each forward pass.
-
-  WARNING: the multiple per-device EMAs this creates need to be manually
-  synchronized within each device before being used for evaluation, or when
-  synchronizing batch norm statistic across devices.
+  multiple virtual batches per device. For example, if the per-device batch size
+  is 128 and the user specifies `virtual_batch_size=32`, each 1/4 of the batch
+  will be normalized with statistics only from that 1/4. The running averages
+  computed here are averaged at every step, which is equivalent to keeping
+  separate running averages and then averaging them at the end of training. Note
+  that users must still sync running averages across hosts before checkpointing,
+  as is also done with nn.BatchNorm.
 
   Attributes:
     x: the input to be normalized.
@@ -99,30 +103,36 @@ class VirtualBatchNorm(nn.Module):
       example, `[[0, 1], [2, 3]]` would independently batch-normalize over the
       examples on the first two and last two devices. See `jax.lax.psum` for
       more details.
+    batch_size: the batch size used for each forward pass. We must explicitly
+      pass this instead of relying on `x.shape` because we may initialize the
+      model with a batch of zeros with a different batch size.
     virtual_batch_size: the size of the virtual batches to construct on
       each device, which will be used to normalize sub-batches of each
-      per-device batch. Will create a running average
-      with a leading dim of size `x.shape[batch_axis] // virtual_batch_size`,
-      one for each sub-batch. Note that the first dim of each state must be
-      synchronized whenever synchronizing batch norm running averages. Must
-      evenly divide the per-device batch size (as determined by `x`), and
-      cannot be combined with `axis_index_groups`. Passing the default value
-      of None will replicate the existing nn.BatchNorm behavior without
-      virtual batches.
+      per-device batch. Must evenly divide the per-device batch size (as
+      determined by `x`), and cannot be combined with `axis_index_groups`.
+      Passing the default value of None will replicate the existing nn.BatchNorm
+      behavior without virtual batches.
+    total_batch_size: only necessary when using gradient accumulation, the total
+      batch size used to calculate accumulated gradients. This is required here
+      because we need to store `total_batch_size // virtual_batch_size` EMAs
+      instead of just `x.shape[batch_axis] // virtual_batch_size`.
     data_format: only used when `virtual_batch_size` is set, to determine the
       batch axis.
   """
+  use_running_average: Optional[bool] = None
   axis: int = -1
   momentum: float = 0.99
   epsilon: float = 1e-5
-  dtype: model_utils.Dtype = jnp.float32
+  dtype: Any = jnp.float32
   use_bias: bool = True
   use_scale: bool = True
-  bias_init: model_utils.Initializer = initializers.zeros
-  scale_init: model_utils.Initializer = initializers.ones
+  bias_init: Initializer = initializers.zeros
+  scale_init: Initializer = initializers.ones
   axis_name: Optional[str] = None
   axis_index_groups: Optional[Any] = None
+  batch_size: Optional[int] = None
   virtual_batch_size: Optional[int] = None
+  total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
 
   @nn.compact
@@ -144,6 +154,8 @@ class VirtualBatchNorm(nn.Module):
     Returns:
       Normalized inputs (the same shape as inputs).
     """
+    use_running_average = nn.module.merge_param(
+        'use_running_average', self.use_running_average, use_running_average)
 
     virtual_batch_size = self.virtual_batch_size
     batch_axis = _get_batch_axis(
@@ -153,7 +165,7 @@ class VirtualBatchNorm(nn.Module):
         use_running_average,
         self.axis_index_groups)
     if virtual_batch_size is None:
-      virtual_batch_size = x.shape[batch_axis]
+      virtual_batch_size = self.batch_size
 
     if use_running_average:
       # Virtual batch norm is not used during evaluation, and we cannot
@@ -164,7 +176,11 @@ class VirtualBatchNorm(nn.Module):
       virtual_batch_size = x.shape[batch_axis]
 
     x = jnp.asarray(x, jnp.float32)
-    num_sub_batches = x.shape[batch_axis] // virtual_batch_size
+    # Note that this should only ever default to the first case if we are
+    # passing in a batch `x` with less examples than `virtual_batch_size`, which
+    # should only happen if we are initializing with dummy variables (typically
+    # of batch size 2).
+    num_sub_batches = max(1, x.shape[batch_axis] // virtual_batch_size)
     input_shape = x.shape
     axis = self.axis if isinstance(self.axis, tuple) else (self.axis,)
     axis = _absolute_dims(x.ndim, axis)
@@ -176,25 +192,50 @@ class VirtualBatchNorm(nn.Module):
     sub_batched_shape = (
         num_sub_batches,
         *x.shape[:batch_axis],
-        virtual_batch_size,
+        # Necessary for when passing in a batch `x` with less examples than
+        # `virtual_batch_size, which should only happen if we are initializing
+        # with dummy variables (typically of batch size 2).
+        min(x.shape[batch_axis], virtual_batch_size),
         *x.shape[batch_axis + 1:])
     x = jnp.reshape(x, sub_batched_shape)
-    ra_means = self.variable('batch_stats', 'batch_norm_running_mean',
-                             lambda s: jnp.zeros(s, jnp.float32),
-                             (num_sub_batches, *reduced_feature_shape))
-    ra_vars = self.variable('batch_stats', 'batch_norm_running_var',
-                            lambda s: jnp.ones(s, jnp.float32),
-                            (num_sub_batches, *reduced_feature_shape))
+    ra_mean = self.variable('batch_stats', 'batch_norm_running_mean',
+                            lambda s: jnp.zeros(s, jnp.float32),
+                            feature_shape)
+    ra_var = self.variable('batch_stats', 'batch_norm_running_var',
+                           lambda s: jnp.ones(s, jnp.float32),
+                           feature_shape)
+    # If using gradient accumulation, use these to accumulate the activations
+    # for the current batch before folding them into the running average.
+    mean_accumulator = self.variable(
+        'batch_stats', 'batch_norm_mean_accumulator',
+        lambda s: jnp.zeros(s, jnp.float32), feature_shape)
+    mean2_accumulator = self.variable(
+        'batch_stats', 'batch_norm_mean2_accumulator',
+        lambda s: jnp.zeros(s, jnp.float32), feature_shape)
+
+    # A counter that is used to determine which accumulation pass we are
+    # currently in. This will increment from 0 until we have accumulated
+    # gradients calculated on `self.total_batch_size` examples. This should only
+    # ever be saved on disk as 0 because we only checkpoint after accumulating
+    # enough examples to make an update.
+    grad_accum_counter = self.variable('batch_stats', 'grad_accum_counter',
+                                       lambda s: jnp.zeros(s, jnp.int32), [])
 
     # See NOTE above on initialization behavior.
     initializing = self.is_mutable_collection('params')
 
+    if self.total_batch_size is None:
+      passes_per_total_batch = 1
+    else:
+      passes_per_total_batch = self.total_batch_size // self.batch_size
+
     if use_running_average:
       # Note that we assume that the values across the first axis have been
       # properly synchronized.
-      mean = jnp.expand_dims(ra_means.value[0], 0)
-      var = jnp.expand_dims(ra_vars.value[0], 0)
+      mean = jnp.expand_dims(ra_mean.value, 0)
+      var = jnp.expand_dims(ra_var.value, 0)
     else:
+      # Shape (num_sub_batches, x.shape[axis]).
       mean = jnp.mean(x, axis=reduction_axis, keepdims=False)
       mean2 = jnp.mean(
           lax.square(x), axis=reduction_axis, keepdims=False)
@@ -208,10 +249,31 @@ class VirtualBatchNorm(nn.Module):
       var = mean2 - lax.square(mean)
 
       if not initializing:
-        ra_means.value = (
-            self.momentum * ra_means.value + (1 - self.momentum) * mean)
-        ra_vars.value = (
-            self.momentum * ra_vars.value + (1 - self.momentum) * var)
+        mean_accumulator.value += jnp.mean(mean, axis=0)
+        mean2_accumulator.value += jnp.mean(mean2, axis=0)
+        grad_accum_counter_inc = grad_accum_counter.value + 1
+        # This will be 0 for all gradient accumulation passes except for the
+        # last one when we have seen enough examples to make an update to the
+        # running averages.
+        should_update_ra = grad_accum_counter_inc // passes_per_total_batch
+        ra_mean_update = (
+            should_update_ra * mean_accumulator.value / grad_accum_counter_inc)
+        ra_mean.value = (
+            (1 - should_update_ra * (1 - self.momentum)) * ra_mean.value +
+            (1 - self.momentum) * ra_mean_update)
+        ra_var_update = should_update_ra * (
+            mean2_accumulator.value / grad_accum_counter_inc -
+            lax.square(mean_accumulator.value / grad_accum_counter_inc))
+        ra_var.value = (
+            (1 - should_update_ra * (1 - self.momentum)) * ra_var.value +
+            (1 - self.momentum) * ra_var_update)
+
+        grad_accum_counter.value = (
+            grad_accum_counter_inc % passes_per_total_batch)
+        # Reset the activation accumulators every `passes_per_total_batch` steps
+        # (np.sign == 0 if grad_accum_counter == 0).
+        mean_accumulator.value *= jnp.sign(grad_accum_counter.value)
+        mean2_accumulator.value *= jnp.sign(grad_accum_counter.value)
 
     y = x - mean.reshape((num_sub_batches, *feature_shape))
     mul = lax.rsqrt(

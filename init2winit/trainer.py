@@ -35,6 +35,7 @@ from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
+from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optimizers
 import jax
 from jax import lax
@@ -115,6 +116,9 @@ def _inject_learning_rate(optimizer_state, lr):
   if isinstance(optimizer_state, optax.InjectHyperparamsState):
     if 'learning_rate' in optimizer_state.hyperparams:
       optimizer_state.hyperparams['learning_rate'] = lr
+  elif isinstance(
+      optimizer_state, gradient_accumulator.GradientAccumulatorState):
+    _inject_learning_rate(optimizer_state.base_state, lr)
   else:
     raise ValueError(
         'Unsupported optimizer_state type given when trying to inject the '
@@ -607,7 +611,19 @@ def train(train_dir,
     utils.log_pytree_shape_and_statistics(unreplicated_params)
     logging.info('train_size: %d,', hps.train_size)
 
-  lr_fn = schedules.get_schedule_fn(hps.lr_hparams, num_train_steps)
+  # Note that global_step refers to the number of gradients calculations, not
+  # the number of model updates. This means when using gradient accumulation,
+  # one must supply configs where the number of steps are in units of gradient
+  # calculations, not model updates, and in post processing one must divide
+  # global_step by grad_accum_step_multiplier to get the number of updates.
+  #
+  # If using gradient accumulation, stretch the learning rate schedule by the
+  # number of gradient calculations per weight update.
+  stretch_factor = 1
+  if hps.get('total_accumulated_batch_size') is not None:
+    stretch_factor = hps.total_accumulated_batch_size // hps.batch_size
+  lr_fn = schedules.get_schedule_fn(
+      hps.lr_hparams, num_train_steps, stretch_factor=stretch_factor)
 
   optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps, model)
   unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)

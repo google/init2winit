@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Wide Resnet Model."""
-from typing import Tuple, List
+from typing import List, Optional, Tuple
 
 from flax import linen as nn
 from init2winit.model_lib import base_model
@@ -45,6 +45,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
             'momentum': 0.9,
         },
         batch_size=128,
+        virtual_batch_size=None,
+        total_accumulated_batch_size=None,
         l2_decay_factor=0.0001,
         l2_decay_rank_threshold=2,
         label_smoothing=None,
@@ -65,10 +67,18 @@ class WideResnetBlock(nn.Module):
   normalizer: str = 'batch_norm'
   dropout_rate: float = 0.0
   activation_function: str = 'relu'
+  batch_size: Optional[int] = None
+  virtual_batch_size: Optional[int] = None
+  total_batch_size: Optional[int] = None
 
   @nn.compact
   def __call__(self, x, train):
-    maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
+    maybe_normalize = model_utils.get_normalizer(
+        self.normalizer,
+        train,
+        batch_size=self.batch_size,
+        virtual_batch_size=self.virtual_batch_size,
+        total_batch_size=self.total_batch_size)
     y = maybe_normalize(name='bn1')(x)
     y = model_utils.ACTIVATIONS[self.activation_function](y)
 
@@ -116,6 +126,9 @@ class WideResnetGroup(nn.Module):
   normalizer: str = 'batch_norm'
   dropout_rate: float = 0.0
   activation_function: str = 'relu'
+  batch_size: Optional[int] = None
+  virtual_batch_size: Optional[int] = None
+  total_batch_size: Optional[int] = None
 
   @nn.compact
   def __call__(self, x, train):
@@ -126,7 +139,10 @@ class WideResnetGroup(nn.Module):
           conv_kernel_init=self.conv_kernel_init,
           normalizer=self.normalizer,
           dropout_rate=self.dropout_rate,
-          activation_function=self.activation_function)(x, train=train)
+          activation_function=self.activation_function,
+          batch_size=self.batch_size,
+          virtual_batch_size=self.virtual_batch_size,
+          total_batch_size=self.total_batch_size)(x, train=train)
     return x
 
 
@@ -141,6 +157,9 @@ class WideResnet(nn.Module):
   normalizer: str = 'batch_norm'
   dropout_rate: float = 0.0
   activation_function: str = 'relu'
+  batch_size: Optional[int] = None
+  virtual_batch_size: Optional[int] = None
+  total_batch_size: Optional[int] = None
 
   @nn.compact
   def __call__(self, x, train):
@@ -158,7 +177,10 @@ class WideResnet(nn.Module):
         conv_kernel_init=self.conv_kernel_init,
         normalizer=self.normalizer,
         dropout_rate=self.dropout_rate,
-        activation_function=self.activation_function)(x, train=train)
+        activation_function=self.activation_function,
+        batch_size=self.batch_size,
+        virtual_batch_size=self.virtual_batch_size,
+        total_batch_size=self.total_batch_size)(x, train=train)
     x = WideResnetGroup(
         self.blocks_per_group,
         32 * self.channel_multiplier,
@@ -166,7 +188,10 @@ class WideResnet(nn.Module):
         conv_kernel_init=self.conv_kernel_init,
         normalizer=self.normalizer,
         dropout_rate=self.dropout_rate,
-        activation_function=self.activation_function)(x, train=train)
+        activation_function=self.activation_function,
+        batch_size=self.batch_size,
+        virtual_batch_size=self.virtual_batch_size,
+        total_batch_size=self.total_batch_size)(x, train=train)
     x = WideResnetGroup(
         self.blocks_per_group,
         64 * self.channel_multiplier,
@@ -174,8 +199,16 @@ class WideResnet(nn.Module):
         conv_kernel_init=self.conv_kernel_init,
         dropout_rate=self.dropout_rate,
         normalizer=self.normalizer,
-        activation_function=self.activation_function)(x, train=train)
-    maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
+        activation_function=self.activation_function,
+        batch_size=self.batch_size,
+        virtual_batch_size=self.virtual_batch_size,
+        total_batch_size=self.total_batch_size)(x, train=train)
+    maybe_normalize = model_utils.get_normalizer(
+        self.normalizer,
+        train,
+        batch_size=self.batch_size,
+        virtual_batch_size=self.virtual_batch_size,
+        total_batch_size=self.total_batch_size)
     x = maybe_normalize()(x)
     x = model_utils.ACTIVATIONS[self.activation_function](x)
     x = nn.avg_pool(x, (8, 8))
@@ -199,4 +232,7 @@ class WideResnetModel(base_model.BaseModel):
             self.hps.dense_kernel_scale),
         dropout_rate=self.hps.dropout_rate,
         normalizer=self.hps.normalizer,
-        activation_function=self.hps.activation_function)
+        activation_function=self.hps.activation_function,
+        batch_size=self.hps.batch_size,
+        virtual_batch_size=self.hps.virtual_batch_size,
+        total_batch_size=self.hps.total_accumulated_batch_size)

@@ -19,9 +19,9 @@ import functools
 from typing import Any, Callable, Iterable
 
 from absl import logging
-from flax import core
 from flax import linen as nn
 from flax import optim
+from init2winit.model_lib import normalization
 import jax
 from jax import lax
 from jax.nn import initializers
@@ -64,7 +64,13 @@ class ScalarMultiply(nn.Module):
     return x * self.param('scale', (), self.scale_init)
 
 
-def get_normalizer(normalizer, train):
+def get_normalizer(
+    normalizer,
+    train,
+    batch_size=None,
+    virtual_batch_size=None,
+    total_batch_size=None,
+    data_format='NHWC'):
   """Maps a string to the given normalizer function.
 
   We return a function that returns the normalization module, deferring the
@@ -83,9 +89,17 @@ def get_normalizer(normalizer, train):
   in an error in the LayerNorm case).
 
   Args:
-    normalizer: One of ['batch_norm', 'layer_norm', 'none'].
+    normalizer: One of ['batch_norm', 'virtual_batch_norm', 'layer_norm',
+      'none'].
     train: Boolean indiciating if we are running in train or inference mode
       for batch norm.
+    batch_size: only used for virtual batch norm, the batch size.
+    virtual_batch_size: only used for virtual batch norm, the virtual batch
+      size.
+    total_batch_size: only used for virtual batch norm when using gradient
+      accumulation, the total batch size used to calculate gradients with.
+    data_format: only used for virtual batch norm, used to determine the batch
+      axis.
 
   Returns:
     A function that when called will create the normalizer module/function.
@@ -99,6 +113,16 @@ def get_normalizer(normalizer, train):
         use_running_average=not train,
         momentum=0.9,
         epsilon=1e-5)
+  elif normalizer == 'virtual_batch_norm':
+    return functools.partial(
+        normalization.VirtualBatchNorm,
+        use_running_average=not train,
+        momentum=0.9,
+        epsilon=1e-5,
+        batch_size=batch_size,
+        virtual_batch_size=virtual_batch_size,
+        data_format=data_format,
+        total_batch_size=total_batch_size)
   elif normalizer in ['layer_norm', 'pre_layer_norm', 'post_layer_norm']:
     return nn.LayerNorm
   elif normalizer == 'none':
@@ -162,45 +186,8 @@ def apply_label_smoothing(one_hot_targets, label_smoothing):
   return one_hot_targets
 
 
-def _average_local_batch_norm_stats(x):
-  """Average local BN EMAs along the 0-th axis, tile back to the same shape."""
-  shape = x.shape
-  # The state is replicated across devices on the first axis, so the
-  # per-device EMAs are on the second.
-  if shape[0] == 1:
-    # In the case that the per_device_batch_size == virtual_batch_size.
-    return x
-  # Average across per-device EMAs.
-  x = jnp.mean(x, axis=(0,))
-  # Add back in the EMA axis.
-  x = jnp.expand_dims(x, axis=0)
-  tiling = [shape[0]] + [1] * (len(shape) - 1)
-  # Recreate an EMA for each subbatch by tiling along the EMA axis.
-  x = jnp.tile(x, tiling)
-  return x
-
-
-def _sync_local_batch_norm_stats_helper(d):
-  """Recursively iterate over the state pytree and only sync BN keys."""
-  for key, value in d.items():
-    if isinstance(value, dict):
-      d[key] = _sync_local_batch_norm_stats_helper(value)
-    elif key.startswith('batch_norm_running_'):
-      d[key] = _average_local_batch_norm_stats(value)
-    return d
-
-
-def sync_local_batch_norm_stats(locally_synced_batch_stats):
-  """Sync the multiple local BN EMAs when using virual bs < per-device bs."""
-  locally_synced_batch_stats = locally_synced_batch_stats.unfreeze()
-  locally_synced_batch_stats = _sync_local_batch_norm_stats_helper(
-      locally_synced_batch_stats)
-  return core.FrozenDict(locally_synced_batch_stats)
-
-
 def sync_batchnorm_stats(state):
   # TODO(jekbradbury): use different formula for running variances?
-  state = sync_local_batch_norm_stats(state)
   return lax.pmean(state, axis_name='batch')
 
 
