@@ -20,6 +20,7 @@ from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
+import jax.numpy as jnp
 
 from ml_collections.config_dict import config_dict
 
@@ -111,7 +112,7 @@ class WideResnetBlock(nn.Module):
         kernel_init=self.conv_kernel_init,
         use_bias=False)(y)
 
-    if self.normalizer == 'none':
+    if self.normalizer == 'none' and jnp.isscalar(y):
       y = model_utils.ScalarMultiply()(y)
 
     return x + y
