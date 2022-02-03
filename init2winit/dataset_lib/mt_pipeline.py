@@ -528,6 +528,9 @@ def get_wmt_datasets(config: config_dict.ConfigDict,
       vocab_path=vocab_path,
       vocab_size=config.vocab_size,
       max_corpus_chars=config.max_corpus_chars,
+      character_coverage=config.character_coverage,
+      byte_fallback=config.byte_fallback,
+      split_digits=config.split_digits,
       user_defined_symbols=user_defined_symbols)
   sampled_train_data = sampled_train_data.map(
       tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)

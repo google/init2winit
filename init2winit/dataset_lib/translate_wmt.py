@@ -56,6 +56,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         output_shape=(VOCAB_SIZE,),
         train_size=4522998,  # raw data size, update with filtered data size.
         input_shape=[(100,), (100,)],  # dummy small values to init_by_shape.
+        character_coverage=1.0,
+        byte_fallback=False,
+        split_digits=False,
         # If None, datasets.get_dataset_hparams() adds input_shape:
         # max_len = max(max_target_length,
         #               max_eval_target_length,

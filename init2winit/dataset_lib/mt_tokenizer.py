@@ -66,6 +66,8 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
                          model_path: str,
                          model_type: str = 'unigram',
                          character_coverage: float = 1.0,
+                         byte_fallback: bool = False,
+                         split_digits: bool = False,
                          data_keys: Tuple[str, str] = ('inputs', 'targets'),
                          user_defined_symbols: List[str] = []):
   """Train SentencePiece tokenizer from subset of tf dataset.
@@ -79,6 +81,8 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
     character_coverage: amount of characters covered by the model, good defaults
       are 0.9995 for languages with rich character set like Japanese or Chinese
       and 1.0 for other languages with small character set.
+    byte_fallback: whether to decomposes unknown pieces into UTF-8 bytes.
+    split_digits: whether to split all digits (0-9) into separate pieces.
     data_keys: Tuple[str]: keys of dataset to use for training.
     user_defined_symbols: List[str]: tokens that are automatically added.
 
@@ -97,6 +101,8 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
       f'--character_coverage={character_coverage}',
       f'--model_prefix={model_fp.name}', f'--model_type={model_type}',
       f'--user_defined_symbols={user_defined_symbols}',
+      f'--byte_fallback={byte_fallback}',
+      f'--split_digits={split_digits}'
   ])
   spm.SentencePieceTrainer.Train(argstr)
   if jax.process_index() == 0:
@@ -130,6 +136,9 @@ def load_or_train_tokenizer(dataset: tf.data.Dataset,
                             vocab_path: str,
                             vocab_size: int,
                             max_corpus_chars: int,
+                            character_coverage: float = 1.0,
+                            byte_fallback: bool = False,
+                            split_digits: bool = False,
                             data_keys: Tuple[str, str] = ('inputs', 'targets'),
                             user_defined_symbols: List[str] = []):
   """Loads the tokenizer at `vocab_path` or trains a one from `dataset`."""
@@ -142,6 +151,9 @@ def load_or_train_tokenizer(dataset: tf.data.Dataset,
         vocab_size=vocab_size,
         maxchars=max_corpus_chars,
         model_path=vocab_path,
+        character_coverage=character_coverage,
+        byte_fallback=byte_fallback,
+        split_digits=split_digits,
         data_keys=data_keys,
         user_defined_symbols=user_defined_symbols)
     return _load_sentencepiece_tokenizer(vocab_path)
