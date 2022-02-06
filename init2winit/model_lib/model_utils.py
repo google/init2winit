@@ -61,7 +61,7 @@ class ScalarMultiply(nn.Module):
 
   @nn.compact
   def __call__(self, x):
-    return x * self.param('scale', (), self.scale_init)
+    return x * self.param('scale', self.scale_init, ())
 
 
 def get_normalizer(
