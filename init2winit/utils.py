@@ -292,6 +292,12 @@ def run_in_parallel(function, list_of_kwargs_to_function, num_workers):
   return [f.result() for f in futures]
 
 
+def should_eval(global_step, eval_frequency, eval_steps):
+  if eval_steps:
+    return global_step in eval_steps
+  return global_step % eval_frequency == 0
+
+
 def add_log_file(logfile):
   """Replicate logs to an additional logfile.
 
@@ -393,6 +399,20 @@ class MetricLogger(object):
       # size 512. We could only flush at the end of training to optimize this.
       self._tb_metric_writer.flush()
 
+  def write_pytree(self, pytree):
+    """Record a serializable pytree to disk, overwriting any previous state.
+
+    Args:
+      pytree: Any serializable pytree.
+    """
+    state = dict(pytree=pytree)
+    checkpoint.save_checkpoint(
+        self._pytree_path,
+        step='',
+        state=state,
+        prefix='training_metrics',
+        max_to_keep=None)
+
   def append_pytree(self, pytree):
     """Append and record a serializable pytree to disk.
 
@@ -407,8 +427,8 @@ class MetricLogger(object):
     # before saving back to disk.
     old_state = flax_checkpoints.restore_checkpoint(
         self._pytree_path, target=None, prefix='training_metrics')
-    # Because we pass target=None, flax checkpointing will return the raw state
-    # dict, where 'pytree' will be a dict with keys ['0', '1', ...] instead of a
+    # Because we pass target=None, checkpointing will return the raw state
+    # dict, where 'pytree' is a dict with keys ['0', '1', ...] instead of a
     # list.
     if old_state:
       state_list = old_state['pytree']
@@ -416,13 +436,8 @@ class MetricLogger(object):
     else:
       state_list = []
     state_list.append(pytree)
-    state = dict(pytree=state_list)
-    checkpoint.save_checkpoint(
-        self._pytree_path,
-        step='',
-        state=state,
-        prefix='training_metrics',
-        max_to_keep=None)
+
+    self.write_pytree(state_list)
 
   def append_json_object(self, json_obj):
     """Append a json serializable object to the json file."""

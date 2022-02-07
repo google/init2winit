@@ -511,12 +511,6 @@ def _maybe_sync_batchnorm_stats(batch_stats):
   return batch_stats
 
 
-def should_eval(global_step, eval_frequency, eval_steps):
-  if eval_steps:
-    return global_step in eval_steps
-  return global_step % eval_frequency == 0
-
-
 def train(train_dir,
           model,
           dataset_builder,
@@ -764,7 +758,7 @@ def train(train_dir,
     # TODO(gdahl, gilmer): consider moving this test up.
     # NB: Since this test is after we increment global_step, having 0 in
     # eval_steps does nothing.
-    if should_eval(global_step, eval_frequency, eval_steps):
+    if utils.should_eval(global_step, eval_frequency, eval_steps):
       batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
       report, eval_time = eval_metrics(params,
                                        batch_stats,
