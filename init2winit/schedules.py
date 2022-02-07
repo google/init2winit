@@ -277,7 +277,14 @@ def prepend_linear_warmup(schedule_hparams, max_training_steps,
       return ((t / warmup_steps) ** warmup_power) * base_lr
     step = t - warmup_steps
     return base_lr_fn(step)
+
   return lr_fn
+
+
+def warmup_then_piecewise_constant_schedule(schedule_hparams,
+                                            max_training_steps):
+  return prepend_linear_warmup(schedule_hparams, max_training_steps,
+                               piecewise_constant_schedule)
 
 
 lr_fn_dict = {
@@ -288,6 +295,7 @@ lr_fn_dict = {
     'polynomial': polynomial_schedule,
     'mlperf_polynomial': mlperf_polynomial_schedule,
     'compound': compound_schedule,
+    'warmup_then_piecewise_constant': warmup_then_piecewise_constant_schedule
 }
 
 
