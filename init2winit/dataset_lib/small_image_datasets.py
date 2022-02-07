@@ -293,6 +293,7 @@ def _process_small_tfds_image_ds(
   train_split = tfds.core.ReadInstruction('train', to=train_size, unit='abs')
   data_train = tfds.load(name=dataset_name, split=train_split,
                          as_dataset_kwargs={'shuffle_files': False})
+  data_train = data_train.cache()
   # Ensure a different shuffle of the training data on each host.
   shuffle_rng = jax.random.fold_in(shuffle_rng, jax.process_index())
   data_train = data_train.shuffle(
