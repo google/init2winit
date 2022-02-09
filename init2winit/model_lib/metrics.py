@@ -42,6 +42,45 @@ class NumExamples(metrics.Metric):
     return self.count
 
 
+# TODO(mbadura): Check if we can use metrics.Average with a mask
+def weighted_average_metric(fun):
+  """Returns a clu.Metric that uses `weights` to average the values.
+
+  We can't use CLU `metrics.Average` directly, because it would ignore
+  `weights`.
+
+  Args:
+    fun: function with the API fun(logits, targets, weights)
+
+  Returns:
+    clu.Metric that maintains a weighted average of the values.
+  """
+
+  @flax.struct.dataclass
+  class _Metric(metrics.Metric):
+    """Applies `fun` and computes the average."""
+    total: np.float32
+    weight: np.float32
+
+    @classmethod
+    def from_model_output(cls, logits, targets, weights, **_):
+      total = fun(logits, targets, weights).sum()
+      if weights is None:
+        weight = targets.shape[0]
+      else:
+        weight = weights.sum()
+      return cls(total=total, weight=weight)
+
+    def merge(self, other):
+      return type(self)(
+          total=self.total + other.total, weight=self.weight + other.weight)
+
+    def compute(self):
+      return self.total / self.weight
+
+  return _Metric
+
+
 # TODO(gilmer): Consider revising this to support categorical targets.
 def weighted_misclassifications(logits, targets, weights=None):
   """Compute weighted error rate over the given batch.
@@ -74,29 +113,29 @@ def weighted_misclassifications(logits, targets, weights=None):
   return loss
 
 
-# All metrics created via `from_fun` must take three arguments named `logits`,
-# `targets`, `weights`, because the arguments to these functions are passed via
-# keyword args. We don't use CLU's `mask` argument, we use `weights` for that.
+# All metrics used here must take three arguments named `logits`, `targets`,
+# `weights`. We don't use CLU's `mask` argument, the metric gets
+# that information from `weights`. The total weight for calculating the average
+# is `weights.sum()`.
 _METRICS = {
     'binary_autoencoder_metrics':
         metrics.Collection.create(
-            sigmoid_binary_cross_entropy=metrics.Average.from_fun(
+            sigmoid_binary_cross_entropy=weighted_average_metric(
                 losses.sigmoid_binary_cross_entropy),
-            sigmoid_mean_squared_error=metrics.Average.from_fun(
+            sigmoid_mean_squared_error=weighted_average_metric(
                 losses.sigmoid_mean_squared_error),
             num_examples=NumExamples),
     'classification_metrics':
         metrics.Collection.create(
-            error_rate=metrics.Average.from_fun(weighted_misclassifications),
-            ce_loss=metrics.Average.from_fun(
+            error_rate=weighted_average_metric(weighted_misclassifications),
+            ce_loss=weighted_average_metric(
                 losses.weighted_unnormalized_cross_entropy),
             num_examples=NumExamples),
     'binary_classification_metrics':
         metrics.Collection.create(
-            ce_loss=metrics.Average.from_fun(
+            ce_loss=weighted_average_metric(
                 losses.sigmoid_binary_cross_entropy),
-            num_examples=NumExamples,
-            average_precision=losses.MeanAveragePrecision)
+            num_examples=NumExamples)
 }
 
 

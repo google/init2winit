@@ -24,6 +24,7 @@ import tempfile
 
 from absl import flags
 from absl.testing import absltest
+from absl.testing import parameterized
 from flax import jax_utils
 from flax import linen as nn
 from init2winit import checkpoint
@@ -177,7 +178,7 @@ def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
                   })
 
 
-class TrainerTest(absltest.TestCase):
+class TrainerTest(parameterized.TestCase):
   """Tests training for 2 epochs on MNIST."""
 
   def setUp(self):
@@ -662,26 +663,45 @@ class TrainerTest(absltest.TestCase):
 
     self.assertEqual(set(df.columns.values), set(get_column_names()))
 
-  def test_evaluate(self):
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='basic',
+          logits=np.array([[1, 0], [1, 0], [1, 0], [1, 0]]),
+          targets=np.array([[1, 0], [0, 1], [1, 0], [1, 0]]),
+          weights=np.array([1, 1, 0, 0]),
+          num_results=2,
+          error_rate=0.5),
+      dict(
+          testcase_name='fractional_weights',
+          logits=np.array([[0.1, 0.9], [0.8, 0.2]]),
+          targets=np.array([[1, 0], [1, 0]]),
+          weights=np.array([0.3, 0.7]),
+          num_results=1,
+          error_rate=0.3),
+  )
+  def test_evaluate(self, logits, targets, weights, num_results, error_rate):
     """Test metrics merging and evaluation including zero weights."""
 
     def mock_evaluate_batch(params, batch_stats, batch):
+      """Always returns ones."""
       del params, batch_stats
       metrics_bundle = metrics.get_metrics('classification_metrics')
 
       return metrics_bundle.gather_from_model_output(
-          logits=np.ones(batch.get('targets').shape),
+          logits=batch.get('logits'),
           targets=batch.get('targets'),
           weights=batch.get('weights'))
 
-    targets = np.split(
-        np.expand_dims(np.array([1, 1, 0, 0, 1, 1, 1, 0]), -1), 2)
-    weights = np.split(np.array([1, 0, 0, 0, 1, 1, 1, 0]), 2)
+    logits = np.split(logits, 2)
+    targets = np.split(targets, 2)
+    weights = np.split(weights, 2)
+
     # pylint: disable=g-complex-comprehension
     batch_iter = [{
+        'logits': ls,
         'targets': ts,
         'weights': ws
-    } for ts, ws in zip(targets, weights)]
+    } for ls, ts, ws in zip(logits, targets, weights)]
 
     result = trainer.evaluate(
         params=None,
@@ -689,8 +709,8 @@ class TrainerTest(absltest.TestCase):
         batch_iter=batch_iter,
         evaluate_batch_pmapped=jax.pmap(mock_evaluate_batch, axis_name='batch'))
 
-    self.assertAlmostEqual(result['error_rate'], 0)
-    self.assertAlmostEqual(result['num_examples'], 4)
+    self.assertAlmostEqual(result['error_rate'], error_rate)
+    self.assertAlmostEqual(result['num_examples'], num_results)
 
 
 if __name__ == '__main__':
