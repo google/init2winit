@@ -95,6 +95,7 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
   with tempfile.NamedTemporaryFile(
       delete=False, prefix='/tmp/sp_tmp') as model_fp:
     pass  # we just want a prefix'd tmp-filename
+  user_defined_symbols = ['▁' + symbol for symbol in user_defined_symbols]
   user_defined_symbols = ','.join(user_defined_symbols)
   argstr = ' '.join([
       f'--input={fname}', f'--vocab_size={vocab_size}',
