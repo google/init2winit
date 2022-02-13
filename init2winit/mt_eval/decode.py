@@ -394,6 +394,7 @@ def decode_step(batch,
       train=False,
       method=flax_module.encode)
   encoded_inputs = flat_batch_beam_expand(encoded_inputs, beam_size)
+  raw_inputs = flat_batch_beam_expand(inputs, beam_size)
 
   def tokens_ids_to_logits(flat_ids, flat_cache):
     """Token slice to logits from decoder model."""
@@ -403,7 +404,7 @@ def decode_step(batch,
         encoded=encoded_inputs,
         # Tile the inputs so that they have the same leading dim as flat_ids so
         # that the masking that is calculated from them is correctly shaped.
-        inputs=jnp.tile(inputs, (beam_size, 1)),
+        inputs=raw_inputs,
         targets=flat_ids,
         train=False,
         mutable=['cache'],

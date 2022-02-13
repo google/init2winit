@@ -134,14 +134,30 @@ class BLEUEvaluator(object):
         {'params': params_rng, 'dropout': dropout_rng}, *xs)
     params = init_dict['params']
     batch_stats = init_dict.get('batch_stats', {})
-    cache = jax.tree_map(lambda _: jnp.array(0, jnp.uint32), init_dict['cache'])
-    self.replicated_cache = jax_utils.replicate(cache)
     self.flax_module = model.flax_module
     self.params = params
     self.batch_stats = jax_utils.replicate(batch_stats)
     optimizer_init_fn, _ = optimizers.get_optimizer(self.hps)
     optimizer_state = optimizer_init_fn(params)
     self.optimizer_state = jax_utils.replicate(optimizer_state)
+    self.pmapped_init_cache = jax.pmap(
+        functools.partial(
+            self.initialize_cache,
+            max_length=self.max_length,
+            params_rng=params_rng,
+            dropout_rng=dropout_rng))
+
+  def initialize_cache(self, inputs, max_length, params_rng, dropout_rng):
+    """Initialize a cache for a given input shape and max decode length."""
+    targets_shape = (inputs.shape[0], max_length) + inputs.shape[2:]
+    model_init_fn = jax.jit(
+        functools.partial(self.flax_module.init, train=False))
+    xs = [jnp.ones(inputs.shape), jnp.ones(targets_shape)]
+    init_dict = model_init_fn({
+        'params': params_rng,
+        'dropout': dropout_rng
+    }, *xs)
+    return init_dict['cache']
 
   def decode_tokens(self, toks):
     valid_toks = toks[:np.argmax(toks == self.eos_id) + 1].astype(np.int32)
@@ -184,10 +200,9 @@ class BLEUEvaluator(object):
       sources, references, predictions = [], [], []
       for batch in self.get_ds_iter():
         pred_batch = common_utils.shard(batch)
-        model_predictions = self.pmapped_predictor(pred_batch,
-                                                   self.flax_module,
-                                                   params_replicated,
-                                                   self.replicated_cache,
+        cache = self.pmapped_init_cache(pred_batch['inputs'])
+        model_predictions = self.pmapped_predictor(pred_batch, self.flax_module,
+                                                   params_replicated, cache,
                                                    self.max_length)
         predicted = tohost(model_predictions)
         inputs = tohost(pred_batch['inputs'])

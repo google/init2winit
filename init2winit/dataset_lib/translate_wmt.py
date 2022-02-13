@@ -68,7 +68,6 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
 
 METADATA = {
     'apply_one_hot_in_loss': True,
-    'shift_outputs': True,
     'causal': True,
 }
 

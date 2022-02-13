@@ -359,6 +359,7 @@ class EncoderDecoder1DBlock(nn.Module):
         use_bias=False,
         broadcast_dropout=False,
         dropout_rate=self.attention_dropout_rate,
+        decode=self.decode,
         name='DecoderSelfAttention')(x, decoder_mask, deterministic=not train)
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
     x = x + targets
@@ -497,7 +498,6 @@ class Decoder(nn.Module):
     shared_embedding: a shared embedding layer to use.
     logits_via_embedding: bool: whether final logit transform shares embedding
       weights.
-    shift: whether to shift or not (for fast decoding).
     use_bfloat16: bool: whether use bfloat16.
     emb_dim: dimension of embedding.
     num_heads: number of heads.
@@ -518,7 +518,6 @@ class Decoder(nn.Module):
   output_vocab_size: int
   shared_embedding: Any = None
   logits_via_embedding: bool = False
-  shift: bool = True
   use_bfloat16: bool = False
   emb_dim: int = 512
   num_heads: int = 8
@@ -570,7 +569,7 @@ class Decoder(nn.Module):
       output_embed = self.shared_embedding
 
     y = targets.astype('int32')
-    if self.shift:
+    if not self.decode:
       y = shift_right(y)
     y = output_embed(y)
     y = AddPositionEmbs(
@@ -646,7 +645,6 @@ class Transformer(nn.Module):
     qkv_dim: dimension of the query/key/value.
     mlp_dim: dimension of the mlp on top of attention block.
     max_len: maximum length.
-    shift: whether to right-shift targets.
     dropout_rate: dropout rate.
     attention_dropout_rate: dropout rate for attention weights.
     normalizer: One of 'batch_norm', 'layer_norm', 'none'
@@ -670,7 +668,6 @@ class Transformer(nn.Module):
   qkv_dim: int = 512
   mlp_dim: int = 2048
   max_len: int = 2048
-  shift: bool = True
   dropout_rate: float = 0.3
   attention_dropout_rate: float = 0.3
   normalizer: str = 'layer_norm'
@@ -718,7 +715,6 @@ class Transformer(nn.Module):
         qkv_dim=self.qkv_dim,
         mlp_dim=self.mlp_dim,
         max_len=self.max_len,
-        shift=self.shift,
         dropout_rate=self.dropout_rate,
         attention_dropout_rate=self.attention_dropout_rate,
         normalizer=self.normalizer,
@@ -932,7 +928,6 @@ class TransformerTranslate(base_model.BaseModel):
         qkv_dim=self.hps.qkv_dim,
         mlp_dim=self.hps.mlp_dim,
         max_len=max_len,
-        shift=self.dataset_meta_data['shift_outputs'],
         dropout_rate=self.hps.dropout_rate,
         normalizer=self.hps.normalizer,
         attention_dropout_rate=self.hps.attention_dropout_rate,
