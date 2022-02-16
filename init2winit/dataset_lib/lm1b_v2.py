@@ -35,8 +35,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         output_shape=(VOCAB_SIZE,),
         vocab_size=VOCAB_SIZE,
         eval_split='test',
-        # TODO(smedapati): move model file to placer
-        # trained sentencepiece model over lm1b
+        vocab_path=None,
         train_size=30301028,
         pack_examples=False,
         max_corpus_chars=10**7))

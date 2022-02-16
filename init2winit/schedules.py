@@ -42,6 +42,31 @@ def cosine_schedule(schedule_hparams, max_training_steps):
   return lr_fn
 
 
+def rsqrt_normalized_decay(schedule_hparams, max_training_steps):
+  """Computes a "squashed" reverse sqrt decay schedule.
+
+  lr = base_lr * sqrt(squash_steps) / sqrt(step + squash_steps)
+
+  Args:
+    schedule_hparams: Relevant hparams are base_lr, squash_steps.
+    max_training_steps: This is ignored (needed to match API of other lr
+      functions).
+
+  Returns:
+    lr_fn: A function mapping global_step to lr.
+  """
+  del max_training_steps
+  _check_schedule_hparams(schedule_hparams,
+                          ['schedule', 'base_lr', 'squash_steps'])
+
+  def lr_fn(t):
+    squash_steps = schedule_hparams['squash_steps']
+    return (schedule_hparams['base_lr'] *
+            jnp.sqrt(squash_steps)) / jnp.sqrt(t + squash_steps)
+
+  return lr_fn
+
+
 def polynomial_schedule(schedule_hparams, max_training_steps):
   """Same behavior as tf.train.polynomial_decay.
 
@@ -248,7 +273,8 @@ def prepend_linear_warmup(schedule_hparams, max_training_steps,
 
   Effectively, what this does is the first warmup_steps will be linear warmup
   (if power =1), followed by what the base_lr_schedule would be if called with
-  max_train_steps - warmup_steps.
+  max_train_steps - warmup_steps. The default value for warmup_power is 1
+  meaning linear warmup
 
   Args:
     schedule_hparams: Must include all required hparams needed in
@@ -266,7 +292,7 @@ def prepend_linear_warmup(schedule_hparams, max_training_steps,
   # grab warmup hparams
   schedule_hparams = dict(schedule_hparams)  # convert to dict so we can pop
   warmup_steps = schedule_hparams.pop('warmup_steps')
-  warmup_power = schedule_hparams.pop('warmup_power')
+  warmup_power = schedule_hparams.pop('warmup_power', 1)
   base_lr = schedule_hparams['base_lr']
 
   base_lr_fn = base_lr_schedule(schedule_hparams,
@@ -295,7 +321,8 @@ lr_fn_dict = {
     'polynomial': polynomial_schedule,
     'mlperf_polynomial': mlperf_polynomial_schedule,
     'compound': compound_schedule,
-    'warmup_then_piecewise_constant': warmup_then_piecewise_constant_schedule
+    'warmup_then_piecewise_constant': warmup_then_piecewise_constant_schedule,
+    'rsqrt_normalized_decay': rsqrt_normalized_decay
 }
 
 

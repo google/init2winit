@@ -15,11 +15,13 @@
 
 """Transformer-based language models.
 
-Adapted from third_party/py/flax/examples/lm1b/models.py
+Adapted from
+https://github.com/google/flax/blob/b60f7f45b90f8fc42a88b1639c9cc88a40b298d3/examples/lm1b/models.py
 """
 from typing import Any, Optional
 
 from flax import linen as nn
+from init2winit import utils
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax
@@ -47,15 +49,15 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
             'beta1': .9,
             'beta2': .98,
             'epsilon': 1e-9,
-            'weight_decay': 1e-1
+            'weight_decay': 0.1
         },
         layer_rescale_factors={},
         normalizer='layer_norm',
         lr_hparams={
-            'base_lr': 0.05,
-            'warmup_steps': 8000,
-            'factors': 'constant * linear_warmup * rsqrt_decay',
-            'schedule': 'compound'
+            'base_lr': 0.0016,
+            'warmup_steps': 1000,
+            'squash_steps': 1000,
+            'schedule': 'rsqrt_normalized_decay_warmup'
         },
         label_smoothing=None,
         l2_decay_factor=None,
@@ -68,50 +70,23 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     ))
 
 
-def shift_right(x):
-  """Shift the input to the right by padding on axis 1."""
+def shift_right(x, axis=1):
+  """Shift the input to the right by padding and slicing on axis."""
   pad_widths = [(0, 0)] * len(x.shape)
-  pad_widths[1] = (1, 0)  # Padding on axis=1
+  pad_widths[axis] = (1, 0)
   padded = jnp.pad(
       x, pad_widths, mode='constant', constant_values=x.dtype.type(0))
-  return padded[:, :-1]
+  return lax.dynamic_slice_in_dim(padded, 0, padded.shape[axis] - 1, axis)
 
 
-class Embed(nn.Module):
-  """Embedding Module.
-
-  A parameterized function from integers [0, n) to d-dimensional vectors.
-
-  num_embeddings: number of embedding
-  features: size of the embedding dimension
-  mode: either 'input' or 'output' -> to share input/output embedding
-  emb_init: embedding initializer
-  """
-  num_embeddings: int
-  features: int
-  mode: str = 'input'
-  emb_init: model_utils.Initializer = nn.initializers.normal(stddev=1.0)
-
-  @nn.compact
-  def __call__(self, inputs, train):
-    """Applies Embed module.
-
-    Args:
-      inputs: input data
-      train: unused
-
-    Returns:
-      output which is embedded input data
-    """
-    del train
-    embedding = self.param(
-        'embedding', self.emb_init, (self.num_embeddings, self.features))
-    if self.mode == 'input':
-      if inputs.dtype not in [jnp.int32, jnp.int64, jnp.uint32, jnp.uint64]:
-        raise ValueError('Input type must be an integer or unsigned integer.')
-      return jnp.take(embedding, inputs, axis=0)
-    if self.mode == 'output':
-      return jnp.einsum('bld,vd->blv', inputs, embedding)
+def shift_inputs(x, segment_ids=None, axis=1):
+  """Shift inputs and replace EOS by 0 for packed inputs."""
+  shifted = shift_right(x, axis=axis)
+  # For packed targets, the first shifted token of a new sequence is made
+  # 0, rather than being the EOS token for the last sequence.
+  if segment_ids is not None:
+    shifted *= (segment_ids == shift_right(segment_ids, axis=axis))
+  return shifted
 
 
 def sinusoidal_init(max_len=2048):
@@ -153,10 +128,7 @@ class AddPositionEmbs(nn.Module):
   decode: bool = False
 
   @nn.compact
-  def __call__(self,
-               inputs,
-               train,
-               inputs_positions=None):
+  def __call__(self, inputs, inputs_positions=None):
     """Applies AddPositionEmbs module.
 
     By default this layer uses a fixed sinusoidal embedding table. If a
@@ -165,13 +137,11 @@ class AddPositionEmbs(nn.Module):
 
     Args:
       inputs: input data.
-      train: unused.
       inputs_positions: input position indices for packed sequences.
 
     Returns:
       output: `(bs, timesteps, in_dim)`
     """
-    del train
     # inputs.shape is (batch_size, seq_len, emb_dim)
     assert inputs.ndim == 3, ('Number of dimensions should be 3,'
                               ' but it is: %d' % inputs.ndim)
@@ -179,11 +149,10 @@ class AddPositionEmbs(nn.Module):
     pos_emb_shape = (1, self.max_len, inputs.shape[-1])
     if self.posemb_init is None:
       # Use a fixed (non-learned) sinusoidal position embedding.
-      pos_embedding = sinusoidal_init(max_len=self.max_len)(
-          None, pos_emb_shape, None)
+      pos_embedding = sinusoidal_init(max_len=self.max_len)(None, pos_emb_shape,
+                                                            None)
     else:
-      pos_embedding = self.param('pos_embedding',
-                                 self.posemb_init,
+      pos_embedding = self.param('pos_embedding', self.posemb_init,
                                  pos_emb_shape)
     pe = pos_embedding[:, :length, :]
 
@@ -196,9 +165,7 @@ class AddPositionEmbs(nn.Module):
         i = cache_index.value
         cache_index.value = i + 1
         _, _, df = pos_embedding.shape
-        pe = lax.dynamic_slice(pos_embedding,
-                               jnp.array((0, i, 0)),
-                               (1, 1, df))
+        pe = lax.dynamic_slice(pos_embedding, jnp.array((0, i, 0)), (1, 1, df))
     if inputs_positions is None:
       # normal unpacked case:
       return inputs + pe
@@ -220,17 +187,14 @@ class MlpBlock(nn.Module):
     """Applies Transformer MlpBlock module."""
     actual_out_dim = inputs.shape[-1] if self.out_dim is None else self.out_dim
     x = nn.Dense(
-        self.mlp_dim,
-        kernel_init=self.kernel_init,
-        bias_init=self.bias_init)(inputs)
+        self.mlp_dim, kernel_init=self.kernel_init, bias_init=self.bias_init)(
+            inputs)
     x = nn.gelu(x)
     x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
     output = nn.Dense(
-        actual_out_dim,
-        kernel_init=self.kernel_init,
-        bias_init=self.bias_init)(x)
-    output = nn.Dropout(
-        rate=self.dropout_rate, deterministic=not train)(output)
+        actual_out_dim, kernel_init=self.kernel_init, bias_init=self.bias_init)(
+            x)
+    output = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(output)
     return output
 
 
@@ -254,15 +218,26 @@ class Transformer1DBlock(nn.Module):
   attention_dropout_rate: float = 0.1
   normalizer: str = 'layer_norm'
   attention_fn: Optional[Any] = None
+  dtype: Any = jnp.float32
   decode: bool = False
 
   @nn.compact
-  def __call__(self, inputs, train):
+  def __call__(self,
+               inputs,
+               train,
+               decoder_mask=None,
+               encoder_decoder_mask=None,
+               inputs_positions=None,
+               inputs_segmentation=None):
     """Applies Transformer1DBlock module.
 
     Args:
       inputs: input data
       train: bool: if model is training.
+      decoder_mask: decoder self-attention mask.
+      encoder_decoder_mask: encoder-decoder attention mask.
+      inputs_positions: input subsequence positions for packed examples.
+      inputs_segmentation: input segmentation info for packed examples.
 
     Returns:
       output after transformer block.
@@ -272,12 +247,17 @@ class Transformer1DBlock(nn.Module):
     # Attention block.
     assert inputs.ndim == 3
     if self.normalizer in [
-        'batch_norm', 'layer_norm', 'pre_layer_norm', 'none']:
-      maybe_pre_normalize = model_utils.get_normalizer(self.normalizer, train)
-      maybe_post_normalize = model_utils.get_normalizer('none', train)
+        'batch_norm', 'layer_norm', 'pre_layer_norm', 'none'
+    ]:
+      maybe_pre_normalize = model_utils.get_normalizer(
+          self.normalizer, train, dtype=self.dtype)
+      maybe_post_normalize = model_utils.get_normalizer(
+          'none', train, dtype=self.dtype)
     elif self.normalizer == 'post_layer_norm':
-      maybe_pre_normalize = model_utils.get_normalizer('none', train)
-      maybe_post_normalize = model_utils.get_normalizer(self.normalizer, train)
+      maybe_pre_normalize = model_utils.get_normalizer(
+          'none', train, dtype=self.dtype)
+      maybe_post_normalize = model_utils.get_normalizer(
+          self.normalizer, train, dtype=self.dtype)
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
@@ -291,13 +271,14 @@ class Transformer1DBlock(nn.Module):
         num_heads=self.num_heads,
         qkv_features=self.qkv_dim,
         decode=self.decode,
+        dtype=self.dtype,
         kernel_init=nn.initializers.xavier_uniform(),
         bias_init=nn.initializers.normal(stddev=1e-6),
         use_bias=False,
         broadcast_dropout=False,
         attention_fn=attention_fn,
         dropout_rate=self.attention_dropout_rate,
-        deterministic=not train)(x)
+        deterministic=not train)(x, decoder_mask)
     x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
     x = x + inputs
     x = maybe_post_normalize()(x)
@@ -305,8 +286,8 @@ class Transformer1DBlock(nn.Module):
     # MLP block.
     y = maybe_pre_normalize()(x)
     y = MlpBlock(
-        mlp_dim=self.mlp_dim,
-        dropout_rate=self.dropout_rate)(y, train=train)
+        mlp_dim=self.mlp_dim, dropout_rate=self.dropout_rate)(
+            y, train=train)
     res = x + y
 
     return maybe_post_normalize()(res)
@@ -335,6 +316,8 @@ class TransformerLM(nn.Module):
     pad_token: Indicates which input tokens are padded.
   """
   vocab_size: int
+  shared_embedding: Any = None
+  logits_via_embedding: bool = False
   emb_dim: int = 512
   num_heads: int = 8
   num_layers: int = 6
@@ -348,53 +331,104 @@ class TransformerLM(nn.Module):
   attention_dropout_rate: float = 0.1
   normalizer: str = 'layer_norm'
   attention_fn: Optional[Any] = None
+  model_dtype: str = None
   decode: bool = False
   pad_token: int = 0
 
   @nn.compact
-  def __call__(self, inputs, train):
+  def __call__(self,
+               inputs,
+               train,
+               inputs_positions=None,
+               inputs_segmentation=None):
     """Applies Transformer model on the inputs.
 
     Args:
       inputs: input data
       train: bool: if model is training.
+      inputs_positions: input subsequence positions for packed examples.
+      inputs_segmentation: input segmentation info for packed examples.
 
     Returns:
       output of a transformer decoder.
     """
     assert inputs.ndim == 2  # (batch, len)
-    x = inputs
-    if self.shift:
-      if not self.causal:
-        raise ValueError('Cannot have shift=True and causal=False')
-      x = shift_right(x)
-    x = x.astype('int32')
-    x = Embed(
-        num_embeddings=self.vocab_size,
-        features=self.emb_dim,
-        name='embed')(x, train=train)
-    x = AddPositionEmbs(
+    dtype = utils.dtype_from_str(self.model_dtype)
+
+    if self.decode:
+      # for fast autoregressive decoding we use no decoder mask
+      decoder_mask = None
+    else:
+      decoder_mask = nn.combine_masks(
+          nn.make_attention_mask(inputs > 0, inputs > 0, dtype=dtype),
+          nn.make_causal_mask(inputs, dtype=dtype))
+
+    if inputs_segmentation is not None:
+      decoder_mask = nn.combine_masks(
+          decoder_mask,
+          nn.make_attention_mask(
+              inputs_segmentation, inputs_segmentation, jnp.equal, dtype=dtype))
+
+    y = inputs.astype('int32')
+    if not self.decode:
+      y = shift_inputs(y, segment_ids=inputs_segmentation)
+
+    if self.shared_embedding is None:
+      output_embed = nn.Embed(
+          num_embeddings=self.vocab_size,
+          features=self.emb_dim,
+          embedding_init=nn.initializers.normal(stddev=1.0))
+    else:
+      output_embed = self.shared_embedding
+
+    y = output_embed(y)
+
+    y = AddPositionEmbs(
         max_len=self.max_len,
         posemb_init=sinusoidal_init(max_len=self.max_len),
-        decode=self.decode)(x, train=train)
-    x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
+        decode=self.decode,
+        name='posembed_output')(
+            y, inputs_positions=inputs_positions)
+    y = nn.Dropout(rate=self.dropout_rate)(y, deterministic=not train)
+
+    y = y.astype(dtype)
+
     for _ in range(self.num_layers):
-      x = Transformer1DBlock(
+      y = Transformer1DBlock(
           qkv_dim=self.qkv_dim,
           mlp_dim=self.mlp_dim,
           num_heads=self.num_heads,
           dropout_rate=self.dropout_rate,
           attention_dropout_rate=self.attention_dropout_rate,
           attention_fn=self.attention_fn,
-          normalizer=self.normalizer)(x, train=train)
+          normalizer=self.normalizer,
+          dtype=dtype)(
+              inputs=y,
+              train=train,
+              decoder_mask=decoder_mask,
+              encoder_decoder_mask=None,
+              inputs_positions=None,
+              inputs_segmentation=None,)
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
-      maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
-      x = maybe_normalize()(x)
-    logits = nn.Dense(
-        self.vocab_size,
-        kernel_init=nn.initializers.xavier_uniform(),
-        bias_init=nn.initializers.normal(stddev=1e-6))(x)
-    return logits
+      maybe_normalize = model_utils.get_normalizer(
+          self.normalizer, train, dtype=dtype)
+      y = maybe_normalize()(y)
+
+    if self.logits_via_embedding:
+      # Use the transpose of embedding matrix for logit transform.
+      logits = output_embed.attend(y.astype(jnp.float32))
+      # Correctly normalize pre-softmax logits for this shared case.
+      logits = logits / jnp.sqrt(y.shape[-1])
+    else:
+      logits = nn.Dense(
+          self.vocab_size,
+          kernel_init=nn.initializers.xavier_uniform(),
+          bias_init=nn.initializers.normal(stddev=1e-6),
+          dtype=dtype,
+          name='logits_dense')(
+              y)
+
+    return logits.astype(dtype)
 
 
 class TransformerLM1B(base_model.BaseModel):
@@ -415,6 +449,7 @@ class TransformerLM1B(base_model.BaseModel):
         attention_dropout_rate=self.hps.attention_dropout_rate,
         normalizer=self.hps.normalizer,
         decode=self.hps.decode,
+        model_dtype=self.hps.model_dtype,
         pad_token=self.dataset_meta_data.get('pad_token', 0),
     )
 

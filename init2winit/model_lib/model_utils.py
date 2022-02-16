@@ -64,13 +64,13 @@ class ScalarMultiply(nn.Module):
     return x * self.param('scale', self.scale_init, ())
 
 
-def get_normalizer(
-    normalizer,
-    train,
-    batch_size=None,
-    virtual_batch_size=None,
-    total_batch_size=None,
-    data_format='NHWC'):
+def get_normalizer(normalizer,
+                   train,
+                   batch_size=None,
+                   virtual_batch_size=None,
+                   total_batch_size=None,
+                   dtype=jnp.float32,
+                   data_format='NHWC'):
   """Maps a string to the given normalizer function.
 
   We return a function that returns the normalization module, deferring the
@@ -98,6 +98,7 @@ def get_normalizer(
       size.
     total_batch_size: only used for virtual batch norm when using gradient
       accumulation, the total batch size used to calculate gradients with.
+    dtype: data type used for normalizer inputs and outputs.
     data_format: only used for virtual batch norm, used to determine the batch
       axis.
 
@@ -112,7 +113,8 @@ def get_normalizer(
         nn.BatchNorm,
         use_running_average=not train,
         momentum=0.9,
-        epsilon=1e-5)
+        epsilon=1e-5,
+        dtype=dtype)
   elif normalizer == 'virtual_batch_norm':
     return functools.partial(
         normalization.VirtualBatchNorm,
@@ -122,9 +124,10 @@ def get_normalizer(
         batch_size=batch_size,
         virtual_batch_size=virtual_batch_size,
         data_format=data_format,
-        total_batch_size=total_batch_size)
+        total_batch_size=total_batch_size,
+        dtype=dtype)
   elif normalizer in ['layer_norm', 'pre_layer_norm', 'post_layer_norm']:
-    return nn.LayerNorm
+    return functools.partial(nn.LayerNorm, dtype=dtype)
   elif normalizer == 'none':
     def identity_wrapper(*args, **kwargs):
       del args
