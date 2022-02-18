@@ -21,8 +21,8 @@ import types
 from absl.testing import absltest
 from absl.testing import parameterized
 from init2winit.model_lib import losses
+import jax
 import numpy as np
-
 
 CLASSIFICATION_LOSSES = ['cross_entropy']
 RECONSTRUCTION_LOSSES = [
@@ -130,8 +130,7 @@ class LossesTest(parameterized.TestCase):
       losses.get_loss_fn('__test__loss__name__')
 
   def test_output_activation_fn_registry(self):
-    activation_fn = losses.get_output_activation_fn(
-        'cross_entropy')
+    activation_fn = losses.get_output_activation_fn('cross_entropy')
     self.assertEqual(activation_fn.__name__, 'softmax')
     with self.assertRaises(ValueError):
       losses.get_output_activation_fn('__test__loss__name__')
@@ -142,7 +141,8 @@ class LossesTest(parameterized.TestCase):
     for data in CLASSIFICATION_TEST_DATA:
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['one_hot_targets'], data['weights']),
-          data[loss_name], places=5)
+          data[loss_name],
+          places=5)
 
   @parameterized.named_parameters(*RECONSTRUCTION_KEYS)
   def test_regression_losses(self, loss_name):
@@ -150,7 +150,8 @@ class LossesTest(parameterized.TestCase):
     for data in RECONSTRUCTION_TEST_DATA:
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['targets'], data['weights']),
-          data[loss_name], places=6)
+          data[loss_name],
+          places=6)
 
   def test_cross_entropy_loss_fn(self):
     for data in CROSS_ENTROPY_TEST_DATA:
@@ -202,6 +203,25 @@ class LossesTest(parameterized.TestCase):
         logits=logits, targets=targets, weights=weights).compute()
     self.assertAlmostEqual(average_precision, result)
 
+  # optax ctc loss blank token has id = 0 by default
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='2_char_no_repeat_no_blank',
+          logits=np.array([[[0.1, 0.8, 0.1], [0.1, 0.1, 0.8]]]),
+          labels=np.array([[1, 2]]),
+          result=1.379453),
+      dict(
+          testcase_name='1_char_1_blank',
+          logits=np.array([[[0.2, 0.8], [0.8, 0.2]]]),
+          labels=np.array([[1, 0]]),
+          result=0.874976))
+  def test_ctc_loss(self, logits, labels, result):
+    """Tests the CTC loss computation."""
+    ctc_loss = losses.get_loss_fn('ctc')
+    loss_value = ctc_loss(logits, np.zeros(logits.shape[:2]), labels,
+                          np.zeros(labels.shape))
+
+    self.assertAlmostEqual(loss_value, jax.numpy.array([result]), places=6)
 
 if __name__ == '__main__':
   absltest.main()

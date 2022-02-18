@@ -20,6 +20,7 @@ from flax import linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 import sklearn.metrics
 
 
@@ -117,12 +118,18 @@ def weighted_cross_entropy(logits, targets, weights=None):
   return jnp.sum(unnormalized_cross_entropy) / normalization
 
 
+def ctc_loss(logits, logit_paddings, labels, label_paddings, blank_id=0):
+  return optax.ctc_loss(logits, logit_paddings, labels, label_paddings,
+                        blank_id)
+
+
 # TODO(cheolmin): add mean_squared_error
 _ALL_LOSS_FUNCTIONS = {
     'sigmoid_mean_squared_error': (sigmoid_mean_squared_error, jax.nn.sigmoid),
     'sigmoid_binary_cross_entropy':
         (sigmoid_binary_cross_entropy, jax.nn.sigmoid),
     'cross_entropy': (weighted_cross_entropy, jax.nn.softmax),
+    'ctc': (ctc_loss, jax.nn.log_softmax)
 }
 
 
