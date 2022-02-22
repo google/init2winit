@@ -18,8 +18,11 @@
 import functools
 import itertools
 from absl import logging
+import flax
 from flax import jax_utils
+from flax.core.frozen_dict import unfreeze
 from init2winit.dataset_lib import data_utils
+from init2winit.model_lib import partition_tree
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -36,7 +39,6 @@ DEFAULT_EVAL_CONFIG = {
     'eval_gradient_covariance': False,
     'eval_hess_grad_overlap': True,
     'eval_hessian': True,
-    'eval_max_eig': True,
     'hparam_overrides': {},
     'max_eig_num_steps': 30,
     'name': 'hessian',
@@ -47,7 +49,100 @@ DEFAULT_EVAL_CONFIG = {
     'rng_key': 0,
     'update_stats': False,
     'use_training_gen': True,
+    'block_hessian': False,
+    'param_partition_fn': None  # only used with block_hessian=True
 }
+
+
+def block_hessians(params,
+                   loss_fn,
+                   param_partition_fn,
+                   batches_gen,
+                   rng_key,
+                   num_lanczos_steps=20):
+  """Computes the loss hessian with respect to subsets of model parameters.
+
+  Subsets are determined by the param_partition_fn, which maps the flattened
+  model parameters to a dict mapping keys to subset of the flattened model
+  parameters. For example, if the flattened param tree is
+
+  {('a', 'b'): 1.0,
+  ('a', 'c'): 1.0,
+  ('d', 'b'): 2.0}
+
+  And we partition on the outer key (see partition_tree.outer_key), then
+  the output is
+  {'a': {('a', 'b'): 1.0, ('a', 'c'): 1.0}
+  'd': {('d', 'b'): 2.0}}
+
+  Args:
+    params: Replicated pytree of model parameters.
+    loss_fn: non pmapped function with API
+       loss_fn(unreplicated_params, unreplicated_batch) -> scalar loss.
+    param_partition_fn: Maps a flattened pytree to a partitioned dict
+       as described above.
+    batches_gen: Should yield replicated batch so we can call
+      jax.pmap(loss_fn)(params, batch).
+    rng_key: Unreplicated jax PRNGKey.
+    num_lanczos_steps: How many lanczos iterates to do.
+
+  Returns:
+    A dictionary of results, with a key for each partition of
+      the model parameters (as determined by param_partition_fn). The key
+      maps to another dict with the following key value pairs:
+      max_eig_hess -> The hessian max eigenvalue with respect to the sub params.
+      tridiag_hess -> The tridiagonal matrix output by lanczos.
+      param_names -> The flattened parameter names in this partitian.
+  """
+  unrep_params = flax.jax_utils.unreplicate(params)
+  flat_dict = flax.traverse_util.flatten_dict(unrep_params)
+
+  sub_param_groups = param_partition_fn(flat_dict)
+
+  sub_results = {}
+
+  # I believe this will basically store a copy of the unreplicated
+  # parameters in the function definition, which may be costly when
+  # len(sub_param_groups) is large? Unclear how garbage colllection will handle
+  # this in jax.
+  def sub_loss(sub_params, batch_rng):
+    new_dict = flat_dict.copy()
+    for tup in sub_params:
+      new_dict[tup] = sub_params[tup]
+
+    new_params = flax.traverse_util.unflatten_dict(new_dict)
+    return loss_fn(new_params, batch_rng)
+
+  for key in sub_param_groups:
+
+    logging.info('Block Hessian eval on %s', key)
+    sub_params = unfreeze(jax_utils.replicate(sub_param_groups[key]))
+
+    hvp_fn, _, n_params = hessian_computation.get_hvp_fn(
+        sub_loss, sub_params, batches_gen, use_pmap=True)
+
+    # This was needed to avoid the lint [cell-var-from-loop] error. Not sure
+    # it's needed but to avoid any python weirdness with defining functions in
+    # loop went ahead and implemented this.
+    hvp_cl = functools.partial(hvp_fn, unfreeze(sub_params))
+    row = {}
+
+    row['tridiag_hess'], _ = lanczos.lanczos_np(
+        hvp_cl,
+        n_params,
+        num_lanczos_steps,
+        0,
+        rng_key,
+        verbose=True)
+    evs = np.linalg.eigvalsh(row['tridiag_hess'])
+    row['max_eig_hess'] = np.max(evs)
+    row['param_names'] = [list(sub_param_groups[key].keys())]
+
+    # The flattened keys are tuples, which doesn't work with the serialization,
+    # so to save this dict the keys need to be strings.
+    sub_results[str(key)] = row
+
+  return sub_results
 
 
 def prepare_batches_gen(dataset, eval_config):
@@ -244,8 +339,9 @@ class CurvatureEvaluator:
 
     self.grad_loss = jax.pmap(functools.partial(avg_grad, loss_fn=loss),
                               axis_name='batch')
-    self.loss = jax.pmap(functools.partial(avg_loss, loss_fn=loss),
-                         axis_name='batch')
+    self.avg_loss = functools.partial(avg_loss, loss_fn=loss)
+    self.p_avg_loss = jax.pmap(
+        functools.partial(avg_loss, loss_fn=loss), axis_name='batch')
     self.hvp_fn, self.unravel, self.n_params = hessian_computation.get_hvp_fn(
         loss, params, self.batches_gen, use_pmap=True)
     self.update_model = jax.pmap(_additive_update)
@@ -442,8 +538,8 @@ class CurvatureEvaluator:
   def _full_batch_eval(self, params, update_dir, eta):
     """Compute the full-batch loss at theta = theta_0 + eta * update_dir.
 
-    The function assumes that self.loss is returning the loss averaged over the
-    batch.
+    The function assumes that self.p_avg_loss is returning the loss averaged
+    over the batch.
     Args:
       params: The current model parameters. Must be already replicated to
         accommodate pmapping.
@@ -459,7 +555,7 @@ class CurvatureEvaluator:
     count = 0.0
     total_loss = 0.0
     for batch in self.batches_gen():
-      sharded_loss = self.loss(new_params, batch)
+      sharded_loss = self.p_avg_loss(new_params, batch)
       avg_loss = _unreplicate(sharded_loss)
       count += 1.0
       total_loss += jax.device_get(avg_loss)
@@ -499,6 +595,15 @@ class CurvatureEvaluator:
     key = jax.random.PRNGKey(0)
 
     row = {'step': step}
+
+    # Do we want .get here to keep old configs working?
+    if self.eval_config.get('block_hessian'):
+      param_partition_fn = partition_tree.get_param_partition_fn(
+          self.eval_config['param_partition_fn'])
+      block_results = block_hessians(params, self.avg_loss, param_partition_fn,
+                                     self.batches_gen, key)
+      row['block_hessian'] = block_results
+
     if self.eval_config['eval_hessian']:
       row['tridiag_hess'], hess_evecs = lanczos.lanczos_np(
           hvp_cl,

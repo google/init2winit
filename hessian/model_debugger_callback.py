@@ -73,8 +73,9 @@ def get_stats(
   (cost_value, _), grad = grad_fn(params)
 
   cost_value, grad = jax.lax.pmean((cost_value, grad), axis_name='batch')
-  grad_norms = jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1)), grad)
-  param_norms = jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1)), params)
+  grad_norms = jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1))**2, grad)
+  param_norms = jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1))**2,
+                             params)
   return param_norms, grad_norms
 
 
@@ -144,6 +145,6 @@ class ModelDebugCallback:
     g_norms = jax.tree_map(lambda x: x[0], g_norms)
     p_norms = jax.tree_map(lambda x: x[0], p_norms)
     self.debugger.full_eval(
-        step=global_step, grad_norms=g_norms, param_norms=p_norms)
+        step=global_step, grad_norms_sql2=g_norms, param_norms_sql2=p_norms)
 
     return {}
