@@ -63,6 +63,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         use_shallue_label_smoothing=False,
         model_dtype='float32',
         grad_clip=None,
+        normalize_classifier_input='none',
+        classification_scale_factor=1.0,
     ))
 
 
@@ -134,6 +136,8 @@ class DenseNet(nn.Module):
   growth_rate: int
   reduction: int
   normalizer: str = 'batch_norm'
+  normalize_classifier_input: bool = False
+  classification_scale_factor: float = 1.0
   dtype: model_utils.Dtype = jnp.float32
 
   @nn.compact
@@ -183,6 +187,12 @@ class DenseNet(nn.Module):
 
     # Classification layer
     y = jnp.reshape(y, (y.shape[0], -1))
+    if self.normalize_classifier_input:
+      maybe_normalize = model_utils.get_normalizer(
+          self.normalize_classifier_input, train)
+      y = maybe_normalize()(y)
+    y = y * self.classification_scale_factor
+
     y = nn.Dense(self.num_outputs)(y)
     return y
 
@@ -208,4 +218,7 @@ class AdaBeliefDensenetModel(base_model.BaseModel):
         growth_rate=self.hps.growth_rate,
         reduction=self.hps.reduction,
         dtype=self.hps.model_dtype,
-        normalizer=self.hps.normalizer)
+        normalizer=self.hps.normalizer,
+        normalize_classifier_input=self.hps.normalize_classifier_input,
+        classification_scale_factor=self.hps.classification_scale_factor,
+        )
