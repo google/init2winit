@@ -85,9 +85,14 @@ def evaluate(
   metrics = None
   for batch in batch_iter:
     batch = data_utils.shard(batch)
-    # Returns a clu.metrics.Collection object.
+    # Returns a clu.metrics.Collection object. We assume that
+    # `evaluate_batch_pmpapped` calls CLU's `gather_from_model_outputs`,
+    # which includes an `all_gather` to replicate the values on all devices.
+    # We need to `unreplicate` before merging the results across batches to
+    # accommodate CollectingMetric, which concatenates the values across the
+    # leading dimension, so we need to remove the leading shard dimension first.
     computed_metrics = evaluate_batch_pmapped(
-        params=params, batch_stats=batch_stats, batch=batch)
+        params=params, batch_stats=batch_stats, batch=batch).unreplicate()
     if metrics is None:
       metrics = computed_metrics
     else:
@@ -97,11 +102,8 @@ def evaluate(
   # For data splits with no data (e.g. Imagenet no test set) no values
   # will appear for that split.
   if metrics is not None:
-    # `evaluate_batch_pmpapped` calls CLU's `gather_from_model_outputs`, which
-    # runs `all_gather` to replicate the values on all devices. Unreplicate
-    # removes that unnecessary dimension. `compute` aggregates the metrics
-    # across batches into a single value.
-    metrics = metrics.unreplicate().compute()
+    # `compute` aggregates the metrics across batches into a single value.
+    metrics = metrics.compute()
     for key, val in metrics.items():
       if np.isnan(val):
         raise utils.TrainingDivergedError('NaN detected in {}'.format(key))
