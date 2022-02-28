@@ -38,10 +38,10 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         rng_seed=-1,
         model_dtype='float32',
-        latent_dim=300,
+        latent_dim=256,
         optimizer='adam',
-        hidden_dims=(600, 300),
-        batch_size=128,
+        hidden_dims=(256,),
+        batch_size=256,
         lr_hparams={
             'base_lr': 0.01,
             'schedule': 'constant'
@@ -55,8 +55,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         l2_decay_factor=.0005,
         l2_decay_rank_threshold=2,
         num_message_passing_steps=5,
-        normalizer='batch_norm',
-        dropout_rate=0.5,
+        normalizer='layer_norm',
+        dropout_rate=0.1,
     ))
 
 
@@ -74,12 +74,11 @@ def _make_mlp(hidden_dims, maybe_normalize_fn, dropout):
   @jraph.concatenated_args
   def make_fn(inputs):
     x = inputs
-    for dim in hidden_dims[:-1]:
+    for dim in hidden_dims:
       x = nn.Dense(features=dim)(x)
       x = maybe_normalize_fn()(x)
       x = nn.relu(x)
       x = dropout(x)
-    x = nn.Dense(features=hidden_dims[-1])(x)
     return x
 
   return make_fn
@@ -109,24 +108,29 @@ class GNN(nn.Module):
     embedder = jraph.GraphMapFeatures(
         embed_node_fn=_make_embed(self.latent_dim),
         embed_edge_fn=_make_embed(self.latent_dim))
-
-    net = jraph.GraphNetwork(
-        update_edge_fn=_make_mlp(
-            self.hidden_dims,
-            maybe_normalize_fn=maybe_normalize_fn,
-            dropout=dropout),
-        update_node_fn=_make_mlp(
-            self.hidden_dims,
-            maybe_normalize_fn=maybe_normalize_fn,
-            dropout=dropout),
-        update_global_fn=_make_mlp(
-            self.hidden_dims + (self.num_outputs,),
-            maybe_normalize_fn=maybe_normalize_fn,
-            dropout=dropout))
-
     graph = embedder(graph)
+
     for _ in range(self.num_message_passing_steps):
+      net = jraph.GraphNetwork(
+          update_edge_fn=_make_mlp(
+              self.hidden_dims,
+              maybe_normalize_fn=maybe_normalize_fn,
+              dropout=dropout),
+          update_node_fn=_make_mlp(
+              self.hidden_dims,
+              maybe_normalize_fn=maybe_normalize_fn,
+              dropout=dropout),
+          update_global_fn=_make_mlp(
+              self.hidden_dims,
+              maybe_normalize_fn=maybe_normalize_fn,
+              dropout=dropout))
+
       graph = net(graph)
+
+    # Map globals to represent the final result
+    decoder = jraph.GraphMapFeatures(
+        embed_global_fn=nn.Dense(self.num_outputs))
+    graph = decoder(graph)
 
     return graph.globals
 

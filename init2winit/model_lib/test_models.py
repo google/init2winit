@@ -361,7 +361,11 @@ class ModelsTest(parameterized.TestCase):
     output_shape = (5,)
     model_str = 'gnn'
     model_hps = models.get_model_hparams(model_str)
-    model_hps.update({'output_shape': output_shape})
+    model_hps.update({'output_shape': output_shape,
+                      'latent_dim': 10,
+                      'hidden_dims': (10,),
+                      'batch_size': 5,
+                      'normalizer': 'batch_norm'})
     model_cls = models.get_model(model_str)
     rng = jax.random.PRNGKey(0)
     dropout_rng, params_rng = jax.random.split(rng)
