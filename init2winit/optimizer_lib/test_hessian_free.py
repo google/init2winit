@@ -122,7 +122,7 @@ class HessianFreeTest(absltest.TestCase):
         'relative_per_iteration_progress_test')
     x = x_arr[x_arr_idx]
     f_value = np.dot(x, test_mvm_fn(x) - 2 * b) / 2
-    self.assertAlmostEqual(f_value, -0.223612576, places=8)
+    self.assertAlmostEqual(f_value, -0.223612576, places=5)
 
   def test_cg_backtracking(self):
     """Tests CG backtracking."""
