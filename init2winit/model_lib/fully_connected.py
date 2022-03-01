@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Simple fully connected feedforward neural network classifier."""
+import copy
 from typing import Any, Tuple
 
 from flax import linen as nn
@@ -21,7 +22,6 @@ from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
 import jax.numpy as jnp
-
 from ml_collections.config_dict import config_dict
 
 
@@ -71,6 +71,7 @@ class FullyConnected(nn.Module):
         raise ValueError(
             'The number of activation functions must be equal to the number '
             'of hidden layers')
+      activation_function = copy.deepcopy(self.activation_function)
     else:
       activation_function = [self.activation_function] * len(self.hid_sizes)
 

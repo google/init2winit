@@ -34,7 +34,7 @@ from ml_collections.config_dict import config_dict
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         hid_sizes=[128, 64, 32, 64, 128],
-        activation_function='relu',
+        activation_function=['relu', 'relu', 'relu', 'relu', 'relu'],
         kernel_scales=[0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
         lr_hparams={
             'base_lr': 0.1,
@@ -42,6 +42,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         },
         layer_rescale_factors={},
         optimizer='hessian_free',
+        opt_hparams={
+            'cg_max_iters': 250,
+        },
         batch_size=128,
         l2_decay_factor=None,
         l2_decay_rank_threshold=0,

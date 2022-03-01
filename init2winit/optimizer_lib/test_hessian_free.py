@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for losses.py.
+"""Tests for hessian_free.py.
 
 """
 
@@ -21,10 +21,11 @@ import copy
 from functools import partial  # pylint: disable=g-importing-member
 
 from absl.testing import absltest
+from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import models
+from init2winit.optimizer_lib import optimizers
 from init2winit.optimizer_lib.hessian_free import cg_backtracking
 from init2winit.optimizer_lib.hessian_free import gvp
-from init2winit.optimizer_lib.hessian_free import hessian_free
 from init2winit.optimizer_lib.hessian_free import mf_conjgrad_solver
 from init2winit.optimizer_lib.hessian_free import relative_per_iteration_progress_test
 from init2winit.optimizer_lib.hessian_free import residual_norm_test
@@ -139,21 +140,27 @@ class HessianFreeTest(absltest.TestCase):
 
     hps = copy.copy(model_hps)
     hps.update({
+        'optimizer': 'hessian_free',
+        'opt_hparams': {
+            'weight_decay': 0.0,
+        },
         'hid_sizes': [2],
-        'activation_function': 'id',
+        'activation_function': ['id'],
         'input_shape': input_shape,
         'output_shape': output_shape
     })
 
     model = model_cls(hps, {}, loss, metrics)
 
-    inputs = jnp.array([[[1, 0], [1, 1]], [[1, 0], [0, 1]]])
+    inputs = jnp.array([
+        [[1, 0], [1, 1]],
+        [[1, 0], [0, 1]]
+    ])
     targets = inputs.reshape(tuple([inputs.shape[0]] + list(output_shape)))
     batch = {'inputs': inputs, 'targets': targets}
 
     def forward_fn(variables, inputs):
-      logits = model.flax_module.apply(variables, inputs, train=False)
-      return logits
+      return model.flax_module.apply(variables, inputs, train=False)
 
     def opt_cost(params):
       return model.loss_fn(forward_fn(params, inputs), targets)
@@ -185,10 +192,12 @@ class HessianFreeTest(absltest.TestCase):
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
     partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
 
-    flattened_p, obj_val = cg_backtracking(p_arr, p_arr_idx,
-                                           partial_forward_fn,
-                                           partial_loss_fn, {'params': params},
-                                           unravel_fn)
+    def obj_fn(variables):
+      return partial_loss_fn(partial_forward_fn(variables))
+
+    flattened_p, obj_val = cg_backtracking(p_arr, p_arr_idx, obj_fn,
+                                           {'params': params}, unravel_fn)
+
     # Test the backtracking function.
     self.assertSameElements(flattened_p, p1)
     updated_params = apply_updates(params, unravel_fn(p1))
@@ -209,15 +218,22 @@ class HessianFreeTest(absltest.TestCase):
 
     hps = copy.copy(model_hps)
     hps.update({
+        'optimizer': 'hessian_free',
+        'opt_hparams': {
+            'weight_decay': 0.0,
+        },
         'hid_sizes': [2],
-        'activation_function': 'id',
+        'activation_function': ['id'],
         'input_shape': input_shape,
         'output_shape': output_shape
     })
 
     model = model_cls(hps, {}, loss, metrics)
 
-    inputs = jnp.array([[[1, 0], [1, 1]], [[1, 0], [0, 1]]])
+    inputs = jnp.array([
+        [[1, 0], [1, 1]],
+        [[1, 0], [0, 1]]
+    ])
     targets = inputs.reshape(tuple([inputs.shape[0]] + list(output_shape)))
     batch = {'inputs': inputs, 'targets': targets}
 
@@ -228,7 +244,7 @@ class HessianFreeTest(absltest.TestCase):
     def opt_cost(variables):
       return model.loss_fn(forward_fn(variables, inputs), targets)
 
-    optimizer = hessian_free(model.flax_module, model.loss_fn)
+    init_fn, update_fn = optimizers.get_optimizer(hps, model)
 
     params = {
         'Dense_0': {
@@ -253,13 +269,14 @@ class HessianFreeTest(absltest.TestCase):
 
     v = np.ones(d)
 
-    state = optimizer.init(params)
+    state = init_fn(params)
 
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
     partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
 
-    matmul_fn = partial(gvp, variables, outputs, state.damping,
-                        partial_forward_fn, partial_loss_fn)
+    matmul_fn = partial(gvp, variables, outputs,
+                        state.inner_state.damping, partial_forward_fn,
+                        partial_loss_fn)
 
     jacobian = jax.jacfwd(partial_forward_fn)(variables)['params']
     jacobian_tensor = np.concatenate((
@@ -274,7 +291,7 @@ class HessianFreeTest(absltest.TestCase):
       hessian = jax.hessian(partial_loss_fn)(outputs[i, None])[0, :, 0, :]
       ggn_matrix += np.transpose(jacobian_matrix) @ hessian @ jacobian_matrix
     ggn_matrix /= n
-    ggn_matrix += state.damping * np.identity(d)
+    ggn_matrix += state.inner_state.damping * np.identity(d)
 
     expected = ggn_matrix @ v
 
@@ -282,10 +299,17 @@ class HessianFreeTest(absltest.TestCase):
     self.assertAlmostEqual(
         jnp.linalg.norm(matmul_fn(v) - expected), 0, places=4)
 
-    p, state = optimizer.update(grads, state, (variables, batch))
+    update_pmapped = jax.pmap(
+        update_fn, axis_name='batch', in_axes=(None, None, None, 0, None))
+
+    batch_shard = data_utils.shard(batch)
+
+    state.hyperparams['learning_rate'] = 1.0
+
+    p, state = update_pmapped(grads, state, params, batch_shard, None)
 
     # Test the damping parameter update
-    self.assertEqual(state.damping, 3/2)
+    self.assertEqual(state.inner_state.damping, 3/2)
 
     # Test the search direction
     self.assertAlmostEqual(

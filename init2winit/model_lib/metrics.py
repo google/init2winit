@@ -13,7 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Registry for the available metrics we can use for evaluating models."""
+"""Registry for the available metrics we can use for evaluating models.
+
+Metric functions take a batch of (logits, targets, weights) as input and
+return a batch of loss values. This is for safe aggregation across
+different-sized eval batches.
+"""
 
 from clu import metrics
 import flax
@@ -121,9 +126,9 @@ _METRICS = {
     'binary_autoencoder_metrics':
         metrics.Collection.create(
             sigmoid_binary_cross_entropy=weighted_average_metric(
-                losses.sigmoid_binary_cross_entropy),
+                losses.unnormalized_sigmoid_binary_cross_entropy),
             sigmoid_mean_squared_error=weighted_average_metric(
-                losses.sigmoid_mean_squared_error),
+                losses.unnormalized_sigmoid_mean_squared_error),
             num_examples=NumExamples),
     'classification_metrics':
         metrics.Collection.create(
@@ -153,5 +158,6 @@ def get_metrics(metrics_name):
   """
   try:
     return _METRICS[metrics_name]
-  except KeyError:
-    raise ValueError('Unrecognized metrics bundle: {}'.format(metrics_name))
+  except KeyError as metric_not_found_error:
+    raise ValueError('Unrecognized metrics bundle: {}'.format(
+        metrics_name)) from metric_not_found_error

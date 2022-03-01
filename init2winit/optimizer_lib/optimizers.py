@@ -20,7 +20,6 @@ from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optmaximus
 from init2winit.optimizer_lib.hessian_free import hessian_free
 import jax
-import numpy as np
 import optax
 
 
@@ -163,14 +162,14 @@ def get_optimizer(hps, model=None):
           'Model info should be provided for using the hessian free optimizer.')
     # Thest arguments are ignored by inject_hyperparams, which should only set
     # a schedule for learning_rate.
-    static_args = ['flax_module_def', 'loss_fn', 'max_iter']
+    static_args = ['flax_module', 'loss_fn', 'max_iter']
     opt_init, opt_update = optax.inject_hyperparams(
         hessian_free,
         static_args=static_args)(
-            flax_module_def=model.flax_module_def,
+            flax_module=model.flax_module,
             loss_fn=model.loss_fn,
             learning_rate=0.0,  # Manually injected on each train step.
-            max_iter=np.prod(hps.output_shape))
+            max_iter=hps.opt_hparams['cg_max_iters'])
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = optmaximus.from_hparams(hps.opt_hparams)
 

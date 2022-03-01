@@ -13,7 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Registry for the available loss functions we can use for training models."""
+"""Registry for the available loss functions we can use for training models.
+
+Loss functions take a batch of (logits, targets, weights) as input and
+return the mean of function values. This is to make trainer.py more agnostic to
+the details of the padding and masking.
+"""
+
 from clu import metrics
 import flax
 from flax import linen as nn
@@ -24,17 +30,44 @@ import optax
 import sklearn.metrics
 
 
+def unnormalized_sigmoid_binary_cross_entropy(logits, targets, weights=None):
+  """Computes the sigmoid binary cross entropy per example.
+
+  Args:
+    logits: float array of shape (batch, output_shape).
+    targets: float array of shape (batch, output_shape).
+    weights: None or float array of shape (batch,).
+
+  Returns:
+    Sigmoid binary cross entropy computed per example, shape (batch,).
+  """
+  log_p = jax.nn.log_sigmoid(logits)
+  log_not_p = jax.nn.log_sigmoid(-logits)
+  losses = -jnp.sum(
+      (targets * log_p + (1 - targets) * log_not_p).reshape(
+          targets.shape[0], -1),
+      axis=-1)
+  if weights is not None:
+    if weights.shape[0] != losses.shape[0]:
+      raise ValueError(
+          'Incorrect shapes. Got shape %s weights and %s losses' %
+          (str(weights.shape), str(losses.shape)))
+    losses = losses * weights
+
+  return losses
+
+
 def sigmoid_binary_cross_entropy(logits, targets, weights=None):
   """Computes the sigmoid binary cross entropy between logits and targets.
 
   Args:
-    logits: float array of shape (batch, output_shape)
-    targets: float array of shape (batch, output_shape)
+    logits: float array of shape (batch, output_shape).
+    targets: float array of shape (batch, output_shape).
     weights: None or float array of shape (batch,) or shape (batch,
-      output_shape)
+      output_shape).
 
   Returns:
-    float value of sigmoid binary cross entropy between logits and targets
+    float value of sigmoid binary cross entropy between logits and targets.
   """
   # Ensure logits and targets are 2d, even if there's only one label per example
   if len(logits.shape) == 1 or len(targets.shape) == 1:
@@ -56,24 +89,40 @@ def sigmoid_binary_cross_entropy(logits, targets, weights=None):
   return -jnp.sum((targets * log_p + (1 - targets) * log_not_p) * weights)
 
 
-def sigmoid_mean_squared_error(logits, targets, weights=None):
-  """Computes the sigmoid mean squared error between logits and targets.
+def unnormalized_sigmoid_mean_squared_error(logits, targets, weights=None):
+  """Computes the sigmoid mean squared error per example.
 
   Args:
-    logits: float array of shape (batch, output_shape)
-    targets: float array of shape (batch, output_shape)
-    weights: None or float array of shape (batch,)
+    logits: float array of shape (batch, output_shape).
+    targets: float array of shape (batch, output_shape).
+    weights: None or float array of shape (batch,).
 
   Returns:
-    float value of sigmoid mean squared error between logits and targets
+    Sigmoid mean squared error computed per example, shape (batch,).
   """
-  loss = jnp.sum(
+  losses = jnp.sum(
       jnp.square(nn.sigmoid(logits) - targets).reshape(targets.shape[0], -1),
       axis=-1)
+  if weights is not None:
+    if weights.shape[0] != losses.shape[0]:
+      raise ValueError(
+          'Incorrect shapes. Got shape %s weights and %s losses' %
+          (str(weights.shape), str(losses.shape)))
+    losses = losses * weights
+
+  return losses
+
+
+def sigmoid_mean_squared_error(logits, targets, weights=None):
+  """Same as unnormalized_sigmoid_mean_squared_error, but takes the mean."""
   if weights is None:
-    weights = jnp.ones(loss.shape[0])
-  weights = weights / sum(weights)
-  return jnp.sum(jnp.dot(loss, weights))
+    normalization = targets.shape[0]
+  else:
+    normalization = weights.sum()
+  unnormalized_sigmoid_mse = unnormalized_sigmoid_mean_squared_error(
+      logits, targets, weights)
+
+  return jnp.sum(unnormalized_sigmoid_mse) / normalization
 
 
 def weighted_unnormalized_cross_entropy(logits, targets, weights=None):
@@ -146,8 +195,9 @@ def get_loss_fn(loss_name):
   """
   try:
     return _ALL_LOSS_FUNCTIONS[loss_name][0]
-  except KeyError:
-    raise ValueError('Unrecognized loss function: {}'.format(loss_name))
+  except KeyError as loss_fn_not_found_error:
+    raise ValueError('Unrecognized loss function: {}'.format(
+        loss_name)) from loss_fn_not_found_error
 
 
 def get_output_activation_fn(loss_name):
@@ -163,8 +213,9 @@ def get_output_activation_fn(loss_name):
   """
   try:
     return _ALL_LOSS_FUNCTIONS[loss_name][1]
-  except KeyError:
-    raise ValueError('Unrecognized loss function: {}'.format(loss_name))
+  except KeyError as activation_fn_not_found_error:
+    raise ValueError('Unrecognized loss function: {}'.format(
+        loss_name)) from activation_fn_not_found_error
 
 
 # Following the Flax OGB example:

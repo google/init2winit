@@ -102,8 +102,9 @@ def require_obj_arr(criterion_name):
   """
   try:
     return _TERMINATION_CRITERIA[criterion_name][0]
-  except KeyError:
-    raise ValueError('Unrecognized criterion name: {}'.format(criterion_name))
+  except KeyError as termination_criterion_not_found_error:
+    raise ValueError('Unrecognized criterion name: {}'.format(
+        criterion_name)) from termination_criterion_not_found_error
 
 
 def get_termination_criterion_fn(criterion_name):
@@ -119,8 +120,9 @@ def get_termination_criterion_fn(criterion_name):
   """
   try:
     return _TERMINATION_CRITERIA[criterion_name][1]
-  except KeyError:
-    raise ValueError('Unrecognized criterion name: {}'.format(criterion_name))
+  except KeyError as termination_criterion_not_found_error:
+    raise ValueError('Unrecognized criterion name: {}'.format(
+        criterion_name)) from termination_criterion_not_found_error
 
 
 @partial(jit, static_argnums=(0, 3, 6, 7))
@@ -302,8 +304,7 @@ def gvp(variables, outputs, damping, forward_fn, loss_fn, v):
   return ravel_pytree(gvp_fn(hjv)[0])[0] + damping * v
 
 
-def cg_backtracking(
-    p_arr, p_arr_idx, forward_fn, loss_fn, variables, unravel_fn):
+def cg_backtracking(p_arr, p_arr_idx, obj_fn, variables, unravel_fn):
   """Backtracks CG iterates (Section 4.6, Martens (2010)).
 
   This function iteratively compares the function values of two consecutive
@@ -316,8 +317,7 @@ def cg_backtracking(
   Args:
     p_arr: An array of CG iterates of shape (m, n).
     p_arr_idx: The index of the last element in p_arr.
-    forward_fn: A function that maps params to outputs.
-    loss_fn: A function that maps outputs to a loss value.
+    obj_fn: A function that maps params to a loss value.
     variables: A dict of variables is passed directly into flax_module.apply,
       required to have a key 'params' that is a pytree of model parameters.
     unravel_fn: A function that maps a numpy vector of shape (n,) to a pytree.
@@ -340,7 +340,8 @@ def cg_backtracking(
   for k, v in variables.items():
     if k != 'params':
       updated_variables[k] = v
-  obj_val = loss_fn(forward_fn(updated_variables))
+
+  obj_val = obj_fn(updated_variables)
 
   def termination_condition_cg_backtracking(state):
     *_, idx, keep_backtracking = state
@@ -359,7 +360,7 @@ def cg_backtracking(
     for k, v in variables.items():
       if k != 'params':
         updated_variables[k] = v
-    obj_val_prev = loss_fn(forward_fn(updated_variables))
+    obj_val_prev = obj_fn(updated_variables)
 
     # Compare the objective values.
     keep_backtracking = jnp.greater_equal(obj_val, obj_val_prev)
@@ -432,17 +433,24 @@ def hessian_free(flax_module,
     """
     variables, batch = variables_batch_tuple
 
-    def forward_fn(variables, inputs):
-      return flax_module.apply(variables, inputs, train=False)
+    def partial_forward_fn(variables):
+      return flax_module.apply(variables, batch['inputs'], train=False)
+    def partial_loss_fn(logits):
+      return loss_fn(logits, batch['targets'])
 
-    outputs = forward_fn(variables, batch['inputs'])
+    outputs = partial_forward_fn(variables)
     flattened_grads, unravel_fn = ravel_pytree(grads)
 
-    partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
-    partial_loss_fn = partial(loss_fn, targets=batch['targets'])
+    def matmul_fn(v):
+      return lax.pmean(
+          gvp(variables, outputs, state.damping, partial_forward_fn,
+              partial_loss_fn, v),
+          axis_name='batch')
 
-    matmul_fn = partial(gvp, variables, outputs, state.damping,
-                        partial_forward_fn, partial_loss_fn)
+    def obj_fn(variables):
+      return lax.pmean(
+          partial_loss_fn(partial_forward_fn(variables)), axis_name='batch')
+
     p_arr, p_arr_idx = mf_conjgrad_solver(matmul_fn, -flattened_grads, state.p0,
                                           max_iter, tol,
                                           residual_refresh_frequency, None,
@@ -455,13 +463,13 @@ def hessian_free(flax_module,
     # each save step in the CG loop and keeping the best one.
     flattened_p, obj_val = cg_backtracking(p_arr,
                                            p_arr_idx,
-                                           partial_forward_fn,
-                                           partial_loss_fn,
+                                           obj_fn,
                                            variables,
                                            unravel_fn)
 
     # update the damping parameter
-    reduction_f = obj_val - partial_loss_fn(outputs)
+    reduction_f = obj_val - lax.pmean(partial_loss_fn(outputs),
+                                      axis_name='batch')
     reduction_q = jnp.dot(flattened_p,
                           flattened_grads + 0.5 * matmul_fn(flattened_p))
 
