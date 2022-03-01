@@ -15,25 +15,31 @@
 
 """Data loader for pre-processed Criteo data."""
 
-from typing import List
+import functools
+import os
 
 from absl import logging
-from flax import struct
+from init2winit.dataset_lib.data_utils import Dataset
+from ml_collections.config_dict import config_dict
 import tensorflow as tf
 
 
-@struct.dataclass
-class CriteoFeatureConfig:
-  num_dense_features: int
-  vocab_sizes: List[int]
-  label_feature_name: str
-
-
-@struct.dataclass
-class CriteoDatasetParams:
-  batch_size: int
-  dataset_index: int
-  dataset_num_shards: int
+# Change below to the path to dataset files.
+CRITEO1TB_FILE_PATH = ''
+CRITEO1TB_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
+    input_shape=528,
+    num_dense_features=16,
+    train_file_path=os.path.join(CRITEO1TB_FILE_PATH, '/train/train*'),
+    eval_file_path=os.path.join(CRITEO1TB_FILE_PATH, '/eval/eval*'),
+    num_train_datasets=8192,
+    num_eval_datasets=1072,
+    parallelism=16,
+    dataset_index=0,
+    dataset_num_shards=4
+))
+CRITEO1TB_METADATA = {
+    'apply_one_hot_in_loss': False,
+}
 
 
 class CriteoTsvReader(object):
@@ -48,18 +54,22 @@ class CriteoTsvReader(object):
 
   def __init__(self,
                file_path=None,
-               feature_config=None,
+               num_dense_features=None,
+               vocab_sizes=None,
+               batch_size=None,
+               dataset_index=0,
+               dataset_num_shards=None,
                is_training=True,
-               distributed_eval=False,
                parallelism=1,
-               num_datasets=None,
-               params=None):
+               num_datasets=None):
     self._file_path = file_path
-    self._feature_config = feature_config
+    self._num_dense_features = num_dense_features
+    self._vocab_sizes = vocab_sizes
+    self._batch_size = batch_size
+    self._dataset_index = dataset_index
+    self._dataset_num_shards = dataset_num_shards
     self._is_training = is_training
-    self._distributed_eval = distributed_eval
     self._parallelism = parallelism
-    self._params = params
 
     num_files = len(tf.io.gfile.glob(file_path))
     if num_datasets > num_files:
@@ -69,16 +79,15 @@ class CriteoTsvReader(object):
           'Reducing dataset parallelism due to insufficient number of files.')
       self._parallelism = num_files // num_datasets
 
-  def __call__(self, params):
-    batch_size = params.batch_size
-    fc = self._feature_config
+  def __call__(self):
+    batch_size = self._batch_size
 
     @tf.function
     def _parse_example_fn(example):
       """Parser function for pre-processed Criteo TSV records."""
       label_defaults = [[0.0]]
-      int_defaults = [[0.0] for _ in range(fc.num_dense_features)]
-      categorical_defaults = [[0] for _ in range(len(fc.vocab_sizes))]
+      int_defaults = [[0.0] for _ in range(self._num_dense_features)]
+      categorical_defaults = [[0] for _ in range(len(self._vocab_sizes))]
       record_defaults = label_defaults + int_defaults + categorical_defaults
       fields = tf.io.decode_csv(
           example, record_defaults, field_delim='\t', na_value='-1')
@@ -86,7 +95,7 @@ class CriteoTsvReader(object):
       num_labels = 1
       num_dense = len(int_defaults)
       features = {}
-      features[fc.label_feature_name] = tf.reshape(fields[0], [batch_size, 1])
+      features['label'] = tf.reshape(fields[0], [batch_size, 1])
 
       int_features = []
       for idx in range(num_dense):
@@ -94,18 +103,19 @@ class CriteoTsvReader(object):
       features['int-features'] = tf.stack(int_features, axis=1)
 
       cat_features = []
-      for idx in range(len(fc.vocab_sizes)):
+      for idx in range(len(self._vocab_sizes)):
         cat_features.append(
             tf.cast(fields[idx + num_dense + num_labels], dtype=tf.int32))
       features['cat-features'] = tf.stack(cat_features, axis=1)
       return features
 
     filenames = tf.data.Dataset.list_files(self._file_path, shuffle=False)
-    filenames = filenames.shard(params.dataset_num_shards, params.dataset_index)
+    filenames = filenames.shard(self._dataset_num_shards, self._dataset_index)
 
-    def make_dataset(ds_index):
+    def make_dataset(ds_index, repeat=True):
       ds = filenames.shard(self._parallelism, ds_index)
-      ds = ds.repeat(2)
+      if repeat:
+        ds = ds.repeat()
       ds = ds.interleave(
           tf.data.TextLineDataset,
           cycle_length=16,
@@ -118,10 +128,54 @@ class CriteoTsvReader(object):
 
     ds_indices = tf.data.Dataset.range(self._parallelism)
     ds = ds_indices.interleave(
-        make_dataset,
+        functools.partial(make_dataset, repeat=self._is_training),
         cycle_length=self._parallelism,
         block_length=1,
         num_parallel_calls=self._parallelism,
         deterministic=False)
     ds = ds.prefetch(tf.data.AUTOTUNE)
     return ds
+
+
+def get_criteo1tb(unused_shuffle_rng,
+                  batch_size,
+                  eval_batch_size,
+                  hps):
+  """Get the Criteo 1TB train and eval iterators."""
+  train_iterator_fn = CriteoTsvReader(
+      file_path=hps.train_file_path,
+      num_dense_features=hps.num_dense_features,
+      vocab_sizes=hps.vocab_sizes,
+      batch_size=batch_size,
+      dataset_index=hps.dataset_index,
+      dataset_num_shards=hps.dataset_num_shards,
+      is_training=True,
+      parallelism=hps.parallelism,
+      num_datasets=hps.num_train_datasets)()
+  eval_train_epoch = CriteoTsvReader(
+      file_path=hps.train_file_path,
+      num_dense_features=hps.num_dense_features,
+      vocab_sizes=hps.vocab_sizes,
+      batch_size=eval_batch_size,
+      dataset_index=hps.dataset_index,
+      dataset_num_shards=hps.dataset_num_shards,
+      is_training=False,
+      parallelism=hps.parallelism,
+      num_datasets=hps.num_train_datasets)()
+  eval_iterator_fn = CriteoTsvReader(
+      file_path=hps.eval_file_path,
+      num_dense_features=hps.num_dense_features,
+      vocab_sizes=hps.vocab_sizes,
+      is_training=False,
+      parallelism=hps.parallelism,
+      num_datasets=hps.num_eval_datasets)()
+  # pylint: disable=unreachable
+  def test_epoch(*args, **kwargs):
+    del args
+    del kwargs
+    return
+    yield  # This yield is needed to make this a valid (null) iterator.
+  # pylint: enable=unreachable
+  return Dataset(train_iterator_fn, eval_train_epoch, eval_iterator_fn,
+                 test_epoch)
+

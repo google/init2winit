@@ -178,6 +178,51 @@ def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
                   })
 
 
+def _get_fake_dlrm_dataset(batch_size, eval_num_batches, hps):
+  """Yields a single text batch repeatedly for train and test."""
+  cat_features = []
+  for vocab_size in hps.vocab_sizes:
+    cat_features.append(
+        np.random.randint(low=0, high=vocab_size, size=(batch_size, 1)))
+  cat_features = np.concatenate(cat_features, 1)
+  int_features = np.random.normal(size=(batch_size, hps.num_dense_features))
+  inputs = np.concatenate((int_features, cat_features), 1)
+  targets = np.random.randint(low=0, high=2, size=(batch_size, 1))
+  batch = {
+      'inputs': inputs,
+      'targets': targets,
+      'weights': jnp.ones(targets.shape),
+  }
+
+  def train_iterator_fn():
+    while True:
+      yield batch
+
+  def eval_train_epoch(num_batches=None):
+    if num_batches is None:
+      num_batches = eval_num_batches
+    for _ in range(num_batches):
+      yield batch
+
+  def valid_epoch(num_batches=None):
+    if num_batches is None:
+      num_batches = eval_num_batches
+    for _ in range(num_batches):
+      yield batch
+
+  def test_epoch(num_batches=None):
+    if num_batches is None:
+      num_batches = eval_num_batches
+    for _ in range(num_batches):
+      yield batch
+
+  meta_data = {
+      'apply_one_hot_in_loss': False,
+  }
+  return (Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
+                  test_epoch), meta_data)
+
+
 class TrainerTest(parameterized.TestCase):
   """Tests training for 2 epochs on MNIST."""
 
@@ -380,6 +425,63 @@ class TrainerTest(parameterized.TestCase):
             # Flax model API made training less stable so we need to eval more
             # frequently in order to get a `train_loss[0]` that is earlier in
             # training.
+            eval_frequency=2,
+            checkpoint_steps=[],
+            metrics_logger=metrics_logger,
+            init_logger=init_logger))
+
+    with tf.io.gfile.GFile(os.path.join(self.test_dir,
+                                        'measurements.csv')) as f:
+      df = pandas.read_csv(f)
+      train_loss = df['train/ce_loss'].values
+      self.assertLess(train_loss[-1], train_loss[0])
+
+  def test_dlrm_model_trainer(self):
+    """Tests that dlrm model training decreases loss."""
+    rng = jax.random.PRNGKey(1337)
+    model_str = 'dlrm'
+    dataset_str = 'criteo1tb'
+    model_cls = models.get_model(model_str)
+    model_hps = models.get_model_hparams(model_str)
+    dataset_hps = datasets.get_dataset_hparams(dataset_str)
+    dataset_hps.update({
+        'batch_size': model_hps.batch_size,
+        'num_dense_features': model_hps.num_dense_features,
+        'vocab_sizes': model_hps.vocab_sizes,
+    })
+    eval_num_batches = 5
+    eval_batch_size = dataset_hps.batch_size
+    loss_name = 'sigmoid_binary_cross_entropy'
+    metrics_name = 'binary_classification_metrics'
+    dataset, dataset_meta_data = _get_fake_dlrm_dataset(
+        dataset_hps.batch_size, eval_num_batches, dataset_hps)
+    hps = copy.copy(model_hps)
+    hps.update({
+        'train_size': 15,
+        'valid_size': 10,
+        'test_size': 10,
+        'input_shape':
+            (model_hps.num_dense_features + len(model_hps.vocab_sizes),),
+        'output_shape': (1,),
+        'l2_decay_factor': 1e-4,
+        'l2_decay_rank_threshold': 2,
+    })
+    model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
+    initializer = initializers.get_initializer('noop')
+
+    metrics_logger, init_logger = trainer.set_up_loggers(self.test_dir)
+    _ = list(
+        trainer.train(
+            train_dir=self.test_dir,
+            model=model,
+            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+            initializer=initializer,
+            num_train_steps=10,
+            hps=hps,
+            rng=rng,
+            eval_batch_size=eval_batch_size,
+            eval_num_batches=eval_num_batches,
+            eval_train_num_batches=eval_num_batches,
             eval_frequency=2,
             checkpoint_steps=[],
             metrics_logger=metrics_logger,

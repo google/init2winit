@@ -15,11 +15,38 @@
 
 """A JAX implementation of DLRM."""
 
+import functools
 from typing import List
 
 import flax.linen as nn
+from init2winit.model_lib import base_model
 from jax import nn as jnn
 import jax.numpy as jnp
+from ml_collections.config_dict import config_dict
+
+# small hparams used for unit tests
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        rng_seed=-1,
+        model_dtype='float32',
+        vocab_sizes=[64] * 8,
+        mlp_bottom_dims=[128, 128],
+        mlp_top_dims=[256, 128, 1],
+        embed_dim=64,
+        keep_diags=True,
+        optimizer='adam',
+        batch_size=128,
+        num_dense_features=16,
+        lr_hparams={
+            'base_lr': 0.01,
+            'schedule': 'constant'
+        },
+        opt_hparams={
+            'beta1': 0.9,
+            'beta2': 0.999,
+            'epsilon': 1e-8,
+        },
+    ))
 
 
 def dot_interact(concat_features, keep_diags=True):
@@ -40,44 +67,48 @@ def dot_interact(concat_features, keep_diags=True):
   # Interact features, select upper or lower-triangular portion, and re-shape.
   xactions = jnp.matmul(
       concat_features, jnp.transpose(concat_features, [0, 2, 1]))
-  ones = jnp.ones_like(xactions)
-  upper_tri_mask = jnp.triu(ones)
   feature_dim = xactions.shape[-1]
 
   if keep_diags:
-    activations = xactions[upper_tri_mask == 1.0]
-    out_dim = feature_dim * (feature_dim + 1) // 2
+    indices = jnp.array(jnp.triu_indices(feature_dim))
   else:
-    lower_tri_mask = ones - upper_tri_mask
-    activations = xactions[lower_tri_mask == 1.0]
-    out_dim = feature_dim * (feature_dim - 1) // 2
-
-  activations = jnp.reshape(activations, [batch_size, out_dim])
+    indices = jnp.array(jnp.tril_indices(feature_dim))
+  num_elems = indices.shape[1]
+  indices = jnp.tile(indices, [1, batch_size])
+  indices0 = jnp.reshape(jnp.tile(jnp.reshape(
+      jnp.arange(batch_size), [-1, 1]), [1, num_elems]), [1, -1])
+  indices = tuple(jnp.concatenate((indices0, indices), 0))
+  activations = xactions[indices]
+  activations = jnp.reshape(activations, [batch_size, -1])
   return activations
 
 
 class DLRM(nn.Module):
-  """DLRM Model.
+  """Define a DLRM model.
 
   Parameters:
     vocab_sizes: list of vocab sizes of embedding tables.
+    total_vocab_sizes: sum of embedding table sizes (for jit compilation).
     mlp_bottom_dims: dimensions of dense layers of the bottom mlp.
     mlp_top_dims: dimensions of dense layers of the top mlp.
+    num_dense_features: number of dense features as the bottom mlp input.
     embed_dim: embedding dimension.
     keep_diags: whether to keep the diagonal terms in x @ x.T.
   """
 
   vocab_sizes: List[int]
+  total_vocab_sizes: int
   mlp_bottom_dims: List[int]
   mlp_top_dims: List[int]
+  num_dense_features: int
   embed_dim: int = 128
   keep_diags: bool = True
 
   @nn.compact
   def __call__(self, x, train):
     del train
-    bot_mlp_input = x['dense-features']
-    cat_features = x['cat-features']
+    bot_mlp_input, cat_features = jnp.split(x, [self.num_dense_features], 1)
+    cat_features = jnp.asarray(cat_features, dtype=jnp.int32)
 
     # bottom mlp
     mlp_bottom_dims = self.mlp_bottom_dims
@@ -100,16 +131,24 @@ class DLRM(nn.Module):
     idx_offsets = jnp.tile(
         jnp.reshape(idx_offsets, [1, -1]), [batch_size, 1])
     idx_lookup = cat_features + idx_offsets
-    embedding_table = jnp.concatenate(
-        [
-            self.param(  # pylint: disable=g-complex-comprehension
-                'embedding_table_%d' % i,
-                jnn.initializers.variance_scaling(
-                    scale=1.0, mode='fan_in', distribution='uniform'),
-                [size, self.embed_dim])
-            for i, size in enumerate(vocab_sizes)
-        ],
-        0)
+    # Scale the initialization to fan_in for each slice.
+    scale = 1.0 / jnp.sqrt(vocab_sizes)
+    scale = jnp.expand_dims(
+        jnp.repeat(
+            scale, vocab_sizes, total_repeat_length=self.total_vocab_sizes), -1)
+
+    def scaled_init(key, shape, scale, init, dtype=jnp.float_):
+      return scale * init(key, shape, dtype)
+
+    scaled_variance_scaling_init = functools.partial(
+        scaled_init,
+        scale=scale,
+        init=jnn.initializers.uniform(scale=1.0))
+    embedding_table = self.param(
+        'embedding_table',
+        scaled_variance_scaling_init,
+        [self.total_vocab_sizes, self.embed_dim])
+
     idx_lookup = jnp.reshape(idx_lookup, [-1])
     embed_features = embedding_table[idx_lookup]
     embed_features = jnp.reshape(
@@ -122,7 +161,6 @@ class DLRM(nn.Module):
     mlp_input_dim = top_mlp_input.shape[1]
     mlp_top_dims = self.mlp_top_dims
     num_layers_top = len(mlp_top_dims)
-    sigmoid_layer_top = num_layers_top - 1
     for layer_idx, fan_out in enumerate(mlp_top_dims):
       fan_in = mlp_input_dim if layer_idx == 0 else mlp_top_dims[layer_idx - 1]
       top_mlp_input = nn.Dense(
@@ -132,7 +170,21 @@ class DLRM(nn.Module):
           bias_init=jnn.initializers.normal(
               stddev=jnp.sqrt(1.0 / mlp_top_dims[layer_idx])))(
                   top_mlp_input)
-      act_fn = nn.sigmoid if layer_idx == sigmoid_layer_top else nn.relu
-      top_mlp_input = act_fn(top_mlp_input)
-    predictions = top_mlp_input
-    return predictions
+      if layer_idx < (num_layers_top - 1):
+        top_mlp_input = nn.relu(top_mlp_input)
+    logits = top_mlp_input
+    return logits
+
+
+class DLRMModel(base_model.BaseModel):
+
+  def build_flax_module(self):
+    """DLRM for ad click probability prediction."""
+    return DLRM(
+        vocab_sizes=self.hps.vocab_sizes,
+        total_vocab_sizes=sum(self.hps.vocab_sizes),
+        mlp_bottom_dims=self.hps.mlp_bottom_dims,
+        mlp_top_dims=self.hps.mlp_top_dims,
+        num_dense_features=self.hps.num_dense_features,
+        embed_dim=self.hps.embed_dim,
+        keep_diags=self.hps.keep_diags)

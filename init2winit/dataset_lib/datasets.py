@@ -17,6 +17,7 @@
 
 import collections
 
+from init2winit.dataset_lib import criteo_terabyte_input_pipeline
 from init2winit.dataset_lib import fake_dataset
 from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import mlperf_imagenet_dataset
@@ -50,6 +51,10 @@ _ALL_DATASETS = {
         _Dataset(small_image_datasets.get_cifar100,
                  small_image_datasets.CIFAR100_DEFAULT_HPARAMS,
                  small_image_datasets.CIFAR100_METADATA),
+    'criteo1tb':
+        _Dataset(criteo_terabyte_input_pipeline.get_criteo1tb,
+                 criteo_terabyte_input_pipeline.CRITEO1TB_DEFAULT_HPARAMS,
+                 criteo_terabyte_input_pipeline.CRITEO1TB_METADATA),
     'fake':
         _Dataset(fake_dataset.get_fake, fake_dataset.DEFAULT_HPARAMS,
                  fake_dataset.METADATA),

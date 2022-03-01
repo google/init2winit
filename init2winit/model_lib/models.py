@@ -20,6 +20,7 @@ from init2winit.model_lib import adabelief_resnet
 from init2winit.model_lib import adabelief_vgg
 from init2winit.model_lib import autoencoder
 from init2winit.model_lib import convolutional_autoencoder
+from init2winit.model_lib import dlrm
 from init2winit.model_lib import fully_connected
 from init2winit.model_lib import gnn
 from init2winit.model_lib import max_pooling_cnn
@@ -58,7 +59,8 @@ _ALL_MODELS = {
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
     'xformer_translate': (xformer_translate.TransformerTranslate,
                           xformer_translate.DEFAULT_HPARAMS),
-    'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS)
+    'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS),
+    'dlrm': (dlrm.DLRMModel, dlrm.DEFAULT_HPARAMS),
 }
 
 
