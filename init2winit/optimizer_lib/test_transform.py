@@ -100,30 +100,37 @@ class PolyakHBTest(chex.TestCase):
       chex.assert_trees_all_close(target, result)
 
 
-class PolyakEMATest(chex.TestCase):
-  """Test correctness of polyak_ema momentum."""
+class FirstMomentEMATest(chex.TestCase):
+  """Test correctness of first_moment_ema."""
 
   def test_correctness(self):
     """Testing correctness via independent implementation."""
 
-    def ema(decay):
+    def ema(decay, debias=True):
 
       def init_fn(params):
         del params
-        return {'w': jnp.zeros((2,))}
+        return {'w': jnp.zeros((2,)), 'count': 0}
 
       def update_fn(updates, state, params=None):
         del params
-        state['w'] = ((1 - decay) * updates['w'] + decay * state['w'])
-        return state, state
+        state['count'] += 1
+        state['w'] = ((1 - decay) * updates['w'] +
+                      decay * state['w'])
+        if debias:
+          update = {'w': state['w'] / (1 - decay**state['count'])}
+        else:
+          update = {'w': state['w']}
+        return update, state
 
       return optax.GradientTransformation(init_fn, update_fn)
 
     decay = 0.7
     learning_rate = 0.01
     true_ema = optax.chain(ema(decay), optax.scale(-1. * learning_rate))
-    ks_ema = kitchen_sink(['polyak_ema'], [{
-        'decay': decay
+    ks_ema = kitchen_sink(['first_moment_ema'], [{
+        'decay': decay,
+        'debias': True,
     }],
                           learning_rate=learning_rate)
     targets = _optimizer_loop(true_ema)
@@ -133,28 +140,48 @@ class PolyakEMATest(chex.TestCase):
       chex.assert_trees_all_close(target, result)
 
 
-class PreconditionByAdamTest(chex.TestCase):
-  """Test correctness of precondition_by_adam."""
+class PreconditionByRMSTest(chex.TestCase):
+  """Test correctness of precondition_by_rms."""
 
   def test_debias_false(self):
-    rms_prop = kitchen_sink(['scale_by_rms'])
-    precondition_by_adam = kitchen_sink(['precondition_by_adam'], [{
+    rms_prop = optax.scale_by_rms()
+    precondition_by_rms = kitchen_sink(['precondition_by_rms'], [{
         'eps': 0,
         'eps_root': 1e-8,
-        'b2': 0.9,
+        'decay': 0.9,
         'debias': False
     }])
     targets = _optimizer_loop(rms_prop)
-    results = _optimizer_loop(precondition_by_adam)
+    results = _optimizer_loop(precondition_by_rms)
 
     for target, result in zip(targets, results):
       chex.assert_trees_all_close(target, result)
 
   def test_debias_true(self):
     adam = kitchen_sink(['scale_by_adam'], [{'b1': 0.0}])
-    precondition_by_adam = kitchen_sink(['precondition_by_adam'])
+    precondition_by_rms = kitchen_sink(['precondition_by_rms'], [{
+        'debias': True
+    }])
     targets = _optimizer_loop(adam)
-    results = _optimizer_loop(precondition_by_adam)
+    results = _optimizer_loop(precondition_by_rms)
+
+    for target, result in zip(targets, results):
+      chex.assert_trees_all_close(target, result)
+
+
+class PreconditionByYogiTest(chex.TestCase):
+  """Test correctness of precondition_by_yogi."""
+
+  def test_with_0_momentum_yogi(self):
+    optax_yogi = optax.yogi(learning_rate=1.0, b1=0.0, b2=0.9, eps=1e-8)
+    precondition_by_yogi = kitchen_sink(['precondition_by_yogi'], [{
+        'eps': 1e-8,
+        'eps_root': 1e-6,
+        'b2': 0.9,
+        'debias': True
+    }], learning_rate=1.0)
+    targets = _optimizer_loop(optax_yogi)
+    results = _optimizer_loop(precondition_by_yogi)
 
     for target, result in zip(targets, results):
       chex.assert_trees_all_close(target, result)
@@ -167,12 +194,9 @@ class TwistedAdamTest(chex.TestCase):
     """Testing correctness via independent implementation."""
 
     rms_decay = 0.9
-    rms_eps = 1e-8
-    rms_scale = 0.
-
-    bias_decay = 0.1
-
-    polyak_decay = 0.1
+    eps_root = 0.0
+    eps = 1e-8
+    moment_decay = 0.1
 
     class State(NamedTuple):
       nu: optax.Updates
@@ -183,7 +207,7 @@ class TwistedAdamTest(chex.TestCase):
 
       def init_fn(params):
         return State(
-            nu=jax.tree_map(lambda n: jnp.full_like(n, rms_scale), params),
+            nu=jax.tree_map(jnp.zeros_like, params),
             trace=jax.tree_map(jnp.zeros_like, params),
             count=jnp.zeros([], jnp.int32))
 
@@ -193,14 +217,17 @@ class TwistedAdamTest(chex.TestCase):
         nu = {
             'w': (1 - rms_decay) * (updates['w']**2) + rms_decay * state.nu['w']
         }
-        updates = {'w': updates['w'] * jax.lax.rsqrt(nu['w'] + rms_eps)}
+        updates = {'w': updates['w'] / (jax.lax.sqrt(nu['w'] + eps_root) + eps)}
 
-        updates = {'w': updates['w'] / (1 - bias_decay**count)}
+        updates = {'w': updates['w'] * jnp.sqrt((1 - rms_decay**count))}
 
-        trace = {'w': updates['w'] + polyak_decay * state.trace['w']}
+        trace = {
+            'w': (1 - moment_decay) * updates['w'] +
+                 moment_decay * state.trace['w']
+        }
         updates = {'w': trace['w']}
 
-        updates = {'w': updates['w'] / (1 - bias_decay**count)}
+        updates = {'w': updates['w'] / (1 - moment_decay**count)}
 
         return updates, State(nu=nu, count=count, trace=trace)
 
@@ -208,20 +235,16 @@ class TwistedAdamTest(chex.TestCase):
 
     true_twisted_adam = twisted_adam()
     ks_twisted_adam = kitchen_sink(
-        ['scale_by_rms', 'bias_correction', 'polyak_hb', 'bias_correction'], [
+        ['precondition_by_rms', 'first_moment_ema'], [
             {
                 'decay': rms_decay,
-                'eps': rms_eps,
-                'initial_scale': rms_scale,
+                'eps': eps,
+                'eps_root': eps_root,
+                'debias': True
             },
             {
-                'decay': bias_decay
-            },
-            {
-                'decay': polyak_decay
-            },
-            {
-                'decay': bias_decay
+                'decay': moment_decay,
+                'debias': True
             },
         ])
 
@@ -272,7 +295,7 @@ class EquivalenceTest(chex.TestCase):
 
   def test_adagrad(self):
     true_adagrad = optax.adagrad(0.7, initial_accumulator_value=0.3)
-    ks_adagrad = kitchen_sink(['scale_by_rss', 'polyak_ema'], [{
+    ks_adagrad = kitchen_sink(['precondition_by_rss', 'first_moment_ema'], [{
         'initial_accumulator_value': 0.3
     }, {
         'decay': 0.0

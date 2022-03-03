@@ -24,30 +24,52 @@ import copy
 from typing import Any, Dict, List
 
 import flax
-from init2winit.optimizer_lib.transform import bias_correction
+from init2winit.optimizer_lib.transform import first_moment_ema
 from init2winit.optimizer_lib.transform import nesterov
-from init2winit.optimizer_lib.transform import polyak_ema
 from init2winit.optimizer_lib.transform import polyak_hb
-from init2winit.optimizer_lib.transform import precondition_by_adam
+from init2winit.optimizer_lib.transform import precondition_by_amsgrad
+from init2winit.optimizer_lib.transform import precondition_by_rms
+from init2winit.optimizer_lib.transform import precondition_by_yogi
+from init2winit.optimizer_lib.transform import scale_by_adam
 from init2winit.optimizer_lib.transform import scale_by_amsgrad
 from init2winit.optimizer_lib.transform import scale_by_learning_rate
+from init2winit.optimizer_lib.transform import scale_by_nadam
 from init2winit.optimizer_lib.utils import create_weight_decay_mask
 import optax
 
-_transformations = {
-    'scale_by_rss': optax.scale_by_rss,
-    'scale_by_adam': optax.scale_by_adam,
+# scale_by_rms exists only for backward compatability
+_composites = {
+    'scale_by_adam': scale_by_adam,
+    'scale_by_yogi': optax.scale_by_yogi,
     'scale_by_amsgrad': scale_by_amsgrad,
-    'bias_correction': bias_correction,
-    'scale_by_learning_rate': scale_by_learning_rate,
-    'nesterov': nesterov,
-    'polyak_ema': polyak_ema,
-    'polyak_hb': polyak_hb,
-    'precondition_by_adam': precondition_by_adam,
-    'scale_by_rms': optax.scale_by_rms,
+    'scale_by_nadam': scale_by_nadam,
+    'scale_by_rms': precondition_by_rms,
     'sgd': optax.sgd,
+}
+
+_first_moment_accumulators = {
+    'nesterov': nesterov,
+    'polyak_hb': polyak_hb,
+    'first_moment_ema': first_moment_ema,
+}
+
+_preconditioners = {
+    'precondition_by_rms': precondition_by_rms,
+    'precondition_by_yogi': precondition_by_yogi,
+    'precondition_by_rss': optax.scale_by_rss,
+    'precondition_by_amsgrad': precondition_by_amsgrad,
+}
+
+_miscellaneous = {
     'add_decayed_weights': optax.add_decayed_weights
 }
+
+
+_transformations = {}
+_transformations.update(_composites)
+_transformations.update(_preconditioners)
+_transformations.update(_first_moment_accumulators)
+_transformations.update(_miscellaneous)
 
 
 def kitchen_sink(elements: List[str],
