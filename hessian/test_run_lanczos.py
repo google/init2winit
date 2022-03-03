@@ -23,13 +23,13 @@ import tempfile
 
 from absl.testing import absltest
 from init2winit import hyperparameters
-from init2winit import trainer
 from init2winit import utils
 from init2winit.dataset_lib import datasets
 from init2winit.hessian import hessian_eval
 from init2winit.hessian import run_lanczos
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
+from init2winit.trainer_lib import trainer
 import jax.random
 import numpy as np
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.

@@ -20,6 +20,7 @@ import functools
 import json
 import logging
 import operator
+import os.path
 import time
 from typing import Any, Dict
 
@@ -61,6 +62,25 @@ def timed(f):
     return retval, time.time() - start_time
 
   return wrapper
+
+
+def set_up_loggers(train_dir, xm_work_unit=None):
+  """Creates a logger for eval metrics as well as initialization metrics."""
+  csv_path = os.path.join(train_dir, 'measurements.csv')
+  pytree_path = os.path.join(train_dir, 'training_metrics')
+  metrics_logger = MetricLogger(
+      csv_path=csv_path,
+      pytree_path=pytree_path,
+      xm_work_unit=xm_work_unit,
+      events_dir=train_dir)
+
+  init_csv_path = os.path.join(train_dir, 'init_measurements.csv')
+  init_json_path = os.path.join(train_dir, 'init_scalars.json')
+  init_logger = MetricLogger(
+      csv_path=init_csv_path,
+      json_path=init_json_path,
+      xm_work_unit=xm_work_unit)
+  return metrics_logger, init_logger
 
 
 def get_summary_tree(training_metrics_grabber):

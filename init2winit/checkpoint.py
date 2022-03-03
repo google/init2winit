@@ -22,13 +22,144 @@ import copy
 import os
 import sys
 import threading
+from typing import Sequence
 
 from absl import flags
 from absl import logging
+from flax import jax_utils
 from flax.training import checkpoints as flax_checkpoints
+import jax
 
 
 FLAGS = flags.FLAGS
+
+
+def replicate_checkpoint(
+    latest,
+    pytree_keys: Sequence[str],
+    replicate=True):
+  """Restores from the provided checkpoint.
+
+  Args:
+    latest: A dict representing the state of the
+      checkpoint we want to restore.
+    pytree_keys: A sequence of keys into `latest` that are pytrees, which will
+      be replicated if replicate=True.
+    replicate: If set, replicate the state across devices.
+
+  Returns:
+    Tuple of (pytree, extra_dict) where pytree is a JAX pytree holding the
+    arrays that need to be replicated/unreplicated and extra_dict holds any
+    additional python state. We expect extra_dict to have the keys of
+    'global_step', 'preemption_count', 'sum_train_cost', but old checkpoints
+    might be missing something.
+  """
+  logging.info('Loaded model parameters from latest checkpoint.')
+  # Old checkpoints without 'sum_train_cost' can still be restored, but the
+  # train() function will break. Evals and curvature stuff should be fine,
+  # however.
+  expected = ['global_step', 'preemption_count', 'sum_train_cost']
+  if any(k not in latest for k in expected):
+    logging.warn('Checkpoint state missing keys, obtained %s expected %s',
+                 list(latest.keys()), expected)
+
+  pytree = {k: latest[k] for k in pytree_keys}
+  if replicate:
+    pytree = jax_utils.replicate(pytree)
+  extra_dict = {k: latest[k] for k in latest.keys() if k not in pytree_keys}
+  return pytree, extra_dict
+
+
+def replicate_and_maybe_restore_latest_checkpoint(
+    unreplicated_optimizer_state,
+    unreplicated_params,
+    unreplicated_batch_stats,
+    unreplicated_training_metrics_grabber,
+    train_dir):
+  """Restore from the latest checkpoint, if it exists."""
+  uninitialized_global_step = -1
+  unreplicated_checkpoint_state = dict(
+      params=unreplicated_params,
+      optimizer_state=unreplicated_optimizer_state,
+      batch_stats=unreplicated_batch_stats,
+      training_metrics_grabber=unreplicated_training_metrics_grabber,
+      global_step=uninitialized_global_step,
+      preemption_count=0,
+      sum_train_cost=0.0)
+  latest = load_latest_checkpoint(
+      train_dir,
+      target=unreplicated_checkpoint_state)
+  found_checkpoint = (
+      latest and latest['global_step'] != uninitialized_global_step)
+
+  optimizer_state = jax_utils.replicate(unreplicated_optimizer_state)
+  params = jax_utils.replicate(unreplicated_params)
+  batch_stats = jax_utils.replicate(unreplicated_batch_stats)
+  training_metrics_grabber = jax_utils.replicate(
+      unreplicated_training_metrics_grabber)
+
+  if not found_checkpoint:
+    return (
+        optimizer_state,
+        params,
+        batch_stats,
+        training_metrics_grabber,
+        0,  # global_step
+        0.0,  # sum_train_cost
+        0,  # preemption_count
+        False)  # is_restored
+
+  pytree_dict, extra_state = replicate_checkpoint(
+      latest,
+      pytree_keys=[
+          'optimizer_state',
+          'params',
+          'batch_stats',
+          'training_metrics_grabber',
+      ])
+  return (
+      pytree_dict['optimizer_state'],
+      pytree_dict['params'],
+      pytree_dict['batch_stats'],
+      pytree_dict['training_metrics_grabber'],
+      extra_state['global_step'],
+      extra_state['sum_train_cost'],
+      extra_state['preemption_count'],
+      True)
+
+
+def save_unreplicated_checkpoint_background(
+    train_dir,
+    optimizer_state,
+    params,
+    batch_stats,
+    training_metrics_grabber,
+    global_step,
+    preemption_count,
+    sum_train_cost,
+    max_to_keep=1):
+  """Saves pytree, step, preemption_count, and sum_train_cost to train_dir."""
+  logging.info('Saving checkpoint to ckpt_%d', global_step)
+  unreplicated_optimizer_state = jax.device_get(
+      jax_utils.unreplicate(optimizer_state))
+  unreplicated_params = jax.device_get(jax_utils.unreplicate(params))
+  unreplicated_batch_stats = jax.device_get(jax_utils.unreplicate(batch_stats))
+  unreplicated_training_metrics_grabber = jax.device_get(
+      jax_utils.unreplicate(training_metrics_grabber))
+  state = dict(global_step=global_step,
+               preemption_count=preemption_count,
+               sum_train_cost=sum_train_cost,
+               optimizer_state=unreplicated_optimizer_state,
+               params=unreplicated_params,
+               batch_stats=unreplicated_batch_stats,
+               training_metrics_grabber=unreplicated_training_metrics_grabber)
+  save_checkpoint_background(
+      train_dir,
+      global_step,
+      state,
+      max_to_keep=max_to_keep)
+  logging.info('Done saving checkpoint.')
+
 
 _save_checkpoint_background_thread = None
 _save_checkpoint_background_error = None

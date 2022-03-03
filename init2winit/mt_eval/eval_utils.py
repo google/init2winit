@@ -19,7 +19,6 @@ import os
 import pathlib
 
 from init2winit import checkpoint
-from init2winit import trainer
 import jax
 import optax
 import sacrebleu
@@ -68,7 +67,7 @@ def _load_checkpoint(checkpoint_path, params, optimizer_state, batch_stats,
       checkpoint_path,
       target=target,
   )
-  results = trainer.restore_checkpoint(
+  results = checkpoint.replicate_checkpoint(
       ckpt,
       pytree_keys=['params', 'optimizer_state', 'batch_stats'],
       replicate=replicate,

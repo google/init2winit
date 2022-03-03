@@ -21,10 +21,12 @@ import os
 from absl import logging
 from flax import jax_utils
 from init2winit import checkpoint
-from init2winit import trainer
 from init2winit.hessian import hessian_eval
+from init2winit.init_lib import init_utils
 from init2winit.init_lib import initializers
 from init2winit.optimizer_lib import optimizers
+from init2winit.trainer_lib import trainer
+from init2winit.trainer_lib import trainer_utils
 import utils as utils  # local file import
 import jax
 import optax
@@ -88,7 +90,7 @@ def eval_checkpoints(
   model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
 
   # Maybe run the initializer.
-  unreplicated_params, unreplicated_batch_stats = trainer.initialize(
+  unreplicated_params, unreplicated_batch_stats = init_utils.initialize(
       model.flax_module,
       initializer, model.loss_fn,
       hps.input_shape,
@@ -172,14 +174,14 @@ def eval_checkpoints(
     ckpt = checkpoint.load_checkpoint(
         checkpoint_path,
         target=unreplicated_checkpoint_state)
-    results, _ = trainer.restore_checkpoint(
+    results, _ = checkpoint.replicate_checkpoint(
         ckpt,
         pytree_keys=['params', 'optimizer_state', 'batch_stats'])
     params = results['params']
     optimizer_state = results['optimizer_state']
     batch_stats = results['batch_stats']
     # pylint: disable=protected-access
-    batch_stats = trainer._maybe_sync_batchnorm_stats(batch_stats)
+    batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
     # pylint: enable=protected-access
     report, _ = trainer.eval_metrics(params, batch_stats, dataset,
                                      eval_num_batches, eval_num_batches,

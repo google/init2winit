@@ -29,14 +29,15 @@ from flax import jax_utils
 from flax import linen as nn
 from init2winit import checkpoint
 from init2winit import hyperparameters
-from init2winit import trainer
 from init2winit import utils
 from init2winit.dataset_lib import datasets
 from init2winit.dataset_lib.small_image_datasets import Dataset
+from init2winit.init_lib import init_utils
 from init2winit.init_lib import initializers
 from init2winit.model_lib import base_model
 from init2winit.model_lib import metrics
 from init2winit.model_lib import models
+from init2winit.trainer_lib import trainer
 import jax.numpy as jnp
 import jax.random
 import jraph
@@ -254,7 +255,7 @@ class TrainerTest(parameterized.TestCase):
     rng, init_rng = jax.random.split(rng)
 
     # First initialize with no rescale.
-    params, _ = trainer.initialize(
+    params, _ = init_utils.initialize(
         model.flax_module,
         initializer,
         model.loss_fn,
@@ -271,7 +272,7 @@ class TrainerTest(parameterized.TestCase):
         '/Dense_1/kernel': rescale_factor,
     }
 
-    rescaled_params, _ = trainer.initialize(
+    rescaled_params, _ = init_utils.initialize(
         model.flax_module,
         initializer,
         model.loss_fn,
@@ -408,7 +409,7 @@ class TrainerTest(parameterized.TestCase):
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
     initializer = initializers.get_initializer('noop')
 
-    metrics_logger, init_logger = trainer.set_up_loggers(self.test_dir)
+    metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     _ = list(
         trainer.train(
             train_dir=self.test_dir,
@@ -469,7 +470,7 @@ class TrainerTest(parameterized.TestCase):
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
     initializer = initializers.get_initializer('noop')
 
-    metrics_logger, init_logger = trainer.set_up_loggers(self.test_dir)
+    metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     _ = list(
         trainer.train(
             train_dir=self.test_dir,
@@ -548,7 +549,7 @@ class TrainerTest(parameterized.TestCase):
     checkpoint_steps = []
     num_train_steps = _TEXT_TRAIN_SIZE // _TEXT_BATCH_SIZE * 3
 
-    metrics_logger, init_logger = trainer.set_up_loggers(self.test_dir)
+    metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     _ = list(
         trainer.train(
             train_dir=self.test_dir,
@@ -680,7 +681,7 @@ class TrainerTest(parameterized.TestCase):
     eval_num_batches = 5
     eval_every = 10
     checkpoint_steps = [1, 3, 15]
-    metrics_logger, init_logger = trainer.set_up_loggers(self.test_dir)
+    metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     epoch_reports = list(
         trainer.train(
             train_dir=self.test_dir,

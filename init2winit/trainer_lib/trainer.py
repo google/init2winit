@@ -13,39 +13,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Trainer for the init2winit project."""
+"""Standard trainer for the init2winit project."""
 import functools
 import itertools
-import json
 import os
-import struct
 import time
-from typing import Sequence
 
-from absl import flags
 from absl import logging
-from flax import jax_utils
 from init2winit import callbacks
 from init2winit import checkpoint
-from init2winit import hyperparameters
 from init2winit import schedules
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
-from init2winit.dataset_lib import datasets
-from init2winit.init_lib import initializers
+from init2winit.init_lib import init_utils
 from init2winit.model_lib import model_utils
-from init2winit.model_lib import models
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optimizers
+from init2winit.trainer_lib import trainer_utils
 import jax
 from jax import lax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from tensorflow.io import gfile
-
-
-FLAGS = flags.FLAGS
 
 _GRAD_CLIP_EPS = 1e-6
 
@@ -227,7 +216,7 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
 
   WARNING: we assume that `batch_stats` has already been synchronized across
   devices before being passed to this function! See
-  `_maybe_sync_batchnorm_stats`.
+  `trainer_utils.maybe_sync_batchnorm_stats`.
 
   The metric names will be of the form split/measurement for split in the set
   {train, valid, test} and measurement in the set {loss, error_rate}.
@@ -262,255 +251,6 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
       metrics = _merge_and_apply_prefix(metrics, split_metrics,
                                         (split_name + '/'))
   return metrics
-
-
-def initialize(flax_module,
-               initializer,
-               loss_fn,
-               input_shape,
-               output_shape,
-               hps,
-               rng,
-               metrics_logger,
-               fake_batch=None):
-  """Run the given initializer.
-
-  We initialize in 3 phases. First we run the default initializer that is
-  specified by the model constructor. Next we apply any rescaling as specified
-  by hps.layer_rescale_factors. Finally we run the black box initializer
-  provided by the initializer arg (the default is noop).
-
-  Args:
-    flax_module: The flax module.
-    initializer: An initializer defined in init_lib.
-    loss_fn: A loss function.
-    input_shape: The input shape of a single data example.
-    output_shape: The output shape of a single data example.
-    hps: A dictionary specifying the model and initializer hparams.
-    rng: An rng key to seed the initialization.
-    metrics_logger: Used for black box initializers that have learning curves.
-    fake_batch: Fake input used to intialize the network or None if using
-      init_by_shape.
-
-  Returns:
-    A tuple (model, batch_stats), where model is the initialized flax model and
-    batch_stats is the collection used for batch norm.
-  """
-  model_dtype = utils.dtype_from_str(hps.model_dtype)
-  # init_by_shape should either pass in a tuple or a list of tuples.
-  # For example, for vision tasks typically input_shape is (image_shape)
-  # For seq2seq tasks, shape can be a list of two tuples corresponding to
-  # input_sequence_shape for encoder and output_sequence_shape for decoder.
-  # TODO(gilmer,ankugarg): Support initializers for list of tuples.
-  #
-  # Note that this fake input batch will be optimized away because the init
-  # function is jitted. However, this can still cause memory issues if it is
-  # large because it is passed in as an XLA argument. Therefore we use a fake
-  # batch size of 2 (we do not want to use 1 in case there is any np.squeeze
-  # calls that would remove it), because we assume that there is no dependence
-  # on the batch size with the model (batch norm reduces across a batch dim of
-  # any size). This is similar to how the Flax examples initialize models:
-  # https://github.com/google/flax/blob/44ee6f2f4130856d47159dc58981fb26ea2240f4/examples/imagenet/train.py#L70.
-  if fake_batch:
-    fake_input_batch = fake_batch
-  elif isinstance(input_shape, list):  # Typical case for seq2seq models
-    fake_input_batch = [
-        np.zeros((2, *x), model_dtype) for x in input_shape
-    ]
-  else:  # Typical case for classification models
-    fake_input_batch = [np.zeros((2, *input_shape), model_dtype)]
-  params_rng, init_rng, dropout_rng = jax.random.split(rng, num=3)
-
-  # By jitting the model init function, we initialize the model parameters
-  # lazily without computing a full forward pass. For further documentation, see
-  # https://flax.readthedocs.io/en/latest/flax.linen.html?highlight=jax.jit#flax.linen.Module.init.
-  # We need to close over train=False here because otherwise the jitted init
-  # function will convert the train Python bool to a jax boolean, which will
-  # mess up Pythonic boolean statements like `not train` inside the model
-  # construction.
-  model_init_fn = jax.jit(functools.partial(flax_module.init, train=False))
-  init_dict = model_init_fn(
-      {'params': params_rng, 'dropout': dropout_rng},
-      *fake_input_batch)
-  # Trainable model parameters.
-  params = init_dict['params']
-  batch_stats = init_dict.get('batch_stats', {})
-
-  if hps.get('layer_rescale_factors'):
-    params = model_utils.rescale_layers(params, hps.layer_rescale_factors)
-  # We don't pass batch_stats to the initializer, the initializer will just
-  # run batch_norm in train mode and does not need to maintain the batch_stats.
-  # TODO(gilmer): We hardcode here weighted_cross_entropy, but this will need
-  # to change for other models. Maybe have meta_loss_inner as an initializer
-  # hyper_param?
-  # TODO(gilmer): instead of passing in weighted_xent, pass in the model and get
-  # the loss from that.
-  params = initializer(loss_fn, flax_module, params, hps, input_shape,
-                       output_shape, init_rng, metrics_logger)
-
-  return params, batch_stats
-
-
-def save_checkpoint(train_dir,
-                    optimizer_state,
-                    params,
-                    batch_stats,
-                    training_metrics_grabber,
-                    global_step,
-                    preemption_count,
-                    sum_train_cost,
-                    max_to_keep=1):
-  """Saves pytree, step, preemption_count, and sum_train_cost to train_dir."""
-  logging.info('Saving checkpoint to ckpt_%d', global_step)
-  unreplicated_optimizer_state = jax.device_get(
-      jax_utils.unreplicate(optimizer_state))
-  unreplicated_params = jax.device_get(jax_utils.unreplicate(params))
-  unreplicated_batch_stats = jax.device_get(jax_utils.unreplicate(batch_stats))
-  unreplicated_training_metrics_grabber = jax.device_get(
-      jax_utils.unreplicate(training_metrics_grabber))
-  state = dict(global_step=global_step,
-               preemption_count=preemption_count,
-               sum_train_cost=sum_train_cost,
-               optimizer_state=unreplicated_optimizer_state,
-               params=unreplicated_params,
-               batch_stats=unreplicated_batch_stats,
-               training_metrics_grabber=unreplicated_training_metrics_grabber)
-  checkpoint.save_checkpoint_background(
-      train_dir,
-      global_step,
-      state,
-      max_to_keep=max_to_keep)
-  logging.info('Done saving checkpoint.')
-
-
-def restore_checkpoint(
-    latest,
-    pytree_keys: Sequence[str],
-    replicate=True):
-  """Restores from the provided checkpoint.
-
-  Args:
-    latest: A dict representing the state of the
-      checkpoint we want to restore.
-    pytree_keys: A sequence of keys into `latest` that are pytrees, which will
-      be replicated if replicate=True.
-    replicate: If set, replicate the state across devices.
-
-  Returns:
-    Tuple of (pytree, extra_dict) where pytree is a JAX pytree holding the
-    arrays that need to be replicated/unreplicated and extra_dict holds any
-    additional python state. We expect extra_dict to have the keys of
-    'global_step', 'preemption_count', 'sum_train_cost', but old checkpoints
-    might be missing something.
-  """
-  logging.info('Loaded model parameters from latest checkpoint.')
-  # Old checkpoints without 'sum_train_cost' can still be restored, but the
-  # train() function will break. Evals and curvature stuff should be fine,
-  # however.
-  expected = ['global_step', 'preemption_count', 'sum_train_cost']
-  if any(k not in latest for k in expected):
-    logging.warn('Checkpoint state missing keys, obtained %s expected %s',
-                 list(latest.keys()), expected)
-
-  pytree = {k: latest[k] for k in pytree_keys}
-  if replicate:
-    pytree = jax_utils.replicate(pytree)
-  extra_dict = {k: latest[k] for k in latest.keys() if k not in pytree_keys}
-  return pytree, extra_dict
-
-
-def _replicate_and_maybe_restore_latest_checkpoint(
-    unreplicated_optimizer_state,
-    unreplicated_params,
-    unreplicated_batch_stats,
-    unreplicated_training_metrics_grabber,
-    train_dir):
-  """Restore from the latest checkpoint, if it exists."""
-  uninitialized_global_step = -1
-  unreplicated_checkpoint_state = dict(
-      params=unreplicated_params,
-      optimizer_state=unreplicated_optimizer_state,
-      batch_stats=unreplicated_batch_stats,
-      training_metrics_grabber=unreplicated_training_metrics_grabber,
-      global_step=uninitialized_global_step,
-      preemption_count=0,
-      sum_train_cost=0.0)
-  latest = checkpoint.load_latest_checkpoint(
-      train_dir,
-      target=unreplicated_checkpoint_state)
-  found_checkpoint = (
-      latest and latest['global_step'] != uninitialized_global_step)
-
-  optimizer_state = jax_utils.replicate(unreplicated_optimizer_state)
-  params = jax_utils.replicate(unreplicated_params)
-  batch_stats = jax_utils.replicate(unreplicated_batch_stats)
-  training_metrics_grabber = jax_utils.replicate(
-      unreplicated_training_metrics_grabber)
-
-  if not found_checkpoint:
-    return (
-        optimizer_state,
-        params,
-        batch_stats,
-        training_metrics_grabber,
-        0,  # global_step
-        0.0,  # sum_train_cost
-        0,  # preemption_count
-        False)  # is_restored
-
-  pytree_dict, extra_state = restore_checkpoint(
-      latest,
-      pytree_keys=[
-          'optimizer_state',
-          'params',
-          'batch_stats',
-          'training_metrics_grabber',
-      ])
-  return (
-      pytree_dict['optimizer_state'],
-      pytree_dict['params'],
-      pytree_dict['batch_stats'],
-      pytree_dict['training_metrics_grabber'],
-      extra_state['global_step'],
-      extra_state['sum_train_cost'],
-      extra_state['preemption_count'],
-      True)
-
-
-def _log_epoch_report(report, metrics_logger):
-  logging.info('Step %d, steps/second: %f, report: %r', report['global_step'],
-               report['steps_per_sec'], report)
-  if metrics_logger:
-    metrics_logger.append_scalar_metrics(report)
-  logging.info('Finished (estimated) epoch %d. Saving checkpoint.',
-               report['epoch'])
-
-
-def _maybe_log_training_metrics(training_metrics_grabber, metrics_logger):
-  if training_metrics_grabber:
-    summary_tree = utils.get_summary_tree(training_metrics_grabber)
-    metrics_logger.append_pytree(summary_tree)
-
-
-def _write_trial_meta_data(meta_data_path, meta_data):
-  d = meta_data.copy()
-  d['timestamp'] = time.time()
-  with gfile.GFile(meta_data_path, 'w') as f:
-    f.write(json.dumps(d, indent=2))
-
-
-def _maybe_sync_batchnorm_stats(batch_stats):
-  """Sync batch_stats across devices."""
-  # We first check that batch_stats is used (pmap will throw an error if
-  # it's a non batch norm model). If batch norm is not used then
-  # batch_stats = None. Note that, in the case of using our implementation of
-  # virtual batch norm, this will also handle synchronizing the multiple moving
-  # averages on each device before doing a cross-host sync.
-  if batch_stats:
-    batch_stats = jax.pmap(
-        model_utils.sync_batchnorm_stats, axis_name='batch')(
-            batch_stats)
-  return batch_stats
 
 
 def train(train_dir,
@@ -592,7 +332,7 @@ def train(train_dir,
     callback_configs = []
 
   # Maybe run the initializer.
-  unreplicated_params, unreplicated_batch_stats = initialize(
+  unreplicated_params, unreplicated_batch_stats = init_utils.initialize(
       model.flax_module,
       initializer,
       model.loss_fn,
@@ -632,7 +372,7 @@ def train(train_dir,
   (optimizer_state, params, batch_stats, training_metrics_grabber,
    global_step, sum_train_cost,
    preemption_count,
-   is_restored) = _replicate_and_maybe_restore_latest_checkpoint(
+   is_restored) = checkpoint.replicate_and_maybe_restore_latest_checkpoint(
        unreplicated_optimizer_state=unreplicated_optimizer_state,
        unreplicated_params=unreplicated_params,
        unreplicated_batch_stats=unreplicated_batch_stats,
@@ -732,7 +472,7 @@ def train(train_dir,
 
   for batch in train_iter:
     if global_step in checkpoint_steps and jax.process_index() == 0:
-      save_checkpoint(
+      checkpoint.save_unreplicated_checkpoint_background(
           checkpoint_dir,
           optimizer_state,
           params,
@@ -760,8 +500,8 @@ def train(train_dir,
     # TODO(gdahl, gilmer): consider moving this test up.
     # NB: Since this test is after we increment global_step, having 0 in
     # eval_steps does nothing.
-    if utils.should_eval(global_step, eval_frequency, eval_steps):
-      batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
+    if trainer_utils.should_eval(global_step, eval_frequency, eval_steps):
+      batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
       report, eval_time = eval_metrics(params,
                                        batch_stats,
                                        dataset,
@@ -787,9 +527,10 @@ def train(train_dir,
         report.update(callback_metrics)
       yield report
       if jax.process_index() == 0:
-        _log_epoch_report(report, metrics_logger)
-        _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
-        save_checkpoint(
+        trainer_utils.log_epoch_report(report, metrics_logger)
+        trainer_utils.maybe_log_training_metrics(
+            training_metrics_grabber, metrics_logger)
+        checkpoint.save_unreplicated_checkpoint_background(
             train_dir,
             optimizer_state,
             params,
@@ -805,7 +546,7 @@ def train(train_dir,
   # If we moved where in the loop body evals happen then we would not need this
   # test.
   if prev_eval_step != num_train_steps:
-    batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
+    batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
     report, eval_time = eval_metrics(params,
                                      batch_stats,
                                      dataset,
@@ -825,9 +566,10 @@ def train(train_dir,
                   train_cost=mean_train_cost)
     yield report
     if jax.process_index() == 0:
-      _log_epoch_report(report, metrics_logger)
-      _maybe_log_training_metrics(training_metrics_grabber, metrics_logger)
-      save_checkpoint(
+      trainer_utils.log_epoch_report(report, metrics_logger)
+      trainer_utils.maybe_log_training_metrics(
+          training_metrics_grabber, metrics_logger)
+      checkpoint.save_unreplicated_checkpoint_background(
           train_dir,
           optimizer_state,
           params,
@@ -840,127 +582,3 @@ def train(train_dir,
   checkpoint.wait_for_checkpoint_save()
 
 
-def set_up_loggers(train_dir, xm_work_unit=None):
-  """Creates a logger for eval metrics as well as initialization metrics."""
-  csv_path = os.path.join(train_dir, 'measurements.csv')
-  pytree_path = os.path.join(train_dir, 'training_metrics')
-  metrics_logger = utils.MetricLogger(
-      csv_path=csv_path,
-      pytree_path=pytree_path,
-      xm_work_unit=xm_work_unit,
-      events_dir=train_dir)
-
-  init_csv_path = os.path.join(train_dir, 'init_measurements.csv')
-  init_json_path = os.path.join(train_dir, 'init_scalars.json')
-  init_logger = utils.MetricLogger(
-      csv_path=init_csv_path,
-      json_path=init_json_path,
-      xm_work_unit=xm_work_unit)
-  return metrics_logger, init_logger
-
-
-@functools.partial(jax.pmap, axis_name='hosts')
-def _sum_seeds_pmapped(seed):
-  return lax.psum(seed, 'hosts')
-
-
-def create_synchronized_rng_seed():
-  rng_seed = np.int64(struct.unpack('q', os.urandom(8))[0])
-  rng_seed = _sum_seeds_pmapped(jax_utils.replicate(rng_seed))
-  rng_seed = np.sum(rng_seed)
-  return rng_seed
-
-
-def run(
-    dataset_name,
-    eval_batch_size,
-    eval_num_batches,
-    eval_train_num_batches,
-    eval_frequency,
-    checkpoint_steps,
-    eval_steps,
-    hparam_file,
-    hparam_overrides,
-    initializer_name,
-    model_name,
-    loss_name,
-    metrics_name,
-    num_train_steps,
-    experiment_dir,
-    worker_id,
-    training_metrics_config,
-    callback_configs):
-  """Function that runs a Jax experiment. See flag definitions for args."""
-  model_cls = models.get_model(model_name)
-  initializer = initializers.get_initializer(initializer_name)
-  dataset_builder = datasets.get_dataset(dataset_name)
-  dataset_meta_data = datasets.get_dataset_meta_data(dataset_name)
-
-  merged_hps = hyperparameters.build_hparams(
-      model_name=model_name,
-      initializer_name=initializer_name,
-      dataset_name=dataset_name,
-      hparam_file=hparam_file,
-      hparam_overrides=hparam_overrides)
-
-  # Note that one should never tune an RNG seed!!! The seed is only included in
-  # the hparams for convenience of running hparam trials with multiple seeds per
-  # point.
-  rng_seed = merged_hps.rng_seed
-  if merged_hps.rng_seed < 0:
-    rng_seed = create_synchronized_rng_seed()
-  xm_experiment = None
-  if jax.process_index() == 0:
-    logging.info('Running with seed %d', rng_seed)
-  rng = jax.random.PRNGKey(rng_seed)
-
-  # Build the loss_fn, metrics_bundle, and flax_module.
-  model = model_cls(merged_hps, dataset_meta_data, loss_name, metrics_name)
-  trial_dir = os.path.join(experiment_dir, str(worker_id))
-  meta_data_path = os.path.join(trial_dir, 'meta_data.json')
-  meta_data = {'worker_id': worker_id, 'status': 'incomplete'}
-  if jax.process_index() == 0:
-    logging.info('rng: %s', rng)
-    gfile.makedirs(trial_dir)
-    # Set up the metric loggers for host 0.
-    xm_work_unit = None
-    metrics_logger, init_logger = set_up_loggers(
-        trial_dir,
-        xm_work_unit)
-    hparams_fname = os.path.join(trial_dir, 'hparams.json')
-    logging.info('saving hparams to %s', hparams_fname)
-    with gfile.GFile(hparams_fname, 'w') as f:
-      f.write(merged_hps.to_json())
-    _write_trial_meta_data(meta_data_path, meta_data)
-  else:
-    metrics_logger = None
-    init_logger = None
-  try:
-    epoch_reports = list(
-        train(
-            trial_dir,
-            model,
-            dataset_builder,
-            initializer,
-            num_train_steps,
-            merged_hps,
-            rng,
-            eval_batch_size,
-            eval_num_batches,
-            eval_train_num_batches,
-            eval_frequency,
-            checkpoint_steps,
-            eval_steps,
-            metrics_logger,
-            init_logger,
-            training_metrics_config=training_metrics_config,
-            callback_configs=callback_configs,
-        ))
-    logging.info(epoch_reports)
-    meta_data['status'] = 'done'
-  except utils.TrainingDivergedError as err:
-    meta_data['status'] = 'diverged'
-    raise err
-  finally:
-    if jax.process_index() == 0:
-      _write_trial_meta_data(meta_data_path, meta_data)

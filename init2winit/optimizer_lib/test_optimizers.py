@@ -21,10 +21,11 @@ import tempfile
 from absl.testing import absltest
 from init2winit import checkpoint
 from init2winit import hyperparameters
-from init2winit import trainer
+from init2winit import utils
 from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
+from init2winit.trainer_lib import trainer
 import jax
 from jax import lax
 import pandas
@@ -100,7 +101,7 @@ class OptimizersTest(absltest.TestCase):
     dataset_meta_data = datasets.get_dataset_meta_data('fake')
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
 
-    metrics_logger, init_logger = trainer.set_up_loggers(self.test_dir)
+    metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     _ = list(
         trainer.train(
             train_dir=self.test_dir,
