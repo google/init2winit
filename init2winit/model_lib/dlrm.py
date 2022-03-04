@@ -29,14 +29,15 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         rng_seed=-1,
         model_dtype='float32',
-        vocab_sizes=[64] * 8,
+        vocab_sizes=[1024] * 26,
         mlp_bottom_dims=[128, 128],
         mlp_top_dims=[256, 128, 1],
+        output_shape=(1,),
         embed_dim=64,
         keep_diags=True,
         optimizer='adam',
         batch_size=128,
-        num_dense_features=16,
+        num_dense_features=13,
         lr_hparams={
             'base_lr': 0.01,
             'schedule': 'constant'
@@ -44,8 +45,10 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         opt_hparams={
             'beta1': 0.9,
             'beta2': 0.999,
-            'epsilon': 1e-8,
+            'epsilon': 1e-5,
         },
+        l2_decay_factor=1e-5,
+        l2_decay_rank_threshold=2,
     ))
 
 

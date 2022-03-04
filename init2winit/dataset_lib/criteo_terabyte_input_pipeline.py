@@ -16,22 +16,24 @@
 """Data loader for pre-processed Criteo data."""
 
 import functools
+import itertools
 import os
 
 from absl import logging
 from init2winit.dataset_lib.data_utils import Dataset
 from ml_collections.config_dict import config_dict
 import tensorflow as tf
-
+import tensorflow_datasets as tfds
 
 # Change below to the path to dataset files.
 CRITEO1TB_FILE_PATH = ''
 CRITEO1TB_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    input_shape=528,
-    num_dense_features=16,
-    train_file_path=os.path.join(CRITEO1TB_FILE_PATH, '/train/train*'),
-    eval_file_path=os.path.join(CRITEO1TB_FILE_PATH, '/eval/eval*'),
+    input_shape=(13 + 26,),
+    train_file_path=os.path.join(CRITEO1TB_FILE_PATH, 'train/train*'),
+    eval_file_path=os.path.join(CRITEO1TB_FILE_PATH, 'eval/eval*'),
     num_train_datasets=8192,
+    # TODO(eamid): find the exact train_size
+    train_size=4e9,
     num_eval_datasets=1072,
     parallelism=16,
     dataset_index=0,
@@ -95,18 +97,22 @@ class CriteoTsvReader(object):
       num_labels = 1
       num_dense = len(int_defaults)
       features = {}
-      features['label'] = tf.reshape(fields[0], [batch_size, 1])
+      features['targets'] = tf.reshape(fields[0], [batch_size, 1])
 
       int_features = []
       for idx in range(num_dense):
         int_features.append(fields[idx + num_labels])
-      features['int-features'] = tf.stack(int_features, axis=1)
+      int_features = tf.stack(int_features, axis=1)
 
       cat_features = []
       for idx in range(len(self._vocab_sizes)):
         cat_features.append(
             tf.cast(fields[idx + num_dense + num_labels], dtype=tf.int32))
-      features['cat-features'] = tf.stack(cat_features, axis=1)
+      cat_features = tf.cast(
+          tf.stack(cat_features, axis=1), dtype=int_features.dtype)
+      features['inputs'] = tf.concat([int_features, cat_features], axis=1)
+      features['weights'] = tf.ones(
+          shape=(features['inputs'].shape[0],), dtype=features['inputs'].dtype)
       return features
 
     filenames = tf.data.Dataset.list_files(self._file_path, shuffle=False)
@@ -137,12 +143,16 @@ class CriteoTsvReader(object):
     return ds
 
 
+def convert_to_numpy_iterator_fn(num_batches, tf_dataset_fn):
+  return itertools.islice(tfds.as_numpy(tf_dataset_fn()), num_batches)
+
+
 def get_criteo1tb(unused_shuffle_rng,
                   batch_size,
                   eval_batch_size,
                   hps):
   """Get the Criteo 1TB train and eval iterators."""
-  train_iterator_fn = CriteoTsvReader(
+  train_dataset = CriteoTsvReader(
       file_path=hps.train_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
@@ -151,8 +161,9 @@ def get_criteo1tb(unused_shuffle_rng,
       dataset_num_shards=hps.dataset_num_shards,
       is_training=True,
       parallelism=hps.parallelism,
-      num_datasets=hps.num_train_datasets)()
-  eval_train_epoch = CriteoTsvReader(
+      num_datasets=hps.num_train_datasets)
+  train_iterator_fn = lambda: tfds.as_numpy(train_dataset())
+  eval_train_dataset = CriteoTsvReader(
       file_path=hps.train_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
@@ -161,14 +172,21 @@ def get_criteo1tb(unused_shuffle_rng,
       dataset_num_shards=hps.dataset_num_shards,
       is_training=False,
       parallelism=hps.parallelism,
-      num_datasets=hps.num_train_datasets)()
-  eval_iterator_fn = CriteoTsvReader(
+      num_datasets=hps.num_train_datasets)
+  eval_train_epoch = functools.partial(
+      convert_to_numpy_iterator_fn, tf_dataset_fn=eval_train_dataset)
+  eval_dataset = CriteoTsvReader(
       file_path=hps.eval_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
+      batch_size=eval_batch_size,
+      dataset_index=hps.dataset_index,
+      dataset_num_shards=hps.dataset_num_shards,
       is_training=False,
       parallelism=hps.parallelism,
-      num_datasets=hps.num_eval_datasets)()
+      num_datasets=hps.num_eval_datasets)
+  eval_iterator_fn = functools.partial(
+      convert_to_numpy_iterator_fn, tf_dataset_fn=eval_dataset)
   # pylint: disable=unreachable
   def test_epoch(*args, **kwargs):
     del args
