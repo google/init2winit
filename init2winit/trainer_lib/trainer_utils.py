@@ -54,3 +54,28 @@ def should_eval(global_step, eval_frequency, eval_steps):
   if eval_steps:
     return global_step in eval_steps
   return global_step % eval_frequency == 0
+
+
+def check_for_early_stopping(
+    early_stopping_target_name,
+    early_stopping_target_value,
+    early_stopping_mode,
+    eval_report):
+  """Check if we reached the metric value to stop training early."""
+  if early_stopping_target_name is not None:
+    if early_stopping_target_name not in eval_report:
+      raise ValueError(
+          'Provided early_stopping_target_name '
+          f'{early_stopping_target_name} not in the computed metrics: '
+          f'{eval_report.keys()}.')
+    if early_stopping_mode is None:
+      raise ValueError(
+          'Need to provide a early_stopping_mode if using early stopping.')
+    # Note that because eval metrics are synced across hosts, this should
+    # stop training on every host at the same step.
+    if early_stopping_mode == 'above':
+      return (eval_report[early_stopping_target_name] >=
+              early_stopping_target_value)
+    else:
+      return (eval_report[early_stopping_target_name] <=
+              early_stopping_target_value)

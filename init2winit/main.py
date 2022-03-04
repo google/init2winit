@@ -78,6 +78,27 @@ flags.DEFINE_list(
     'directory train_dir/checkpoints. Note these checkpoints'
     'will be in addition to the normal checkpointing that'
     'occurs during training for preemption purposes.')
+
+flags.DEFINE_string(
+    'early_stopping_target_name',
+    None,
+    'A string naming the metric to use to perform early stopping. If this '
+    'metric reaches the value `early_stopping_target_value`, training will '
+    'stop. Must include the dataset split (ex: validation/error_rate).')
+flags.DEFINE_float(
+    'early_stopping_target_value',
+    None,
+    'A float indicating the value at which to stop training.')
+flags.DEFINE_enum(
+    'early_stopping_mode',
+    None,
+    enum_values=['above', 'below'],
+    help=(
+        'One of "above" or "below", indicates if we should stop when the '
+        'metric is above or below the threshold value. Example: if "above", '
+        'then training will stop when '
+        '`report[early_stopping_target_name] >= early_stopping_target_value`.'))
+
 flags.DEFINE_list(
     'eval_steps', [],
     'List of steps to evaluate the model. Evaluating implies saving a '
@@ -123,6 +144,9 @@ def _run(
     eval_train_num_batches,
     eval_frequency,
     checkpoint_steps,
+    early_stopping_target_name,
+    early_stopping_target_value,
+    early_stopping_mode,
     eval_steps,
     hparam_file,
     hparam_overrides,
@@ -195,6 +219,9 @@ def _run(
             eval_train_num_batches,
             eval_frequency,
             checkpoint_steps,
+            early_stopping_target_name,
+            early_stopping_target_value,
+            early_stopping_mode,
             eval_steps,
             metrics_logger,
             init_logger,
@@ -250,6 +277,9 @@ def main(unused_argv):
         eval_train_num_batches=FLAGS.eval_train_num_batches,
         eval_frequency=FLAGS.eval_frequency,
         checkpoint_steps=checkpoint_steps,
+        early_stopping_target_name=FLAGS.early_stopping_target_name,
+        early_stopping_target_value=FLAGS.early_stopping_target_value,
+        early_stopping_mode=FLAGS.early_stopping_mode,
         eval_steps=eval_steps,
         hparam_file=FLAGS.hparam_file,
         hparam_overrides=FLAGS.hparam_overrides,

@@ -265,6 +265,9 @@ def train(train_dir,
           eval_train_num_batches,
           eval_frequency,
           checkpoint_steps,
+          early_stopping_target_name=None,
+          early_stopping_target_value=None,
+          early_stopping_mode=None,
           eval_steps=None,
           metrics_logger=None,
           init_logger=None,
@@ -292,6 +295,16 @@ def train(train_dir,
     eval_frequency: (int) Evaluate every k steps.
     checkpoint_steps: List of integers indicating special steps to save
       checkpoints at. These checkpoints do not get used for preemption recovery.
+    early_stopping_target_name: A string naming the metric to use to perform
+       early stopping. If this metric reaches the value
+      `early_stopping_target_value`, training will stop. Must include the
+      dataset split (ex: validation/error_rate).
+    early_stopping_target_value: A float indicating the value at which to stop
+      training.
+    early_stopping_mode: One of "above" or "below", indicates if we should stop
+      when the metric is above or below the threshold value. Example: if
+      "above", then training will stop when
+      `report[early_stopping_target_name] >= early_stopping_target_value`.
     eval_steps: List of integers indicating which steps to perform evals. If
       provided, eval_frequency will be ignored. Performing an eval implies
       saving a checkpoint that will be used to resume training in the case of
@@ -541,6 +554,22 @@ def train(train_dir,
             sum_train_cost)
       sum_train_cost = 0.0
       prev_eval_step = global_step
+
+      early_stopping_condition = trainer_utils.check_for_early_stopping(
+          early_stopping_target_name,
+          early_stopping_target_value,
+          early_stopping_mode,
+          report)
+      if early_stopping_condition:
+        comparison_string = '>=' if early_stopping_mode == 'above' else '<='
+        logging.info(
+            'Early stopping because metric %s=%f, reached the target value '
+            'of %s %f.',
+            early_stopping_target_name,
+            report[early_stopping_target_name],
+            comparison_string,
+            early_stopping_target_value)
+        return
 
   # Always log and checkpoint on host 0 at the end of training.
   # If we moved where in the loop body evals happen then we would not need this

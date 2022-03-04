@@ -815,6 +815,103 @@ class TrainerTest(parameterized.TestCase):
     self.assertAlmostEqual(result['error_rate'], error_rate)
     self.assertAlmostEqual(result['num_examples'], num_results)
 
+  def test_early_stopping(self):
+    """Test training early stopping on MNIST with a small model."""
+    rng = jax.random.PRNGKey(0)
+
+    # Set the numpy seed to make the fake data deterministc. mocking.mock_data
+    # ultimately calls numpy.random.
+    np.random.seed(0)
+
+    model_name = 'fully_connected'
+    loss_name = 'cross_entropy'
+    metrics_name = 'classification_metrics'
+    initializer_name = 'noop'
+    dataset_name = 'mnist'
+    model_cls = models.get_model(model_name)
+    initializer = initializers.get_initializer(initializer_name)
+    dataset_builder = datasets.get_dataset(dataset_name)
+    hparam_overrides = {
+        'lr_hparams': {
+            'base_lr': 0.1,
+            'schedule': 'cosine'
+        },
+        'batch_size': 8,
+        'train_size': 160,
+        'valid_size': 96,
+        'test_size': 80,
+    }
+    hps = hyperparameters.build_hparams(
+        model_name,
+        initializer_name,
+        dataset_name,
+        hparam_file=None,
+        hparam_overrides=hparam_overrides)
+
+    eval_batch_size = 16
+    num_examples = 256
+
+    def as_dataset(self, *args, **kwargs):
+      del args
+      del kwargs
+
+      # pylint: disable=g-long-lambda,g-complex-comprehension
+      return tf.data.Dataset.from_generator(
+          lambda: ({
+              'image': np.ones(shape=(28, 28, 1), dtype=np.uint8),
+              'label': 9,
+          } for i in range(num_examples)),
+          output_types=self.info.features.dtype,
+          output_shapes=self.info.features.shape,
+      )
+
+    # This will override the tfds.load(mnist) call to return 100 fake samples.
+    with tfds.testing.mock_data(
+        as_dataset_fn=as_dataset, num_examples=num_examples):
+      dataset = dataset_builder(
+          shuffle_rng=jax.random.PRNGKey(0),
+          batch_size=hps.batch_size,
+          eval_batch_size=eval_batch_size,
+          hps=hps)
+
+    model = model_cls(hps, datasets.get_dataset_meta_data(dataset_name),
+                      loss_name, metrics_name)
+
+    num_train_steps = 40
+    early_stopping_target_name = 'test/ce_loss'
+    early_stopping_target_value = 0.005
+    early_stopping_mode = 'less'
+    eval_num_batches = 5
+    eval_every = 10
+    checkpoint_steps = [1, 3, 15]
+    metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
+    epoch_reports = list(
+        trainer.train(
+            train_dir=self.test_dir,
+            model=model,
+            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+            initializer=initializer,
+            num_train_steps=num_train_steps,
+            hps=hps,
+            rng=rng,
+            eval_batch_size=eval_batch_size,
+            eval_num_batches=eval_num_batches,
+            eval_train_num_batches=eval_num_batches,
+            eval_frequency=eval_every,
+            checkpoint_steps=checkpoint_steps,
+            early_stopping_target_name=early_stopping_target_name,
+            early_stopping_target_value=early_stopping_target_value,
+            early_stopping_mode=early_stopping_mode,
+            metrics_logger=metrics_logger,
+            init_logger=init_logger))
+    self.assertLen(epoch_reports, 3)
+    self.assertGreater(
+        epoch_reports[-2][early_stopping_target_name],
+        early_stopping_target_value)
+    self.assertLess(
+        epoch_reports[-1][early_stopping_target_name],
+        early_stopping_target_value)
+
 
 if __name__ == '__main__':
   absltest.main()
