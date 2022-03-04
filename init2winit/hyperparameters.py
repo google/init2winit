@@ -26,6 +26,19 @@ from ml_collections.config_dict import config_dict
 from tensorflow.io import gfile
 
 
+def _check_keys_used(hps, incoming, prefix=''):
+  for incoming_key in incoming.keys():
+    if incoming_key in ['opt_hparams', 'lr_hparams']:
+      continue
+    if incoming_key in hps:
+      if isinstance(incoming[incoming_key], (dict, config_dict.ConfigDict)):
+        _check_keys_used(
+            hps[incoming_key], incoming[incoming_key], incoming_key + '.')
+    else:
+      logging.warning(
+          'Key %s%s not supported by current workload.', prefix, incoming_key)
+
+
 def build_hparams(model_name,
                   initializer_name,
                   dataset_name,
@@ -71,16 +84,11 @@ def build_hparams(model_name,
     merged_dict['label_smoothing'] *= num_classes / float(num_classes - 1)
 
   merged = config_dict.ConfigDict(merged_dict)
-  merged.lock()
 
   # Subconfig "opt_hparams" and "lr_hparams" are allowed to add new fields.
   for key in ['opt_hparams', 'lr_hparams']:
     if key not in merged:
-      with merged.unlocked():
-        merged[key] = config_dict.ConfigDict()
-
-  for key in ['opt_hparams', 'lr_hparams']:
-    merged[key].unlock()
+      merged[key] = config_dict.ConfigDict()
 
   if hparam_file:
     logging.info('Loading hparams from %s', hparam_file)
@@ -101,6 +109,14 @@ def build_hparams(model_name,
     if 'optimizer' in hparam_overrides and merged[
         'optimizer'] != hparam_overrides['optimizer']:
       merged['opt_hparams'] = {}
+
+    # In order to gracefully support training a set of multiple workloads with
+    # a single config, we need to allow some hyperparameters in merged that are
+    # only used by certain experiments. We don't want to silently drop these
+    # values in case they were set with the intention of using them, so we
+    # noisily warn the user in logs.
+    _check_keys_used(merged, hparam_overrides)
+
     merged.update_from_flattened_dict(hparam_overrides)
 
   return merged
