@@ -40,7 +40,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     output_shape=(1000,),
     train_size=1281167,
     valid_size=50000,
-    use_inception=False,
+    use_inception_crop=False,
     use_mixup=False,
     mixup={'alpha': 0.5},
     use_randaug=False,
@@ -246,7 +246,7 @@ def preprocess_for_train(image_bytes,
   Returns:
     A preprocessed image `Tensor`.
   """
-  if hps.get('use_inception'):
+  if hps.get('use_inception_crop'):
     image = _decode_and_inception_crop(image_bytes, image_size)
   else:
     image = _decode_and_random_crop(image_bytes, image_size)
