@@ -15,6 +15,7 @@
 
 """Preprocessing for image datasets."""
 
+import jax
 from jax import lax
 from jax import random
 from jax import vmap
@@ -52,6 +53,54 @@ def crop(key, images, hps):
   vcrop = vmap(_crop, (0, 0, None), 0)
   key = random.split(key, images.shape[0])
   return vcrop(key, images, hps)
+
+
+def mixup_general(key,
+                  *args_to_mix,
+                  alpha=0.1,
+                  fold_in=None,
+                  n=2,
+                  **kwargs_to_mix):
+  """Perform mixup https://arxiv.org/abs/1710.09412.
+
+  NOTE: Code taken from https://github.com/google/big_vision with variables
+  renamed to match `mixup` in this file and logic to synchronize globally.
+
+  Args:
+    key: The random key to use.
+    *args_to_mix: further arguments are the arrays to be mixed.
+    alpha: the beta/dirichlet concentration parameter, typically 0.1 or 0.2.
+    fold_in: One of None, "host", "device", or "sample". Whether to sample a
+      global mixing coefficient, one per host, one per device, or one per
+      example, respectively. The latter is usually a bad idea.
+    n: with how many other images an image is mixed. Default mixup is n=2.
+    **kwargs_to_mix: further kwargs are arrays to be mixed.
+      for further experiments and investigations.
+
+  Returns:
+    A new key key. A list of mixed *things. A dict of mixed **more_things.
+  """
+  _, key_m = random.split(key, 2)
+  ashape = (len(args_to_mix[0]),) if fold_in == 'sample' else (1,)
+
+  if fold_in == 'host':
+    key_m = random.fold_in(key_m, jax.process_index())
+  elif fold_in in ('device', 'sample'):
+    key_m = random.fold_in(key_m, jax.lax.axis_index('batch'))
+
+  weight = random.dirichlet(key_m, jnp.array([alpha] * n), ashape)
+  # Sort alpha values in decreasing order. This avoids destroying examples
+  # when the concentration parameter alpha is very small, due to Dirichlet's
+  # symmetry.
+  weight = -jnp.sort(-weight, axis=-1)
+
+  def mix(batch):
+    if batch is None: return None  # For call-side convenience!
+    def mul(a, b):  # B * BHWC -> B111 * BHWC
+      return b * jnp.expand_dims(a, tuple(range(1, b.ndim)))
+    return sum(mul(weight[:, i], jnp.roll(batch, i, axis=0)) for i in range(n))
+
+  return map(mix, args_to_mix), {k: mix(v) for k, v in kwargs_to_mix.items()}
 
 
 def mixup(key, alpha, images, labels):

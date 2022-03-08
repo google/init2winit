@@ -29,6 +29,7 @@ from init2winit.model_lib import nqm
 from init2winit.model_lib import resnet
 from init2winit.model_lib import simple_cnn
 from init2winit.model_lib import transformer_lm
+from init2winit.model_lib import vit
 from init2winit.model_lib import wide_resnet
 from init2winit.model_lib import xformer_translate
 
@@ -61,6 +62,7 @@ _ALL_MODELS = {
                           xformer_translate.DEFAULT_HPARAMS),
     'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS),
     'dlrm': (dlrm.DLRMModel, dlrm.DEFAULT_HPARAMS),
+    'vit': (vit.ViTModel, vit.DEFAULT_HPARAMS),
 }
 
 
@@ -84,7 +86,7 @@ def get_model(model_name):
   try:
     return _ALL_MODELS[model_name][0]
   except KeyError:
-    raise ValueError('Unrecognized model: {}'.format(model_name))
+    raise ValueError('Unrecognized model: {}'.format(model_name)) from None
 
 
 def get_model_hparams(model_name):
@@ -102,4 +104,4 @@ def get_model_hparams(model_name):
   try:
     return _ALL_MODELS[model_name][1]
   except KeyError:
-    raise ValueError('Unrecognized model: {}'.format(model_name))
+    raise ValueError('Unrecognized model: {}'.format(model_name)) from None
