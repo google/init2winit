@@ -45,6 +45,11 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         num_layers=121,  # Must be one of [121, 169, 201, 161]
         growth_rate=32,
         reduction=0.5,
+        # Set this to True to replicate the DenseNet behavior.  Setting it to
+        # False results in stride 1 being used in the pooling layers. This
+        # results in a large Dense matrix in the readout layer and unstable
+        # training.
+        use_kernel_size_as_stride_in_pooling=True,
         layer_rescale_factors={},
         lr_hparams={
             'schedule': 'constant',
@@ -110,6 +115,7 @@ class TransitionBlock(nn.Module):
   batch norm and ReLU) and a 2x2 average pooling layer.
   """
   num_features: int
+  use_kernel_size_as_stride_in_pooling: bool
   dtype: model_utils.Dtype = jnp.float32
   normalizer: str = 'batch_norm'
 
@@ -121,7 +127,10 @@ class TransitionBlock(nn.Module):
     y = maybe_normalize()(x)
     y = nn.relu(y)
     y = conv(features=self.num_features, kernel_size=(1, 1))(y)
-    y = nn.avg_pool(y, window_shape=(2, 2))
+    y = nn.avg_pool(
+        y,
+        window_shape=(2, 2),
+        strides=(2, 2) if self.use_kernel_size_as_stride_in_pooling else (1, 1))
     return y
 
 
@@ -135,6 +144,7 @@ class DenseNet(nn.Module):
   num_outputs: int
   growth_rate: int
   reduction: int
+  use_kernel_size_as_stride_in_pooling: bool
   normalizer: str = 'batch_norm'
   normalize_classifier_input: bool = False
   classification_scale_factor: float = 1.0
@@ -173,7 +183,11 @@ class DenseNet(nn.Module):
       num_features = update_num_features(num_features, num_blocks[i],
                                          self.growth_rate, self.reduction)
       y = TransitionBlock(
-          num_features, dtype=self.dtype, normalizer=self.normalizer)(
+          num_features,
+          dtype=self.dtype,
+          normalizer=self.normalizer,
+          use_kernel_size_as_stride_in_pooling=self
+          .use_kernel_size_as_stride_in_pooling)(
               y, train=train)
 
     # Final dense block
@@ -183,7 +197,10 @@ class DenseNet(nn.Module):
     maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
     y = maybe_normalize()(y)
     y = nn.relu(y)
-    y = nn.avg_pool(y, window_shape=(4, 4))
+    y = nn.avg_pool(
+        y,
+        window_shape=(4, 4),
+        strides=(4, 4) if self.use_kernel_size_as_stride_in_pooling else (1, 1))
 
     # Classification layer
     y = jnp.reshape(y, (y.shape[0], -1))
@@ -217,8 +234,10 @@ class AdaBeliefDensenetModel(base_model.BaseModel):
         num_outputs=self.hps['output_shape'][-1],
         growth_rate=self.hps.growth_rate,
         reduction=self.hps.reduction,
+        use_kernel_size_as_stride_in_pooling=self.hps
+        .use_kernel_size_as_stride_in_pooling,
         dtype=self.hps.model_dtype,
         normalizer=self.hps.normalizer,
         normalize_classifier_input=self.hps.normalize_classifier_input,
         classification_scale_factor=self.hps.classification_scale_factor,
-        )
+    )
