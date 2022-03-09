@@ -311,3 +311,33 @@ class EquivalenceTest(chex.TestCase):
 
 if __name__ == '__main__':
   absltest.main()
+
+
+class EqEMAHBTest(chex.TestCase):
+  """Tests the equivalence of EMA vs HB. Both LR and WD need to scale."""
+
+  def test_equivalence(self):
+    hb = kitchen_sink(
+        ['precondition_by_rms', 'polyak_hb', 'add_decayed_weights'], [{
+            'decay': 0.3
+        }, {
+            'decay': 0.5
+        }, {
+            'weight_decay': 0.1
+        }],
+        learning_rate=1.0)
+    ema = kitchen_sink(
+        ['precondition_by_rms', 'first_moment_ema', 'add_decayed_weights'], [{
+            'decay': 0.3
+        }, {
+            'decay': 0.5
+        }, {
+            'weight_decay': 0.05
+        }],
+        learning_rate=2.0)
+
+    targets = _optimizer_loop(hb)
+    results = _optimizer_loop(ema)
+
+    for target, result in zip(targets, results):
+      chex.assert_trees_all_close(target, result)
