@@ -20,14 +20,40 @@ return the mean of function values. This is to make trainer.py more agnostic to
 the details of the padding and masking.
 """
 
-from clu import metrics
-import flax
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
-import sklearn.metrics
+
+
+def conform_weights_to_targets(weights, targets):
+  """Conforms the shape of weights to targets to apply masking.
+
+  We allow shape of weights to be a prefix of the shape of targets, for example
+  for targets of shape (n_batches, n_tasks) we allow weights with shape
+  (n_batches, n_tasks) or (n_batches, ). Add the necessary trailing dimensions
+  of size 1 so that weights can be applied as a mask by a simple multiplication,
+  (n_batches, 1) in this case.
+
+  Args:
+    weights: None or a numpy array which shape is a prefix of targets shape
+    targets: numpy array to conform the weights to
+
+  Returns:
+    weights with proper dimensions added to apply it as a mask.
+
+  """
+  if weights is None:
+    weights = jnp.ones_like(targets)
+  elif weights.shape == targets.shape[:weights.ndim]:
+    # Add extra dimension if weights.shape is a prefix of targets.shape
+    # so that multiplication can be broadcasted.
+    weights = jnp.expand_dims(
+        weights, axis=tuple(range(weights.ndim, targets.ndim)))
+  elif weights.shape != targets.shape:
+    raise ValueError('Incorrect shapes. Got shape %s weights and %s targets' %
+                     (str(weights.shape), str(targets.shape)))
+  return weights
 
 
 def unnormalized_sigmoid_binary_cross_entropy(logits, targets, weights=None):
@@ -43,18 +69,16 @@ def unnormalized_sigmoid_binary_cross_entropy(logits, targets, weights=None):
   """
   log_p = jax.nn.log_sigmoid(logits)
   log_not_p = jax.nn.log_sigmoid(-logits)
-  losses = -jnp.sum(
-      (targets * log_p + (1 - targets) * log_not_p).reshape(
-          targets.shape[0], -1),
-      axis=-1)
-  if weights is not None:
-    if weights.shape[0] != losses.shape[0]:
-      raise ValueError(
-          'Incorrect shapes. Got shape %s weights and %s losses' %
-          (str(weights.shape), str(losses.shape)))
-    losses = losses * weights
+  losses = -1.0 * (targets * log_p +
+                   (1 - targets) * log_not_p)
 
-  return losses
+  if weights is not None:
+    weights = conform_weights_to_targets(weights, targets)
+    weighted_losses = losses * weights
+  else:
+    weighted_losses = losses
+
+  return jnp.sum((weighted_losses).reshape(losses.shape[0], -1), axis=-1)
 
 
 def sigmoid_binary_cross_entropy(logits, targets, weights=None):
@@ -69,24 +93,14 @@ def sigmoid_binary_cross_entropy(logits, targets, weights=None):
   Returns:
     float value of sigmoid binary cross entropy between logits and targets.
   """
-  # Ensure logits and targets are 2d, even if there's only one label per example
-  if len(logits.shape) == 1 or len(targets.shape) == 1:
-    raise ValueError('logits and targets must be 2d')
-
   if weights is None:
-    weights = jnp.ones_like(targets)
-  elif weights.shape == targets.shape[:1]:
-    # Add a dimension if labels are per-example so that multiplication can be
-    # broadcasted.
-    weights = weights[:, None]
+    normalization = targets.shape[0]
+  else:
+    normalization = weights.sum()
 
-  per_label_normalization = jnp.nan_to_num(1 / weights.sum(axis=0), nan=1.0)
-  weights = weights * per_label_normalization
-
-  log_p = jax.nn.log_sigmoid(logits)
-  log_not_p = jax.nn.log_sigmoid(-logits)
-
-  return -jnp.sum((targets * log_p + (1 - targets) * log_not_p) * weights)
+  return jnp.sum(
+      unnormalized_sigmoid_binary_cross_entropy(logits, targets,
+                                                weights)) / normalization
 
 
 def unnormalized_sigmoid_mean_squared_error(logits, targets, weights=None):
@@ -100,17 +114,15 @@ def unnormalized_sigmoid_mean_squared_error(logits, targets, weights=None):
   Returns:
     Sigmoid mean squared error computed per example, shape (batch,).
   """
-  losses = jnp.sum(
-      jnp.square(nn.sigmoid(logits) - targets).reshape(targets.shape[0], -1),
-      axis=-1)
-  if weights is not None:
-    if weights.shape[0] != losses.shape[0]:
-      raise ValueError(
-          'Incorrect shapes. Got shape %s weights and %s losses' %
-          (str(weights.shape), str(losses.shape)))
-    losses = losses * weights
+  losses = jnp.square(nn.sigmoid(logits) - targets)
 
-  return losses
+  if weights is not None:
+    weights = conform_weights_to_targets(weights, targets)
+    weighted_losses = losses * weights
+  else:
+    weighted_losses = losses
+
+  return jnp.sum((weighted_losses).reshape(losses.shape[0], -1), axis=-1)
 
 
 def sigmoid_mean_squared_error(logits, targets, weights=None):
@@ -119,6 +131,7 @@ def sigmoid_mean_squared_error(logits, targets, weights=None):
     normalization = targets.shape[0]
   else:
     normalization = weights.sum()
+
   unnormalized_sigmoid_mse = unnormalized_sigmoid_mean_squared_error(
       logits, targets, weights)
 
@@ -141,16 +154,14 @@ def weighted_unnormalized_cross_entropy(logits, targets, weights=None):
     Cross entropy loss computed per example, shape [batch, ...].
   """
   if logits.ndim != targets.ndim:
-    raise ValueError(
-        'Incorrect shapes. Got shape %s logits and %s targets' %
-        (str(logits.shape), str(targets.shape)))
+    raise ValueError('Incorrect shapes. Got shape %s logits and %s targets' %
+                     (str(logits.shape), str(targets.shape)))
 
   loss = -jnp.sum(targets * nn.log_softmax(logits), axis=-1)
   if weights is not None:
     if weights.ndim != targets.ndim - 1:
-      raise ValueError(
-          'Incorrect shapes. Got shape %s weights and %s targets' %
-          (str(weights.shape), str(targets.shape)))
+      raise ValueError('Incorrect shapes. Got shape %s weights and %s targets' %
+                       (str(weights.shape), str(targets.shape)))
     loss = loss * weights
 
   return loss
@@ -216,40 +227,3 @@ def get_output_activation_fn(loss_name):
   except KeyError as activation_fn_not_found_error:
     raise ValueError('Unrecognized loss function: {}'.format(
         loss_name)) from activation_fn_not_found_error
-
-
-# Following the Flax OGB example:
-# https://github.com/google/flax/blob/main/examples/ogbg_molpcba/train.py
-@flax.struct.dataclass
-class MeanAveragePrecision(
-    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))):
-  """Computes the mean average precision (mAP) over different tasks."""
-
-  def compute(self):
-    # Matches the official OGB evaluation scheme for mean average precision.
-    targets = self.values['targets']
-    logits = self.values['logits']
-    weights = self.values['weights']
-
-    assert logits.shape == targets.shape == weights.shape
-    assert len(logits.shape) == 2
-    assert np.logical_or(weights == 1, weights == 0).all()
-    weights = weights.astype(np.bool)
-
-    probs = jax.nn.sigmoid(logits)
-    num_tasks = targets.shape[1]
-    average_precisions = np.full(num_tasks, np.nan)
-
-    for task in range(num_tasks):
-      # AP is only defined when there is at least one negative data
-      # and at least one positive data.
-      if np.sum(targets[:, task] == 0) > 0 and np.sum(targets[:,
-                                                              task] == 1) > 0:
-        is_labeled = weights[:, task]
-        average_precisions[task] = sklearn.metrics.average_precision_score(
-            targets[is_labeled, task], probs[is_labeled, task])
-
-    # When all APs are NaNs, return NaN. This avoids raising a RuntimeWarning.
-    if np.isnan(average_precisions).all():
-      return np.nan
-    return np.nanmean(average_precisions)

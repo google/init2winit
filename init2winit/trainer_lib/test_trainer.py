@@ -768,27 +768,96 @@ class TrainerTest(parameterized.TestCase):
 
   @parameterized.named_parameters(
       dict(
-          testcase_name='basic',
+          testcase_name='basic_classification',
+          metrics_name='classification_metrics',
           logits=np.array([[1, 0], [1, 0], [1, 0], [1, 0]]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [1, 0]]),
           weights=np.array([1, 1, 0, 0]),
-          num_results=2,
-          error_rate=0.5),
+          test_metric_names=['error_rate', 'num_examples'],
+          test_metric_vals=[0.5, 2]),
       dict(
           testcase_name='fractional_weights',
+          metrics_name='classification_metrics',
           logits=np.array([[0.1, 0.9], [0.8, 0.2]]),
           targets=np.array([[1, 0], [1, 0]]),
           weights=np.array([0.3, 0.7]),
-          num_results=1,
-          error_rate=0.3),
+          test_metric_names=['error_rate', 'num_examples'],
+          test_metric_vals=[0.3, 1]),
+      dict(
+          testcase_name='binary_classification_basic',
+          metrics_name='binary_classification_metrics',
+          logits=np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5],
+                           [0.5, 0.5], [0.5, 0.5]]),
+          targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
+          weights=np.array([[1., 1.], [1., 1.], [1., 1.], [1., 1.], [1., 1.],
+                            [1., 1.]]),
+          test_metric_names=['ce_loss'],
+          test_metric_vals=[0.724077]),
+      dict(
+          testcase_name='binary_classification_no_weights',
+          metrics_name='binary_classification_metrics',
+          logits=np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5],
+                           [0.5, 0.5], [0.5, 0.5]]),
+          targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
+          weights=None,
+          test_metric_names=['ce_loss'],
+          test_metric_vals=[1.448154]),
+      dict(
+          testcase_name='binary_classification_zero_weights',
+          metrics_name='binary_classification_metrics',
+          logits=np.array([[100, 0.5], [100, 0.5], [0.5, 0.5], [0.5, 0.5],
+                           [0.5, 0.5], [0.5, 0.5]]),
+          targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
+          weights=np.array([[0., 1.], [0., 1.], [1., 1.], [1., 1.], [1., 1.],
+                            [1., 1.]]),
+          test_metric_names=['ce_loss'],
+          test_metric_vals=[0.724077]),
+      dict(
+          testcase_name='binary_classification_1d_weights',
+          metrics_name='binary_classification_metrics',
+          logits=np.array([[100, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 100],
+                           [0.5, 0.5], [0.5, 0.5]]),
+          targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
+          weights=np.array([0., 1., 1., 0., 1., 1.,]),
+          test_metric_names=['ce_loss'],
+          test_metric_vals=[1.448154]),
+      dict(
+          testcase_name='binary_autoencoder_2d_weights',
+          metrics_name='binary_autoencoder_metrics',
+          logits=np.array([[0.5, 100], [0.5, 100], [0.5, 0.5], [0.5, 0.5],
+                           [0.5, 0.5], [0.5, 0.5]]),
+          targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
+          weights=np.array([[1., 0.], [1., 0.], [1., 1.], [1., 1.], [1., 1.],
+                            [1., 1.]]),
+          test_metric_names=['sigmoid_mean_squared_error'],
+          test_metric_vals=[0.26499629]),
+      dict(
+          testcase_name='binary_autoencoder_1d_weights',
+          metrics_name='binary_autoencoder_metrics',
+          logits=np.array([[0.5, 100], [0.5, 0.5], [0.5, 100], [0.5, 0.5],
+                           [0.5, 0.5], [0.5, 0.5]]),
+          targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
+          weights=np.array([0., 1., 0., 1., 1., 1.,]),
+          test_metric_names=['sigmoid_mean_squared_error'],
+          test_metric_vals=[0.52999258]),
+      dict(
+          testcase_name='binary_autoencoder_no_weights',
+          metrics_name='binary_autoencoder_metrics',
+          logits=np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5],
+                           [0.5, 0.5], [0.5, 0.5]]),
+          targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
+          weights=None,
+          test_metric_names=['sigmoid_mean_squared_error'],
+          test_metric_vals=[0.5299926]),
   )
-  def test_evaluate(self, logits, targets, weights, num_results, error_rate):
+  def test_evaluate(self, metrics_name, logits, targets, weights,
+                    test_metric_names, test_metric_vals):
     """Test metrics merging and evaluation including zero weights."""
 
     def mock_evaluate_batch(params, batch_stats, batch):
       """Always returns ones."""
       del params, batch_stats
-      metrics_bundle = metrics.get_metrics('classification_metrics')
+      metrics_bundle = metrics.get_metrics(metrics_name)
 
       return metrics_bundle.gather_from_model_output(
           logits=batch.get('logits'),
@@ -797,7 +866,7 @@ class TrainerTest(parameterized.TestCase):
 
     logits = np.split(logits, 2)
     targets = np.split(targets, 2)
-    weights = np.split(weights, 2)
+    weights = np.split(weights, 2) if weights is not None else [None, None]
 
     # pylint: disable=g-complex-comprehension
     batch_iter = [{
@@ -812,8 +881,8 @@ class TrainerTest(parameterized.TestCase):
         batch_iter=batch_iter,
         evaluate_batch_pmapped=jax.pmap(mock_evaluate_batch, axis_name='batch'))
 
-    self.assertAlmostEqual(result['error_rate'], error_rate)
-    self.assertAlmostEqual(result['num_examples'], num_results)
+    for metric, val in zip(test_metric_names, test_metric_vals):
+      self.assertAlmostEqual(result[metric], val, places=5)
 
   def test_early_stopping(self):
     """Test training early stopping on MNIST with a small model."""

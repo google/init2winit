@@ -178,30 +178,12 @@ class LossesTest(parameterized.TestCase):
     ])
     per_example_weights = np.array([1, 1, 0])
 
+    # Both calls normalize by the sum of weights, which is higher in the
+    # per-label case.
     self.assertAlmostEqual(
         sigmoid_binary_ce_fn(logits, targets, per_label_weights),
         sigmoid_binary_ce_fn(logits[:, :4], targets[:, :4],
-                             per_example_weights))
-
-  @parameterized.named_parameters(
-      dict(
-          testcase_name='basic',
-          targets=np.array([[1., 0.], [0., 1.]]),
-          logits=np.array([[0.5, 0.5], [0.5, 0.5]]),
-          weights=np.array([[1., 1.], [1., 1.]]),
-          result=0.5),
-      dict(
-          testcase_name='weights',
-          targets=np.array([[1., 0.,], [0., 1.], [0., 1.]]),
-          logits=np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.7]]),
-          weights=np.array([[1., 1.], [0., 1.], [1., 0.]]),
-          result=0.5))
-  def test_MeanAveragePrecision(self, logits, targets, weights, result):
-    """Tests the mean average precision computation."""
-
-    average_precision = losses.MeanAveragePrecision.from_model_output(
-        logits=logits, targets=targets, weights=weights).compute()
-    self.assertAlmostEqual(average_precision, result)
+                             per_example_weights) / 4)
 
   # optax ctc loss blank token has id = 0 by default
   @parameterized.named_parameters(

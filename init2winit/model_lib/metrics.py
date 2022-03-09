@@ -23,8 +23,10 @@ different-sized eval batches.
 from clu import metrics
 import flax
 from init2winit.model_lib import losses
+import jax
 import jax.numpy as jnp
 import numpy as np
+import sklearn.metrics
 
 
 @flax.struct.dataclass
@@ -45,6 +47,51 @@ class NumExamples(metrics.Metric):
 
   def compute(self):
     return self.count
+
+
+# Following the Flax OGB example:
+# https://github.com/google/flax/blob/main/examples/ogbg_molpcba/train.py
+@flax.struct.dataclass
+class MeanAveragePrecision(
+    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))):
+  """Computes the mean average precision (mAP) over different tasks."""
+
+  def compute(self):
+    # Matches the official OGB evaluation scheme for mean average precision.
+    targets = self.values['targets']
+    logits = self.values['logits']
+    weights = self.values['weights']
+    if weights.shape != targets.shape:
+      # This happens if weights are None
+      if np.all(np.isnan(weights)):
+        weights = None
+      # We need weights to be the exact same shape as targets, not just
+      # compatible for broadcasting, so multiply by ones of the right shape.
+      weights = np.ones(targets.shape) * losses.conform_weights_to_targets(
+          weights, targets)
+
+    assert logits.shape == targets.shape == weights.shape
+    assert len(logits.shape) == 2
+    assert np.logical_or(weights == 1, weights == 0).all()
+    weights = weights.astype(np.bool)
+
+    probs = jax.nn.sigmoid(logits)
+    num_tasks = targets.shape[1]
+    average_precisions = np.full(num_tasks, np.nan)
+
+    for task in range(num_tasks):
+      # AP is only defined when there is at least one negative data
+      # and at least one positive data.
+      if np.sum(targets[:, task] == 0) > 0 and (
+          np.sum(targets[:, task] == 1) > 0):
+        is_labeled = weights[:, task]
+        average_precisions[task] = sklearn.metrics.average_precision_score(
+            targets[is_labeled, task], probs[is_labeled, task])
+
+    # When all APs are NaNs, return NaN. This avoids raising a RuntimeWarning.
+    if np.isnan(average_precisions).all():
+      return np.nan
+    return np.nanmean(average_precisions)
 
 
 # TODO(mbadura): Check if we can use metrics.Average with a mask
@@ -139,9 +186,9 @@ _METRICS = {
     'binary_classification_metrics':
         metrics.Collection.create(
             ce_loss=weighted_average_metric(
-                losses.sigmoid_binary_cross_entropy),
+                losses.unnormalized_sigmoid_binary_cross_entropy),
             num_examples=NumExamples,
-            average_precision=losses.MeanAveragePrecision)
+            average_precision=MeanAveragePrecision)
 }
 
 
