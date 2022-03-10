@@ -483,7 +483,9 @@ def train(train_dir,
                                  dataset, hps, config, train_dir, callback_rng)
     eval_callbacks.append(eval_callback)
 
+
   for batch in train_iter:
+
     if global_step in checkpoint_steps and jax.process_index() == 0:
       checkpoint.save_unreplicated_checkpoint_background(
           checkpoint_dir,
