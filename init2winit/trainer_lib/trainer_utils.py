@@ -19,6 +19,28 @@ from absl import logging
 from init2winit import utils
 from init2winit.model_lib import model_utils
 import jax
+from jax.experimental import multihost_utils
+
+
+def gather_multihost_report(report):
+  """Gathers eval metrics from all hosts.
+
+  Args:
+    report: report generated from eval_metrics in trainer.py
+
+  Returns:
+    report: report gathered from all hosts and arranged as a dict of scalars.
+  """
+  all_reports = multihost_utils.process_allgather(report)
+
+  for metric in report.keys():
+    metric_reports = {
+        f'{metric}-{i}': x.item() for i, x in enumerate(all_reports[metric])
+    }
+    all_reports.update(metric_reports)
+    del all_reports[metric]
+
+  return all_reports
 
 
 def log_epoch_report(report, metrics_logger):

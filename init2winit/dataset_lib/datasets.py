@@ -24,6 +24,8 @@ from init2winit.dataset_lib import mlperf_imagenet_dataset
 from init2winit.dataset_lib import nqm_noise
 from init2winit.dataset_lib import ogbg_molpcba
 from init2winit.dataset_lib import proteins
+from init2winit.dataset_lib import samuel_imagenet_dataset
+from init2winit.dataset_lib import samuel_small_image_datasets
 from init2winit.dataset_lib import small_image_datasets
 from init2winit.dataset_lib import translate_wmt
 
@@ -61,6 +63,14 @@ _ALL_DATASETS = {
     'imagenet':
         _Dataset(imagenet_dataset.get_imagenet,
                  imagenet_dataset.DEFAULT_HPARAMS, imagenet_dataset.METADATA),
+    'samuel_imagenet':
+        _Dataset(samuel_imagenet_dataset.get_imagenet,
+                 samuel_imagenet_dataset.DEFAULT_HPARAMS,
+                 samuel_imagenet_dataset.METADATA),
+    'samuel_cifar10':
+        _Dataset(samuel_small_image_datasets.get_cifar10,
+                 samuel_small_image_datasets.CIFAR10_DEFAULT_HPARAMS,
+                 samuel_small_image_datasets.CIFAR10_METADATA),
     'translate_wmt':
         _Dataset(translate_wmt.get_translate_wmt, translate_wmt.DEFAULT_HPARAMS,
                  translate_wmt.METADATA),
@@ -89,7 +99,7 @@ def get_dataset(dataset_name):
   try:
     return _ALL_DATASETS[dataset_name].getter
   except KeyError:
-    raise ValueError('Unrecognized dataset: {}'.format(dataset_name))
+    raise ValueError('Unrecognized dataset: {}'.format(dataset_name)) from None
 
 
 def get_dataset_hparams(dataset_name):
@@ -113,7 +123,7 @@ def get_dataset_hparams(dataset_name):
             'Undefined input shape for dataset: {}'.format(dataset_name))
     return hparams
   except KeyError:
-    raise ValueError('Unrecognized dataset: {}'.format(dataset_name))
+    raise ValueError('Unrecognized dataset: {}'.format(dataset_name)) from None
 
 
 def get_dataset_meta_data(dataset_name):
@@ -136,4 +146,4 @@ def get_dataset_meta_data(dataset_name):
   try:
     return _ALL_DATASETS[dataset_name].meta_data
   except KeyError:
-    raise ValueError('Unrecognized dataset: {}'.format(dataset_name))
+    raise ValueError('Unrecognized dataset: {}'.format(dataset_name)) from None
