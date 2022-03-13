@@ -26,21 +26,14 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from init2winit import checkpoint
 from init2winit.model_lib import models
+from init2winit.shared_testing_utilities import pytree_equal
 import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 from tensorflow.io import gfile
 
+
 FLAGS = flags.FLAGS
-
-
-def pytree_equal(tree1, tree2):
-  try:
-    equal_tree = jax.tree_util.tree_multimap(np.array_equal, tree1, tree2)
-    return jax.tree_util.tree_reduce(lambda x, y: x and y, equal_tree)
-  # The tree_utils will raise TypeErrors if structures don't match.
-  except TypeError:
-    return False
 
 INPUT_SHAPE = [10, 28, 28, 1]
 OUTPUT_SHAPE = (10,)
