@@ -30,6 +30,7 @@ from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
+from init2winit.training_metrics_grabber import TrainingMetricsGrabber
 import jax
 from jax import lax
 import jax.numpy as jnp
@@ -148,7 +149,7 @@ def update(
     local_device_index: an integer that is unique to this device amongst all
       devices on this host, usually in the range [0, jax.local_device_count()].
       It is folded in to `rng` to produce a unique per-device, per-step RNG.
-    training_metrics_grabber: See the TrainingMetricsGrabber in utils.py
+    training_metrics_grabber: records training metrics at each iteration.
     training_cost: a function used to calculate the training objective that will
       be differentiated to generate updates. Takes
       (`params`, `batch`, `batch_stats`, `dropout_rng`) as inputs.
@@ -196,7 +197,7 @@ def update(
   new_metrics_grabber = None
   if training_metrics_grabber:
     new_metrics_grabber = training_metrics_grabber.update(
-        grad, params, new_params)
+        cost_value, grad, params, new_params)
 
   return (new_optimizer_state, new_params, new_batch_stats, cost_value,
           new_metrics_grabber, grad_norm)
@@ -379,7 +380,7 @@ def train(train_dir,
 
   unreplicated_training_metrics_grabber = None
   if training_metrics_config:
-    unreplicated_training_metrics_grabber = utils.TrainingMetricsGrabber.create(
+    unreplicated_training_metrics_grabber = TrainingMetricsGrabber.create(
         unreplicated_params, training_metrics_config)
 
   (optimizer_state, params, batch_stats, training_metrics_grabber,
