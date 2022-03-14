@@ -15,7 +15,7 @@
 
 """Transforms."""
 from typing import Any
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, List
 
 import chex
 import jax
@@ -378,5 +378,103 @@ def scale_by_nadam(
     updates = jax.tree_multimap(
         lambda m, v: m / (jnp.sqrt(v + eps_root) + eps), mu_hat, nu_hat)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+class PreconditionByLayeredAdaptiveRMSState(NamedTuple):
+  """State for the Layered Adaptive RMS Preconditioner algorithm."""
+  count: chex.Array  # shape=(), dtype=jnp.int32.
+  nu: optax.Updates
+  beta_array: Any
+  scale_array: Any
+
+
+def precondition_by_layered_adaptive_rms(
+    decays: List[float],
+    scales: List[float],
+    decay_distribution: List[float],
+    modality: Any = 'output',
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    # debias: bool = False,
+) -> optax.GradientTransformation:
+  """Code implementing beta-factored rms preconditioner.
+
+  Args:
+    decays: List of beta values
+    scales: List of scales accompanying the beta values. Must of the same length
+      as decays.
+    decay_distribution: distribution according to which tensors are divided.
+      Must be of the same length as decays.
+    modality: one of two values 'input' vs 'output' indicating whether factoring
+      is perfomed on the input vs the output axis. For conv-nets convention fits
+      the Height-Width-InpChannels-OutChannels convention of parameters in
+      flax linen Conv
+    eps: term added to the denominator to improve numerical stability.
+    eps_root: term added to the denominator inside the square-root to improve
+      numerical stability when backpropagating gradients through the rescaling.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+  def init_fn(params):
+    count = jnp.zeros([], jnp.int32)
+    nu = jax.tree_map(jnp.zeros_like, params)
+    beta_array = jax.tree_map(
+        lambda x: _generate_per_parameter_array(decays, x), params)
+    scale_array = jax.tree_map(
+        lambda x: _generate_per_parameter_array(scales, x), params)
+
+    return PreconditionByLayeredAdaptiveRMSState(
+        count=count, nu=nu, beta_array=beta_array, scale_array=scale_array)
+
+  def _generate_partition(decays, decay_distribution, length):
+    # Generates length-sized array split according to decay_distribution.
+    decays = jnp.array(decays)
+    decay_distribution = jnp.array(decay_distribution)
+    multiples = jnp.int32(jnp.floor(decay_distribution*length))
+    multiples = multiples.at[-1].set(multiples[-1]+length-jnp.sum(multiples))
+    return jnp.repeat(decays, multiples)
+
+  def _generate_per_parameter_array(arr, params):
+    # For 1D Tensor - input_Index = output_index = 1
+    # For 2D Tensor - input_Index = 0, output_index = 1
+    # For > 2D Tensor - input_Index = second last dim , output_index = last dim
+    input_index = max(len(params.shape) - 2, 0)
+    output_index = len(params.shape) - 1
+    array_len = params.shape[
+        output_index] if modality == 'output' else params.shape[input_index]
+    full_array = _generate_partition(arr, decay_distribution, array_len)
+    # enlarge beta array to have same ndims as params but ones in shape
+    # everywhere but the target_index for easy broadcasting
+    target_index = output_index if modality == 'output' else input_index
+    new_shape = [1]*jnp.ndim(params)
+    new_shape[target_index] = array_len
+    return jnp.reshape(full_array, new_shape)
+
+  def _update_moment_general(updates, moments, beta, order):
+    # input beta can be an array here
+    # the following code handles the adagrad case
+    one_minus_beta = 1.0 - beta
+    one_minus_beta = jnp.where(one_minus_beta <= 0.0,
+                               jnp.ones_like(one_minus_beta), one_minus_beta)
+    return one_minus_beta * (updates**order) + beta*moments
+
+  def update_fn(updates, state, params=None):
+    del params
+    nu = jax.tree_multimap(lambda g, t, b: _update_moment_general(g, t, b, 2),
+                           updates, state.nu, state.beta_array)
+    count = state.count + jnp.array(1, dtype=jnp.int32)
+    # Decide what to do with bias correction
+    # nu_hat = nu if not debias else _bias_correction(nu, b2, count)
+    updates = jax.tree_multimap(
+        lambda m, v, s: s * (m / (jnp.sqrt(v + eps_root) + eps)), updates, nu,
+        state.scale_array)
+    return updates, PreconditionByLayeredAdaptiveRMSState(
+        count=count,
+        nu=nu,
+        beta_array=state.beta_array,
+        scale_array=state.scale_array)
 
   return optax.GradientTransformation(init_fn, update_fn)

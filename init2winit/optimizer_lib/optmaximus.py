@@ -28,6 +28,7 @@ from init2winit.optimizer_lib.transform import first_moment_ema
 from init2winit.optimizer_lib.transform import nesterov
 from init2winit.optimizer_lib.transform import polyak_hb
 from init2winit.optimizer_lib.transform import precondition_by_amsgrad
+from init2winit.optimizer_lib.transform import precondition_by_layered_adaptive_rms
 from init2winit.optimizer_lib.transform import precondition_by_rms
 from init2winit.optimizer_lib.transform import precondition_by_yogi
 from init2winit.optimizer_lib.transform import scale_by_adam
@@ -58,6 +59,7 @@ _preconditioners = {
     'precondition_by_yogi': precondition_by_yogi,
     'precondition_by_rss': optax.scale_by_rss,
     'precondition_by_amsgrad': precondition_by_amsgrad,
+    'precondition_by_layered_adaptive_rms': precondition_by_layered_adaptive_rms
 }
 
 _miscellaneous = {
