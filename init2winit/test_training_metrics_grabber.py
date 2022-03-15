@@ -22,23 +22,23 @@ import tempfile
 
 from absl import flags
 from absl.testing import absltest
-from init2winit import utils
+from init2winit.training_metrics_grabber import TrainingMetricsGrabber
 from jax import test_util as jtu
 import numpy as np
 
 FLAGS = flags.FLAGS
 
 
-class TrainingMetricsTest(jtu.JaxTestCase):
+class TrainingMetricsGrabberTest(jtu.JaxTestCase):
   """Tests the logged statistics from training_metrics_grabber."""
 
   def setUp(self):
-    super(TrainingMetricsTest, self).setUp()
+    super(TrainingMetricsGrabberTest, self).setUp()
     self.test_dir = tempfile.mkdtemp()
 
   def tearDown(self):
     shutil.rmtree(self.test_dir)
-    super(TrainingMetricsTest, self).tearDown()
+    super(TrainingMetricsGrabberTest, self).tearDown()
 
   def test_grad_var(self):
     model_size = 10
@@ -50,7 +50,7 @@ class TrainingMetricsTest(jtu.JaxTestCase):
         'layer2': np.ones(model_size)
     }]
     eval_config = {'ema_beta': 0.5}
-    training_metrics_grabber = utils.TrainingMetricsGrabber.create(
+    training_metrics_grabber = TrainingMetricsGrabber.create(
         example_grads[0], eval_config)
 
     for grad in example_grads:
