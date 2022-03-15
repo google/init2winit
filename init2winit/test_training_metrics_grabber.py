@@ -60,14 +60,15 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
 
     for grad in example_grads:
       training_metrics_grabber = training_metrics_grabber.update(
-          grad, example_grads[0], example_grads[0])
+          1.0, grad, example_grads[0], example_grads[0])
 
     for layer in ['layer1', 'layer2']:
       expected_grad_ema = 1 / 4 * np.zeros(model_size) + 1 / 4 * example_grads[
           0][layer] + 1 / 2 * example_grads[1][layer]
 
-      self.assertArraysAllClose(expected_grad_ema,
-                                training_metrics_grabber.state[layer].grad_ema)
+      self.assertArraysAllClose(
+          expected_grad_ema,
+          training_metrics_grabber.state['param_tree_stats'][layer].grad_ema)
 
   def test_serialize_in_checkpoint(self):
     """Test that the TrainingMetricsGrabber can be serialized and restored."""
@@ -81,7 +82,7 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
     initial_grabber = TrainingMetricsGrabber.create(
         initial_params, {'ema_beta': 0.5})
     new_grabber = initial_grabber.update(
-        initial_gradient, initial_params, new_params)
+        1.0, initial_gradient, initial_params, new_params)
 
     checkpoint.save_checkpoint(self.test_dir, 1,
                                {'training_metrics_grabber': new_grabber})
@@ -91,6 +92,50 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
     loaded_grabber = loaded_checkpoint['training_metrics_grabber']
 
     self.assertTrue(pytree_equal(loaded_grabber.state, new_grabber.state))
+
+  def test_global_stats(self):
+    """Test that the global stats are computed correctly."""
+
+    lr = 0.1
+
+    # Create mocks.
+    params = {'foo': jnp.zeros(5), 'bar': jnp.zeros(5)}
+    first_gradient = {'foo': 1*jnp.ones(5), 'bar': 2*jnp.ones(5)}
+    first_loss = 4.0
+    second_gradient = {'foo': 2*jnp.ones(5), 'bar': 3*jnp.ones(5)}
+    second_loss = 2.0
+
+    grabber = TrainingMetricsGrabber.create(params, {'ema_beta': 0.5})
+
+    # Simulate first step of GD.
+    new_params = jax.tree_map(lambda p, g: p - lr*g, params, first_gradient)
+    grabber = grabber.update(first_loss, first_gradient, params, new_params)
+    params = new_params
+
+    # Simulate second step of GD.
+    new_params = jax.tree_map(lambda p, g: p - lr*g, params, second_gradient)
+    grabber = grabber.update(second_loss, second_gradient, params, new_params)
+    params = new_params
+
+    # Assert that the training metrics are as expected.
+    expected_first_update_normsq = (lr**2) * ((1**2) * 5 + (2**2) * 5)
+    expected_second_update_normsq = (lr**2) * ((2**2) * 5 + (3**2) * 5)
+
+    global_stats = grabber.state['global_stats']
+
+    self.assertArraysEqual(global_stats['train_cost_series'],
+                           jnp.array([first_loss, second_loss]))
+
+    self.assertArraysAllClose(
+        global_stats['param_normsq_series'],
+        jnp.array([0.0, expected_first_update_normsq]),
+        atol=1e-7)
+
+    self.assertArraysAllClose(
+        global_stats['update_normsq_series'],
+        jnp.array([expected_first_update_normsq,
+                   expected_second_update_normsq]),
+        atol=1e-7)
 
 if __name__ == '__main__':
   absltest.main()

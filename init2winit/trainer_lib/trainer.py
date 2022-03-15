@@ -198,7 +198,7 @@ def update(
   new_metrics_grabber = None
   if training_metrics_grabber:
     new_metrics_grabber = training_metrics_grabber.update(
-        grad, params, new_params)
+        cost_value, grad, params, new_params)
 
   return (new_optimizer_state, new_params, new_batch_stats, cost_value,
           new_metrics_grabber, grad_norm)

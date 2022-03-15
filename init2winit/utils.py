@@ -110,8 +110,8 @@ def get_summary_tree(training_metrics_grabber):
   Returns:
     A dict of different aggregate training statistics.
   """
-  unreplicated_metrics_tree = jax.tree_map(lambda x: x[0],
-                                           training_metrics_grabber.state)
+  unreplicated_metrics_tree = jax.tree_map(
+      lambda x: x[0], training_metrics_grabber.state['param_tree_stats'])
 
   # Example key: Layer1/conv1/kernel/
   # NOTE: jax.tree_map does not work here, because tree_map will additionally

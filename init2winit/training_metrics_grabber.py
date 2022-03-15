@@ -19,6 +19,8 @@ from typing import Any, Dict
 
 from flax import serialization
 from flax import struct
+from init2winit.utils import array_append
+from init2winit.utils import total_tree_norm_sql2
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -69,6 +71,79 @@ def _update_param_stats(leaf_state, param_gradient, update, new_param, config):
       update_sq_ema=update_sq_ema)
 
 
+def _update_param_tree_stats(param_tree_stats, model_gradient,
+                             old_params, new_params, config):
+  """Update the parameter tree statistics.
+
+  Args:
+    param_tree_stats: (pytree) The current parameter tree statistics, as a
+      pytree with a _MetricsLeafState as each leaf.
+    model_gradient: (pytree) The current gradient.
+    old_params: (pytree) The params before the param update.
+    new_params: (pytree) The params after the param update.
+    config: (ConfigDict) The TrainingMetricsGrabber config.
+
+  Returns:
+    new_param_tree_stats: (pytree) The new parameter tree statistics, as a
+      pytree of the same form as `param_tree_stats`.
+  """
+
+  grads_flat, treedef = jax.tree_flatten(model_gradient)
+  new_params_flat, _ = jax.tree_flatten(new_params)
+  old_params_flat, _ = jax.tree_flatten(old_params)
+  updates_flat = [new_param - old_param for (
+      old_param, new_param) in zip(old_params_flat, new_params_flat)]
+
+  # flatten_up_to here is needed to avoid flattening the _MetricsLeafState
+  # nodes.
+  param_tree_stats_flat = treedef.flatten_up_to(param_tree_stats)
+  new_param_tree_stats_flat = [
+      _update_param_stats(state, grad, update, new_param, config)
+      for (state, grad, update, new_param) in zip(
+          param_tree_stats_flat, grads_flat, updates_flat, new_params_flat)
+  ]
+  return jax.tree_unflatten(treedef, new_param_tree_stats_flat)
+
+
+# TODO(jeremycohen, gilmer) maybe we should be logging the global step
+def _update_global_stats(global_stats, train_cost,
+                         old_params, new_params):
+  """Update the global statistics.
+
+  Args:
+    global_stats: (dict) The current global statistics, as a dict with keys
+      'train_cost_series', 'param_normsq_series', and 'update_normsq_series.'
+    train_cost: (float) The train cost before the update.
+    old_params: (pytree) The params before the param update.
+    new_params: (pytree) The params after the param update.
+
+  Returns:
+    new_global_stats: (dict) The new global statistics, as a dict with the
+      same keys as `global_stats`.
+  """
+
+  param_update = jax.tree_map(lambda x, y: x - y, new_params, old_params)
+
+  param_normsq = total_tree_norm_sql2(old_params)
+  param_update_normsq = total_tree_norm_sql2(param_update)
+
+  train_cost_series = global_stats['train_cost_series']
+  new_train_cost_series = array_append(train_cost_series, train_cost)
+
+  param_normsq_series = global_stats['param_normsq_series']
+  new_param_normsq_series = array_append(param_normsq_series, param_normsq)
+
+  update_normsq_series = global_stats['update_normsq_series']
+  new_update_normsq_series = array_append(update_normsq_series,
+                                          param_update_normsq)
+
+  return {
+      'train_cost_series': new_train_cost_series,
+      'param_normsq_series': new_param_normsq_series,
+      'update_normsq_series': new_update_normsq_series
+  }
+
+
 def _validate_config(config):
   if 'ema_beta' not in config:
     raise ValueError('Eval config requires field ema_beta')
@@ -116,20 +191,34 @@ class TrainingMetricsGrabber:
       )
 
     _validate_config(config)
-    gradient_statistics = jax.tree_map(_node_init, model_params)
 
-    return TrainingMetricsGrabber(gradient_statistics, config)
+    global_stats = {'train_cost_series': jnp.zeros(0),
+                    'param_normsq_series': jnp.zeros(0),
+                    'update_normsq_series': jnp.zeros(0)}
 
-  def update(self, model_gradient, old_params, new_params):
+    param_tree_stats = jax.tree_map(_node_init, model_params)
+
+    state = {'global_stats': global_stats,
+             'param_tree_stats': param_tree_stats}
+
+    return TrainingMetricsGrabber(state, config)
+
+  def update(self, train_cost, model_gradient, old_params, new_params):
     """Computes a number of statistics from the model params and update.
 
-    Statistics computed:
+    Global statistics computed:
+      Train cost
+      Parameter squared norm
+      Update squared norm
+
+    Parameter tree statistics computed:
       Per layer update variances and norms.
       Per layer gradient variance and norms.
       Per layer param norms.
       Ratio of parameter norm to update and update variance.
 
     Args:
+      train_cost: (float) The train cost before the update
       model_gradient: A pytree of the same shape as the model_params pytree that
         was used when the metrics_grabber object was created.
       old_params: The params before the param update.
@@ -138,20 +227,16 @@ class TrainingMetricsGrabber:
     Returns:
       An updated class object.
     """
-    grads_flat, treedef = jax.tree_flatten(model_gradient)
-    new_params_flat, _ = jax.tree_flatten(new_params)
-    old_params_flat, _ = jax.tree_flatten(old_params)
-
-    # flatten_up_to here is needed to avoid flattening the _MetricsLeafState
-    # nodes.
-    state_flat = treedef.flatten_up_to(self.state)
-    new_states_flat = [
-        _update_param_stats(state, grad, new_param - old_param, new_param,
-                            self.config) for state, grad, old_param, new_param
-        in zip(state_flat, grads_flat, old_params_flat, new_params_flat)
-    ]
-
-    return self.replace(state=jax.tree_unflatten(treedef, new_states_flat))
+    new_global_stats = _update_global_stats(
+        self.state['global_stats'], train_cost, old_params, new_params)
+    new_param_tree_stats = _update_param_tree_stats(
+        self.state['param_tree_stats'], model_gradient, old_params, new_params,
+        self.config)
+    new_state = {
+        'global_stats': new_global_stats,
+        'param_tree_stats': new_param_tree_stats
+    }
+    return self.replace(state=new_state)
 
   @staticmethod
   def to_state_dict(grabber):
