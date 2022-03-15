@@ -22,9 +22,14 @@ import tempfile
 
 from absl import flags
 from absl.testing import absltest
+from init2winit import checkpoint
+from init2winit.shared_test_utilities import pytree_equal
 from init2winit.training_metrics_grabber import TrainingMetricsGrabber
+import jax
 from jax import test_util as jtu
+import jax.numpy as jnp
 import numpy as np
+
 
 FLAGS = flags.FLAGS
 
@@ -63,6 +68,29 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
 
       self.assertArraysAllClose(expected_grad_ema,
                                 training_metrics_grabber.state[layer].grad_ema)
+
+  def test_serialize_in_checkpoint(self):
+    """Test that the TrainingMetricsGrabber can be serialized and restored."""
+
+    initial_params = {'foo': jnp.zeros(5), 'bar': jnp.zeros(5)}
+    initial_gradient = {'foo': 1*jnp.ones(5), 'bar': 2*jnp.ones(5)}
+    new_params = jax.tree_map(lambda p, g: p - 0.1*g,
+                              initial_params,
+                              initial_gradient)
+
+    initial_grabber = TrainingMetricsGrabber.create(
+        initial_params, {'ema_beta': 0.5})
+    new_grabber = initial_grabber.update(
+        initial_gradient, initial_params, new_params)
+
+    checkpoint.save_checkpoint(self.test_dir, 1,
+                               {'training_metrics_grabber': new_grabber})
+
+    loaded_checkpoint = checkpoint.load_latest_checkpoint(
+        self.test_dir, {'training_metrics_grabber': initial_grabber})
+    loaded_grabber = loaded_checkpoint['training_metrics_grabber']
+
+    self.assertTrue(pytree_equal(loaded_grabber.state, new_grabber.state))
 
 if __name__ == '__main__':
   absltest.main()

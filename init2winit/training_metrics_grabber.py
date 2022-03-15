@@ -153,30 +153,43 @@ class TrainingMetricsGrabber:
 
     return self.replace(state=jax.tree_unflatten(treedef, new_states_flat))
 
-  def state_dict(self):
-    return serialization.to_state_dict(
-        {'state': serialization.to_state_dict(self.state)})
+  @staticmethod
+  def to_state_dict(grabber):
+    """Serialize a TraningMetricsGrabber.
 
-  def restore_state(self, state, state_dict):
-    """Restore the state from the state dict.
-
-    Allows for checkpointing the class object.
+    This function is called by flax.serialization.to_state_dict.
 
     Args:
-      state: the class state.
-      state_dict: the state dict containing the desired new state of the object.
+      grabber: (TrainingMetricsGrabber) A TrainingMetricsGrabber to be
+        serialized.
 
     Returns:
-      The restored class object.
+      a dict representing the TrainingMetricsGrabber
     """
+    return serialization.to_state_dict(
+        {'state': serialization.to_state_dict(grabber.state)})
 
-    state = serialization.from_state_dict(state, state_dict['state'])
-    return self.replace(state=state)
+  @staticmethod
+  def from_state_dict(target, state_dict):
+    """Restore a serialized TrainingMetricsGrabber.
+
+    This function is called by flax.serialization.from_state_dict.
+
+    Args:
+      target: (TrainingMetricsGrabber) The "target" TrainingMetricsGrabber
+        to be populated with contents from the state dict.
+      state_dict: (dict) A dictionary, originating from to_state_dict(), whose
+        contents should populate the target TrainingMetricsGrabber.
+
+    Returns:
+      the target TrainingMetricsGrabber populated with contents from state_dict.
+    """
+    state = serialization.from_state_dict(target.state, state_dict['state'])
+    return target.replace(state=state)
 
 
 serialization.register_serialization_state(
     TrainingMetricsGrabber,
-    TrainingMetricsGrabber.state_dict,
-    TrainingMetricsGrabber.restore_state,
+    TrainingMetricsGrabber.to_state_dict,
+    TrainingMetricsGrabber.from_state_dict,
     override=True)
-
