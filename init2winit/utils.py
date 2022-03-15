@@ -43,6 +43,23 @@ class TrainingDivergedError(Exception):
   pass
 
 
+def tree_norm_sql2(pytree):
+  """Compute the param-wise squared L2 norm of a pytree."""
+  return jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1)) ** 2, pytree)
+
+
+def total_tree_norm_sql2(pytree):
+  """Compute the overall squared L2 norm of a pytree."""
+  sql2_norms = tree_norm_sql2(pytree)
+  return jax.tree_util.tree_reduce(operator.add, sql2_norms, 0)
+
+
+def array_append(full_array, to_append):
+  """Append to an array."""
+  to_append = jnp.expand_dims(to_append, axis=0)
+  return jnp.concatenate((full_array, to_append))
+
+
 def dtype_from_str(dtype_string):
   # We use strings to avoid having to import jnp into the config files.
   if dtype_string == 'float32':

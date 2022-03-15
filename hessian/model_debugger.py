@@ -16,13 +16,10 @@
 r"""Debugging tool for identifying problematic layers in a network.
 
 """
+from init2winit.utils import array_append
+from init2winit.utils import tree_norm_sql2
 import jax
-import jax.numpy as jnp
 import numpy as np
-
-
-def tree_norm_sql2(pytree):
-  return jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1)) ** 2, pytree)
 
 
 def get_distributed_norm_computation(norm_fn, axis_name='batch'):
@@ -33,11 +30,6 @@ def get_distributed_norm_computation(norm_fn, axis_name='batch'):
     norms_on_device = jax.tree_map(lambda x: x[0], norms)
     return norms_on_device
   return tree_norm_fn
-
-
-def array_append(full_array, to_append):
-  to_append = np.expand_dims(to_append, axis=0)
-  return np.concatenate((full_array, to_append))
 
 
 def append_pytree_leaves(full_pytree, to_append):

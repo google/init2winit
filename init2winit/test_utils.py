@@ -25,6 +25,8 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from init2winit import checkpoint
 from init2winit import utils
+import jax.numpy as jnp
+import numpy as np
 
 
 def _identity(i):
@@ -96,6 +98,20 @@ class UtilsTest(parameterized.TestCase):
     saved_pytrees = latest['pytree'] if latest else []
     self.assertEqual(
         pytrees, [saved_pytrees[str(i)] for i in range(len(saved_pytrees))])
+
+  def testArrayAppend(self):
+    """Test appending to an array."""
+    np.testing.assert_allclose(
+        utils.array_append(jnp.array([1, 2, 3]), 4), jnp.array([1, 2, 3, 4]))
+    np.testing.assert_allclose(
+        utils.array_append(jnp.array([[1, 2], [3, 4]]), jnp.array([5, 6])),
+        jnp.array([[1, 2], [3, 4], [5, 6]]))
+
+  def testTreeNormSqL2(self):
+    """Test computing the squared L2 norm of a pytree."""
+    pytree = {'foo': jnp.ones(10), 'baz': jnp.ones(20)}
+    self.assertEqual(utils.tree_norm_sql2(pytree), {'foo': 10.0, 'baz': 20.0})
+    self.assertEqual(utils.total_tree_norm_sql2(pytree), 30.0)
 
 
 if __name__ == '__main__':
