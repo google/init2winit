@@ -24,6 +24,7 @@ import tempfile
 from absl import flags
 from absl.testing import absltest
 from absl.testing import parameterized
+from flax import jax_utils
 from init2winit import checkpoint
 from init2winit.model_lib import models
 from init2winit.shared_test_utilities import pytree_equal
@@ -118,6 +119,66 @@ class CheckpointTest(parameterized.TestCase):
     with self.assertRaisesRegex(BaseException, r'Permission\sdenied'):
       checkpoint.save_checkpoint_background(
           self.test_dir, 0, state)
+
+  def test_all_variables_restored(self):
+    """Test that all variables are properly restored.
+
+    This test checks that optimizer_state, params, batch_stats, and
+    training_metrics_grabber are all properly restored after training
+    is pre-empted.
+    """
+
+    fresh_train_dir = tempfile.mkdtemp()
+    global_step = 100
+    preemption_count = 8
+    sum_train_cost = 0.9
+
+    saved_optimizer_state = {'second_moments': 7}
+    saved_params = {'kernel': 3}
+    saved_batch_stats = {'mean': 2}
+    saved_training_metrics = {'ema': 4}
+
+    initial_optimizer_state = {'second_moments': 0}
+    initial_params = {'kernel': 0}
+    initial_batch_stats = {'mean': 0}
+    initial_training_metrics = {'ema': 0}
+
+    checkpoint.save_checkpoint(
+        train_dir=fresh_train_dir,
+        step=global_step,
+        state=dict(global_step=global_step,
+                   preemption_count=preemption_count,
+                   sum_train_cost=sum_train_cost,
+                   optimizer_state=saved_optimizer_state,
+                   params=saved_params,
+                   batch_stats=saved_batch_stats,
+                   training_metrics_grabber=saved_training_metrics),
+        max_to_keep=1)
+
+    (ret_state, ret_params, ret_batch_stats, ret_training_metrics,
+     ret_global_step, ret_sum_train_cost, ret_preemption_count, ret_is_restored,
+     ) = checkpoint.replicate_and_maybe_restore_latest_checkpoint(
+         initial_optimizer_state, initial_params, initial_batch_stats,
+         initial_training_metrics, fresh_train_dir)
+
+    assert pytree_equal(
+        jax.device_get(jax_utils.unreplicate(ret_state)),
+        saved_optimizer_state)
+    assert pytree_equal(
+        jax.device_get(jax_utils.unreplicate(ret_params)),
+        saved_params)
+    assert pytree_equal(
+        jax.device_get(jax_utils.unreplicate(ret_batch_stats)),
+        saved_batch_stats)
+    assert pytree_equal(
+        jax.device_get(jax_utils.unreplicate(ret_training_metrics)),
+        saved_training_metrics)
+    self.assertEqual(ret_sum_train_cost, sum_train_cost)
+    self.assertEqual(ret_preemption_count, preemption_count)
+    self.assertEqual(ret_global_step, global_step)
+    self.assertEqual(ret_is_restored, True)
+
+    shutil.rmtree(fresh_train_dir)
 
 
 if __name__ == '__main__':
