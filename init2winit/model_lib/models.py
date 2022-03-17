@@ -27,6 +27,7 @@ from init2winit.model_lib import max_pooling_cnn
 from init2winit.model_lib import mlperf_resnet
 from init2winit.model_lib import nqm
 from init2winit.model_lib import resnet
+from init2winit.model_lib import routing_transformer
 from init2winit.model_lib import simple_cnn
 from init2winit.model_lib import transformer_lm
 from init2winit.model_lib import vit
@@ -63,6 +64,8 @@ _ALL_MODELS = {
     'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS),
     'dlrm': (dlrm.DLRMModel, dlrm.DEFAULT_HPARAMS),
     'vit': (vit.ViTModel, vit.DEFAULT_HPARAMS),
+    'routing_transformer': (routing_transformer.RoutingTransformer,
+                            routing_transformer.DEFAULT_HPARAMS),
 }
 
 
