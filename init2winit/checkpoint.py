@@ -70,13 +70,44 @@ def replicate_checkpoint(
   return pytree, extra_dict
 
 
-def replicate_and_maybe_restore_latest_checkpoint(
+def replicate_and_maybe_restore_checkpoint(
     unreplicated_optimizer_state,
     unreplicated_params,
     unreplicated_batch_stats,
     unreplicated_training_metrics_grabber,
-    train_dir):
-  """Restore from the latest checkpoint, if it exists."""
+    train_dir,
+    external_checkpoint_path=None):
+  """Replicates everything, and optionally restores from a checkpoint.
+
+  The checkpoint logic is as follows: if there is a checkpoint in `train_dir`,
+  restore it.  Else, if `external_checkpoint_path` is set, restore the
+  checkpoint found there.  Else, don't restore any checkpoint, and just
+  return the passed-in optimizer_state, params, batch_stats, and
+  metrics_grabber.
+
+  This function is also responsible for replicating the optimizer_state, params,
+  batch_stats, and training_metrics_grabber across multiple devices.
+
+  Args:
+    unreplicated_optimizer_state: unreplicated optimizer state
+    unreplicated_params: unreplicated params
+    unreplicated_batch_stats: unreplicated batch stats
+    unreplicated_training_metrics_grabber: unreplicated metrics grabber
+    train_dir: (str) The training directory where we will look for a checkpoint.
+    external_checkpoint_path: (str) If this argument is set, then we will load
+    the external checkpoint stored there.
+
+  Returns:
+    replicated_optimizer_state
+    replicated_params
+    replicated_batch_stats
+    replicated_training_metrics_grabber
+    global_step (int)
+    sum_train_cost (float)
+    preemption_count (int)
+    is_restored (bool): True if we've restored the latest checkpoint
+                        in train_dir.
+  """
   uninitialized_global_step = -1
   unreplicated_checkpoint_state = dict(
       params=unreplicated_params,
@@ -86,31 +117,36 @@ def replicate_and_maybe_restore_latest_checkpoint(
       global_step=uninitialized_global_step,
       preemption_count=0,
       sum_train_cost=0.0)
-  latest = load_latest_checkpoint(
-      train_dir,
-      target=unreplicated_checkpoint_state)
-  found_checkpoint = (
-      latest and latest['global_step'] != uninitialized_global_step)
+  latest_ckpt = load_latest_checkpoint(train_dir,
+                                       target=unreplicated_checkpoint_state)
+  # Load_latest_checkpoint() will return unreplicated_checkpoint_state if
+  # train_dir does not exist or if it exists and contains no checkpoints.
+  # Note that we could likely change the below line to:
+  # found_checkpoint = latest_ckpt != unreplicated_checkpoint_state
+  found_checkpoint = (latest_ckpt['global_step'] != uninitialized_global_step)
 
-  optimizer_state = jax_utils.replicate(unreplicated_optimizer_state)
-  params = jax_utils.replicate(unreplicated_params)
-  batch_stats = jax_utils.replicate(unreplicated_batch_stats)
-  training_metrics_grabber = jax_utils.replicate(
-      unreplicated_training_metrics_grabber)
-
-  if not found_checkpoint:
+  # If there's a latest checkpoint in the train_dir, restore from that.
+  if found_checkpoint:
+    ckpt_to_return = latest_ckpt
+    is_restored = True  # We do want trainer to increment preemption_count.
+  # Else, if external_checkpoint_path is non-null, restore from that checkpoint.
+  elif external_checkpoint_path is not None:
+    ckpt_to_return = load_checkpoint(external_checkpoint_path,
+                                     target=unreplicated_checkpoint_state)
+    is_restored = False  # We don't want trainer to increment preemption_count.
+  else:  # Else, don't restore from any checkpoint.
     return (
-        optimizer_state,
-        params,
-        batch_stats,
-        training_metrics_grabber,
+        jax_utils.replicate(unreplicated_optimizer_state),
+        jax_utils.replicate(unreplicated_params),
+        jax_utils.replicate(unreplicated_batch_stats),
+        jax_utils.replicate(unreplicated_training_metrics_grabber),
         0,  # global_step
         0.0,  # sum_train_cost
         0,  # preemption_count
         False)  # is_restored
 
   pytree_dict, extra_state = replicate_checkpoint(
-      latest,
+      ckpt_to_return,
       pytree_keys=[
           'optimizer_state',
           'params',
@@ -125,7 +161,7 @@ def replicate_and_maybe_restore_latest_checkpoint(
       extra_state['global_step'],
       extra_state['sum_train_cost'],
       extra_state['preemption_count'],
-      True)
+      is_restored)
 
 
 def save_unreplicated_checkpoint_background(

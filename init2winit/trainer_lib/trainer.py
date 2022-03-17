@@ -274,7 +274,8 @@ def train(train_dir,
           metrics_logger=None,
           init_logger=None,
           training_metrics_config=None,
-          callback_configs=None):
+          callback_configs=None,
+          external_checkpoint_path=None):
   """Main training loop.
 
   Trains the given network on the specified dataset for the given number of
@@ -320,6 +321,9 @@ def train(train_dir,
     callback_configs: List of configs specifying general callbacks to run
       during the eval phase. Empty list means no callbacks are run. See
       callbacks.py for details on what is expected in a config.
+    external_checkpoint_path: (str) If this argument is set, we will load the
+      optimizer_state, params, batch_stats, and training_metrics from the
+      checkpoint at this location.
 
   Yields:
     metrics: A dictionary of all eval metrics from the given epoch.
@@ -385,15 +389,14 @@ def train(train_dir,
         unreplicated_params, training_metrics_config)
 
   (optimizer_state, params, batch_stats, training_metrics_grabber,
-   global_step, sum_train_cost,
-   preemption_count,
-   is_restored) = checkpoint.replicate_and_maybe_restore_latest_checkpoint(
-       unreplicated_optimizer_state=unreplicated_optimizer_state,
-       unreplicated_params=unreplicated_params,
-       unreplicated_batch_stats=unreplicated_batch_stats,
-       unreplicated_training_metrics_grabber=(
-           unreplicated_training_metrics_grabber),
-       train_dir=train_dir)
+   global_step, sum_train_cost, preemption_count, is_restored
+   ) = checkpoint.replicate_and_maybe_restore_checkpoint(
+       unreplicated_optimizer_state,
+       unreplicated_params,
+       unreplicated_batch_stats,
+       unreplicated_training_metrics_grabber,
+       train_dir=train_dir,
+       external_checkpoint_path=external_checkpoint_path)
 
   if is_restored:
     preemption_count += 1

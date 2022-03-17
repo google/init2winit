@@ -78,6 +78,10 @@ flags.DEFINE_list(
     'directory train_dir/checkpoints. Note these checkpoints'
     'will be in addition to the normal checkpointing that'
     'occurs during training for preemption purposes.')
+flags.DEFINE_string('external_checkpoint_path', None,
+                    'If this argument is set, the trainer will initialize'
+                    'the parameters, batch stats, optimizer state, and training'
+                    'metrics by loading them from the checkpoint at this path.')
 
 flags.DEFINE_string(
     'early_stopping_target_name',
@@ -158,7 +162,9 @@ def _run(
     experiment_dir,
     worker_id,
     training_metrics_config,
-    callback_configs):
+    callback_configs,
+    external_checkpoint_path
+    ):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
   initializer = initializers.get_initializer(initializer_name)
@@ -227,6 +233,7 @@ def _run(
             init_logger,
             training_metrics_config=training_metrics_config,
             callback_configs=callback_configs,
+            external_checkpoint_path=external_checkpoint_path
         ))
     logging.info(epoch_reports)
     meta_data['status'] = 'done'
@@ -291,7 +298,9 @@ def main(unused_argv):
         experiment_dir=FLAGS.experiment_dir,
         worker_id=FLAGS.worker_id,
         training_metrics_config=training_metrics_config,
-        callback_configs=callback_configs)
+        callback_configs=callback_configs,
+        external_checkpoint_path=FLAGS.external_checkpoint_path,
+        )
 
 
 if __name__ == '__main__':
