@@ -45,6 +45,15 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
     shutil.rmtree(self.test_dir)
     super(TrainingMetricsGrabberTest, self).tearDown()
 
+  def test_config_override(self):
+    # If no override is passed, ema_beta should default to 0.9.
+    grabber = TrainingMetricsGrabber.create({}, {})
+    self.assertEqual(grabber.config['ema_beta'], 0.9)
+
+    # If an override is passed, that value should take precedence.
+    grabber = TrainingMetricsGrabber.create({}, {'ema_beta': 0.5})
+    self.assertEqual(grabber.config['ema_beta'], 0.5)
+
   def test_grad_var(self):
     model_size = 10
     example_grads = [{

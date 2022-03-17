@@ -21,7 +21,13 @@ from flax import serialization
 from flax import struct
 import jax
 import jax.numpy as jnp
+from ml_collections import ConfigDict
 import numpy as np
+
+# The TrainingMetricsGrabber configs will be these defaults overridden
+# by any overrides passsed to TrainingMetricsGrabber.create.
+# See the class doc string for an overview of the keys and what they mean.
+DEFAULT_CONFIG = ConfigDict({'ema_beta': 0.9})
 
 
 @struct.dataclass
@@ -32,6 +38,11 @@ class _MetricsLeafState:
   param_norm: np.ndarray
   update_ema: np.ndarray
   update_sq_ema: np.ndarray
+
+
+def _advance_ema(cur_ema, new_val, beta):
+  """Advance an exponential moving average (EMA)."""
+  return beta * cur_ema + (1 - beta) * new_val
 
 
 def _update_param_stats(leaf_state, param_gradient, update, new_param, config):
@@ -49,15 +60,12 @@ def _update_param_stats(leaf_state, param_gradient, update, new_param, config):
   """
   ema_beta = config['ema_beta']
   param_grad_sq = jnp.square(param_gradient)
-
-  grad_sq_ema = ema_beta * leaf_state.grad_sq_ema + (1.0 -
-                                                     ema_beta) * param_grad_sq
-  grad_ema = ema_beta * leaf_state.grad_ema + (1.0 - ema_beta) * param_gradient
-
   update_sq = jnp.square(update)
-  update_ema = ema_beta * leaf_state.update_ema + (1.0 - ema_beta) * update
-  update_sq_ema = ema_beta * leaf_state.update_sq_ema + (1.0 -
-                                                         ema_beta) * update_sq
+
+  grad_ema = _advance_ema(leaf_state.grad_ema, param_gradient, ema_beta)
+  grad_sq_ema = _advance_ema(leaf_state.grad_sq_ema, param_grad_sq, ema_beta)
+  update_ema = _advance_ema(leaf_state.update_ema, update, ema_beta)
+  update_sq_ema = _advance_ema(leaf_state.update_sq_ema, update_sq, ema_beta)
 
   param_norm = jnp.linalg.norm(new_param.reshape(-1))
 
@@ -69,11 +77,6 @@ def _update_param_stats(leaf_state, param_gradient, update, new_param, config):
       update_sq_ema=update_sq_ema)
 
 
-def _validate_config(config):
-  if 'ema_beta' not in config:
-    raise ValueError('Eval config requires field ema_beta')
-
-
 @struct.dataclass
 class TrainingMetricsGrabber:
   """Flax object used to grab gradient statistics during training.
@@ -82,7 +85,8 @@ class TrainingMetricsGrabber:
   to record statistics of the gradient during training. The API is
   new_metrics_grabber = training_metrics_grabber.update(grad, batch_stats).
   Currently, this records an ema of the model gradient and squared gradient.
-  The this class is configured with the config dict passed to create().
+  The class is configured with the override dict passed to create() as well as
+  the DEFAULT_CONFIG specificied above.
   Current keys:
     ema_beta: The beta used when computing the exponential moving average of the
       gradient variance as follows:
@@ -94,17 +98,19 @@ class TrainingMetricsGrabber:
 
   # This pattern is needed to maintain functional purity.
   @staticmethod
-  def create(model_params, config):
+  def create(model_params, config_overrides):
     """Build the TrainingMetricsGrabber.
 
     Args:
       model_params: A pytree containing model parameters.
-      config: Dictionary specifying the grabber configuration. See class doc
-        string for relevant keys.
+      config_overrides: Dictionary specifying config overrides.
+        See class doc string for relevant keys.
 
     Returns:
       The build grabber object.
     """
+    config = ConfigDict(DEFAULT_CONFIG)
+    config.update(config_overrides)
 
     def _node_init(x):
       return _MetricsLeafState(
@@ -115,10 +121,9 @@ class TrainingMetricsGrabber:
           update_sq_ema=jnp.zeros_like(x),
       )
 
-    _validate_config(config)
     gradient_statistics = jax.tree_map(_node_init, model_params)
 
-    return TrainingMetricsGrabber(gradient_statistics, config)
+    return TrainingMetricsGrabber(gradient_statistics, config.to_dict())
 
   def update(self, model_gradient, old_params, new_params):
     """Computes a number of statistics from the model params and update.

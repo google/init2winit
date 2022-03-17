@@ -384,7 +384,7 @@ def train(train_dir,
   unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
 
   unreplicated_training_metrics_grabber = None
-  if training_metrics_config:
+  if training_metrics_config is not None:
     unreplicated_training_metrics_grabber = TrainingMetricsGrabber.create(
         unreplicated_params, training_metrics_config)
 
