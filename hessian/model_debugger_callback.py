@@ -110,8 +110,7 @@ class ModelDebugCallback:
             training_cost=model.training_cost,
             ),
         axis_name='batch',
-        in_axes=(0, 0, 0, None, None, 0),
-        donate_argnums=(0, 1, 2))
+        in_axes=(0, 0, 0, None, None, 0))
     self.debugger = debugger
     self.logger = logger
     self.dataset = dataset
