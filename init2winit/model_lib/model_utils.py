@@ -21,6 +21,7 @@ from typing import Any, Callable, Iterable
 from absl import logging
 from flax import linen as nn
 from flax import optim
+from flax.core import FrozenDict
 from init2winit.model_lib import normalization
 import jax
 from jax import lax
@@ -241,7 +242,7 @@ def flatten_dict(nested_dict, sep='/'):
     The flattened dictionary.
   """
   # Base case at a leaf, in which case nested_dict is not a dict.
-  if not isinstance(nested_dict, dict):
+  if not (isinstance(nested_dict, dict) or isinstance(nested_dict, FrozenDict)):
     return {}
   return_dict = {}
   for key in nested_dict:
