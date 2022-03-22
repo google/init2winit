@@ -29,6 +29,7 @@ from init2winit.model_lib import nqm
 from init2winit.model_lib import resnet
 from init2winit.model_lib import simple_cnn
 from init2winit.model_lib import transformer_lm
+from init2winit.model_lib import unet
 from init2winit.model_lib import vit
 from init2winit.model_lib import wide_resnet
 from init2winit.model_lib import xformer_translate
@@ -63,6 +64,7 @@ _ALL_MODELS = {
     'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS),
     'dlrm': (dlrm.DLRMModel, dlrm.DEFAULT_HPARAMS),
     'vit': (vit.ViTModel, vit.DEFAULT_HPARAMS),
+    'unet': (unet.UNetModel, unet.DEFAULT_HPARAMS),
 }
 
 
