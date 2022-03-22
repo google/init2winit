@@ -106,9 +106,9 @@ class CriteoTsvReader(object):
       ds = ds.repeat()
     ds = ds.interleave(
         tf.data.TextLineDataset,
-        cycle_length=16,
+        cycle_length=128,
         block_length=batch_size // 8,
-        num_parallel_calls=8,
+        num_parallel_calls=128,
         deterministic=False)
     ds = ds.batch(batch_size, drop_remainder=True)
     ds = ds.map(_parse_example_fn, num_parallel_calls=16)
