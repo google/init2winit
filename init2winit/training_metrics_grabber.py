@@ -27,11 +27,12 @@ from ml_collections import ConfigDict
 # See the class doc string for an overview of the keys and what they mean.
 DEFAULT_CONFIG = ConfigDict({
     'ema_beta': 0.9,
+    'enable_train_cost': False,
     'enable_ema': False,
 })
 
 
-def make_training_metrics(**config_overrides):
+def make_training_metrics(num_train_steps, **config_overrides):
   """Creates functions for managing training metrics.
 
   Training metrics are handled in a functional, "jax-onic" way, similar to
@@ -51,6 +52,9 @@ def make_training_metrics(**config_overrides):
   config overrides passed as arguments to this function.
 
   The config keys and their meanings are:
+    - enable_train_cost (bool): if true, the metrics state will have a field
+        "train_cost" which is a jnp array of length num_train_steps, and which
+        stores the train cost at every step of training (padded by zeros).
     - enable_ema (bool): if true, the metrics state will have fields "grad_ema",
         "grad_sq_ema", "update_ema", and "update_sq_ema" containing
         exponential moving averages of the gradient, update, elementwise squared
@@ -60,6 +64,8 @@ def make_training_metrics(**config_overrides):
         their "beta" averaging parameter.
 
   Args:
+    num_train_steps: (int) the number of steps of training.  We use this to
+      determine the shape of the arrays that store per-step time series.
     **config_overrides: optional overrides for the training_metrics configs.
       Config keys which are not overridden will retain their default values.
 
@@ -87,6 +93,8 @@ def make_training_metrics(**config_overrides):
     """
     metrics_state = {}
     metrics_state['param_norm'] = jax.tree_map(lambda x: 0.0, params)
+    if config['enable_train_cost']:
+      metrics_state['train_cost'] = jnp.zeros(num_train_steps)
     if config['enable_ema']:
       metrics_state['grad_ema'] = jax.tree_map(jnp.zeros_like, params)
       metrics_state['grad_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
@@ -94,11 +102,13 @@ def make_training_metrics(**config_overrides):
       metrics_state['update_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
     return metrics_state
 
-  def update_fn(metrics_state, grad, old_params, new_params):
+  def update_fn(metrics_state, step, train_cost, grad, old_params, new_params):
     """Update the training metrics state.
 
     Args:
       metrics_state: (pytree) The current training metrics state.
+      step: (int) the global step of training.
+      train_cost: (float) The current train cost.
       grad: (pytree, of same shape as params): The current gradient.
       old_params: (pytree, of same shape as params): The parameters before the
         update.
@@ -115,6 +125,9 @@ def make_training_metrics(**config_overrides):
     next_metrics_state = {}
     next_metrics_state['param_norm'] = jax.tree_map(
         lambda x: jnp.linalg.norm(x.reshape(-1)), new_params)
+    if config['enable_train_cost']:
+      next_metrics_state['train_cost'] = metrics_state['train_cost'].at[
+          step].set(train_cost)
     if config['enable_ema']:
       beta = config['ema_beta']
       next_metrics_state['grad_ema'] = _advance_ema(

@@ -131,6 +131,11 @@ def replicate_and_maybe_restore_checkpoint(
     is_restored = True  # We do want trainer to increment preemption_count.
   # Else, if external_checkpoint_path is non-null, restore from that checkpoint.
   elif external_checkpoint_path is not None:
+    # TODO(jeremycohen) This code will crash if we try to load an external
+    # checkpoint which was trained with a different num_train_steps.  The issue
+    # is that some of the fields in the training metrics state are arrays of
+    # shape [num_train_steps].  In the future we may want to handle these
+    # arrays explicitly, in order to avoid this crash.
     ckpt_to_return = load_checkpoint(external_checkpoint_path,
                                      target=unreplicated_checkpoint_state)
     is_restored = False  # We don't want trainer to increment preemption_count.
