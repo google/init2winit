@@ -15,8 +15,7 @@
 
 """Utility functions related to training."""
 from absl import logging
-
-from init2winit import utils
+from flax import jax_utils
 from init2winit.model_lib import model_utils
 import jax
 
@@ -30,9 +29,13 @@ def log_epoch_report(report, metrics_logger):
                report['epoch'])
 
 
-def maybe_log_training_metrics(training_metrics_grabber, metrics_logger):
-  if training_metrics_grabber:
-    summary_tree = utils.get_summary_tree(training_metrics_grabber)
+def maybe_log_training_metrics(metrics_state,
+                               metrics_summary_fn,
+                               metrics_logger):
+  """If appropriate, send a summary tree of training metrics to the logger."""
+  if metrics_state:
+    unreplicated_metrics_state = jax_utils.unreplicate(metrics_state)
+    summary_tree = metrics_summary_fn(unreplicated_metrics_state)
     metrics_logger.append_pytree(summary_tree)
 
 

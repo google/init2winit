@@ -74,7 +74,7 @@ def replicate_and_maybe_restore_checkpoint(
     unreplicated_optimizer_state,
     unreplicated_params,
     unreplicated_batch_stats,
-    unreplicated_training_metrics_grabber,
+    unreplicated_training_metrics_state,
     train_dir,
     external_checkpoint_path=None):
   """Replicates everything, and optionally restores from a checkpoint.
@@ -92,7 +92,7 @@ def replicate_and_maybe_restore_checkpoint(
     unreplicated_optimizer_state: unreplicated optimizer state
     unreplicated_params: unreplicated params
     unreplicated_batch_stats: unreplicated batch stats
-    unreplicated_training_metrics_grabber: unreplicated metrics grabber
+    unreplicated_training_metrics_state: unreplicated metrics state
     train_dir: (str) The training directory where we will look for a checkpoint.
     external_checkpoint_path: (str) If this argument is set, then we will load
     the external checkpoint stored there.
@@ -101,7 +101,7 @@ def replicate_and_maybe_restore_checkpoint(
     replicated_optimizer_state
     replicated_params
     replicated_batch_stats
-    replicated_training_metrics_grabber
+    replicated_training_metrics_state
     global_step (int)
     sum_train_cost (float)
     preemption_count (int)
@@ -113,7 +113,7 @@ def replicate_and_maybe_restore_checkpoint(
       params=unreplicated_params,
       optimizer_state=unreplicated_optimizer_state,
       batch_stats=unreplicated_batch_stats,
-      training_metrics_grabber=unreplicated_training_metrics_grabber,
+      training_metrics_grabber=unreplicated_training_metrics_state,
       global_step=uninitialized_global_step,
       preemption_count=0,
       sum_train_cost=0.0)
@@ -139,7 +139,7 @@ def replicate_and_maybe_restore_checkpoint(
         jax_utils.replicate(unreplicated_optimizer_state),
         jax_utils.replicate(unreplicated_params),
         jax_utils.replicate(unreplicated_batch_stats),
-        jax_utils.replicate(unreplicated_training_metrics_grabber),
+        jax_utils.replicate(unreplicated_training_metrics_state),
         0,  # global_step
         0.0,  # sum_train_cost
         0,  # preemption_count
@@ -169,7 +169,7 @@ def save_unreplicated_checkpoint_background(
     optimizer_state,
     params,
     batch_stats,
-    training_metrics_grabber,
+    training_metrics_state,
     global_step,
     preemption_count,
     sum_train_cost,
@@ -180,15 +180,15 @@ def save_unreplicated_checkpoint_background(
       jax_utils.unreplicate(optimizer_state))
   unreplicated_params = jax.device_get(jax_utils.unreplicate(params))
   unreplicated_batch_stats = jax.device_get(jax_utils.unreplicate(batch_stats))
-  unreplicated_training_metrics_grabber = jax.device_get(
-      jax_utils.unreplicate(training_metrics_grabber))
+  unreplicated_training_metrics_state = jax.device_get(
+      jax_utils.unreplicate(training_metrics_state))
   state = dict(global_step=global_step,
                preemption_count=preemption_count,
                sum_train_cost=sum_train_cost,
                optimizer_state=unreplicated_optimizer_state,
                params=unreplicated_params,
                batch_stats=unreplicated_batch_stats,
-               training_metrics_grabber=unreplicated_training_metrics_grabber)
+               training_metrics_grabber=unreplicated_training_metrics_state)
   save_checkpoint_background(
       train_dir,
       global_step,

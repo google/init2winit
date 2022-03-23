@@ -15,186 +15,167 @@
 
 """Grab training metrics throughout training."""
 
-from typing import Any, Dict
+import operator
 
-from flax import serialization
-from flax import struct
+from init2winit.model_lib import model_utils
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
-import numpy as np
 
 # The TrainingMetricsGrabber configs will be these defaults overridden
 # by any overrides passsed to TrainingMetricsGrabber.create.
 # See the class doc string for an overview of the keys and what they mean.
-DEFAULT_CONFIG = ConfigDict({'ema_beta': 0.9})
+DEFAULT_CONFIG = ConfigDict({
+    'ema_beta': 0.9,
+    'enable_ema': False,
+})
 
 
-@struct.dataclass
-class _MetricsLeafState:
-  # These won't actualy be np arrays, just for type checking.
-  grad_ema: np.ndarray
-  grad_sq_ema: np.ndarray
-  param_norm: np.ndarray
-  update_ema: np.ndarray
-  update_sq_ema: np.ndarray
+def make_training_metrics(**config_overrides):
+  """Creates functions for managing training metrics.
+
+  Training metrics are handled in a functional, "jax-onic" way, similar to
+  optax optimizers: there is a state pytree (whose precise structure depends
+  on the config settings), and a set of functions to manipulate that state.
+
+  The three functions are:
+    (1) an initializer, which initializes the training metrics state
+       (given the network param shapes);
+    (2) an updater, which updates the training metrics state; and
+    (3) a summarizer, which summarizes the training metrics state into a summary
+      tree.
+
+  The behavior of these functions is customizable via the configs.  The
+  final configs used to configure the training metrics functionality are a
+  combination of (1) the default configs in DEFAULT_CONFIG, and (2) the
+  config overrides passed as arguments to this function.
+
+  The config keys and their meanings are:
+    - enable_ema (bool): if true, the metrics state will have fields "grad_ema",
+        "grad_sq_ema", "update_ema", and "update_sq_ema" containing
+        exponential moving averages of the gradient, update, elementwise squared
+        gradient, and elementwise squared update; and the summary tree will
+        contain estimates of the gradient variance and update variance.
+    - ema_beta (float): if enable_ema=true, the EMA's will use this value for
+        their "beta" averaging parameter.
+
+  Args:
+    **config_overrides: optional overrides for the training_metrics configs.
+      Config keys which are not overridden will retain their default values.
+
+  Returns:
+    init_fn: (function) initializes the training metrics state
+    update_fn: (function) updates the training metrics state
+    summarize_fn: (function): summarizes the training metrics state
+  """
+
+  config = ConfigDict(DEFAULT_CONFIG)
+  config.update(config_overrides)
+
+  def init_fn(params):
+    """Initialize the training metrics state.
+
+    Args:
+      params: (pytree) A pytree of model parameters.  Used for its shape
+        information.
+
+    Returns:
+      metrics_state: (pytree): The initial training metrics state.  This is
+        a pytree whose keys are the different training metrics; many of the
+        corresponding values are pytrees of the same shape as the model params,
+        though some are just scalars.
+    """
+    metrics_state = {}
+    metrics_state['param_norm'] = jax.tree_map(lambda x: 0.0, params)
+    if config['enable_ema']:
+      metrics_state['grad_ema'] = jax.tree_map(jnp.zeros_like, params)
+      metrics_state['grad_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
+      metrics_state['update_ema'] = jax.tree_map(jnp.zeros_like, params)
+      metrics_state['update_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
+    return metrics_state
+
+  def update_fn(metrics_state, grad, old_params, new_params):
+    """Update the training metrics state.
+
+    Args:
+      metrics_state: (pytree) The current training metrics state.
+      grad: (pytree, of same shape as params): The current gradient.
+      old_params: (pytree, of same shape as params): The parameters before the
+        update.
+      new_params: (pytree, of same shape as params): The parameters after the
+        update.
+
+    Returns:
+      next_metrics_state: (pytree) The next training metrics state.
+    """
+    update = jax.tree_map(lambda x, y: x - y, old_params, new_params)
+    grad_sq = jax.tree_map(jnp.square, grad)
+    update_sq = jax.tree_map(jnp.square, update)
+
+    next_metrics_state = {}
+    next_metrics_state['param_norm'] = jax.tree_map(
+        lambda x: jnp.linalg.norm(x.reshape(-1)), new_params)
+    if config['enable_ema']:
+      beta = config['ema_beta']
+      next_metrics_state['grad_ema'] = _advance_ema(
+          metrics_state['grad_ema'], grad, beta)
+      next_metrics_state['grad_sq_ema'] = _advance_ema(
+          metrics_state['grad_sq_ema'], grad_sq, beta)
+      next_metrics_state['update_ema'] = _advance_ema(
+          metrics_state['update_ema'], update, beta)
+      next_metrics_state['update_sq_ema'] = _advance_ema(
+          metrics_state['update_sq_ema'], update_sq, beta)
+
+    return next_metrics_state
+
+  def summarize_fn(metrics_state):
+    """Construct a summary tree based on the current training metrics state.
+
+    Args:
+      metrics_state: (pytree) The current training metrics state.
+
+    Returns:
+      summary_tree: (pytree) A summary of the training metrics state.
+    """
+
+    # this dict will map from "summary key" to "pytree of same shape as params"
+    summary = {}
+
+    summary['param_norm'] = metrics_state['param_norm']
+
+    if config['enable_ema']:
+
+      def compute_var(first_moment, second_moment):
+        return (second_moment - first_moment**2).sum()
+
+      summary['grad_var'] = jax.tree_map(compute_var,
+                                         metrics_state['grad_ema'],
+                                         metrics_state['grad_sq_ema'])
+
+      summary['update_var'] = jax.tree_map(compute_var,
+                                           metrics_state['update_ema'],
+                                           metrics_state['update_sq_ema'])
+
+      summary['update_ratio'] = jax.tree_map(operator.truediv,
+                                             summary['update_var'],
+                                             metrics_state['param_norm'])
+
+    # This dict will map from "summary key" to "flattened pytree of same shape
+    # as params."
+    flat_summary = _map_values(model_utils.flatten_dict, summary)
+
+    return flat_summary
+
+  return init_fn, update_fn, summarize_fn
+
+
+def _map_values(f, dictionary):
+  """Create a new dict by mapping all the values in a dict through f."""
+  return {k: f(v) for (k, v) in dictionary.items()}
 
 
 def _advance_ema(cur_ema, new_val, beta):
-  """Advance an exponential moving average (EMA)."""
-  return beta * cur_ema + (1 - beta) * new_val
-
-
-def _update_param_stats(leaf_state, param_gradient, update, new_param, config):
-  """Updates the leaf state with the new layer statistics.
-
-  Args:
-    leaf_state: A _MetricsLeafState.
-    param_gradient: The most recent gradient at the given layer.
-    update: The optimizer update at the given layer.
-    new_param: The updated layer parameters.
-    config: See docstring of TrainingMetricsGrabber.
-
-  Returns:
-    Updated leaf state containing the new layer statistics.
-  """
-  ema_beta = config['ema_beta']
-  param_grad_sq = jnp.square(param_gradient)
-  update_sq = jnp.square(update)
-
-  grad_ema = _advance_ema(leaf_state.grad_ema, param_gradient, ema_beta)
-  grad_sq_ema = _advance_ema(leaf_state.grad_sq_ema, param_grad_sq, ema_beta)
-  update_ema = _advance_ema(leaf_state.update_ema, update, ema_beta)
-  update_sq_ema = _advance_ema(leaf_state.update_sq_ema, update_sq, ema_beta)
-
-  param_norm = jnp.linalg.norm(new_param.reshape(-1))
-
-  return _MetricsLeafState(
-      grad_ema=grad_ema,
-      grad_sq_ema=grad_sq_ema,
-      param_norm=param_norm,
-      update_ema=update_ema,
-      update_sq_ema=update_sq_ema)
-
-
-@struct.dataclass
-class TrainingMetricsGrabber:
-  """Flax object used to grab gradient statistics during training.
-
-  This class will be passed to the trainer update function, and can be used
-  to record statistics of the gradient during training. The API is
-  new_metrics_grabber = training_metrics_grabber.update(grad, batch_stats).
-  Currently, this records an ema of the model gradient and squared gradient.
-  The class is configured with the override dict passed to create() as well as
-  the DEFAULT_CONFIG specificied above.
-  Current keys:
-    ema_beta: The beta used when computing the exponential moving average of the
-      gradient variance as follows:
-      var_ema_{i+1} = (beta) * var_ema_{i} + (1-beta) * current_variance.
-  """
-
-  state: Any
-  config: Dict[str, Any]
-
-  # This pattern is needed to maintain functional purity.
-  @staticmethod
-  def create(model_params, config_overrides):
-    """Build the TrainingMetricsGrabber.
-
-    Args:
-      model_params: A pytree containing model parameters.
-      config_overrides: Dictionary specifying config overrides.
-        See class doc string for relevant keys.
-
-    Returns:
-      The build grabber object.
-    """
-    config = ConfigDict(DEFAULT_CONFIG)
-    config.update(config_overrides)
-
-    def _node_init(x):
-      return _MetricsLeafState(
-          grad_ema=jnp.zeros_like(x),
-          grad_sq_ema=jnp.zeros_like(x),
-          param_norm=0.0,
-          update_ema=jnp.zeros_like(x),
-          update_sq_ema=jnp.zeros_like(x),
-      )
-
-    gradient_statistics = jax.tree_map(_node_init, model_params)
-
-    return TrainingMetricsGrabber(gradient_statistics, config.to_dict())
-
-  def update(self, model_gradient, old_params, new_params):
-    """Computes a number of statistics from the model params and update.
-
-    Statistics computed:
-      Per layer update variances and norms.
-      Per layer gradient variance and norms.
-      Per layer param norms.
-      Ratio of parameter norm to update and update variance.
-
-    Args:
-      model_gradient: A pytree of the same shape as the model_params pytree that
-        was used when the metrics_grabber object was created.
-      old_params: The params before the param update.
-      new_params: The params after the param update.
-
-    Returns:
-      An updated class object.
-    """
-    grads_flat, treedef = jax.tree_flatten(model_gradient)
-    new_params_flat, _ = jax.tree_flatten(new_params)
-    old_params_flat, _ = jax.tree_flatten(old_params)
-
-    # flatten_up_to here is needed to avoid flattening the _MetricsLeafState
-    # nodes.
-    state_flat = treedef.flatten_up_to(self.state)
-    new_states_flat = [
-        _update_param_stats(state, grad, new_param - old_param, new_param,
-                            self.config) for state, grad, old_param, new_param
-        in zip(state_flat, grads_flat, old_params_flat, new_params_flat)
-    ]
-
-    return self.replace(state=jax.tree_unflatten(treedef, new_states_flat))
-
-  @staticmethod
-  def to_state_dict(grabber):
-    """Serialize a TraningMetricsGrabber.
-
-    This function is called by flax.serialization.to_state_dict.
-
-    Args:
-      grabber: (TrainingMetricsGrabber) A TrainingMetricsGrabber to be
-        serialized.
-
-    Returns:
-      a dict representing the TrainingMetricsGrabber
-    """
-    return serialization.to_state_dict(
-        {'state': serialization.to_state_dict(grabber.state)})
-
-  @staticmethod
-  def from_state_dict(target, state_dict):
-    """Restore a serialized TrainingMetricsGrabber.
-
-    This function is called by flax.serialization.from_state_dict.
-
-    Args:
-      target: (TrainingMetricsGrabber) The "target" TrainingMetricsGrabber
-        to be populated with contents from the state dict.
-      state_dict: (dict) A dictionary, originating from to_state_dict(), whose
-        contents should populate the target TrainingMetricsGrabber.
-
-    Returns:
-      the target TrainingMetricsGrabber populated with contents from state_dict.
-    """
-    state = serialization.from_state_dict(target.state, state_dict['state'])
-    return target.replace(state=state)
-
-
-serialization.register_serialization_state(
-    TrainingMetricsGrabber,
-    TrainingMetricsGrabber.to_state_dict,
-    TrainingMetricsGrabber.from_state_dict,
-    override=True)
+  """Advance an exponential moving average."""
+  return jax.tree_map(lambda cur, new: beta * cur + (1 - beta) * new,
+                      cur_ema,
+                      new_val)

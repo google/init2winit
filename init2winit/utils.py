@@ -27,7 +27,6 @@ from absl import logging as absl_logging
 from clu import metric_writers
 from flax.training import checkpoints as flax_checkpoints
 from init2winit import checkpoint
-from init2winit.model_lib import model_utils
 import jax
 import jax.numpy as jnp
 import pandas as pd
@@ -95,43 +94,6 @@ def set_up_loggers(train_dir, xm_work_unit=None):
       json_path=init_json_path,
       xm_work_unit=xm_work_unit)
   return metrics_logger, init_logger
-
-
-def get_summary_tree(training_metrics_grabber):
-  """Extracts desired training statistics from the grabber state.
-
-  Currently this function will compute the scalar aggregate gradient variance
-  for every weight matrix of the model. Future iterations of this function
-  may depend on the metrics_grabber config.
-
-  Args:
-    training_metrics_grabber: TrainingMetricsGrabber object.
-
-  Returns:
-    A dict of different aggregate training statistics.
-  """
-  unreplicated_metrics_tree = jax.tree_map(lambda x: x[0],
-                                           training_metrics_grabber.state)
-
-  # Example key: Layer1/conv1/kernel/
-  # NOTE: jax.tree_map does not work here, because tree_map will additionally
-  # flatten the node state, while model_utils.flatten_dict will consider the
-  # node object a leaf.
-  flat_metrics = model_utils.flatten_dict(unreplicated_metrics_tree)
-
-  # Grab just the gradient_variance terms.
-  def _reduce_node(node):
-    # Var[g] = E[g^2] - E[g]^2
-    grad_var_ema = node.grad_sq_ema - jnp.square(node.grad_ema)
-    update_var_ema = node.update_sq_ema - jnp.square(node.update_ema)
-    return {
-        'grad_var': grad_var_ema.sum(),
-        'param_norm': node.param_norm,
-        'update_var': update_var_ema.sum(),
-        'update_ratio': update_var_ema.sum() / node.param_norm,
-    }
-
-  return {k: _reduce_node(flat_metrics[k]) for k in flat_metrics}
 
 
 def run_in_parallel(function, list_of_kwargs_to_function, num_workers):

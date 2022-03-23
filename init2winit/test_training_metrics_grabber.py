@@ -17,18 +17,15 @@
 
 """
 
-import shutil
-import tempfile
+import math
 
 from absl import flags
 from absl.testing import absltest
-from init2winit import checkpoint
 from init2winit.shared_test_utilities import pytree_equal
-from init2winit.training_metrics_grabber import TrainingMetricsGrabber
+from init2winit.training_metrics_grabber import make_training_metrics
 import jax
 from jax import test_util as jtu
 import jax.numpy as jnp
-import numpy as np
 
 
 FLAGS = flags.FLAGS
@@ -39,67 +36,124 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
 
   def setUp(self):
     super(TrainingMetricsGrabberTest, self).setUp()
-    self.test_dir = tempfile.mkdtemp()
+    self.mock_params0 = {'foo': jnp.zeros(5), 'bar': {'baz': jnp.ones(10)}}
+    self.mock_grad1 = {'foo': -jnp.ones(5), 'bar': {'baz': -jnp.ones(10)}}
+    self.mock_grad2 = {'foo': -2*jnp.ones(5), 'bar': {'baz': -2*jnp.ones(10)}}
 
-  def tearDown(self):
-    shutil.rmtree(self.test_dir)
-    super(TrainingMetricsGrabberTest, self).tearDown()
+    # Simulate running GD with step size 1.
+    self.mock_params1 = jax.tree_map(lambda p, g: p - 1.0 * g,
+                                     self.mock_params0,
+                                     self.mock_grad1)
+    self.mock_params2 = jax.tree_map(lambda p, g: p - 1.0 * g,
+                                     self.mock_params1,
+                                     self.mock_grad2)
 
-  def test_config_override(self):
-    # If no override is passed, ema_beta should default to 0.9.
-    grabber = TrainingMetricsGrabber.create({}, {})
-    self.assertEqual(grabber.config['ema_beta'], 0.9)
+    self.mock_zeros = {'foo': jnp.zeros(5), 'bar': {'baz': jnp.zeros(10)}}
 
-    # If an override is passed, that value should take precedence.
-    grabber = TrainingMetricsGrabber.create({}, {'ema_beta': 0.5})
-    self.assertEqual(grabber.config['ema_beta'], 0.5)
+  def test_init(self):
+    """Test the training metrics initializer."""
 
-  def test_grad_var(self):
-    model_size = 10
-    example_grads = [{
-        'layer1': np.ones(model_size),
-        'layer2': 3 * np.ones(model_size)
-    }, {
-        'layer1': 2 * np.ones(model_size),
-        'layer2': np.ones(model_size)
-    }]
-    eval_config = {'ema_beta': 0.5}
-    training_metrics_grabber = TrainingMetricsGrabber.create(
-        example_grads[0], eval_config)
+    zeros_like_params = jax.tree_map(jnp.zeros_like, self.mock_params0)
+    zeros_scalar_like_params = jax.tree_map(lambda x: 0.0, self.mock_params0)
 
-    for grad in example_grads:
-      training_metrics_grabber = training_metrics_grabber.update(
-          grad, example_grads[0], example_grads[0])
+    # Test init with enable_ema = False.
+    init_fn, _, _ = make_training_metrics(enable_ema=False)
+    initial_metrics_state = init_fn(self.mock_params0)
+    self.assertTrue(
+        pytree_equal({'param_norm': zeros_scalar_like_params},
+                     initial_metrics_state))
 
-    for layer in ['layer1', 'layer2']:
-      expected_grad_ema = 1 / 4 * np.zeros(model_size) + 1 / 4 * example_grads[
-          0][layer] + 1 / 2 * example_grads[1][layer]
+    # Test init with enable_ema = True.
+    init_fn, _, _ = make_training_metrics(enable_ema=True)
+    initial_metrics_state = init_fn(self.mock_params0)
+    self.assertTrue(pytree_equal(initial_metrics_state, {
+                'param_norm': zeros_scalar_like_params,
+                'grad_ema': zeros_like_params,
+                'grad_sq_ema': zeros_like_params,
+                'update_ema': zeros_like_params,
+                'update_sq_ema': zeros_like_params
+    }))
 
-      self.assertArraysAllClose(expected_grad_ema,
-                                training_metrics_grabber.state[layer].grad_ema)
+  def test_update_param_norm(self):
+    """Ensure that the training metrics updater updates param norm correctly."""
 
-  def test_serialize_in_checkpoint(self):
-    """Test that the TrainingMetricsGrabber can be serialized and restored."""
+    init_fn, update_fn, _ = make_training_metrics(enable_ema=False)
+    initial_metrics_state = init_fn(self.mock_params0)
+    updated_metrics_state = update_fn(initial_metrics_state, self.mock_grad1,
+                                      self.mock_params0, self.mock_params1)
+    self.assertTrue(
+        pytree_equal(updated_metrics_state['param_norm'], {
+            'foo': math.sqrt(5),
+            'bar': {'baz': math.sqrt(40)}
+        }))
 
-    initial_params = {'foo': jnp.zeros(5), 'bar': jnp.zeros(5)}
-    initial_gradient = {'foo': 1*jnp.ones(5), 'bar': 2*jnp.ones(5)}
-    new_params = jax.tree_map(lambda p, g: p - 0.1*g,
-                              initial_params,
-                              initial_gradient)
+  def test_update_grad_ema(self):
+    """Ensure that the training metrics updater updates grad ema correctly."""
 
-    initial_grabber = TrainingMetricsGrabber.create(
-        initial_params, {'ema_beta': 0.5})
-    new_grabber = initial_grabber.update(
-        initial_gradient, initial_params, new_params)
+    init_fn, update_fn, _ = make_training_metrics(enable_ema=True,
+                                                  ema_beta=0.5)
+    initial_metrics_state = init_fn(self.mock_params0)
+    updated_metrics_state = update_fn(initial_metrics_state,
+                                      self.mock_grad1,
+                                      self.mock_params0,
+                                      self.mock_params1)
+    updated_metrics_state = update_fn(updated_metrics_state,
+                                      self.mock_grad2,
+                                      self.mock_params1,
+                                      self.mock_params2)
 
-    checkpoint.save_checkpoint(self.test_dir, 1,
-                               {'training_metrics_grabber': new_grabber})
+    self.assertTrue(
+        pytree_equal(
+            updated_metrics_state['grad_ema'],
+            jax.tree_map(lambda x, y, z: 0.25 * x + 0.25 * y + 0.5 * z,
+                         self.mock_zeros, self.mock_grad1, self.mock_grad2)))
 
-    loaded_checkpoint = checkpoint.load_latest_checkpoint(
-        self.test_dir, {'training_metrics_grabber': initial_grabber})
-    loaded_grabber = loaded_checkpoint['training_metrics_grabber']
-
-    self.assertTrue(pytree_equal(loaded_grabber.state, new_grabber.state))
+  def test_summarize(self):
+    """Test the training metrics summarizer."""
+    _, _, summarize_fn = make_training_metrics(enable_ema=True)
+    metrics_state = {
+        'param_norm': {
+            'foo': 7.0,
+            'bar': {'baz': 2.0}
+        },
+        'grad_ema': {
+            'foo': 1 * jnp.ones(5),
+            'bar': {'baz': 2 * jnp.ones(10)}
+        },
+        'grad_sq_ema': {
+            'foo': 2 * jnp.ones(5),
+            'bar': {'baz': 6 * jnp.ones(10)}
+        },
+        'update_ema': {
+            'foo': 2 * jnp.ones(5),
+            'bar': {'baz': 1 * jnp.ones(10)}
+        },
+        'update_sq_ema': {
+            'foo': 6 * jnp.ones(5),
+            'bar': {'baz': 2 * jnp.ones(10)}
+        },
+    }
+    tree_summary = summarize_fn(metrics_state)
+    self.assertTrue(
+        pytree_equal(
+            tree_summary, {
+                'param_norm': {
+                    '/foo': 7.0,
+                    '/bar/baz': 2.0
+                },
+                'grad_var': {
+                    '/foo': 5 * (2 - 1**2),
+                    '/bar/baz': 10 * (6 - 2**2)
+                },
+                'update_var': {
+                    '/foo': 5 * (6 - 2**2),
+                    '/bar/baz': 10 * (2 - 1**2)
+                },
+                'update_ratio': {
+                    '/foo': 5 * (6 - 2**2) / 7.0,
+                    '/bar/baz': 10 * (2 - 1**2) / 2.0
+                }
+            }))
 
 if __name__ == '__main__':
   absltest.main()

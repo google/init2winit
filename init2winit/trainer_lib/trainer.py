@@ -30,7 +30,7 @@ from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
-from init2winit.training_metrics_grabber import TrainingMetricsGrabber
+from init2winit.training_metrics_grabber import make_training_metrics
 import jax
 from jax import lax
 import jax.numpy as jnp
@@ -121,15 +121,16 @@ def update(
     optimizer_state,
     params,
     batch_stats,
+    metrics_state,
     batch,
     step,
     lr,
     rng,
     local_device_index,
-    training_metrics_grabber,
     training_cost,
     grad_clip,
-    optimizer_update_fn):
+    optimizer_update_fn,
+    metrics_update_fn):
   """Single step of the training loop.
 
   Args:
@@ -140,6 +141,7 @@ def update(
     batch_stats: a dict of non-trainable model state. Passed into
       training_cost(...) which then passes into flax_module.apply() as
       {'batch_stats': batch_stats} as part of the variables dict.
+    metrics_state: a pytree of training metrics state.
     batch: the per-device batch of data to process.
     step: the current global step of this update. Used to fold in to `rng` to
       produce a unique per-device, per-step RNG.
@@ -149,8 +151,6 @@ def update(
     local_device_index: an integer that is unique to this device amongst all
       devices on this host, usually in the range [0, jax.local_device_count()].
       It is folded in to `rng` to produce a unique per-device, per-step RNG.
-    training_metrics_grabber: (TrainingMetricsGrabber) records training metrics
-      at each iteration.
     training_cost: a function used to calculate the training objective that will
       be differentiated to generate updates. Takes
       (`params`, `batch`, `batch_stats`, `dropout_rng`) as inputs.
@@ -158,10 +158,11 @@ def update(
       minibatches with gradient norm ||g||_2 > grad_clip, we rescale g to the
       value g / ||g||_2 * grad_clip. If None, then no clipping will be applied.
     optimizer_update_fn: the optimizer update function.
+    metrics_update_fn: the training metrics update function.
 
   Returns:
     A tuple of the new optimizer, the new batch stats, the scalar training cost,
-    and the updated metrics_grabber.
+    the new training metrics state, and the gradient norm.
   """
   # `jax.random.split` is very slow outside the train step, so instead we do a
   # `jax.random.fold_in` here.
@@ -195,13 +196,13 @@ def update(
       batch_stats=new_batch_stats)
   new_params = optax.apply_updates(params, model_updates)
 
-  new_metrics_grabber = None
-  if training_metrics_grabber:
-    new_metrics_grabber = training_metrics_grabber.update(
-        grad, params, new_params)
+  new_metrics_state = None
+  if metrics_state is not None:
+    new_metrics_state = metrics_update_fn(metrics_state, grad, params,
+                                          new_params)
 
   return (new_optimizer_state, new_params, new_batch_stats, cost_value,
-          new_metrics_grabber, grad_norm)
+          new_metrics_state, grad_norm)
 
 
 def _merge_and_apply_prefix(d1, d2, prefix):
@@ -383,18 +384,20 @@ def train(train_dir,
   optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps, model)
   unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
 
-  unreplicated_training_metrics_grabber = None
+  (unreplicated_metrics_state, metrics_update_fn, metrics_summary_fn
+   ) = None, None, None
   if training_metrics_config is not None:
-    unreplicated_training_metrics_grabber = TrainingMetricsGrabber.create(
-        unreplicated_params, training_metrics_config)
+    (metrics_init_fn, metrics_update_fn, metrics_summary_fn
+     ) = make_training_metrics(**training_metrics_config)
+    unreplicated_metrics_state = metrics_init_fn(unreplicated_params)
 
-  (optimizer_state, params, batch_stats, training_metrics_grabber,
+  (optimizer_state, params, batch_stats, metrics_state,
    global_step, sum_train_cost, preemption_count, is_restored
    ) = checkpoint.replicate_and_maybe_restore_checkpoint(
        unreplicated_optimizer_state,
        unreplicated_params,
        unreplicated_batch_stats,
-       unreplicated_training_metrics_grabber,
+       unreplicated_metrics_state,
        train_dir=train_dir,
        external_checkpoint_path=external_checkpoint_path)
 
@@ -429,27 +432,29 @@ def train(train_dir,
       update,
       training_cost=model.training_cost,
       grad_clip=hps.get('grad_clip'),
-      optimizer_update_fn=optimizer_update_fn)
+      optimizer_update_fn=optimizer_update_fn,
+      metrics_update_fn=metrics_update_fn)
   # in_axes = (
   #     optimizer_state = 0,
   #     params = 0,
   #     batch_stats = 0,
+  #     metrics_state = 0,
   #     batch = 0,
   #     step = None,
   #     lr = None,
   #     rng = None,
   #     local_device_index = 0,
-  #     training_metrics_grabber = 0,
   #     training_cost,
   #     grad_clip,
-  #     optimizer_update_fn)
+  #     optimizer_update_fn,
+  #     metrics_state_update_fn)
   # Also, we can donate buffers for 'optimizer', 'batch_stats',
-  # 'batch' and 'training_metrics_grabber' for update's pmapped computation.
+  # 'batch' and 'training_metrics_state' for update's pmapped computation.
   update_pmapped = jax.pmap(
       update_fn,
       axis_name='batch',
-      in_axes=(0, 0, 0, 0, None, None, None, 0, 0),
-      donate_argnums=(0, 1, 2, 7))
+      in_axes=(0, 0, 0, 0, 0, None, None, None, 0),
+      donate_argnums=(0, 1, 2, 8))
   # During eval, we can donate the 'batch' buffer. We don't donate the
   # 'params' and 'batch_stats' buffers as we don't re-assign those values in
   # eval, we do that only in train.
@@ -497,23 +502,23 @@ def train(train_dir,
           optimizer_state,
           params,
           batch_stats,
-          training_metrics_grabber,
+          metrics_state,
           global_step,
           preemption_count,
           sum_train_cost,
           max_to_keep=None)
     batch = data_utils.shard(batch)
     lr = lr_fn(global_step)
-    optimizer_state, params, batch_stats, cost_val, training_metrics_grabber, grad_norm = update_pmapped(
+    optimizer_state, params, batch_stats, cost_val, metrics_state, grad_norm = update_pmapped(
         optimizer_state,
         params,
         batch_stats,
+        metrics_state,
         batch,
         global_step,
         lr,
         rng,
-        local_device_indices,
-        training_metrics_grabber)
+        local_device_indices)
     # Calling float is needed since cost_val is a shape (1,) DeviceArray.
     sum_train_cost += float(np.mean(cost_val))
     global_step += 1
@@ -548,14 +553,15 @@ def train(train_dir,
       yield report
       if jax.process_index() == 0:
         trainer_utils.log_epoch_report(report, metrics_logger)
-        trainer_utils.maybe_log_training_metrics(
-            training_metrics_grabber, metrics_logger)
+        trainer_utils.maybe_log_training_metrics(metrics_state,
+                                                 metrics_summary_fn,
+                                                 metrics_logger)
         checkpoint.save_unreplicated_checkpoint_background(
             train_dir,
             optimizer_state,
             params,
             batch_stats,
-            training_metrics_grabber,
+            metrics_state,
             global_step,
             preemption_count,
             sum_train_cost)
@@ -603,14 +609,15 @@ def train(train_dir,
     yield report
     if jax.process_index() == 0:
       trainer_utils.log_epoch_report(report, metrics_logger)
-      trainer_utils.maybe_log_training_metrics(
-          training_metrics_grabber, metrics_logger)
+      trainer_utils.maybe_log_training_metrics(metrics_state,
+                                               metrics_summary_fn,
+                                               metrics_logger)
       checkpoint.save_unreplicated_checkpoint_background(
           train_dir,
           optimizer_state,
           params,
           batch_stats,
-          training_metrics_grabber,
+          metrics_state,
           global_step,
           preemption_count,
           sum_train_cost)
