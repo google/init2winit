@@ -69,7 +69,7 @@ def initialize(flax_module,
   # on the batch size with the model (batch norm reduces across a batch dim of
   # any size). This is similar to how the Flax examples initialize models:
   # https://github.com/google/flax/blob/44ee6f2f4130856d47159dc58981fb26ea2240f4/examples/imagenet/train.py#L70.
-  if fake_batch:
+  if fake_batch is not None:
     fake_input_batch = fake_batch
   elif isinstance(input_shape, list):  # Typical case for seq2seq models
     fake_input_batch = [

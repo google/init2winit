@@ -19,6 +19,7 @@ import collections
 
 from init2winit.dataset_lib import criteo_terabyte_input_pipeline
 from init2winit.dataset_lib import fake_dataset
+from init2winit.dataset_lib import fastmri_dataset
 from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import mlperf_imagenet_dataset
 from init2winit.dataset_lib import nqm_noise
@@ -60,6 +61,9 @@ _ALL_DATASETS = {
     'fake':
         _Dataset(fake_dataset.get_fake, fake_dataset.DEFAULT_HPARAMS,
                  fake_dataset.METADATA),
+    'fastmri':
+        _Dataset(fastmri_dataset.get_fastmri, fastmri_dataset.DEFAULT_HPARAMS,
+                 fastmri_dataset.METADATA),
     'imagenet':
         _Dataset(imagenet_dataset.get_imagenet,
                  imagenet_dataset.DEFAULT_HPARAMS, imagenet_dataset.METADATA),

@@ -188,7 +188,13 @@ _METRICS = {
             ce_loss=weighted_average_metric(
                 losses.unnormalized_sigmoid_binary_cross_entropy),
             num_examples=NumExamples,
-            average_precision=MeanAveragePrecision)
+            average_precision=MeanAveragePrecision),
+    'l1_metrics':
+        metrics.Collection.create(
+            l1_loss=weighted_average_metric(
+                losses.weighted_unnormalized_mean_absolute_error),
+            num_examples=NumExamples,
+        )
 }
 
 

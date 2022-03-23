@@ -32,26 +32,45 @@ import jax.numpy as jnp
 
 from ml_collections import config_dict
 
+opt_hparams = {
+    'weight_decay': 0.0,
+    '0': {
+        'element': 'precondition_by_rms',
+        'hps': {
+            'decay': 0.99,
+            'eps': 1e-8,
+            'eps_root': 0.0,
+            'debias': False,
+        }
+    }
+}
+
+# NOTE(dsuo): This lives here because decay_events / decay_factors is too large
+# to pass via the config file.
+num_train_steps = 217137
+lr_gamma = 0.1
+lr_step_size = 40
+decay_events = list(range(lr_step_size, num_train_steps, lr_step_size))
+decay_factors = [lr_gamma] * len(decay_events)
+
+lr_hparams = {
+    'schedule': 'piecewise_constant',
+    'base_lr': 1e-3,
+    'decay_events': decay_events,
+    'decay_factors': decay_factors
+}
+
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        out_chans=4,
+        out_chans=1,
         chans=32,
         num_pool_layers=4,
         drop_prob=0.0,
-        lr_hparams={
-            'base_lr': 1e-3,
-            'schedule': 'cosine_warmup',
-            'warmup_steps': 10_000
-        },
-        optimizer='adam',
-        opt_hparams={
-            'beta1': 0.9,
-            'beta2': 0.999,
-            'epsilon': 1e-8,
-            'weight_decay': 1e-1,
-        },
+        optimizer='kitchen_sink',
+        opt_hparams=opt_hparams,
+        lr_hparams=lr_hparams,
         l2_decay_factor=None,
-        batch_size=1024,
+        batch_size=1,
         rng_seed=-1,
         model_dtype='float32',
         grad_clip=None
@@ -106,7 +125,7 @@ class UNet(nn.Module):
   drop_prob: float = 0.0
 
   @nn.compact
-  def __call__(self, x):
+  def __call__(self, x, train=True):
     down_sample_layers = [ConvBlock(self.chans, self.drop_prob)]
 
     ch = self.chans
@@ -128,15 +147,15 @@ class UNet(nn.Module):
     final_conv = nn.Conv(self.out_chans, kernel_size=(1, 1), strides=(1, 1))
 
     stack = []
-    output = x
+    output = x[:, :, :, None]
 
     # apply down-sampling layers
     for layer in down_sample_layers:
-      output = layer(output)
+      output = layer(output, train)
       stack.append(output)
       output = nn.avg_pool(output, window_shape=(2, 2), strides=(2, 2))
 
-    output = conv(output)
+    output = conv(output, train)
 
     # apply up-sampling layers
     for transpose_conv, conv in zip(up_transpose_conv, up_conv):
@@ -156,11 +175,11 @@ class UNet(nn.Module):
         output = jnp.pad(output, padding, mode='reflect')
 
       output = jnp.concatenate((output, downsample_layer), axis=-1)
-      output = conv(output)
+      output = conv(output, train)
 
     output = final_conv(output)
 
-    return output
+    return output.squeeze(-1)
 
 
 class ConvBlock(nn.Module):
