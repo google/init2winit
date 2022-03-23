@@ -18,6 +18,7 @@
 from absl import logging
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optmaximus
+from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib.hessian_free import hessian_free
 import jax
 import optax
@@ -172,6 +173,8 @@ def get_optimizer(hps, model=None):
             max_iter=hps.opt_hparams['cg_max_iters'])
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = optmaximus.from_hparams(hps.opt_hparams)
+  elif hps.optimizer == 'samuel':
+    opt_init, opt_update = samuel.from_hparams(hps.opt_hparams)
 
   if hps.get('total_accumulated_batch_size', None) is not None:
     # We do not synchronize batch norm stats across devices, so if there is no
