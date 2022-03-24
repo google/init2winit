@@ -226,6 +226,30 @@ def _tree_normalize(tree):
   return jax.tree_map(norm_fn, tree)
 
 
+def precondition_mvp_fn(mvp_fn, p_diag):
+  """Matrix-vector product with a diagonal preconditioner.
+
+  Given (1) a function that computes matrix-vector products between some [n x n]
+  matrix "M" and arbitrary vectors, and (2) an [n] vector "p_diag", create a
+  function that computes matrix-vector products between the matrix
+      P^{-1/2} M P^{-1/2}  where P = diag(p_diag)
+  and arbitrary vectors.
+
+  Args:
+    mvp_fn: (function) a function: ndarray -> ndarray that computes the matrix
+      vector product of some matrix M with an arbitrary vector.
+    p_diag: (ndarray) an ndarray
+
+  Returns:
+    a function that computes the matrix-vector product of P^{-1} M, where
+      P = diag(p_diag), with arbitrary vectors.
+  """
+  p_diag_sqrt = np.sqrt(p_diag)
+  def preconditioned_mvp_fn(v):
+    return np.divide(mvp_fn(np.divide(v, p_diag_sqrt)), p_diag_sqrt)
+  return preconditioned_mvp_fn
+
+
 # TODO(gilmer): Rewrite API to accept loss as a function of params, batch
 class CurvatureEvaluator:
   """Class for evaluating 2nd-order curvature stats of a model's loss surface.
@@ -580,8 +604,25 @@ class CurvatureEvaluator:
     full_grad = _unreplicate(full_grad)
     return full_grad
 
-  def evaluate_spectrum(self, params, step):
-    """Estimate the eignespectrum of H and C."""
+  def evaluate_spectrum(self, params, step, diag_preconditioner=None):
+    """Estimate the eigenspectrum of H and C.
+
+    Args:
+      params: (replicated pytree) the parameters at which to compute
+        the hessian spectrum.
+      step: (int) the global step of training.
+      diag_preconditioner: (optional unreplicated pytree) if not None, we'll
+        compute the spectrum of P^{-1} H and P^{-1} C,
+        where P = diag(diag_preconditioner). Our implementation exploits the
+        fact that P^{-1} M shares eigenvalues with the "similar" matrix
+        P^(-1/2) M P^(-1/2), which is symmetric, and hence can be
+        eigendecomposed using Lanczos.
+
+    Returns:
+      row
+      hess_evecs
+      cov_evecs
+    """
     # Number of upper and lower eigenvectors to be approximated.
     num_evs = self.eval_config['num_eigens']
     hess_evecs = []
@@ -591,6 +632,11 @@ class CurvatureEvaluator:
       raise ValueError('Too many eigenvectors requested!')
     hvp_cl = lambda v: self.hvp_fn(params, v)
     gvp_cl = lambda v: self.gvp_fn(params, v)
+
+    if diag_preconditioner is not None:
+      diag_p = hessian_computation.ravel_pytree(diag_preconditioner)[0]
+      hvp_cl = precondition_mvp_fn(hvp_cl, diag_p)
+      gvp_cl = precondition_mvp_fn(gvp_cl, diag_p)
 
     key = jax.random.PRNGKey(0)
 
