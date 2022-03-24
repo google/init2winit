@@ -42,13 +42,14 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
     self.mock_cost1 = 0.5
     self.mock_cost2 = 0.25
 
+    self.step_size = 1.0
     self.num_train_steps = 5
 
     # Simulate running GD with step size 1.
-    self.mock_params1 = jax.tree_map(lambda p, g: p - 1.0 * g,
+    self.mock_params1 = jax.tree_map(lambda p, g: p - self.step_size * g,
                                      self.mock_params0,
                                      self.mock_grad1)
-    self.mock_params2 = jax.tree_map(lambda p, g: p - 1.0 * g,
+    self.mock_params2 = jax.tree_map(lambda p, g: p - self.step_size * g,
                                      self.mock_params1,
                                      self.mock_grad2)
 
@@ -73,7 +74,8 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
     init_fn, _, _ = make_training_metrics(self.num_train_steps,
                                           enable_ema=True,
                                           enable_train_cost=True,
-                                          enable_param_norms=True)
+                                          enable_param_norms=True,
+                                          enable_update_norms=True)
     initial_metrics_state = init_fn(self.mock_params0)
     self.assertTrue(pytree_equal(initial_metrics_state, {
                 'train_cost': jnp.zeros(self.num_train_steps),
@@ -82,7 +84,8 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
                 'grad_sq_ema': zeros_like_params,
                 'update_ema': zeros_like_params,
                 'update_sq_ema': zeros_like_params,
-                'param_norms': zeros_timeseries_like_params
+                'param_norms': zeros_timeseries_like_params,
+                'update_norms': zeros_timeseries_like_params
     }))
 
   def test_train_cost(self):
@@ -164,6 +167,44 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
                         jnp.array([
                             jnp.linalg.norm(self.mock_params0['bar']['baz']),
                             jnp.linalg.norm(self.mock_params1['bar']['baz']),
+                            0.0, 0.0, 0.0
+                        ])
+                }
+            }))
+
+  def test_update_update_norms(self):
+    """Ensure that we update update norms correctly."""
+    init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
+                                                  enable_update_norms=True)
+    initial_metrics_state = init_fn(self.mock_params0)
+    updated_metrics_state = update_fn(initial_metrics_state,
+                                      0,
+                                      self.mock_cost0,
+                                      self.mock_grad1,
+                                      self.mock_params0,
+                                      self.mock_params1)
+    updated_metrics_state = update_fn(updated_metrics_state,
+                                      1,
+                                      self.mock_cost1,
+                                      self.mock_grad2,
+                                      self.mock_params1,
+                                      self.mock_params2)
+    self.assertTrue(
+        pytree_equal(
+            updated_metrics_state['update_norms'], {
+                'foo':
+                    jnp.array([
+                        self.step_size*jnp.linalg.norm(self.mock_grad1['foo']),
+                        self.step_size*jnp.linalg.norm(self.mock_grad2['foo']),
+                        0.0, 0.0, 0.0
+                    ]),
+                'bar': {
+                    'baz':
+                        jnp.array([
+                            self.step_size *
+                            jnp.linalg.norm(self.mock_grad1['bar']['baz']),
+                            self.step_size *
+                            jnp.linalg.norm(self.mock_grad2['bar']['baz']),
                             0.0, 0.0, 0.0
                         ])
                 }

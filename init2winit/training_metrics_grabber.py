@@ -29,6 +29,7 @@ DEFAULT_CONFIG = ConfigDict({
     'ema_beta': 0.9,
     'enable_train_cost': False,
     'enable_param_norms': False,
+    'enable_update_norms': False,
     'enable_ema': False,
 })
 
@@ -58,6 +59,9 @@ def make_training_metrics(num_train_steps, **config_overrides):
         stores the train cost at every step of training (padded by zeros).
     - enable_param_norms (bool): if true, the metrics state will have a field
         "param_norms" which is a pytree in the shape of the model params whose
+        leaves are jnp arrays of length num_train_steps.
+    - enable_update_norms (bool) if true, the metrics state will have a field
+        "update_norms" which is a pytree in the shape of the model params whose
         leaves are jnp arrays of length num_train_steps.
     - enable_ema (bool): if true, the metrics state will have fields "grad_ema",
         "grad_sq_ema", "update_ema", and "update_sq_ema" containing
@@ -102,6 +106,9 @@ def make_training_metrics(num_train_steps, **config_overrides):
     if config['enable_param_norms']:
       metrics_state['param_norms'] = jax.tree_map(
           lambda x: jnp.zeros(num_train_steps), params)
+    if config['enable_update_norms']:
+      metrics_state['update_norms'] = jax.tree_map(
+          lambda x: jnp.zeros(num_train_steps), params)
     if config['enable_ema']:
       metrics_state['grad_ema'] = jax.tree_map(jnp.zeros_like, params)
       metrics_state['grad_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
@@ -139,6 +146,10 @@ def make_training_metrics(num_train_steps, **config_overrides):
     if config['enable_param_norms']:
       next_metrics_state['param_norms'] = _set_pytree_idx(
           metrics_state['param_norms'], param_norm, step)
+    if config['enable_update_norms']:
+      update_norm = jax.tree_map(_compute_leaf_norms, update)
+      next_metrics_state['update_norms'] = _set_pytree_idx(
+          metrics_state['update_norms'], update_norm, step)
     if config['enable_ema']:
       beta = config['ema_beta']
       next_metrics_state['grad_ema'] = _advance_ema(
