@@ -17,8 +17,6 @@
 
 """
 
-import math
-
 from absl import flags
 from absl.testing import absltest
 from init2winit.shared_test_utilities import pytree_equal
@@ -61,6 +59,8 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
 
     zeros_like_params = jax.tree_map(jnp.zeros_like, self.mock_params0)
     zeros_scalar_like_params = jax.tree_map(lambda x: 0.0, self.mock_params0)
+    zeros_timeseries_like_params = jax.tree_map(
+        lambda x: jnp.zeros(self.num_train_steps), self.mock_params0)
 
     # Test init with everything disabled.
     init_fn, _, _ = make_training_metrics(self.num_train_steps)
@@ -72,7 +72,8 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
     # Test init with enable_ema = True and enable_train_cost=True.
     init_fn, _, _ = make_training_metrics(self.num_train_steps,
                                           enable_ema=True,
-                                          enable_train_cost=True)
+                                          enable_train_cost=True,
+                                          enable_param_norms=True)
     initial_metrics_state = init_fn(self.mock_params0)
     self.assertTrue(pytree_equal(initial_metrics_state, {
                 'train_cost': jnp.zeros(self.num_train_steps),
@@ -80,7 +81,8 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
                 'grad_ema': zeros_like_params,
                 'grad_sq_ema': zeros_like_params,
                 'update_ema': zeros_like_params,
-                'update_sq_ema': zeros_like_params
+                'update_sq_ema': zeros_like_params,
+                'param_norms': zeros_timeseries_like_params
     }))
 
   def test_train_cost(self):
@@ -116,9 +118,56 @@ class TrainingMetricsGrabberTest(jtu.JaxTestCase):
                                       self.mock_params1)
     self.assertTrue(
         pytree_equal(updated_metrics_state['param_norm'], {
-            'foo': math.sqrt(5),
-            'bar': {'baz': math.sqrt(40)}
+            'foo': jnp.linalg.norm(self.mock_params0['foo']),
+            'bar': {'baz': jnp.linalg.norm(self.mock_params0['bar']['baz'])}
         }))
+
+    updated_metrics_state = update_fn(initial_metrics_state, 1, self.mock_cost1,
+                                      self.mock_grad2, self.mock_params1,
+                                      self.mock_params2)
+
+    self.assertTrue(
+        pytree_equal(updated_metrics_state['param_norm'], {
+            'foo': jnp.linalg.norm(self.mock_params1['foo']),
+            'bar': {'baz': jnp.linalg.norm(self.mock_params1['bar']['baz'])}
+        }))
+
+  def test_update_param_norms(self):
+    """Ensure that we update param norms correctly."""
+
+    init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
+                                                  enable_param_norms=True)
+    initial_metrics_state = init_fn(self.mock_params0)
+    updated_metrics_state = update_fn(initial_metrics_state,
+                                      0,
+                                      self.mock_cost0,
+                                      self.mock_grad1,
+                                      self.mock_params0,
+                                      self.mock_params1)
+    updated_metrics_state = update_fn(updated_metrics_state,
+                                      1,
+                                      self.mock_cost1,
+                                      self.mock_grad2,
+                                      self.mock_params1,
+                                      self.mock_params2)
+    self.assertTrue(
+        pytree_equal(
+            updated_metrics_state['param_norms'], {
+                'foo':
+                    jnp.array([
+                        jnp.linalg.norm(self.mock_params0['foo']),
+                        jnp.linalg.norm(self.mock_params1['foo']),
+                        0.0, 0.0, 0.0
+                    ]),
+                'bar': {
+                    'baz':
+                        jnp.array([
+                            jnp.linalg.norm(self.mock_params0['bar']['baz']),
+                            jnp.linalg.norm(self.mock_params1['bar']['baz']),
+                            0.0, 0.0, 0.0
+                        ])
+                }
+            }))
 
   def test_update_grad_ema(self):
     """Ensure that the training metrics updater updates grad ema correctly."""

@@ -28,6 +28,7 @@ from ml_collections import ConfigDict
 DEFAULT_CONFIG = ConfigDict({
     'ema_beta': 0.9,
     'enable_train_cost': False,
+    'enable_param_norms': False,
     'enable_ema': False,
 })
 
@@ -55,6 +56,9 @@ def make_training_metrics(num_train_steps, **config_overrides):
     - enable_train_cost (bool): if true, the metrics state will have a field
         "train_cost" which is a jnp array of length num_train_steps, and which
         stores the train cost at every step of training (padded by zeros).
+    - enable_param_norms (bool): if true, the metrics state will have a field
+        "param_norms" which is a pytree in the shape of the model params whose
+        leaves are jnp arrays of length num_train_steps.
     - enable_ema (bool): if true, the metrics state will have fields "grad_ema",
         "grad_sq_ema", "update_ema", and "update_sq_ema" containing
         exponential moving averages of the gradient, update, elementwise squared
@@ -95,6 +99,9 @@ def make_training_metrics(num_train_steps, **config_overrides):
     metrics_state['param_norm'] = jax.tree_map(lambda x: 0.0, params)
     if config['enable_train_cost']:
       metrics_state['train_cost'] = jnp.zeros(num_train_steps)
+    if config['enable_param_norms']:
+      metrics_state['param_norms'] = jax.tree_map(
+          lambda x: jnp.zeros(num_train_steps), params)
     if config['enable_ema']:
       metrics_state['grad_ema'] = jax.tree_map(jnp.zeros_like, params)
       metrics_state['grad_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
@@ -122,12 +129,16 @@ def make_training_metrics(num_train_steps, **config_overrides):
     grad_sq = jax.tree_map(jnp.square, grad)
     update_sq = jax.tree_map(jnp.square, update)
 
+    param_norm = jax.tree_map(_compute_leaf_norms, old_params)
+
     next_metrics_state = {}
-    next_metrics_state['param_norm'] = jax.tree_map(
-        lambda x: jnp.linalg.norm(x.reshape(-1)), new_params)
+    next_metrics_state['param_norm'] = param_norm
     if config['enable_train_cost']:
       next_metrics_state['train_cost'] = metrics_state['train_cost'].at[
           step].set(train_cost)
+    if config['enable_param_norms']:
+      next_metrics_state['param_norms'] = _set_pytree_idx(
+          metrics_state['param_norms'], param_norm, step)
     if config['enable_ema']:
       beta = config['ema_beta']
       next_metrics_state['grad_ema'] = _advance_ema(
@@ -192,3 +203,26 @@ def _advance_ema(cur_ema, new_val, beta):
   return jax.tree_map(lambda cur, new: beta * cur + (1 - beta) * new,
                       cur_ema,
                       new_val)
+
+
+def _compute_leaf_norms(pytree):
+  """Compute the norm of all leaves in a pytree."""
+  return jax.tree_map(lambda leaf: jnp.linalg.norm(leaf.reshape(-1)), pytree)
+
+
+def _set_pytree_idx(pytree_of_arrs, new_pytree, idx):
+  """Incorporate a new pytree into a pytree of arrays.
+
+  Args:
+    pytree_of_arrs: (pytree) a pytree of float arrays
+    new_pytree: (pytree) a pytree of floats
+    idx: (int) an index
+
+  Returns:
+    a pytree where we set the "idx" index of each leaf in pytree_of_arrs to
+      the corresponding leaf in new_pytree.
+
+  """
+  def set_arr(arr, new_value):
+    return arr.at[idx].set(new_value)
+  return jax.tree_map(set_arr, pytree_of_arrs, new_pytree)
