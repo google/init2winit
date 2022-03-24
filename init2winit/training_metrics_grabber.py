@@ -132,11 +132,10 @@ def make_training_metrics(num_train_steps, **config_overrides):
     Returns:
       next_metrics_state: (pytree) The next training metrics state.
     """
-    update = jax.tree_map(lambda x, y: x - y, old_params, new_params)
-    grad_sq = jax.tree_map(jnp.square, grad)
-    update_sq = jax.tree_map(jnp.square, update)
-
     param_norm = jax.tree_map(_compute_leaf_norms, old_params)
+
+    if config['enable_update_norms'] or config['enable_ema']:
+      update = jax.tree_map(lambda x, y: x - y, old_params, new_params)
 
     next_metrics_state = {}
     next_metrics_state['param_norm'] = param_norm
@@ -152,6 +151,8 @@ def make_training_metrics(num_train_steps, **config_overrides):
           metrics_state['update_norms'], update_norm, step)
     if config['enable_ema']:
       beta = config['ema_beta']
+      grad_sq = jax.tree_map(jnp.square, grad)
+      update_sq = jax.tree_map(jnp.square, update)
       next_metrics_state['grad_ema'] = _advance_ema(
           metrics_state['grad_ema'], grad, beta)
       next_metrics_state['grad_sq_ema'] = _advance_ema(
