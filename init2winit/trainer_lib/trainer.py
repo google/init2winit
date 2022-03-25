@@ -489,7 +489,7 @@ def train(train_dir,
   callback_rngs = jax.random.split(callback_rng, len(callback_configs))
   for callback_rng, config in zip(callback_rngs, callback_configs):
     eval_callback = callbacks.get_callback(
-        config['callback_name'])(model, params, batch_stats,
+        config['callback_name'])(model, params, batch_stats, optimizer_state,
                                  dataset, hps, config, train_dir, callback_rng)
     eval_callbacks.append(eval_callback)
 
@@ -545,7 +545,7 @@ def train(train_dir,
 
       for eval_callback in eval_callbacks:
         callback_metrics = eval_callback.run_eval(params, batch_stats,
-                                                  global_step)
+                                                  optimizer_state, global_step)
         if set(callback_metrics.keys()).intersection(set(report.keys())):
           raise ValueError('There was a collision between the callback metrics'
                            'and the standard eval metrics keys')

@@ -19,9 +19,11 @@ Callbacks can be stateful, and in trainer are meant to be called as follows:
 
 
   callback_builder = callbacks.get_callback(config['callback_name'])
-  callback = callback_builder(optimizer, dataset, hps, config, train_dir)
+  callback = callback_builder(model, params, batch_stats, optimizer_state,
+                              dataset, hps, config, train_dir, rng)
 
-  callback_metrics = callback.run_eval(optimizer, batch_stats, global_step).
+  callback_metrics = callback.run_eval(params, batch_stats,
+                                       optimizer_state, global_step).
 
 We require that the config has a field 'callback_name', which the trainer
 uses to determine which callbacks to run. The dictionary, callback_metrics
@@ -35,18 +37,18 @@ scalar metrics.
 class BaseCallBack:
   """Base callback to specify the required API."""
 
-  def __init__(self, model, optimizer, batch_stats, dataset, hps,
+  def __init__(self, model, params, batch_stats, optimizer_state, dataset, hps,
                callback_config, train_dir, rng):
     """Defines the API for callback construction."""
     pass
 
-  def run_eval(self, optimizer, batch_stats, global_step):
+  def run_eval(self, params, batch_stats, optimizer_state, global_step):
     """Define the API for running the callback during eval.
 
     Args:
-      optimizer: Replicated optimizer the trainer has (this also has the
-        model parameters).
+      params: Replicated params from the trainer.
       batch_stats: Replicated batch_stats from the trainer.
+      optimizer_state: Replicated optimizer state from the trainer.
       global_step: Current training step.
 
     Returns:

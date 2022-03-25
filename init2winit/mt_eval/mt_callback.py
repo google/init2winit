@@ -138,10 +138,11 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       d1[prefix+key] = d2[key]
     return d1
 
-  def __init__(self, model, flax_module, batch_stats, dataset, hps,
-               callback_config, train_dir, rng):
+  def __init__(self, model, flax_module, batch_stats, optimizer_state,
+               dataset, hps, callback_config, train_dir, rng):
     del flax_module
     del batch_stats
+    del optimizer_state
     del train_dir
     del dataset
     self.callback_config = callback_config
@@ -150,12 +151,13 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
         model.evaluate_batch, axis_name='batch', donate_argnums=(2,))
     self.dataset = self._get_dataset(hps, rng)
 
-  def run_eval(self, flax_module, batch_stats, global_step):
+  def run_eval(self, flax_module, batch_stats, optimizer_state, global_step):
     """Runs the MT models to evals specified by MT model.
 
     Args:
       flax_module: Replicated flax module.
       batch_stats: Replicated batch_stats from the trainer.
+      optimizer_state: Replicated optimizer state from the trainer.
       global_step: Current training step.
 
     Returns:
@@ -165,6 +167,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
          'callback/wmt16_translate/ro-en/test/ce_loss': 0.13
         }
     """
+    del optimizer_state
 
     ds_splits_dict = {}
     for eval_split in self.callback_config['eval_splits']:

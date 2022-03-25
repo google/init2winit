@@ -47,17 +47,18 @@ def set_up_hessian_eval(model, flax_module, batch_stats, dataset,
 class HessianCallback(base_callback.BaseCallBack):
   """Used to run the hessian eval in the trainer binary."""
 
-  def __init__(self, model, flax_module, batch_stats, dataset, hps,
-               callback_config, train_dir, rng):
+  def __init__(self, model, flax_module, batch_stats, optimizer_state,
+               dataset, hps, callback_config, train_dir, rng):
     del hps
     del rng
+    del optimizer_state
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
     # copy batch_stats as we close over it, and it gets modified.
     self.hessian_evaluator, self.logger = set_up_hessian_eval(
         model, flax_module, batch_stats, dataset, checkpoint_dir,
         callback_config)
 
-  def run_eval(self, flax_module, batch_stats, global_step):
+  def run_eval(self, flax_module, batch_stats, optimizer_state, global_step):
     """Computes the loss hessian and returns the max eigenvalue.
 
     Note, the full lanczos tridiagonal matrix is saved via the logger to
@@ -66,12 +67,14 @@ class HessianCallback(base_callback.BaseCallBack):
     Args:
       flax_module: Replicated flax module.
       batch_stats: Replicated batch_stats from the trainer.
+      optimizer_state: Replicated optimizer state from the trainer.
       global_step: Current training step.
 
     Returns:
       Max eigenavlue of the loss (full tridiag is saved to disk).
     """
     del batch_stats
+    del optimizer_state
     hessian_metrics, _, _ = self.hessian_evaluator.evaluate_spectrum(
         flax_module, global_step)
     if jax.host_id() == 0:

@@ -82,12 +82,13 @@ def get_stats(
 class ModelDebugCallback:
   """Used to run the hessian eval in the trainer binary."""
 
-  def __init__(self, model, optimizer, batch_stats, dataset, hps,
-               callback_config, train_dir, rng):
+  def __init__(self, model, optimizer, batch_stats, optimizer_state, dataset,
+               hps, callback_config, train_dir, rng):
     del hps
     del rng
     del optimizer
     del batch_stats
+    del optimizer_state
     del callback_config  # In future CL's we will use this.
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
     # copy batch_stats as we close over it, and it gets modified.
@@ -116,7 +117,7 @@ class ModelDebugCallback:
     self.dataset = dataset
     self.train_iter = itertools.islice(dataset.train_iterator_fn(), 0, None)
 
-  def run_eval(self, params, batch_stats, global_step):
+  def run_eval(self, params, batch_stats, optimizer_state, global_step):
     """Computes the loss hessian and returns the max eigenvalue.
 
     Note, the full lanczos tridiagonal matrix is saved via the logger to
@@ -125,11 +126,13 @@ class ModelDebugCallback:
     Args:
       params: Replicated model parameter tree.
       batch_stats: Replicated batch_stats from the trainer.
+      optimizer_state: Replicated optimizer state from the trainer.
       global_step: Current training step.
 
     Returns:
-      Max eigenavlue of the loss (full tridiag is saved to disk).
+      Max eigenvalue of the loss (full tridiag is saved to disk).
     """
+    del optimizer_state
     batch = next(self.train_iter)
     batch = data_utils.shard(batch)
     rng = jax.random.PRNGKey(0)
