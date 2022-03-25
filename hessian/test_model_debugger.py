@@ -50,6 +50,26 @@ class TestDense(nn.Module):
     return out
 
 
+class Linear(nn.Module):
+  """A simple linear model."""
+
+  @nn.compact
+  def __call__(self, x, train=False):
+    y = nn.Dense(features=10, kernel_init=nn.initializers.ones)(x)
+    model_debugger.tag_residual_activations(self, x, y)
+    return y
+
+
+def set_up_cnn(seed=0, batch_size=10, replicate=True):
+  rng = jax.random.PRNGKey(seed)
+  batch = get_batch(batch_size, shard=True)
+  cnn = CNN()
+  variables = cnn.init(rng, batch[0][0])  # init with unsharded batch
+  if replicate:
+    rep_variables = flax.jax_utils.replicate(variables)
+    return rep_variables
+
+
 class CNN(nn.Module):
   """A simple CNN model."""
 
@@ -112,21 +132,50 @@ class ModelDebuggerTest(absltest.TestCase):
     ]
     self.assertEqual(set(expected_keys), set(metrics.keys()))
 
+  def test_create_forward_pass_stats_fn(self):
+    """Test that we properly capture intermediate values."""
+    rng = jax.random.PRNGKey(0)
+    xs = np.random.normal(size=(1, 10, 5))
+
+    lin_model = Linear()
+    params = lin_model.init(rng, xs[0])['params']  # init with unsharded batch
+    rep_params = flax.jax_utils.replicate(params)
+
+    get_act_stats_fn = model_debugger.create_forward_pass_stats_fn(
+        lin_model, capture_activation_norms=True,
+        sown_collection_names=['residual_activations'])
+
+    debugger = model_debugger.ModelDebugger(
+        forward_pass=get_act_stats_fn,
+        use_pmap=True)
+
+    metrics = debugger.full_eval(step=0, params=rep_params, batch=xs)
+
+    expected_output = np.dot(xs[0], params['Dense_0']['kernel'])
+    expected_output_norm = np.linalg.norm(expected_output)
+    expected_input_norm = float(np.linalg.norm(xs))
+
+    self.assertAlmostEqual(expected_output_norm,
+                           metrics['intermediate_norms']['__call__'])
+    self.assertAlmostEqual(
+        expected_input_norm,
+        float(metrics['residual_activations']['residual'][0]), places=5)
+    self.assertAlmostEqual(
+        expected_output_norm,
+        float(metrics['residual_activations']['residual'][1]), places=5)
+
   def test_model_debugger_pmap(self):
     """Test training for two epochs on MNIST with a small model."""
-    rng = jax.random.PRNGKey(0)
-    batch_size = 10
-    batch = get_batch(batch_size, shard=True)
-    cnn = CNN()
-    variables = cnn.init(rng, batch[0][0])  # init with unsharded batch
+
+    rep_variables = set_up_cnn()
 
     pytree_path = os.path.join(self.test_dir, 'metrics')
     metrics_logger = utils.MetricLogger(
         pytree_path=pytree_path,
         events_dir=self.test_dir)
-    rep_variables = flax.jax_utils.replicate(variables)
     debugger = model_debugger.ModelDebugger(
         use_pmap=True, metrics_logger=metrics_logger)
+
     # eval twice to test the concat
     extra_metrics = {'train_loss': 1.0}
     extra_metrics2 = {'train_loss': 1.0}
