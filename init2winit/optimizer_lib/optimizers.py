@@ -17,7 +17,7 @@
 
 from absl import logging
 from init2winit.optimizer_lib import gradient_accumulator
-from init2winit.optimizer_lib import optmaximus
+from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib.hessian_free import hessian_free
 import jax
@@ -172,7 +172,7 @@ def get_optimizer(hps, model=None):
             learning_rate=0.0,  # Manually injected on each train step.
             max_iter=hps.opt_hparams['cg_max_iters'])
   elif hps.optimizer == 'kitchen_sink':
-    opt_init, opt_update = optmaximus.from_hparams(hps.opt_hparams)
+    opt_init, opt_update = kitchen_sink.from_hparams(hps.opt_hparams)
   elif hps.optimizer == 'samuel':
     opt_init, opt_update = samuel.from_hparams(hps.opt_hparams)
 

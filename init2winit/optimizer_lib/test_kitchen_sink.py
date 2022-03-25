@@ -19,9 +19,9 @@ from absl.testing import absltest
 import chex
 import flax
 import flax.linen as nn
-from init2winit.optimizer_lib.optmaximus import from_hparams
-from init2winit.optimizer_lib.optmaximus import kitchen_sink
-from init2winit.optimizer_lib.optmaximus import transform_chain
+from init2winit.optimizer_lib.kitchen_sink import from_hparams
+from init2winit.optimizer_lib.kitchen_sink import kitchen_sink
+from init2winit.optimizer_lib.kitchen_sink import transform_chain
 import jax
 import jax.numpy as jnp
 import ml_collections

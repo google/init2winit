@@ -19,7 +19,7 @@ from typing import NamedTuple
 
 from absl.testing import absltest
 import chex
-from init2winit.optimizer_lib.optmaximus import transform_chain
+from init2winit.optimizer_lib.kitchen_sink import transform_chain
 import jax
 import jax.numpy as jnp
 import optax
