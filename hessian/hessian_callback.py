@@ -57,6 +57,7 @@ class HessianCallback(base_callback.BaseCallBack):
     self.hessian_evaluator, self.logger = set_up_hessian_eval(
         model, flax_module, batch_stats, dataset, checkpoint_dir,
         callback_config)
+    self.name = callback_config['name']
 
   def run_eval(self, flax_module, batch_stats, optimizer_state, global_step):
     """Computes the loss hessian and returns the max eigenvalue.
@@ -80,4 +81,5 @@ class HessianCallback(base_callback.BaseCallBack):
     if jax.host_id() == 0:
       self.logger.append_pytree(hessian_metrics)
 
-    return {'max_eig': hessian_metrics['max_eig_hess']}
+    max_eig_key = self.name + '/max_eig'
+    return {max_eig_key: hessian_metrics['max_eig_hess']}
