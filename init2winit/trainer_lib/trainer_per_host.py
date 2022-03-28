@@ -611,133 +611,142 @@ def train(train_dir,
     eval_callbacks.append(eval_callback)
 
 
-  for batch in train_iter:
+  for _ in range(start_step, num_train_steps):
+    with jax.profiler.StepTraceContext('train', step_num=global_step):
+      # NOTE(dsuo): to properly profile each step, we must include batch
+      # creation in the StepTraceContext (as opposed to putting `train_iter`
+      # directly in the top-level for loop).
+      batch = next(train_iter)
 
-    if global_step in checkpoint_steps and jax.process_index() == 0:
-      checkpoint.save_unreplicated_checkpoint_background(
-          checkpoint_dir,
-          optimizer_state,
-          params,
-          batch_stats,
-          metrics_state,
-          global_step,
-          preemption_count,
-          sum_train_cost,
-          max_to_keep=None)
-    batch = data_utils.shard(batch)
-    lr = hps.get(
-        'opt_hparams.optimizers.' +
-        f'{optimizer_state.inner_state.current_expert[0]}.hps.learning_rate',
-        lr_fn(global_step))
-    optimizer_state, params, batch_stats, cost_val, metrics_state, grad_norm = update_pmapped(
-        optimizer_state,
-        params,
-        batch_stats,
-        metrics_state,
-        batch,
-        global_step,
-        lr,
-        rng,
-        local_device_indices)
-
-    # TODO(dsuo): would be nice if this logic can live inside samuel.
-    # However, need to find a way to pass back params to the trainer.
-    if global_step in hps.get('opt_hparams.reinit_steps', []):
-      logging.info('Syncing at step %d to expert %d',
-                   global_step, optimizer_state.inner_state.current_expert[0])
-      current_expert = optimizer_state.inner_state.current_expert[0]
-      checkpointed_expert = current_expert
-      source = jax.process_index() == current_expert
-
-      # Unreplicate so we can broadcast a single instance of params.
-      params = jax_utils.unreplicate(params)
-
-      # multihost_utils.broadcast_one_to_all will broadcast a ShardedDeviceArray
-      # but will unshard, giving an extra leading device dimension.
-      params = multihost_utils.broadcast_one_to_all(params, source)
-
-      optimizer_state = optimizer_init_fn(params)
-
-      optimizer_state = optimizer_state._replace(
-          inner_state=optimizer_state.inner_state._replace(
-              current_expert=current_expert))
-
-      # Replicate params and optimizer state so each device can use.
-      params = jax_utils.replicate(params)
-      optimizer_state = jax_utils.replicate(optimizer_state)
-
-    # Calling float is needed since cost_val is a shape (1,) DeviceArray.
-    sum_train_cost += float(np.mean(cost_val))
-    global_step += 1
-    # TODO(gdahl, gilmer): consider moving this test up.
-    # NB: Since this test is after we increment global_step, having 0 in
-    # eval_steps does nothing.
-    if trainer_utils.should_eval(global_step, eval_frequency, eval_steps):
-      # NOTE(dsuo): sync batch stats across devices for each host.
-      batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
-      report, eval_time = eval_metrics(params, batch_stats, dataset,
-                                       eval_num_batches, eval_train_num_batches,
-                                       evaluate_batch_pmapped)
-      # NOTE(dsuo): grab reports from all experts. For some reason, we can only
-      # log metrics from one host.
-      if hps.optimizer == 'samuel':
-        report = gather_multihost_report(
-            report, optimizer_state.inner_state.current_expert[0])
-        report = add_expert_probs(report,
-                                  optimizer_state.inner_state.expert_weights[0])
-        report.update(
-            current_expert=optimizer_state.inner_state.current_expert[0],
-            checkpointed_expert=checkpointed_expert)
-      mean_train_cost = sum_train_cost / max(1, global_step - prev_eval_step)
-      report.update(learning_rate=float(lr),
-                    global_step=global_step,
-                    epoch=global_step * hps.batch_size // hps.train_size,
-                    steps_per_sec=get_step_frequency(global_step),
-                    eval_time=eval_time,
-                    grad_norm=np.mean(grad_norm),
-                    preemption_count=preemption_count,
-                    train_cost=mean_train_cost)
-
-      for eval_callback in eval_callbacks:
-        callback_metrics = eval_callback.run_eval(params, batch_stats,
-                                                  optimizer_state, global_step)
-        if set(callback_metrics.keys()).intersection(set(report.keys())):
-          raise ValueError('There was a collision between the callback metrics'
-                           'and the standard eval metrics keys')
-        report.update(callback_metrics)
-      yield report
-      if jax.process_index() == 0:
-        trainer_utils.log_epoch_report(report, metrics_logger)
-        trainer_utils.maybe_log_training_metrics(metrics_state,
-                                                 metrics_summary_fn,
-                                                 metrics_logger)
+      if global_step in checkpoint_steps and jax.process_index() == 0:
         checkpoint.save_unreplicated_checkpoint_background(
-            train_dir,
+            checkpoint_dir,
             optimizer_state,
             params,
             batch_stats,
             metrics_state,
             global_step,
             preemption_count,
-            sum_train_cost)
-      sum_train_cost = 0.0
-      prev_eval_step = global_step
+            sum_train_cost,
+            max_to_keep=None)
+      batch = data_utils.shard(batch)
+      lr = hps.get(
+          'opt_hparams.optimizers.' +
+          f'{optimizer_state.inner_state.current_expert[0]}.hps.learning_rate',
+          lr_fn(global_step))
+      optimizer_state, params, batch_stats, cost_val, metrics_state, grad_norm = update_pmapped(
+          optimizer_state,
+          params,
+          batch_stats,
+          metrics_state,
+          batch,
+          global_step,
+          lr,
+          rng,
+          local_device_indices)
 
-      early_stopping_condition = trainer_utils.check_for_early_stopping(
-          early_stopping_target_name,
-          early_stopping_target_value,
-          early_stopping_mode,
-          report)
-      if early_stopping_condition:
-        comparison_string = '>=' if early_stopping_mode == 'above' else '<='
-        logging.info(
-            'Early stopping because metric %s=%f, reached the target value '
-            'of %s %f.',
+      # TODO(dsuo): would be nice if this logic can live inside samuel.
+      # However, need to find a way to pass back params to the trainer.
+      if global_step in hps.get('opt_hparams.reinit_steps', []):
+        logging.info('Syncing at step %d to expert %d', global_step,
+                     optimizer_state.inner_state.current_expert[0])
+        current_expert = optimizer_state.inner_state.current_expert[0]
+        checkpointed_expert = current_expert
+        source = jax.process_index() == current_expert
+
+        # Unreplicate so we can broadcast a single instance of params.
+        params = jax_utils.unreplicate(params)
+
+        # multihost_utils.broadcast_one_to_all will broadcast a
+        # ShardedDeviceArray but will unshard, giving an extra leading device
+        # dimension.
+        params = multihost_utils.broadcast_one_to_all(params, source)
+
+        optimizer_state = optimizer_init_fn(params)
+
+        optimizer_state = optimizer_state._replace(
+            inner_state=optimizer_state.inner_state._replace(
+                current_expert=current_expert))
+
+        # Replicate params and optimizer state so each device can use.
+        params = jax_utils.replicate(params)
+        optimizer_state = jax_utils.replicate(optimizer_state)
+
+      # Calling float is needed since cost_val is a shape (1,) DeviceArray.
+      sum_train_cost += float(np.mean(cost_val))
+      global_step += 1
+      # TODO(gdahl, gilmer): consider moving this test up.
+      # NB: Since this test is after we increment global_step, having 0 in
+      # eval_steps does nothing.
+      if trainer_utils.should_eval(global_step, eval_frequency, eval_steps):
+        # NOTE(dsuo): sync batch stats across devices for each host.
+        batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
+        report, eval_time = eval_metrics(params, batch_stats, dataset,
+                                         eval_num_batches,
+                                         eval_train_num_batches,
+                                         evaluate_batch_pmapped)
+        # NOTE(dsuo): grab reports from all experts. For some reason, we can
+        # only log metrics from one host.
+        if hps.optimizer == 'samuel':
+          report = gather_multihost_report(
+              report, optimizer_state.inner_state.current_expert[0])
+          report = add_expert_probs(
+              report, optimizer_state.inner_state.expert_weights[0])
+          report.update(
+              current_expert=optimizer_state.inner_state.current_expert[0],
+              checkpointed_expert=checkpointed_expert)
+        mean_train_cost = sum_train_cost / max(1, global_step - prev_eval_step)
+        report.update(learning_rate=float(lr),
+                      global_step=global_step,
+                      epoch=global_step * hps.batch_size // hps.train_size,
+                      steps_per_sec=get_step_frequency(global_step),
+                      eval_time=eval_time,
+                      grad_norm=np.mean(grad_norm),
+                      preemption_count=preemption_count,
+                      train_cost=mean_train_cost)
+
+        for eval_callback in eval_callbacks:
+          callback_metrics = eval_callback.run_eval(params, batch_stats,
+                                                    optimizer_state,
+                                                    global_step)
+          if set(callback_metrics.keys()).intersection(set(report.keys())):
+            raise ValueError(
+                'There was a collision between the callback metrics'
+                'and the standard eval metrics keys')
+          report.update(callback_metrics)
+        yield report
+        if jax.process_index() == 0:
+          trainer_utils.log_epoch_report(report, metrics_logger)
+          trainer_utils.maybe_log_training_metrics(metrics_state,
+                                                   metrics_summary_fn,
+                                                   metrics_logger)
+          checkpoint.save_unreplicated_checkpoint_background(
+              train_dir,
+              optimizer_state,
+              params,
+              batch_stats,
+              metrics_state,
+              global_step,
+              preemption_count,
+              sum_train_cost)
+        sum_train_cost = 0.0
+        prev_eval_step = global_step
+
+        early_stopping_condition = trainer_utils.check_for_early_stopping(
             early_stopping_target_name,
-            report[early_stopping_target_name],
-            comparison_string,
-            early_stopping_target_value)
-        return
+            early_stopping_target_value,
+            early_stopping_mode,
+            report)
+        if early_stopping_condition:
+          comparison_string = '>=' if early_stopping_mode == 'above' else '<='
+          logging.info(
+              'Early stopping because metric %s=%f, reached the target value '
+              'of %s %f.',
+              early_stopping_target_name,
+              report[early_stopping_target_name],
+              comparison_string,
+              early_stopping_target_value)
+          return
 
   # Always log and checkpoint on host 0 at the end of training.
   # If we moved where in the loop body evals happen then we would not need this
