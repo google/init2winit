@@ -17,10 +17,13 @@
 
 import os
 
+from flax import jax_utils
 from init2winit import base_callback
 from init2winit import utils
 from init2winit.hessian import hessian_eval
+from init2winit.hessian import precondition
 import jax
+from ml_collections import FrozenConfigDict
 
 
 def set_up_hessian_eval(model, flax_module, batch_stats, dataset,
@@ -49,7 +52,6 @@ class HessianCallback(base_callback.BaseCallBack):
 
   def __init__(self, model, flax_module, batch_stats, optimizer_state,
                dataset, hps, callback_config, train_dir, rng):
-    del hps
     del rng
     del optimizer_state
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
@@ -57,6 +59,8 @@ class HessianCallback(base_callback.BaseCallBack):
     self.hessian_evaluator, self.logger = set_up_hessian_eval(
         model, flax_module, batch_stats, dataset, checkpoint_dir,
         callback_config)
+    self.callback_config = FrozenConfigDict(callback_config)
+    self.hps = hps
     self.name = callback_config['name']
 
   def run_eval(self, flax_module, batch_stats, optimizer_state, global_step):
@@ -72,12 +76,19 @@ class HessianCallback(base_callback.BaseCallBack):
       global_step: Current training step.
 
     Returns:
-      Max eigenavlue of the loss (full tridiag is saved to disk).
+      Max eigenvalue of the loss (full tridiag is saved to disk).
     """
     del batch_stats
-    del optimizer_state
+    if self.callback_config.get('precondition'):
+      precondition_config = self.callback_config.get('precondition_config',
+                                                     default=FrozenConfigDict())
+      diag_preconditioner = precondition.make_diag_preconditioner(
+          self.hps.optimizer, self.hps.opt_hparams,
+          jax_utils.unreplicate(optimizer_state), precondition_config)
+    else:
+      diag_preconditioner = None
     hessian_metrics, _, _ = self.hessian_evaluator.evaluate_spectrum(
-        flax_module, global_step)
+        flax_module, global_step, diag_preconditioner=diag_preconditioner)
     if jax.host_id() == 0:
       self.logger.append_pytree(hessian_metrics)
 

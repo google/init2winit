@@ -15,6 +15,8 @@
 
 """Shared utilities for unit tests."""
 
+import functools
+
 import jax
 import jax.numpy as jnp
 
@@ -22,6 +24,16 @@ import jax.numpy as jnp
 def pytree_equal(tree1, tree2):
   try:
     equal_tree = jax.tree_util.tree_multimap(jnp.array_equal, tree1, tree2)
+    return jax.tree_util.tree_reduce(lambda x, y: x and y, equal_tree)
+  # The tree_utils will raise TypeErrors if structures don't match.
+  except TypeError:
+    return False
+
+
+def pytree_allclose(tree1, tree2, rtol=1e-5):
+  try:
+    allclose = functools.partial(jnp.allclose, rtol=rtol)
+    equal_tree = jax.tree_util.tree_multimap(allclose, tree1, tree2)
     return jax.tree_util.tree_reduce(lambda x, y: x and y, equal_tree)
   # The tree_utils will raise TypeErrors if structures don't match.
   except TypeError:
