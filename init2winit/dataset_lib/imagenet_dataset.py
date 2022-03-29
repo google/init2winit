@@ -23,7 +23,7 @@ from init2winit.dataset_lib import autoaugment
 from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import image_preprocessing
 import jax
-import jax.numpy as jnp
+from jax.experimental import multihost_utils
 from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow.compat.v2 as tf
@@ -418,22 +418,8 @@ def get_imagenet(shuffle_rng,
     if hps.use_mixup:
       # NOTE(dsuo): using `fold_in` so as not to disturb shuffle_rng.
       mixup_rng = jax.random.fold_in(shuffle_rng, jax.process_index())
-
-      # NOTE(dsuo): synchronize weights across hosts. More generally, we
-      # should consider passing a global key into `get_dataset`.
-      # NOTE(dsuo): in order to preserve the dirichlet distribution, we set
-      # mixup_rng to be non-zero for only the 0th device on the 0th host and
-      # psum so each host gets the same value.
-      mixup_rng = jnp.tile(mixup_rng, (jax.local_device_count(), 1))
-      if jax.process_index() == 0:
-        one_hot = jax.nn.one_hot(
-            jnp.array([0]), jax.local_device_count(), dtype=mixup_rng.dtype)
-        mixup_rng *= one_hot.T
-      else:
-        mixup_rng = jnp.zeros_like(mixup_rng)
-      mixup_rng = jax.pmap(lambda x: jax.lax.psum(x, 'devices'), 'devices')(
-          mixup_rng)
-      mixup_rng = mixup_rng.at[0].get()
+      mixup_rng = multihost_utils.broadcast_one_to_all(
+          mixup_rng, is_source=jax.process_index() == 0)
 
     for batch in iter(train_ds):
       image = batch['image']
