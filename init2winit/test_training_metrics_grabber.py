@@ -22,14 +22,13 @@ from absl.testing import absltest
 from init2winit.shared_test_utilities import pytree_equal
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
-from jax import test_util as jtu
 import jax.numpy as jnp
 
 
 FLAGS = flags.FLAGS
 
 
-class TrainingMetricsGrabberTest(jtu.JaxTestCase):
+class TrainingMetricsGrabberTest(absltest.TestCase):
   """Tests the logged statistics from training_metrics_grabber."""
 
   def setUp(self):
