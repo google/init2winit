@@ -154,9 +154,15 @@ class ModelDebuggerTest(absltest.TestCase):
     expected_output = np.dot(xs[0], params['Dense_0']['kernel'])
     expected_output_norm = np.linalg.norm(expected_output)
     expected_input_norm = float(np.linalg.norm(xs))
+    expected_keys = ['residual_activations', 'intermediate_norms', 'step',
+                     'param_norms_sql2', 'global_param_norm_sql2']
 
-    self.assertAlmostEqual(expected_output_norm,
-                           metrics['intermediate_norms']['__call__'])
+    self.assertEqual(set(expected_keys), set(metrics.keys()))
+
+    self.assertAlmostEqual(
+        float(expected_output_norm),
+        float(metrics['intermediate_norms']['__call__'][0]),
+        places=5)
     self.assertAlmostEqual(
         expected_input_norm,
         float(metrics['residual_activations']['residual'][0]), places=5)

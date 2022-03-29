@@ -148,6 +148,9 @@ def create_forward_pass_stats_fn(flax_module,
           lambda x: jnp.linalg.norm(x.reshape(-1)),
           forward_pass_statistics['intermediates'])
 
+      # Don't want to store the full activations.
+      forward_pass_statistics.pop('intermediates')
+
     return forward_pass_statistics
   return get_forward_pass_statistics
 
