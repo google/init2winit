@@ -62,7 +62,7 @@ def get_lm1b(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
 
   per_host_batch_size = batch_size // process_count
   if eval_batch_size is None:
-    eval_batch_size = per_host_batch_size
+    eval_batch_size = batch_size
 
   if eval_batch_size % process_count != 0:
     raise ValueError('process_count={} must divide eval_batch_size={}.'.format(
