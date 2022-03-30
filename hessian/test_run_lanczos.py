@@ -22,8 +22,8 @@ import shutil
 import tempfile
 
 from absl.testing import absltest
+from init2winit import checkpoint
 from init2winit import hyperparameters
-from init2winit import utils
 from init2winit.dataset_lib import datasets
 from init2winit.hessian import hessian_eval
 from init2winit.hessian import run_lanczos
@@ -145,8 +145,12 @@ class RunLanczosTest(absltest.TestCase):
     )
 
     # Load the saved file.
-    hessian_dir = os.path.join(checkpoint_dir, 'hessian')
-    pytree_list = utils.load_pytrees(hessian_dir)
+    hessian_dir = os.path.join(checkpoint_dir, 'hessian', 'training_metrics')
+    pytree_list = checkpoint.load_pytree(hessian_dir)
+
+    # Convert to a regular list (checkpointer will have converted the saved
+    # list to a dict of keys '0', '1', ...
+    pytree_list = [pytree_list[str(i)] for i in range(len(pytree_list))]
     # Test that the logged steps are correct.
     saved_steps = [row['step'] for row in pytree_list]
     self.assertEqual(saved_steps, checkpoint_steps)
@@ -242,9 +246,11 @@ class RunLanczosTest(absltest.TestCase):
 
     checkpoint_dir = os.path.join(self.test_dir, 'checkpoints')
     # Load the saved file.
-    hessian_dir = os.path.join(checkpoint_dir, hessian_save_name)
-    pytree_list = utils.load_pytrees(hessian_dir)
+    hessian_dir = os.path.join(checkpoint_dir, hessian_save_name,
+                               'training_metrics')
+    pytree_list = checkpoint.load_pytree(hessian_dir)
     # Test that the logged steps are correct.
+    pytree_list = [pytree_list[str(i)] for i in range(len(pytree_list))]
     saved_steps = [int(row['step']) for row in pytree_list]
     self.assertEqual(saved_steps, checkpoint_steps)
 

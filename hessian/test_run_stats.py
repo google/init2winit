@@ -26,8 +26,8 @@ from absl import flags
 from absl.testing import absltest
 from flax import jax_utils
 from flax import linen as nn
+from init2winit import checkpoint
 from init2winit import hyperparameters
-from init2winit import utils
 from init2winit.dataset_lib import datasets
 from init2winit.hessian import hessian_eval
 from init2winit.hessian import run_lanczos
@@ -293,9 +293,10 @@ class TrainerTest(absltest.TestCase):
     )
 
     # Load the saved file.
-    stats_dir = os.path.join(checkpoint_dir, 'stats')
-    pytree_list = utils.load_pytrees(stats_dir)
+    stats_path = os.path.join(checkpoint_dir, 'stats', 'training_metrics')
+    pytree_list = checkpoint.load_pytree(stats_path)
     # Test that the logged steps are correct.
+    pytree_list = [pytree_list[str(i)] for i in range(len(pytree_list))]
     saved_steps = [row['step'] for row in pytree_list]
     self.assertEqual(saved_steps, checkpoint_steps)
 

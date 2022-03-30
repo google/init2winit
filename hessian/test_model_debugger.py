@@ -222,6 +222,12 @@ class ModelDebuggerTest(absltest.TestCase):
         loaded_metrics['param_norms_sql2']['Conv_0']['kernel'].shape, (2,))
     self.assertEqual(loaded_metrics['train_loss'][0], 1.0)
 
+    # Test restore of prior metrics.
+    new_debugger = model_debugger.ModelDebugger(
+        use_pmap=True, metrics_logger=metrics_logger)
+    self.assertEqual(
+        new_debugger.stored_metrics['param_norms_sql2']['Conv_0']
+        ['kernel'].shape, (2,))
 
 if __name__ == '__main__':
   absltest.main()

@@ -151,17 +151,6 @@ def add_log_file(logfile):
   absl_logger.addHandler(handler)
 
 
-def load_pytrees(pytree_path):
-  # Note that this assumes each pytree is some nested dict of arrays, which
-  # don't need to be individually restored.
-  state_dict = checkpoint.load_latest_checkpoint(
-      pytree_path, prefix='training_metrics')
-  if state_dict:
-    pytree = state_dict['pytree']
-    return [pytree[str(i)] for i in range(len(pytree))]
-  return []
-
-
 # TODO(gdahl,gilmer): Use atomic writes to avoid file corruptions due to
 # preemptions.
 class MetricLogger(object):

@@ -34,6 +34,17 @@ import jax
 FLAGS = flags.FLAGS
 
 
+def load_pytree(pytree_file):
+  """Loads the checkpointed pytree."""
+  latest = load_latest_checkpoint(pytree_file, target=None)
+  if latest:
+    # Because we pass target=None, flax checkpointing will return the raw
+    # state dict, where 'state' will be a dict with keys ['0', '1', ...]
+    # instead of a list.
+    return latest['pytree']
+  return None
+
+
 def replicate_checkpoint(
     latest,
     pytree_keys: Sequence[str],

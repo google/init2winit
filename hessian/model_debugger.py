@@ -16,12 +16,17 @@
 r"""Debugging tool for identifying problematic layers in a network.
 
 """
+
+import os
+
 import flax
+from init2winit.checkpoint import load_pytree
 from init2winit.utils import array_append
 from init2winit.utils import tree_norm_sql2
 import jax
 import jax.numpy as jnp
 import numpy as np
+from tensorflow.io import gfile
 
 
 def tag_residual_activations(module,
@@ -198,6 +203,13 @@ class ModelDebugger:
 
     self._stored_metrics = {}
 
+    # In the case of preemption we want to restore prior metrics.
+    if metrics_logger:
+      metrics_file = os.path.join(metrics_logger._pytree_path,
+                                  'training_metrics')
+      if gfile.exists(metrics_file):
+        self._stored_metrics = load_pytree(metrics_file)
+
   def _grab_statistics(self,
                        step,
                        params=None,
@@ -232,6 +244,10 @@ class ModelDebugger:
         self._metrics_logger.write_pytree(save_dict)
     else:
       self._metrics_logger.write_pytree(save_dict)
+
+  @property
+  def stored_metrics(self):
+    return self._stored_metrics
 
   def full_eval(self,
                 step,
