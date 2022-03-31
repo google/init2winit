@@ -24,7 +24,7 @@ import jax
 
 def log_epoch_report(report, metrics_logger):
   logging.info('Step %d, steps/second: %f, report: %r', report['global_step'],
-               report['steps_per_sec'], report)
+               report['train_steps_per_sec'], report)
   if metrics_logger:
     metrics_logger.append_scalar_metrics(report)
   logging.info('Finished (estimated) epoch %d. Saving checkpoint.',

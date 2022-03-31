@@ -617,6 +617,8 @@ def train(train_dir,
   train_iter = trainer_utils.prefetch_input_pipeline(train_iter,
                                                      num_h2d_prefetches)
 
+  eval_start_time = start_time
+  eval_start_step = start_step
   for _ in range(start_step, num_train_steps):
     with jax.profiler.StepTraceContext('train', step_num=global_step):
       # NOTE(dsuo): to properly profile each step, we must include batch
@@ -684,6 +686,10 @@ def train(train_dir,
       # NB: Since this test is after we increment global_step, having 0 in
       # eval_steps does nothing.
       if trainer_utils.should_eval(global_step, eval_frequency, eval_steps):
+        train_steps_per_sec = (global_step - eval_start_step) / (
+            time.time() - eval_start_time)
+        eval_start_step = global_step
+        eval_start_time = time.time()
         # NOTE(dsuo): sync batch stats across devices for each host.
         batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
         report, eval_time = eval_metrics(params, batch_stats, dataset,
@@ -704,7 +710,8 @@ def train(train_dir,
         report.update(learning_rate=float(lr),
                       global_step=global_step,
                       epoch=global_step * hps.batch_size // hps.train_size,
-                      steps_per_sec=get_step_frequency(global_step),
+                      train_steps_per_sec=train_steps_per_sec,
+                      overall_steps_per_sec=get_step_frequency(global_step),
                       eval_time=eval_time,
                       grad_norm=np.mean(grad_norm),
                       preemption_count=preemption_count,
@@ -757,6 +764,8 @@ def train(train_dir,
   # If we moved where in the loop body evals happen then we would not need this
   # test.
   if prev_eval_step != num_train_steps:
+    train_steps_per_sec = (global_step - eval_start_step) / (
+        time.time() - eval_start_time)
     batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
     report, eval_time = eval_metrics(params,
                                      batch_stats,
@@ -778,7 +787,8 @@ def train(train_dir,
     report.update(learning_rate=float(lr),
                   global_step=global_step,
                   epoch=global_step * hps.batch_size // hps.train_size,
-                  steps_per_sec=get_step_frequency(global_step),
+                  train_steps_per_sec=train_steps_per_sec,
+                  overall_steps_per_sec=get_step_frequency(global_step),
                   eval_time=eval_time,
                   grad_norm=np.mean(grad_norm),
                   preemption_count=preemption_count,
