@@ -58,6 +58,9 @@ flags.DEFINE_string('experiment_dir', None,
 flags.DEFINE_string('dataset', 'mnist',
                     'Which dataset to train on.')
 flags.DEFINE_integer('num_train_steps', None, 'The number of steps to train.')
+flags.DEFINE_integer(
+    'num_h2d_prefetches', 0, 'The number of batches to to prefetch from '
+    'host to device at each step.')
 flags.DEFINE_integer('eval_batch_size', None, 'Batch size for evaluation.')
 flags.DEFINE_integer('eval_num_batches', None,
                      'Number of batches for evaluation. Leave None to evaluate '
@@ -148,6 +151,7 @@ def _run(
     eval_train_num_batches,
     eval_frequency,
     checkpoint_steps,
+    num_h2d_prefetches,
     early_stopping_target_name,
     early_stopping_target_value,
     early_stopping_mode,
@@ -225,6 +229,7 @@ def _run(
             eval_train_num_batches,
             eval_frequency,
             checkpoint_steps,
+            num_h2d_prefetches,
             early_stopping_target_name,
             early_stopping_target_value,
             early_stopping_mode,
@@ -284,6 +289,7 @@ def main(unused_argv):
         eval_train_num_batches=FLAGS.eval_train_num_batches,
         eval_frequency=FLAGS.eval_frequency,
         checkpoint_steps=checkpoint_steps,
+        num_h2d_prefetches=FLAGS.num_h2d_prefetches,
         early_stopping_target_name=FLAGS.early_stopping_target_name,
         early_stopping_target_value=FLAGS.early_stopping_target_value,
         early_stopping_mode=FLAGS.early_stopping_mode,

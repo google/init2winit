@@ -15,7 +15,9 @@
 
 """Utility functions related to training."""
 from absl import logging
+
 from flax import jax_utils
+from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
 import jax
 
@@ -82,3 +84,22 @@ def check_for_early_stopping(
     else:
       return (eval_report[early_stopping_target_name] <=
               early_stopping_target_value)
+
+
+def prefetch_input_pipeline(ds, n_prefetch=0, devices=None):
+  """Modify input pipeline to prefetch from host to device.
+
+  Args:
+    ds: tf.data pipeline
+    n_prefetch: number of items to prefetch
+    devices: devices to prefetch to
+
+  Returns:
+    prefetching ds
+
+  """
+  it = iter(ds)
+  it = (data_utils.shard(x) for x in it)
+  if n_prefetch > 0:
+    it = jax_utils.prefetch_to_device(it, n_prefetch, devices=devices)
+  return it

@@ -384,6 +384,7 @@ def train(train_dir,
           eval_train_num_batches,
           eval_frequency,
           checkpoint_steps,
+          num_h2d_prefetches=0,
           early_stopping_target_name=None,
           early_stopping_target_value=None,
           early_stopping_mode=None,
@@ -415,6 +416,8 @@ def train(train_dir,
     eval_frequency: (int) Evaluate every k steps.
     checkpoint_steps: List of integers indicating special steps to save
       checkpoints at. These checkpoints do not get used for preemption recovery.
+    num_h2d_prefetches: (int) Number of batches to prefetch from host to device
+      at each step.
     early_stopping_target_name: A string naming the metric to use to perform
        early stopping. If this metric reaches the value
       `early_stopping_target_value`, training will stop. Must include the
@@ -611,6 +614,9 @@ def train(train_dir,
     eval_callbacks.append(eval_callback)
 
 
+  train_iter = trainer_utils.prefetch_input_pipeline(train_iter,
+                                                     num_h2d_prefetches)
+
   for _ in range(start_step, num_train_steps):
     with jax.profiler.StepTraceContext('train', step_num=global_step):
       # NOTE(dsuo): to properly profile each step, we must include batch
@@ -629,7 +635,6 @@ def train(train_dir,
             preemption_count,
             sum_train_cost,
             max_to_keep=None)
-      batch = data_utils.shard(batch)
       lr = hps.get(
           'opt_hparams.optimizers.' +
           f'{optimizer_state.inner_state.current_expert[0]}.hps.learning_rate',
