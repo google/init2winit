@@ -125,18 +125,29 @@ def get_criteo1tb(unused_shuffle_rng,
                   eval_batch_size,
                   hps):
   """Get the Criteo 1TB train and eval iterators."""
+  process_count = jax.process_count()
+  if batch_size % process_count != 0:
+    raise ValueError('process_count={} must divide batch_size={}.'.format(
+        process_count, batch_size))
+  if eval_batch_size is None:
+    eval_batch_size = batch_size
+  if eval_batch_size % process_count != 0:
+    raise ValueError('process_count={} must divide eval_batch_size={}.'.format(
+        process_count, eval_batch_size))
+  per_host_eval_batch_size = eval_batch_size // process_count
+  per_host_batch_size = batch_size // process_count
   train_dataset = CriteoTsvReader(
       file_path=hps.train_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
-      batch_size=batch_size,
+      batch_size=per_host_batch_size,
       is_training=True)
   train_iterator_fn = lambda: tfds.as_numpy(train_dataset())
   eval_train_dataset = CriteoTsvReader(
       file_path=hps.train_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
-      batch_size=eval_batch_size,
+      batch_size=per_host_eval_batch_size,
       is_training=False)
   eval_train_epoch = functools.partial(
       convert_to_numpy_iterator_fn, tf_dataset_fn=eval_train_dataset)
@@ -144,7 +155,7 @@ def get_criteo1tb(unused_shuffle_rng,
       file_path=hps.eval_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
-      batch_size=eval_batch_size,
+      batch_size=per_host_eval_batch_size,
       is_training=False)
   eval_iterator_fn = functools.partial(
       convert_to_numpy_iterator_fn, tf_dataset_fn=eval_dataset)
@@ -157,4 +168,3 @@ def get_criteo1tb(unused_shuffle_rng,
   # pylint: enable=unreachable
   return Dataset(train_iterator_fn, eval_train_epoch, eval_iterator_fn,
                  test_epoch)
-
