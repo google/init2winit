@@ -29,6 +29,7 @@ from absl import logging
 from flax import jax_utils
 from flax.training import checkpoints as flax_checkpoints
 import jax
+import jax.numpy as jnp
 
 
 FLAGS = flags.FLAGS
@@ -157,7 +158,7 @@ def replicate_and_maybe_restore_checkpoint(
         jax_utils.replicate(unreplicated_batch_stats),
         jax_utils.replicate(unreplicated_training_metrics_state),
         0,  # global_step
-        0.0,  # sum_train_cost
+        jnp.zeros(jax.local_device_count()),  # sum_train_cost
         0,  # preemption_count
         False)  # is_restored
 

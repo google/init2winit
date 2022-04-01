@@ -236,6 +236,7 @@ def update(
     lr,
     rng,
     local_device_index,
+    running_train_cost,
     training_cost,
     grad_clip,
     optimizer_update_fn,
@@ -260,6 +261,8 @@ def update(
     local_device_index: an integer that is unique to this device amongst all
       devices on this host, usually in the range [0, jax.local_device_count()].
       It is folded in to `rng` to produce a unique per-device, per-step RNG.
+    running_train_cost: the cumulative train cost over some past number of train
+      steps. Reset at evaluation time.
     training_cost: a function used to calculate the training objective that will
       be differentiated to generate updates. Takes
       (`params`, `batch`, `batch_stats`, `dropout_rng`) as inputs.
@@ -317,8 +320,8 @@ def update(
     new_metrics_state = metrics_update_fn(metrics_state, grad, params,
                                           new_params)
 
-  return (new_optimizer_state, new_params, new_batch_stats, cost_value,
-          new_metrics_state, grad_norm)
+  return (new_optimizer_state, new_params, new_batch_stats,
+          running_train_cost + cost_value, new_metrics_state, grad_norm)
 
 
 def _merge_and_apply_prefix(d1, d2, prefix):
@@ -566,6 +569,7 @@ def train(train_dir,
   #     lr = None,
   #     rng = None,
   #     local_device_index = 0,
+  #     running_train_cost = 0,
   #     training_cost,
   #     grad_clip,
   #     optimizer_update_fn,
@@ -573,7 +577,7 @@ def train(train_dir,
   update_pmapped = jax.pmap(
       update_fn,
       axis_name='batch',
-      in_axes=(0, 0, 0, 0, 0, None, None, None, 0))
+      in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0))
   evaluate_batch_pmapped = jax.pmap(
       functools.partial(evaluate_batch, model),
       axis_name='batch')
@@ -639,7 +643,7 @@ def train(train_dir,
           'opt_hparams.optimizers.' +
           f'{optimizer_state.inner_state.current_expert[0]}.hps.learning_rate',
           lr_fn(global_step))
-      optimizer_state, params, batch_stats, cost_val, metrics_state, grad_norm = update_pmapped(
+      optimizer_state, params, batch_stats, sum_train_cost, metrics_state, grad_norm = update_pmapped(
           optimizer_state,
           params,
           batch_stats,
@@ -648,7 +652,8 @@ def train(train_dir,
           global_step,
           lr,
           rng,
-          local_device_indices)
+          local_device_indices,
+          sum_train_cost)
 
       # TODO(dsuo): would be nice if this logic can live inside samuel.
       # However, need to find a way to pass back params to the trainer.
@@ -678,7 +683,6 @@ def train(train_dir,
         optimizer_state = jax_utils.replicate(optimizer_state)
 
       # Calling float is needed since cost_val is a shape (1,) DeviceArray.
-      sum_train_cost += float(np.mean(cost_val))
       global_step += 1
       # TODO(gdahl, gilmer): consider moving this test up.
       # NB: Since this test is after we increment global_step, having 0 in
@@ -704,7 +708,8 @@ def train(train_dir,
           report.update(
               current_expert=optimizer_state.inner_state.current_expert[0],
               checkpointed_expert=checkpointed_expert)
-        mean_train_cost = sum_train_cost / max(1, global_step - prev_eval_step)
+        mean_train_cost = sum_train_cost.mean().item() / max(
+            1, global_step - prev_eval_step)
         report.update(learning_rate=float(lr),
                       global_step=global_step,
                       epoch=global_step * hps.batch_size // hps.train_size,
@@ -739,7 +744,7 @@ def train(train_dir,
               global_step,
               preemption_count,
               sum_train_cost)
-        sum_train_cost = 0.0
+        sum_train_cost = jnp.zeros(jax.local_device_count())
         prev_eval_step = global_step
 
         early_stopping_condition = trainer_utils.check_for_early_stopping(
@@ -781,7 +786,8 @@ def train(train_dir,
           checkpointed_expert=checkpointed_expert)
     lr = lr_fn(global_step)
     # Correct the average for the final partial epoch.
-    mean_train_cost = sum_train_cost / max(1, global_step - prev_eval_step)
+    mean_train_cost = sum_train_cost / max(
+        1, global_step - prev_eval_step)
     report.update(learning_rate=float(lr),
                   global_step=global_step,
                   epoch=global_step * hps.batch_size // hps.train_size,

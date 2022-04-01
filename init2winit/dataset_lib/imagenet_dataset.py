@@ -413,7 +413,7 @@ def load_split(
 
   if split != 'train':
     ds = ds.cache()
-  ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
+  ds = ds.prefetch(hps.num_tf_data_prefetches)
 
   return ds
 
