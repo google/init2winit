@@ -16,6 +16,7 @@
 """ImageNet input pipeline with resnet preprocessing."""
 
 from collections import abc
+import functools
 import itertools
 
 from absl import logging
@@ -25,7 +26,6 @@ from init2winit.dataset_lib import image_preprocessing
 import jax
 from jax.experimental import multihost_utils
 from ml_collections.config_dict import config_dict
-import numpy as np
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
@@ -315,6 +315,8 @@ def load_split(
   Returns:
     A `tf.data.Dataset`.
   """
+  num_classes = 1000
+
   if split not in ['train', 'eval_train', 'valid']:
     raise ValueError('Unrecognized split {}'.format(split))
   if split in ['train']:
@@ -347,11 +349,18 @@ def load_split(
 
     else:
       image = preprocess_for_eval(example['image'], dtype, image_size)
-    return {
-        'image': image,
-        'label': example['label'],
-        'example_key': example['tfds_id'],
+
+    example_dict = {
+        'inputs': image,
+        'targets': tf.one_hot(example['label'], num_classes)
     }
+
+    if split == 'train':
+      example_dict['weights'] = 1
+    elif hps.get('include_example_keys'):
+      example_dict['example_key'] = example['tfds_id']
+
+    return example_dict
 
   # TODO(znado): make shuffling the input files deterministic, as this will
   # yield a different order each time we are pre-empted.
@@ -378,6 +387,30 @@ def load_split(
       decode_example, num_parallel_calls=tf.data.experimental.AUTOTUNE)
   ds = ds.batch(per_host_batch_size, drop_remainder=False)
 
+  if split == 'train' and hps.use_mixup:
+    per_batch_mixup_rng = tf.convert_to_tensor(shuffle_rng, dtype=tf.int32)
+    per_batch_mixup_rng = tf.random.experimental.stateless_fold_in(
+        per_batch_mixup_rng, 0)
+    per_batch_mixup_rng = multihost_utils.broadcast_one_to_all(
+        per_batch_mixup_rng, is_source=jax.process_index() == 0)
+    def mixup_batch(per_batch_mixup_rng, batch):
+      per_batch_mixup_rng = tf.random.experimental.stateless_fold_in(
+          per_batch_mixup_rng, 0)
+      (image, targets) = image_preprocessing.mixup_tf(
+          per_batch_mixup_rng,
+          batch['inputs'],
+          batch['targets'],
+          alpha=hps.mixup.alpha,
+          n=2
+      )
+      batch['inputs'] = image
+      batch['targets'] = targets
+      return batch
+
+    ds = ds.map(
+        functools.partial(mixup_batch, per_batch_mixup_rng),
+        num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
   if split != 'train':
     ds = ds.cache()
   ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
@@ -394,7 +427,6 @@ def get_imagenet(shuffle_rng,
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
 
   image_size = hps.input_shape[0]
-  num_classes = 1000
 
   # TODO(gilmer) Currently the training data is not determistic.
   logging.info('Loading train split')
@@ -415,51 +447,16 @@ def get_imagenet(shuffle_rng,
   eval_ds = tfds.as_numpy(eval_ds)
 
   def train_iterator_fn():
-    if hps.use_mixup:
-      # NOTE(dsuo): using `fold_in` so as not to disturb shuffle_rng.
-      mixup_rng = jax.random.fold_in(shuffle_rng, jax.process_index())
-      mixup_rng = multihost_utils.broadcast_one_to_all(
-          mixup_rng, is_source=jax.process_index() == 0)
-
-    for batch in iter(train_ds):
-      image = batch['image']
-      targets = np.eye(num_classes)[batch['label']]
-      if hps.use_mixup:
-        mixup_rng = jax.random.fold_in(mixup_rng, 0)
-        (image, targets), _ = image_preprocessing.mixup_general(
-            mixup_rng,
-            image,
-            targets,
-            alpha=hps.mixup.alpha,
-            n=2)
-      yield {
-          'inputs': image,
-          'targets': targets,
-          'weights': np.ones(per_host_batch_size, dtype=image.dtype)
-      }
+    return train_ds
 
   def eval_train_epoch(num_batches=None):
     # This uses per_host_batch_size and not per_host_eval_batch_size.
-    eval_train_iter = iter(eval_train_ds)
-    for batch in itertools.islice(eval_train_iter, num_batches):
-      batch_dict = {
-          'inputs': batch['image'],
-          'targets': np.eye(num_classes)[batch['label']],
-      }
-      if hps.get('include_example_keys'):
-        batch_dict['example_key'] = batch['example_key']
-      yield data_utils.maybe_pad_batch(batch_dict, per_host_eval_batch_size)
+    for batch in itertools.islice(eval_train_ds, num_batches):
+      yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
   def valid_epoch(num_batches=None):
-    valid_iter = iter(eval_ds)
-    for batch in itertools.islice(valid_iter, num_batches):
-      batch_dict = {
-          'inputs': batch['image'],
-          'targets': np.eye(num_classes)[batch['label']],
-      }
-      if hps.get('include_example_keys'):
-        batch_dict['example_key'] = batch['example_key']
-      yield data_utils.maybe_pad_batch(batch_dict, per_host_eval_batch_size)
+    for batch in itertools.islice(eval_ds, num_batches):
+      yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
   # pylint: disable=unreachable
   def test_epoch(*args, **kwargs):
