@@ -503,7 +503,7 @@ def train(train_dir,
   eval_start_time = start_time
   eval_start_step = start_step
   for _ in range(start_step, num_train_steps):
-    with jax.profiler.StepTraceContext('train', step_num=global_step):
+    with jax.profiler.StepTraceAnnotation('train', step_num=global_step):
       # NOTE(dsuo): to properly profile each step, we must include batch
       # creation in the StepTraceContext (as opposed to putting `train_iter`
       # directly in the top-level for loop).
