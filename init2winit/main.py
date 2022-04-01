@@ -37,6 +37,7 @@ from init2winit.trainer_lib import trainers
 import utils as utils  # local file import
 import jax
 from jax import lax
+from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow as tf
 from tensorflow.io import gfile
@@ -59,7 +60,10 @@ flags.DEFINE_string('dataset', 'mnist',
                     'Which dataset to train on.')
 flags.DEFINE_integer('num_train_steps', None, 'The number of steps to train.')
 flags.DEFINE_integer(
-    'num_h2d_prefetches', 0, 'The number of batches to to prefetch from '
+    'num_tf_data_prefetches', -1, 'The number of batches to to prefetch from '
+    'network to host at each step. -1 for tf.data.AUTOTUNE.')
+flags.DEFINE_integer(
+    'num_device_prefetches', 0, 'The number of batches to to prefetch from '
     'host to device at each step.')
 flags.DEFINE_integer('eval_batch_size', None, 'Batch size for evaluation.')
 flags.DEFINE_integer('eval_num_batches', None,
@@ -151,7 +155,8 @@ def _run(
     eval_train_num_batches,
     eval_frequency,
     checkpoint_steps,
-    num_h2d_prefetches,
+    num_tf_data_prefetches,
+    num_device_prefetches,
     early_stopping_target_name,
     early_stopping_target_value,
     early_stopping_mode,
@@ -174,13 +179,18 @@ def _run(
   initializer = initializers.get_initializer(initializer_name)
   dataset_builder = datasets.get_dataset(dataset_name)
   dataset_meta_data = datasets.get_dataset_meta_data(dataset_name)
+  input_pipeline_hps = config_dict.ConfigDict(dict(
+      num_tf_data_prefetches=num_tf_data_prefetches,
+      num_device_prefetches=num_device_prefetches
+  ))
 
   merged_hps = hyperparameters.build_hparams(
       model_name=model_name,
       initializer_name=initializer_name,
       dataset_name=dataset_name,
       hparam_file=hparam_file,
-      hparam_overrides=hparam_overrides)
+      hparam_overrides=hparam_overrides,
+      input_pipeline_hps=input_pipeline_hps)
 
   # Note that one should never tune an RNG seed!!! The seed is only included in
   # the hparams for convenience of running hparam trials with multiple seeds per
@@ -229,7 +239,6 @@ def _run(
             eval_train_num_batches,
             eval_frequency,
             checkpoint_steps,
-            num_h2d_prefetches,
             early_stopping_target_name,
             early_stopping_target_value,
             early_stopping_mode,
@@ -289,7 +298,8 @@ def main(unused_argv):
         eval_train_num_batches=FLAGS.eval_train_num_batches,
         eval_frequency=FLAGS.eval_frequency,
         checkpoint_steps=checkpoint_steps,
-        num_h2d_prefetches=FLAGS.num_h2d_prefetches,
+        num_tf_data_prefetches=FLAGS.num_tf_data_prefetches,
+        num_device_prefetches=FLAGS.num_device_prefetches,
         early_stopping_target_name=FLAGS.early_stopping_target_name,
         early_stopping_target_value=FLAGS.early_stopping_target_value,
         early_stopping_mode=FLAGS.early_stopping_mode,

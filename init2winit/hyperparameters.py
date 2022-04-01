@@ -30,7 +30,8 @@ def build_hparams(model_name,
                   initializer_name,
                   dataset_name,
                   hparam_file,
-                  hparam_overrides):
+                  hparam_overrides,
+                  input_pipeline_hps=None):
   """Build experiment hyperparameters.
 
   Args:
@@ -42,6 +43,7 @@ def build_hparams(model_name,
     hparam_overrides: a dict of hyperparameter override names/values, or a JSON
       string encoding of this hyperparameter override dict. Note that this is
       applied after the hyperparameter file overrides.
+    input_pipeline_hps: a dict of hyperparameters for performance tuning.
 
   Returns:
     A ConfigDict of experiment hyperparameters.
@@ -49,11 +51,13 @@ def build_hparams(model_name,
   model_hps = models.get_model_hparams(model_name)
   initializer_hps = initializers.get_initializer_hparams(initializer_name)
   dataset_hps = datasets.get_dataset_hparams(dataset_name)
+  input_pipeline_hps = input_pipeline_hps or config_dict.ConfigDict()
 
   merged_dict = {}
 
   hps_dicts = [
-      hps.to_dict() for hps in [model_hps, initializer_hps, dataset_hps]
+      hps.to_dict()
+      for hps in [model_hps, initializer_hps, dataset_hps, input_pipeline_hps]
   ]
 
   total_hps = 0

@@ -268,7 +268,6 @@ def train(train_dir,
           eval_train_num_batches,
           eval_frequency,
           checkpoint_steps,
-          num_h2d_prefetches=0,
           early_stopping_target_name=None,
           early_stopping_target_value=None,
           early_stopping_mode=None,
@@ -300,8 +299,6 @@ def train(train_dir,
     eval_frequency: (int) Evaluate every k steps.
     checkpoint_steps: List of integers indicating special steps to save
       checkpoints at. These checkpoints do not get used for preemption recovery.
-    num_h2d_prefetches: (int) Number of batches to prefetch from host to device
-      at each step.
     early_stopping_target_name: A string naming the metric to use to perform
        early stopping. If this metric reaches the value
       `early_stopping_target_value`, training will stop. Must include the
@@ -497,8 +494,9 @@ def train(train_dir,
     eval_callbacks.append(eval_callback)
 
 
+  num_device_prefetches = hps.get('num_device_prefetches', 0)
   train_iter = trainer_utils.prefetch_input_pipeline(train_iter,
-                                                     num_h2d_prefetches)
+                                                     num_device_prefetches)
 
   eval_start_time = start_time
   eval_start_step = start_step
