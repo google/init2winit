@@ -384,7 +384,7 @@ def load_split(
     ds = ds.repeat()
 
   ds = ds.enumerate().map(
-      decode_example, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+      decode_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls)
   ds = ds.batch(per_host_batch_size, drop_remainder=False)
 
   if split == 'train' and hps.use_mixup:
@@ -409,7 +409,7 @@ def load_split(
 
     ds = ds.map(
         functools.partial(mixup_batch, per_batch_mixup_rng),
-        num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        num_parallel_calls=hps.num_tf_data_map_parallel_calls)
 
   if split != 'train':
     ds = ds.cache()

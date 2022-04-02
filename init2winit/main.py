@@ -61,10 +61,14 @@ flags.DEFINE_string('dataset', 'mnist',
 flags.DEFINE_integer('num_train_steps', None, 'The number of steps to train.')
 flags.DEFINE_integer(
     'num_tf_data_prefetches', -1, 'The number of batches to to prefetch from '
-    'network to host at each step. -1 for tf.data.AUTOTUNE.')
+    'network to host at each step. Set to -1 for tf.data.AUTOTUNE.')
 flags.DEFINE_integer(
     'num_device_prefetches', 0, 'The number of batches to to prefetch from '
     'host to device at each step.')
+flags.DEFINE_integer(
+    'num_tf_data_map_parallel_calls', -1, 'The number of parallel calls to '
+    'make from tf.data.map. Set to -1 for tf.data.AUTOTUNE.'
+)
 flags.DEFINE_integer('eval_batch_size', None, 'Batch size for evaluation.')
 flags.DEFINE_integer('eval_num_batches', None,
                      'Number of batches for evaluation. Leave None to evaluate '
@@ -157,6 +161,7 @@ def _run(
     checkpoint_steps,
     num_tf_data_prefetches,
     num_device_prefetches,
+    num_tf_data_map_parallel_calls,
     early_stopping_target_name,
     early_stopping_target_value,
     early_stopping_mode,
@@ -181,7 +186,8 @@ def _run(
   dataset_meta_data = datasets.get_dataset_meta_data(dataset_name)
   input_pipeline_hps = config_dict.ConfigDict(dict(
       num_tf_data_prefetches=num_tf_data_prefetches,
-      num_device_prefetches=num_device_prefetches
+      num_device_prefetches=num_device_prefetches,
+      num_tf_data_map_parallel_calls=num_tf_data_map_parallel_calls,
   ))
 
   merged_hps = hyperparameters.build_hparams(
@@ -300,6 +306,7 @@ def main(unused_argv):
         checkpoint_steps=checkpoint_steps,
         num_tf_data_prefetches=FLAGS.num_tf_data_prefetches,
         num_device_prefetches=FLAGS.num_device_prefetches,
+        num_tf_data_map_parallel_calls=FLAGS.num_tf_data_map_parallel_calls,
         early_stopping_target_name=FLAGS.early_stopping_target_name,
         early_stopping_target_value=FLAGS.early_stopping_target_value,
         early_stopping_mode=FLAGS.early_stopping_mode,
