@@ -760,8 +760,9 @@ class TrainerTest(parameterized.TestCase):
 
       # final_step will be one larger than the last step used to calculate the
       # lr_decay, hense we plug in (final_step - 1) to the decay formula.
-      decay_factor = (1 + jnp.cos(
-          (final_step - 1) / num_train_steps_reload * jnp.pi)) * 0.5
+      # Note that there is a small numerical different here with np vs jnp.
+      decay_factor = (1 + np.cos(
+          (final_step - 1) / num_train_steps_reload * np.pi)) * 0.5
       self.assertEqual(float(final_learning_rate),
                        hps.lr_hparams['base_lr'] * decay_factor)
 

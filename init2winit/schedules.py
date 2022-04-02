@@ -15,7 +15,7 @@
 
 """Defines different learning_rate schedules."""
 
-import jax.numpy as jnp
+import numpy as np
 
 
 def _check_schedule_hparams(schedule_hparams, expected_keys):
@@ -37,7 +37,7 @@ def cosine_schedule(schedule_hparams, max_training_steps):
                           ['schedule', 'base_lr'])
 
   def lr_fn(t):
-    decay_factor = (1 + jnp.cos(t / max_training_steps * jnp.pi)) * 0.5
+    decay_factor = (1 + np.cos(t / max_training_steps * np.pi)) * 0.5
     return schedule_hparams['base_lr'] * decay_factor
   return lr_fn
 
@@ -62,7 +62,7 @@ def rsqrt_normalized_decay(schedule_hparams, max_training_steps):
   def lr_fn(t):
     squash_steps = schedule_hparams['squash_steps']
     return (schedule_hparams['base_lr'] *
-            jnp.sqrt(squash_steps)) / jnp.sqrt(t + squash_steps)
+            np.sqrt(squash_steps)) / np.sqrt(t + squash_steps)
 
   return lr_fn
 
@@ -127,10 +127,10 @@ def piecewise_constant_schedule(schedule_hparams, max_training_steps):
       'schedule', 'base_lr', 'decay_events',
       'decay_factors'
   ])
-  boundaries = jnp.array([0] + schedule_hparams['decay_events'])
+  boundaries = np.array([0] + schedule_hparams['decay_events'])
   factors = [1.0] + schedule_hparams['decay_factors']
   def lr_fn(t):
-    index = jnp.sum(boundaries[1:] < t)
+    index = np.sum(boundaries[1:] < t)
     return factors[index] * schedule_hparams['base_lr']
 
   return lr_fn
@@ -159,10 +159,10 @@ def piecewise_linear_schedule(schedule_hparams, max_training_steps):
       'schedule', 'base_lr', 'decay_events',
       'decay_factors'
   ])
-  boundaries = jnp.array([0] + schedule_hparams['decay_events'])
+  boundaries = np.array([0] + schedule_hparams['decay_events'])
   factors = [1.0] + schedule_hparams['decay_factors']
   def lr_fn(t):
-    index = jnp.sum(boundaries[1:] < t)
+    index = np.sum(boundaries[1:] < t)
     if index+1 == len(factors):
       return factors[index] * schedule_hparams['base_lr']
     m = (factors[index + 1] - factors[index]) / (
@@ -201,11 +201,11 @@ def mlperf_polynomial_schedule(schedule_hparams, max_training_steps):
     r = (step / schedule_hparams.warmup_steps) ** schedule_hparams.warmup_power
     warmup_lr = (
         schedule_hparams.base_lr * r + (1 - r) * schedule_hparams.start_lr)
-    decay_step = jnp.minimum(step - schedule_hparams.warmup_steps, decay_steps)
+    decay_step = np.minimum(step - schedule_hparams.warmup_steps, decay_steps)
     poly_lr = (
         end_lr + (schedule_hparams.base_lr - end_lr) *
         (1 - decay_step / decay_steps) ** schedule_hparams.power)
-    return jnp.where(step <= schedule_hparams.warmup_steps, warmup_lr, poly_lr)
+    return np.where(step <= schedule_hparams.warmup_steps, warmup_lr, poly_lr)
   return step_fn
 
 
@@ -247,12 +247,12 @@ def compound_schedule(schedule_hparams, max_training_steps):
       if name == 'constant':
         ret *= schedule_hparams['base_lr']
       elif name == 'linear_warmup':
-        ret *= jnp.minimum(1.0, step / schedule_hparams['warmup_steps'])
+        ret *= np.minimum(1.0, step / schedule_hparams['warmup_steps'])
       elif name == 'rsqrt_decay':
-        ret /= jnp.sqrt(jnp.maximum(step, schedule_hparams['warmup_steps']))
+        ret /= np.sqrt(np.maximum(step, schedule_hparams['warmup_steps']))
       else:
         raise ValueError('Unknown factor %s.' % name)
-    return jnp.asarray(ret, dtype=jnp.float32)
+    return np.asarray(ret, dtype=np.float32)
 
   return lr_fn
 
