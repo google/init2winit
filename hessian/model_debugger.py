@@ -149,8 +149,9 @@ def create_forward_pass_stats_fn(flax_module,
     if 'batch_stats' in forward_pass_statistics:
       forward_pass_statistics.pop('batch_stats')
     if 'intermediates' in forward_pass_statistics:
+      # This calculation corresponds to the average q-value across the batch.
       forward_pass_statistics['intermediate_norms'] = jax.tree_map(
-          lambda x: jnp.linalg.norm(x.reshape(-1)),
+          lambda x: jnp.linalg.norm(x.reshape(-1)) ** 2 / x.size,
           forward_pass_statistics['intermediates'])
 
       # Don't want to store the full activations.
@@ -334,7 +335,7 @@ class ModelDebugger:
     # In order to properly do this, the model_debugger object needs to be
     # stateful and keep track of this tree in between saves.
     self._stored_metrics = append_pytree_leaves(self._stored_metrics,
-                                                all_metrics)
+                                                flax.core.unfreeze(all_metrics))
 
     if self._metrics_logger and jax.host_id() == 0:
       self._maybe_save_metrics(step)

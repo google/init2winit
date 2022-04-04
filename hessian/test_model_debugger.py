@@ -152,6 +152,7 @@ class ModelDebuggerTest(absltest.TestCase):
     metrics = debugger.full_eval(step=0, params=rep_params, batch=xs)
 
     expected_output = np.dot(xs[0], params['Dense_0']['kernel'])
+    expected_q_value = np.linalg.norm(expected_output)**2 / expected_output.size
     expected_output_norm = np.linalg.norm(expected_output)
     expected_input_norm = float(np.linalg.norm(xs))
     expected_keys = ['residual_activations', 'intermediate_norms', 'step',
@@ -160,7 +161,7 @@ class ModelDebuggerTest(absltest.TestCase):
     self.assertEqual(set(expected_keys), set(metrics.keys()))
 
     self.assertAlmostEqual(
-        float(expected_output_norm),
+        float(expected_q_value),
         float(metrics['intermediate_norms']['__call__'][0]),
         places=5)
     self.assertAlmostEqual(
@@ -225,9 +226,15 @@ class ModelDebuggerTest(absltest.TestCase):
     # Test restore of prior metrics.
     new_debugger = model_debugger.ModelDebugger(
         use_pmap=True, metrics_logger=metrics_logger)
+    metrics = new_debugger.full_eval(
+        10,
+        params=rep_variables['params'],
+        grad=rep_variables['params'],
+        extra_scalar_metrics=extra_metrics2)
     self.assertEqual(
         new_debugger.stored_metrics['param_norms_sql2']['Conv_0']
-        ['kernel'].shape, (2,))
+        ['kernel'].shape, (3,))
+
 
 if __name__ == '__main__':
   absltest.main()
