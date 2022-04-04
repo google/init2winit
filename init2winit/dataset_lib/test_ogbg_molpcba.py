@@ -20,6 +20,7 @@ import itertools
 from init2winit.dataset_lib.datasets import get_dataset
 from init2winit.dataset_lib.datasets import get_dataset_hparams
 import jax.random
+from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow.compat.v1 as tf
 import tensorflow_datasets as tfds
@@ -30,7 +31,7 @@ NUM_LABELS = 2
 NORMAL_LABELS = np.array([1, 1]).astype('float32')
 NAN_LABELS = np.array([np.nan, 1]).astype('float32')
 
-NUMS_NODES = [3, 7, 15, 6]
+NUMS_NODES = [4, 7, 15, 6]
 NUMS_EDGES = [4, 6, 20, 9]
 LABELS = [NORMAL_LABELS, NAN_LABELS, NORMAL_LABELS, NAN_LABELS]
 
@@ -80,12 +81,15 @@ def _as_dataset(*args, **kwargs):
       })
 
 
-def _get_dataset(shuffle_seed):
+def _get_dataset(shuffle_seed, additional_hps=None):
   """Loads the ogbg-molpcba dataset using mock data."""
   with tfds.testing.mock_data(as_dataset_fn=_as_dataset):
     ds = 'ogbg_molpcba'
     dataset_builder = get_dataset(ds)
-    hps = get_dataset_hparams(ds)
+    hps_dict = get_dataset_hparams(ds).to_dict()
+    if additional_hps is not None:
+      hps_dict.update(additional_hps)
+    hps = config_dict.ConfigDict(hps_dict)
     hps.train_size = 4
     hps.valid_size = 4
     hps.test_size = 4
@@ -104,7 +108,8 @@ def _get_dataset(shuffle_seed):
 class OgbgMolpcbaTest(tf.test.TestCase):
   """Tests data loading for the ogbg-molpcba dataset."""
 
-  def test_get_batch(self):
+  def test_get_batch_pads_correctly(self):
+    """Tests that data batches are padded correctly."""
     # Use validation batch to maintain the example order, since the train batch
     # will be shuffled.
     dataset = _get_dataset(jax.random.PRNGKey(0))
@@ -113,7 +118,7 @@ class OgbgMolpcbaTest(tf.test.TestCase):
     inputs = batch['inputs'][0]
 
     # The first two graphs are in the first batch
-    self.assertEqual(len(batch['inputs']), 1)
+    self.assertLen(batch['inputs'], 1)
     self.assertNDArrayNear(inputs.n_node[:2], np.array(NUMS_NODES[:2]), 1e-3)
 
     # The graphs are padded to the right size
@@ -128,6 +133,7 @@ class OgbgMolpcbaTest(tf.test.TestCase):
     self.assertFalse(np.any(np.isnan(batch['targets'][0])))
 
   def test_train_shuffle_is_deterministic(self):
+    """Tests that shuffling of the train split is deterministic."""
     dataset = _get_dataset(jax.random.PRNGKey(0))
     dataset_same = _get_dataset(jax.random.PRNGKey(0))
     dataset_different = _get_dataset(jax.random.PRNGKey(1))
@@ -138,6 +144,60 @@ class OgbgMolpcbaTest(tf.test.TestCase):
 
     self.assertAllClose(batch['inputs'][0], batch_same['inputs'][0])
     self.assertNotAllClose(batch['inputs'][0], batch_different['inputs'][0])
+
+  def test_add_virtual_node(self):
+    """Tests that adding a virtual node works correctly."""
+    dataset = _get_dataset(jax.random.PRNGKey(0), {'add_virtual_node': True})
+
+    batch = next(dataset.valid_epoch())
+    inputs = batch['inputs'][0]
+    num_nodes = np.array(NUMS_NODES[0])
+    num_edges = np.array(NUMS_EDGES[0])
+
+    self.assertLen(batch['inputs'], 1)
+    self.assertNDArrayNear(
+        inputs.n_node[0], np.array(num_nodes + 1), 1e-3)
+    self.assertNDArrayNear(
+        inputs.n_edge[0], np.array(num_edges + num_nodes), 1e-3)
+    self.assertNDArrayNear(
+        inputs.edges[num_edges:num_edges + num_nodes],
+        np.zeros_like(inputs.edges[num_edges:num_edges + num_nodes]), 1e-3)
+    self.assertNDArrayNear(inputs.nodes[num_nodes],
+                           np.zeros_like(inputs.nodes[num_nodes]), 1e-3)
+
+  def test_add_bidirectional_edges(self):
+    """Tests that adding bidirectional edges works correctly."""
+    dataset = _get_dataset(
+        jax.random.PRNGKey(0), {'add_bidirectional_edges': True})
+
+    batch = next(dataset.valid_epoch())
+    inputs = batch['inputs'][0]
+    num_nodes = np.array(NUMS_NODES[0])
+    num_edges = np.array(NUMS_EDGES[0])
+
+    self.assertLen(batch['inputs'], 1)
+    self.assertNDArrayNear(
+        inputs.n_node[0], np.array(num_nodes), 1e-3)
+    self.assertNDArrayNear(
+        inputs.n_edge[0], np.array(num_edges * 2), 1e-3)
+
+  def test_add_self_loops(self):
+    """Tests that adding self loops works correctly."""
+    dataset = _get_dataset(jax.random.PRNGKey(0), {'add_self_loops': True})
+
+    batch = next(dataset.valid_epoch())
+    inputs = batch['inputs'][0]
+    num_nodes = np.array(NUMS_NODES[0])
+    num_edges = np.array(NUMS_EDGES[0])
+
+    self.assertLen(batch['inputs'], 1)
+    self.assertNDArrayNear(
+        inputs.n_node[0], np.array(num_nodes), 1e-3)
+    self.assertNDArrayNear(
+        inputs.n_edge[0], np.array(num_edges + num_nodes), 1e-3)
+    self.assertNDArrayNear(
+        inputs.edges[num_edges:num_edges + num_nodes],
+        np.zeros_like(inputs.edges[num_edges:num_edges + num_nodes]), 1e-3)
 
 
 if __name__ == '__main__':

@@ -19,6 +19,7 @@ See https://www.tensorflow.org/datasets/catalog/ogbg_molpcba and
 https://ogb.stanford.edu/docs/graphprop/ for more details.
 """
 
+import functools
 import itertools
 
 from init2winit.dataset_lib import data_utils
@@ -45,6 +46,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         # so that each batch contains batch_size graphs on average.
         max_edges_multiplier=AVG_EDGES_PER_GRAPH,
         max_nodes_multiplier=AVG_NODES_PER_GRAPH,
+        add_bidirectional_edges=False,
+        add_virtual_node=False,
+        add_self_loops=False,
     ))
 
 METADATA = {
@@ -82,26 +86,52 @@ def _load_dataset(split,
   return dataset
 
 
-def _to_jraph(example):
+def _to_jraph(example, add_bidirectional_edges, add_virtual_node,
+              add_self_loops):
   """Converts an example graph to jraph.GraphsTuple."""
   example = data_utils.tf_to_numpy(example)
   edge_feat = example['edge_feat']
   node_feat = example['node_feat']
   edge_index = example['edge_index']
   labels = example['labels']
-  num_nodes = example['num_nodes']
+  num_nodes = np.squeeze(example['num_nodes'])
+  num_edges = len(edge_index)
 
   senders = edge_index[:, 0]
   receivers = edge_index[:, 1]
 
+  new_senders, new_receivers = senders[:], receivers[:]
+
+  if add_bidirectional_edges:
+    new_senders = np.concatenate([senders, receivers])
+    new_receivers = np.concatenate([receivers, senders])
+    edge_feat = np.concatenate([edge_feat, edge_feat])
+    num_edges *= 2
+
+  if add_self_loops:
+    new_senders = np.concatenate([new_senders, np.arange(num_nodes)])
+    new_receivers = np.concatenate([new_receivers, np.arange(num_nodes)])
+    edge_feat = np.concatenate(
+        [edge_feat, np.zeros((num_nodes, edge_feat.shape[-1]))])
+    num_edges += num_nodes
+
+  if add_virtual_node:
+    node_feat = np.concatenate([node_feat, np.zeros_like(node_feat[0, None])])
+    new_senders = np.concatenate([new_senders, np.arange(num_nodes)])
+    new_receivers = np.concatenate(
+        [new_receivers, np.full((num_nodes,), num_nodes)])
+    edge_feat = np.concatenate(
+        [edge_feat, np.zeros((num_nodes, edge_feat.shape[-1]))])
+    num_edges += num_nodes
+    num_nodes += 1
+
   return jraph.GraphsTuple(
-      n_node=num_nodes,
-      n_edge=np.array([len(edge_index) * 2]),
+      n_node=np.array([num_nodes]),
+      n_edge=np.array([num_edges]),
       nodes=node_feat,
-      edges=np.concatenate([edge_feat, edge_feat]),
-      # Make the edges bidirectional
-      senders=np.concatenate([senders, receivers]),
-      receivers=np.concatenate([receivers, senders]),
+      edges=edge_feat,
+      senders=new_senders,
+      receivers=new_receivers,
       # Keep the labels with the graph for batching. They will be removed
       # in the processed batch.
       globals=np.expand_dims(labels, axis=0))
@@ -134,6 +164,9 @@ def _get_batch_iterator(dataset_iter,
                         batch_size,
                         nodes_per_graph,
                         edges_per_graph,
+                        add_bidirectional_edges,
+                        add_self_loops,
+                        add_virtual_node,
                         num_shards=None):
   """Turns a TFDS per-example iterator into a batched iterator in the init2winit format.
 
@@ -149,6 +182,10 @@ def _get_batch_iterator(dataset_iter,
       of nodes in the batch will be nodes_per_graph * batch_size.
     edges_per_graph: How many edges per graph there are on average. Max number
       of edges in the batch will be edges_per_graph * batch_size.
+    add_bidirectional_edges: If True, add edges with reversed sender and
+      receiver.
+    add_self_loops: If True, add a self-loop for each node.
+    add_virtual_node: If True, add a new node connected to all nodes.
     num_shards: How many devices we should be able to shard the batch into.
 
   Yields:
@@ -166,7 +203,12 @@ def _get_batch_iterator(dataset_iter,
   max_n_edges = edges_per_graph * batch_size
   max_n_graphs = batch_size
 
-  jraph_iter = map(_to_jraph, dataset_iter)
+  to_jraph_partial = functools.partial(
+      _to_jraph,
+      add_bidirectional_edges=add_bidirectional_edges,
+      add_virtual_node=add_virtual_node,
+      add_self_loops=add_self_loops)
+  jraph_iter = map(to_jraph_partial, dataset_iter)
   batched_iter = jraph.dynamically_batch(jraph_iter, max_n_nodes + 1,
                                          max_n_edges, max_n_graphs + 1)
 
@@ -219,27 +261,33 @@ def get_ogbg_molpcba(shuffle_rng, batch_size, eval_batch_size, hps=None):
   valid_ds = _load_dataset('validation')
   test_ds = _load_dataset('test')
 
+  iterator_from_ds = functools.partial(
+      _get_batch_iterator,
+      nodes_per_graph=hps.max_nodes_multiplier,
+      edges_per_graph=hps.max_edges_multiplier,
+      add_bidirectional_edges=hps.add_bidirectional_edges,
+      add_virtual_node=hps.add_virtual_node,
+      add_self_loops=hps.add_self_loops)
+
   def train_iterator_fn():
-    return _get_batch_iterator(
-        iter(train_ds), batch_size, hps.max_nodes_multiplier,
-        hps.max_edges_multiplier)
+    return iterator_from_ds(dataset_iter=iter(train_ds), batch_size=batch_size)
 
   def eval_train_epoch(num_batches=None):
     return itertools.islice(
-        _get_batch_iterator(
-            iter(eval_train_ds), batch_size, hps.max_nodes_multiplier,
-            hps.max_edges_multiplier), num_batches)
+        iterator_from_ds(
+            dataset_iter=iter(eval_train_ds), batch_size=eval_batch_size),
+        num_batches)
 
   def valid_epoch(num_batches=None):
     return itertools.islice(
-        _get_batch_iterator(
-            iter(valid_ds), eval_batch_size, hps.max_nodes_multiplier,
-            hps.max_edges_multiplier), num_batches)
+        iterator_from_ds(
+            dataset_iter=iter(valid_ds), batch_size=eval_batch_size),
+        num_batches)
 
   def test_epoch(num_batches=None):
     return itertools.islice(
-        _get_batch_iterator(
-            iter(test_ds), eval_batch_size, hps.max_nodes_multiplier,
-            hps.max_edges_multiplier), num_batches)
+        iterator_from_ds(
+            dataset_iter=iter(test_ds), batch_size=eval_batch_size),
+        num_batches)
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
