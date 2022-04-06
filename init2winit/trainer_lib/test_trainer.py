@@ -400,6 +400,7 @@ class TrainerTest(parameterized.TestCase):
             'base_lr': 0.001,
             'schedule': 'constant'
         },
+        'num_device_prefetches': 0,
     })
     eval_num_batches = 5
     eval_batch_size = hps.batch_size
@@ -467,6 +468,7 @@ class TrainerTest(parameterized.TestCase):
         'output_shape': (1,),
         'l2_decay_factor': 1e-4,
         'l2_decay_rank_threshold': 2,
+        'num_device_prefetches': 0,
     })
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
     initializer = initializers.get_initializer('noop')
@@ -537,6 +539,7 @@ class TrainerTest(parameterized.TestCase):
         'gradient_clipping': 0.0,
         'model_dtype': 'float32',
         'decode': False,
+        'num_device_prefetches': 0,
     })
     initializer = initializers.get_initializer('noop')
     eval_num_batches = 5
@@ -642,12 +645,18 @@ class TrainerTest(parameterized.TestCase):
         'valid_size': 96,
         'test_size': 80,
     }
+    input_pipeline_hps = config_dict.ConfigDict(dict(
+        num_tf_data_prefetches=-1,
+        num_device_prefetches=0,
+        num_tf_data_map_parallel_calls=-1,
+    ))
     hps = hyperparameters.build_hparams(
         model_name,
         initializer_name,
         dataset_name,
         hparam_file=None,
-        hparam_overrides=hparam_overrides)
+        hparam_overrides=hparam_overrides,
+        input_pipeline_hps=input_pipeline_hps)
 
     eval_batch_size = 16
     num_examples = 256
@@ -912,12 +921,18 @@ class TrainerTest(parameterized.TestCase):
         'valid_size': 96,
         'test_size': 80,
     }
+    input_pipeline_hps = config_dict.ConfigDict(dict(
+        num_tf_data_prefetches=-1,
+        num_device_prefetches=0,
+        num_tf_data_map_parallel_calls=-1,
+    ))
     hps = hyperparameters.build_hparams(
         model_name,
         initializer_name,
         dataset_name,
         hparam_file=None,
-        hparam_overrides=hparam_overrides)
+        hparam_overrides=hparam_overrides,
+        input_pipeline_hps=input_pipeline_hps)
 
     eval_batch_size = 16
     num_examples = 256

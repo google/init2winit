@@ -38,6 +38,7 @@ from jax.config import config as jax_config
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import jax.random
+from ml_collections import config_dict
 import numpy as np
 import optax
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
@@ -224,12 +225,18 @@ class TrainerTest(absltest.TestCase):
         'valid_size': 96,
         'test_size': 80,
     }
+    input_pipeline_hps = config_dict.ConfigDict(dict(
+        num_tf_data_prefetches=-1,
+        num_device_prefetches=0,
+        num_tf_data_map_parallel_calls=-1,
+    ))
     hps = hyperparameters.build_hparams(
         model_name,
         initializer_name,
         dataset_name,
         hparam_file=None,
-        hparam_overrides=hparam_overrides)
+        hparam_overrides=hparam_overrides,
+        input_pipeline_hps=input_pipeline_hps)
     model = model_cls(hps, datasets.get_dataset_meta_data(dataset_name),
                       loss_name, metrics_name)
 

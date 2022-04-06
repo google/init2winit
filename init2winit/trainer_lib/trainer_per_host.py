@@ -615,9 +615,8 @@ def train(train_dir,
     eval_callbacks.append(eval_callback)
 
 
-  num_device_prefetches = hps.get('num_device_prefetches', 0)
   train_iter = trainer_utils.prefetch_input_pipeline(train_iter,
-                                                     num_device_prefetches)
+                                                     hps.num_device_prefetches)
 
   eval_start_time = start_time
   eval_start_step = start_step

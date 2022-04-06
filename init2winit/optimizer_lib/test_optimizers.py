@@ -28,6 +28,7 @@ from init2winit.model_lib import models
 from init2winit.trainer_lib import trainer
 import jax
 from jax import lax
+from ml_collections import config_dict
 import pandas
 import tensorflow.compat.v1 as tf
 
@@ -82,12 +83,18 @@ class OptimizersTest(absltest.TestCase):
             'best_effort_memory_usage_reduction': False,
         },
     }
+    input_pipeline_hps = config_dict.ConfigDict(dict(
+        num_tf_data_prefetches=-1,
+        num_device_prefetches=0,
+        num_tf_data_map_parallel_calls=-1,
+    ))
     hps = hyperparameters.build_hparams(
         model_name,
         initializer_name='noop',
         dataset_name='fake',
         hparam_file=None,
-        hparam_overrides=hparam_overrides)
+        hparam_overrides=hparam_overrides,
+        input_pipeline_hps=input_pipeline_hps)
     initializer = initializers.get_initializer('noop')
     dataset_builder = datasets.get_dataset('fake')
     dataset = dataset_builder(

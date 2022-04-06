@@ -31,6 +31,7 @@ from init2winit.init_lib import initializers
 from init2winit.model_lib import models
 from init2winit.trainer_lib import trainer
 import jax.random
+from ml_collections import config_dict
 import numpy as np
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
@@ -73,12 +74,18 @@ class RunLanczosTest(absltest.TestCase):
         'valid_size': 96,
         'test_size': 80,
     }
+    input_pipeline_hps = config_dict.ConfigDict(dict(
+        num_tf_data_prefetches=-1,
+        num_device_prefetches=0,
+        num_tf_data_map_parallel_calls=-1,
+    ))
     hps = hyperparameters.build_hparams(
         model_name,
         initializer_name,
         dataset_name,
         hparam_file=None,
-        hparam_overrides=hparam_overrides)
+        hparam_overrides=hparam_overrides,
+        input_pipeline_hps=input_pipeline_hps)
     model = model_cls(hps, datasets.get_dataset_meta_data(dataset_name),
                       loss_name, metrics_name)
 
@@ -186,12 +193,18 @@ class RunLanczosTest(absltest.TestCase):
     hessian_save_name = 'hessian2'
     callback_configs[0]['callback_name'] = 'hessian'
     callback_configs[0]['name'] = hessian_save_name
+    input_pipeline_hps = config_dict.ConfigDict(dict(
+        num_tf_data_prefetches=-1,
+        num_device_prefetches=0,
+        num_tf_data_map_parallel_calls=-1,
+    ))
     hps = hyperparameters.build_hparams(
         model_name,
         initializer_name,
         dataset_name,
         hparam_file=None,
-        hparam_overrides=hparam_overrides)
+        hparam_overrides=hparam_overrides,
+        input_pipeline_hps=input_pipeline_hps)
     model = model_cls(hps, datasets.get_dataset_meta_data(dataset_name),
                       loss_name, metrics_name)
 
