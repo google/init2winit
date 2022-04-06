@@ -25,6 +25,7 @@ from init2winit.dataset_lib import nqm_noise
 from init2winit.dataset_lib import ogbg_molpcba
 from init2winit.dataset_lib import per_host_imagenet_dataset
 from init2winit.dataset_lib import per_host_small_image_datasets
+from init2winit.dataset_lib import pg19
 from init2winit.dataset_lib import proteins
 from init2winit.dataset_lib import small_image_datasets
 from init2winit.dataset_lib import translate_wmt
@@ -91,6 +92,9 @@ _ALL_DATASETS = {
     'uniref50':
         _Dataset(proteins.get_uniref, proteins.DEFAULT_HPARAMS,
                  proteins.METADATA),
+    'pg19':
+        _Dataset(pg19.get_pg19, pg19.DEFAULT_HPARAMS,
+                 pg19.METADATA),
 }
 
 
