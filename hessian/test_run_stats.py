@@ -509,7 +509,7 @@ class TrainerTest(absltest.TestCase):
   def test_eval_hess_grad_overlap(self):
     """Test gradient overlap calculations."""
 
-    if FLAGS.jax_test_dut == 'tpu':
+    if jax.devices()[0].platform == 'tpu':
       atol = 1e-3
       rtol = 0.1
     else:
