@@ -35,6 +35,7 @@ tf.config.experimental.set_visible_devices([], 'GPU')
 os.environ['FLAX_PROFILE'] = 'true'
 
 flags.DEFINE_string('dataset', None, 'Which dataset to inspect')
+flags.DEFINE_string('model', None, 'Which model to use')
 flags.DEFINE_integer('batch_size', None,
                      'Number of examples to retrieve in 1 batch')
 flags.DEFINE_integer('num_batches', None, 'Number of batches to retrieve')
@@ -59,9 +60,8 @@ def main(unused_argv):
 
     batch_size = FLAGS.batch_size
     num_batches = FLAGS.num_batches
-
-    dataset_name = 'lm1b'
-    model_name = 'transformer'
+    dataset_name = FLAGS.dataset
+    model_name = FLAGS.model
     initializer_name = 'noop'
 
     hparam_overrides = {
