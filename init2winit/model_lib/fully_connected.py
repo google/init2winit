@@ -26,28 +26,30 @@ from ml_collections.config_dict import config_dict
 
 
 # small hparams used for unit tests
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    hid_sizes=[20, 10],
-    kernel_scales=[1.0, 1.0, 1.0],
-    lr_hparams={
-        'base_lr': 0.1,
-        'schedule': 'constant'
-    },
-    layer_rescale_factors={},
-    optimizer='momentum',
-    opt_hparams={
-        'momentum': 0.9,
-    },
-    batch_size=128,
-    activation_function='relu',
-    l2_decay_factor=.0005,
-    l2_decay_rank_threshold=2,
-    label_smoothing=None,
-    rng_seed=-1,
-    use_shallue_label_smoothing=False,
-    model_dtype='float32',
-    grad_clip=None,
-))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        hid_sizes=[20, 10],
+        kernel_scales=[1.0, 1.0, 1.0],
+        lr_hparams={
+            'base_lr': 0.1,
+            'schedule': 'constant'
+        },
+        layer_rescale_factors={},
+        optimizer='momentum',
+        opt_hparams={
+            'momentum': 0.9,
+        },
+        batch_size=128,
+        total_accumulated_batch_size=None,
+        activation_function='relu',
+        l2_decay_factor=.0005,
+        l2_decay_rank_threshold=2,
+        label_smoothing=None,
+        rng_seed=-1,
+        use_shallue_label_smoothing=False,
+        model_dtype='float32',
+        grad_clip=None,
+    ))
 
 
 class FullyConnected(nn.Module):

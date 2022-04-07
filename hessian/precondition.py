@@ -15,6 +15,7 @@
 
 """Compute diagonal preconditioners for different optimizers."""
 
+from init2winit.optimizer_lib import gradient_accumulator
 import jax
 import jax.numpy as jnp
 
@@ -61,6 +62,8 @@ def make_diag_preconditioner(optimizer, opt_hparams,
   Returns:
     (pytree) diagonal preconditioner
   """
+  if isinstance(optimizer_state, gradient_accumulator.GradientAccumulatorState):
+    optimizer_state = optimizer_state.base_state
 
   if optimizer == 'adam':
     eps = opt_hparams.epsilon

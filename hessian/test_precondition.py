@@ -69,7 +69,9 @@ class RunPreconditionTest(absltest.TestCase):
     hparams = FrozenConfigDict({
         'optimizer': 'adam',
         'opt_hparams': opt_hparams,
-        'l2_decay_factor': 0.0
+        'l2_decay_factor': 0.0,
+        'batch_size': 50,
+        'total_accumulated_batch_size': 50,
     })
 
     init_fn, update_fn = optimizers.get_optimizer(hparams)
@@ -79,7 +81,7 @@ class RunPreconditionTest(absltest.TestCase):
                  {'foo': 0.2, 'bar': {'baz': 0.6}}]
 
     optimizer_state = init_fn(params)
-    optimizer_state.hyperparams['learning_rate'] = lr
+    optimizer_state.base_state.hyperparams['learning_rate'] = lr
 
     for gradient in gradients:
       updates, optimizer_state = update_fn(gradient, optimizer_state, params)
