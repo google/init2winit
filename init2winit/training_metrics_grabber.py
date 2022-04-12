@@ -18,9 +18,13 @@
 import operator
 
 from init2winit.model_lib import model_utils
+from init2winit.optimizer_lib import gradient_accumulator
+from init2winit.utils import total_tree_norm_sql2
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
+from optax import InjectHyperparamsState
+from optax import ScaleByAdamState
 
 # The TrainingMetricsGrabber configs will be these defaults overridden
 # by any overrides passsed to TrainingMetricsGrabber.create.
@@ -31,6 +35,7 @@ DEFAULT_CONFIG = ConfigDict({
     'enable_param_norms': False,
     'enable_update_norms': False,
     'enable_ema': False,
+    'enable_nu_normsq': False
 })
 
 
@@ -114,9 +119,12 @@ def make_training_metrics(num_train_steps, **config_overrides):
       metrics_state['grad_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
       metrics_state['update_ema'] = jax.tree_map(jnp.zeros_like, params)
       metrics_state['update_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
+    if config['enable_nu_normsq']:
+      metrics_state['nu_normsq'] = jnp.zeros(num_train_steps)
     return metrics_state
 
-  def update_fn(metrics_state, step, train_cost, grad, old_params, new_params):
+  def update_fn(metrics_state, step, train_cost, grad, old_params, new_params,
+                optimizer_state):
     """Update the training metrics state.
 
     Args:
@@ -128,6 +136,7 @@ def make_training_metrics(num_train_steps, **config_overrides):
         update.
       new_params: (pytree, of same shape as params): The parameters after the
         update.
+      optimizer_state: (pytree): The optimizer state.
 
     Returns:
       next_metrics_state: (pytree) The next training metrics state.
@@ -161,6 +170,10 @@ def make_training_metrics(num_train_steps, **config_overrides):
           metrics_state['update_ema'], update, beta)
       next_metrics_state['update_sq_ema'] = _advance_ema(
           metrics_state['update_sq_ema'], update_sq, beta)
+    if config['enable_nu_normsq']:
+      nu_normsq = total_tree_norm_sql2(_extract_nu(optimizer_state))
+      next_metrics_state['nu_normsq'] = metrics_state['nu_normsq'].at[step].set(
+          nu_normsq)
 
     return next_metrics_state
 
@@ -203,6 +216,24 @@ def make_training_metrics(num_train_steps, **config_overrides):
     return flat_summary
 
   return init_fn, update_fn, summarize_fn
+
+
+def _extract_nu(opt_state):
+  """Extract the "nu" pytree from an optimizer state."""
+  if isinstance(opt_state, ScaleByAdamState):
+    return opt_state.nu
+  elif isinstance(opt_state, gradient_accumulator.GradientAccumulatorState):
+    return _extract_nu(opt_state.base_state)
+  elif isinstance(opt_state, InjectHyperparamsState):
+    return _extract_nu(opt_state.inner_state)
+  elif isinstance(opt_state, tuple):  # Assume this is from combine.chain()
+    for transform_state in opt_state:
+      if isinstance(transform_state, ScaleByAdamState):
+        return _extract_nu(transform_state)
+    raise ValueError('no ScaleByAdam transform in transform chain')
+  else:
+    raise ValueError('optimizer of type {} does not have nu'.format(
+        type(opt_state)))
 
 
 def _map_values(f, dictionary):
