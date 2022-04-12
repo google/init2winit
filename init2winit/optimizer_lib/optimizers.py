@@ -181,7 +181,7 @@ def get_optimizer(hps, model=None):
     # virtual_batch_size set in the hyperparameters, the per-core batch size
     # (hps.batch_size // num_hosts) is used as the virtual batch size.
     virtual_batch_size = hps.get('virtual_batch_size', None)
-    if virtual_batch_size is not None:
+    if virtual_batch_size is None:
       virtual_batch_size = hps.batch_size // jax.process_count()
     opt_init, opt_update = gradient_accumulator.accumulate_gradients(
         per_step_batch_size=hps.batch_size,
