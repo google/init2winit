@@ -19,11 +19,14 @@
 
 from absl import flags
 from absl.testing import absltest
+from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.shared_test_utilities import pytree_equal
 from init2winit.training_metrics_grabber import make_training_metrics
+from init2winit.utils import total_tree_norm_sql2
 import jax
 import jax.numpy as jnp
-
+from optax import InjectHyperparamsState
+from optax import ScaleByAdamState
 
 FLAGS = flags.FLAGS
 
@@ -43,6 +46,12 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
 
     self.step_size = 1.0
     self.num_train_steps = 5
+
+    self.mock_nu0 = {'foo': 2*jnp.ones(5), 'bar': {'baz': 3*jnp.ones(10)}}
+    self.mock_nu1 = {'foo': 3*jnp.ones(5), 'bar': {'baz': 4*jnp.ones(10)}}
+
+    self.mock_optimizer_state0 = ScaleByAdamState(0, None, self.mock_nu0)
+    self.mock_optimizer_state1 = ScaleByAdamState(0, None, self.mock_nu1)
 
     # Simulate running GD with step size 1.
     self.mock_params1 = jax.tree_map(lambda p, g: p - self.step_size * g,
@@ -69,12 +78,13 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
         pytree_equal({'param_norm': zeros_scalar_like_params},
                      initial_metrics_state))
 
-    # Test init with enable_ema = True and enable_train_cost=True.
+    # Test init with lots of things enabled.
     init_fn, _, _ = make_training_metrics(self.num_train_steps,
                                           enable_ema=True,
                                           enable_train_cost=True,
                                           enable_param_norms=True,
-                                          enable_update_norms=True)
+                                          enable_update_norms=True,
+                                          enable_nu_normsq=True)
     initial_metrics_state = init_fn(self.mock_params0)
     self.assertTrue(pytree_equal(initial_metrics_state, {
                 'train_cost': jnp.zeros(self.num_train_steps),
@@ -84,7 +94,8 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                 'update_ema': zeros_like_params,
                 'update_sq_ema': zeros_like_params,
                 'param_norms': zeros_timeseries_like_params,
-                'update_norms': zeros_timeseries_like_params
+                'update_norms': zeros_timeseries_like_params,
+                'nu_normsq': jnp.zeros(self.num_train_steps)
     }))
 
   def test_train_cost(self):
@@ -97,13 +108,15 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_cost0,
                                       self.mock_grad1,
                                       self.mock_params0,
-                                      self.mock_params1)
+                                      self.mock_params1,
+                                      self.mock_optimizer_state0)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
-                                      self.mock_params2)
+                                      self.mock_params2,
+                                      self.mock_optimizer_state1)
 
     self.assertTrue(
         pytree_equal(
@@ -117,7 +130,8 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     initial_metrics_state = init_fn(self.mock_params0)
     updated_metrics_state = update_fn(initial_metrics_state, 0, self.mock_cost0,
                                       self.mock_grad1, self.mock_params0,
-                                      self.mock_params1)
+                                      self.mock_params1,
+                                      self.mock_optimizer_state0)
     self.assertTrue(
         pytree_equal(updated_metrics_state['param_norm'], {
             'foo': jnp.linalg.norm(self.mock_params0['foo']),
@@ -126,7 +140,8 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
 
     updated_metrics_state = update_fn(initial_metrics_state, 1, self.mock_cost1,
                                       self.mock_grad2, self.mock_params1,
-                                      self.mock_params2)
+                                      self.mock_params2,
+                                      self.mock_optimizer_state1)
 
     self.assertTrue(
         pytree_equal(updated_metrics_state['param_norm'], {
@@ -145,13 +160,15 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_cost0,
                                       self.mock_grad1,
                                       self.mock_params0,
-                                      self.mock_params1)
+                                      self.mock_params1,
+                                      self.mock_optimizer_state0)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
-                                      self.mock_params2)
+                                      self.mock_params2,
+                                      self.mock_optimizer_state1)
     self.assertTrue(
         pytree_equal(
             updated_metrics_state['param_norms'], {
@@ -181,13 +198,15 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_cost0,
                                       self.mock_grad1,
                                       self.mock_params0,
-                                      self.mock_params1)
+                                      self.mock_params1,
+                                      self.mock_optimizer_state0)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
-                                      self.mock_params2)
+                                      self.mock_params2,
+                                      self.mock_optimizer_state1)
     self.assertTrue(
         pytree_equal(
             updated_metrics_state['update_norms'], {
@@ -221,19 +240,47 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_cost0,
                                       self.mock_grad1,
                                       self.mock_params0,
-                                      self.mock_params1)
+                                      self.mock_params1,
+                                      self.mock_optimizer_state0)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
-                                      self.mock_params2)
+                                      self.mock_params2,
+                                      self.mock_optimizer_state1)
 
     self.assertTrue(
         pytree_equal(
             updated_metrics_state['grad_ema'],
             jax.tree_map(lambda x, y, z: 0.25 * x + 0.25 * y + 0.5 * z,
                          self.mock_zeros, self.mock_grad1, self.mock_grad2)))
+
+  def test_update_nu_normsq(self):
+    """Ensure that the training metrics updater updates nu_normsq correctly."""
+
+    # Test Adam with gradient accumulation and inject hyperparams.
+
+    complete_opt_state0 = gradient_accumulator.GradientAccumulatorState(
+        InjectHyperparamsState(0, {}, (self.mock_optimizer_state0,)), 1, None)
+    complete_opt_state1 = gradient_accumulator.GradientAccumulatorState(
+        InjectHyperparamsState(1, {}, (self.mock_optimizer_state1,)), 1, None)
+
+    init_fn, update_fn, _ = make_training_metrics(
+        self.num_train_steps, enable_nu_normsq=True)
+    initial_metrics_state = init_fn(self.mock_params0)
+    updated_metrics_state = update_fn(initial_metrics_state, 0, self.mock_cost0,
+                                      self.mock_grad1, self.mock_params0,
+                                      self.mock_params1,
+                                      complete_opt_state0)
+    updated_metrics_state = update_fn(updated_metrics_state, 1, self.mock_cost1,
+                                      self.mock_grad2, self.mock_params1,
+                                      self.mock_params2,
+                                      complete_opt_state1)
+    self.assertEqual(updated_metrics_state['nu_normsq'][0],
+                     total_tree_norm_sql2(self.mock_nu0))
+    self.assertEqual(updated_metrics_state['nu_normsq'][1],
+                     total_tree_norm_sql2(self.mock_nu1))
 
   def test_summarize(self):
     """Test the training metrics summarizer."""
