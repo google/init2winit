@@ -263,7 +263,7 @@ def transform_chain_from_hparams(opt_hparams):
     mask = hparams.get('mask')
 
     # TODO(dsuo): there is some unfortunate badness here where `mask` for
-    # `add_decayed_scales` can show up in either the `hps` or in `mask` keys.
+    # `add_decayed_weights` can show up in either the `hps` or in `mask` keys.
     # If we have less general requirements for masking than we thought, then
     # we should consider amending the `kitchen_sink` mask API.
     if element == 'add_decayed_weights' and (hp.get('mask') == 'bias_bn' or
