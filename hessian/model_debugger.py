@@ -161,6 +161,22 @@ def create_forward_pass_stats_fn(flax_module,
   return get_forward_pass_statistics
 
 
+def _check_tuple(x):
+  return isinstance(x, tuple) and len(x) == 1
+
+
+def _maybe_remove_tuple(x):
+  if _check_tuple(x):
+    return x[0]
+  return x
+
+
+def remove_leaf_tuples(tree):
+  return jax.tree_map(_maybe_remove_tuple,
+                      tree,
+                      is_leaf=_check_tuple)
+
+
 class ModelDebugger:
   """Debugging tool for internal layers of a model."""
 
@@ -334,8 +350,10 @@ class ModelDebugger:
     # save_frequency and eval_frequency to avoid writing to disk every step.
     # In order to properly do this, the model_debugger object needs to be
     # stateful and keep track of this tree in between saves.
-    self._stored_metrics = append_pytree_leaves(self._stored_metrics,
-                                                flax.core.unfreeze(all_metrics))
+
+    self._stored_metrics = append_pytree_leaves(
+        self._stored_metrics,
+        remove_leaf_tuples(flax.core.unfreeze(all_metrics)))
 
     if self._metrics_logger and jax.host_id() == 0:
       self._maybe_save_metrics(step)
