@@ -41,3 +41,45 @@ def create_mask(fn):
 def create_weight_decay_mask():
   return create_mask(
       lambda p, _: 'bias' not in p and not p[-2].startswith('BatchNorm'))
+
+
+def extract_field(state, field_name):
+  """Extract a field from a nested tuple (especially an optax optimizer state).
+
+  Suppose that we'd like to extract Adam's "nu" pytree from an optax optimizer
+  state that consists of a ScaleByAdam namedtuple wrapped inside of a
+  combine.chain() tuple wrapped inside of an InjectHyperparamsState namedtuple
+  wrapped inside of a GradientAccumulatorState namedtuple.  This function
+  can do that.
+
+  Args:
+    state: An optax optimizer state.  This should be a nested tuple, meaning a
+      tuple (potentially a namedtuple) that contains other tuples (or
+      potentially namedtuples) in its slots.  Note that the state can contain
+      non-tuple values as well (e.g. one of the slots in InjectHyperparamsState
+      is a dict), but these will be ignored.
+    field_name: (str) The name of the field we'd like to extract from the nested
+      tuple.  For example, "nu" to extract Adam's second-moment accumulator.
+
+  Returns:
+    The value of a field with the given field name.  If there is more than
+      one field with this name in the nested tuple, the behavior of this
+      function is undefined.  Returns None if there is no field with the
+      given name in "state".
+  """
+  assert isinstance(state, tuple)
+
+  # If "state" is a namedtuple containing a field with the right name, return
+  # the value in that field.
+  if hasattr(state, '_fields') and field_name in state._fields:
+    return getattr(state, field_name)
+
+  # Else, recursively call this function on the slots of the tuple "state".
+  for element in state:
+    if isinstance(element, tuple):
+      field = extract_field(element, field_name)
+      if field is not None:
+        return field
+
+  # If we didn't find anything, return None.
+  return None

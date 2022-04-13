@@ -21,10 +21,13 @@ from absl.testing import absltest
 import chex
 import flax
 import flax.linen as nn
+from init2winit.optimizer_lib import optimizers
 from init2winit.optimizer_lib.utils import create_mask
 from init2winit.optimizer_lib.utils import create_weight_decay_mask
+from init2winit.optimizer_lib.utils import extract_field
 import jax
 import jax.numpy as jnp
+from ml_collections.config_dict import ConfigDict
 import optax
 
 # pylint:disable=duplicate-key
@@ -61,6 +64,35 @@ class Bar(nn.Module):
       if i != len(self.features) - 1:
         x = nn.relu(x)
     return x
+
+
+class ExtractFieldTest(chex.TestCase):
+  """Test the extract_field() function."""
+
+  def test_adam(self):
+    init_fn, update_fn = optimizers.get_optimizer(
+        ConfigDict({
+            'optimizer': 'adam',
+            'l2_decay_factor': None,
+            'batch_size': 50,
+            'total_accumulated_batch_size': 100,  # Use gradient accumulation.
+            'opt_hparams': {
+                'beta1': 0.9,
+                'beta2': 0.999,
+                'epsilon': 1e-7,
+                'weight_decay': 0.0,
+            }
+        }))
+    del update_fn
+    optimizer_state = init_fn({'foo': jnp.ones(10)})
+    # Test that we can extract 'count'.
+    chex.assert_type(extract_field(optimizer_state, 'count'), int)
+    # Test that we can extract 'nu'.
+    chex.assert_shape(extract_field(optimizer_state, 'nu')['foo'], (10,))
+    # Test that we can extract 'mu'.
+    chex.assert_shape(extract_field(optimizer_state, 'mu')['foo'], (10,))
+    # Test that attemptping to extract a nonexistent field "abc" returns None.
+    chex.assert_equal(extract_field(optimizer_state, 'abc'), None)
 
 
 class CreateMaskTest(chex.TestCase):
