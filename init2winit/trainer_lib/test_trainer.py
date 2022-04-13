@@ -405,7 +405,7 @@ class TrainerTest(parameterized.TestCase):
     eval_num_batches = 5
     eval_batch_size = hps.batch_size
     loss_name = 'sigmoid_binary_cross_entropy'
-    metrics_name = 'binary_classification_metrics'
+    metrics_name = 'binary_classification_metrics_ogbg_map'
     dataset, dataset_meta_data = _get_fake_graph_dataset(
         batch_size=hps.batch_size, eval_num_batches=eval_num_batches, hps=hps)
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
@@ -802,8 +802,8 @@ class TrainerTest(parameterized.TestCase):
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
           weights=np.array([[1., 1.], [1., 1.], [1., 1.], [1., 1.], [1., 1.],
                             [1., 1.]]),
-          test_metric_names=['ce_loss'],
-          test_metric_vals=[0.724077]),
+          test_metric_names=['ce_loss', 'average_precision', 'auc_roc'],
+          test_metric_vals=[0.724077, 0.5, 0.5]),
       dict(
           testcase_name='binary_classification_no_weights',
           metrics_name='binary_classification_metrics',
@@ -811,18 +811,18 @@ class TrainerTest(parameterized.TestCase):
                            [0.5, 0.5], [0.5, 0.5]]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
           weights=None,
-          test_metric_names=['ce_loss'],
-          test_metric_vals=[1.448154]),
+          test_metric_names=['ce_loss', 'average_precision', 'auc_roc'],
+          test_metric_vals=[1.448154, 0.5, 0.5]),
       dict(
           testcase_name='binary_classification_zero_weights',
           metrics_name='binary_classification_metrics',
-          logits=np.array([[100, 0.5], [100, 0.5], [0.5, 0.5], [0.5, 0.5],
-                           [0.5, 0.5], [0.5, 0.5]]),
+          logits=np.array([[100, 0.5], [100, 0.5], [0.3, 0.7], [0.5, 0.15],
+                           [0.05, 0.5], [0.9, 0.5]]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
           weights=np.array([[0., 1.], [0., 1.], [1., 1.], [1., 1.], [1., 1.],
                             [1., 1.]]),
-          test_metric_names=['ce_loss'],
-          test_metric_vals=[0.724077]),
+          test_metric_names=['ce_loss', 'average_precision', 'auc_roc'],
+          test_metric_vals=[0.8058497, 0.433333, 0.22222]),
       dict(
           testcase_name='binary_classification_1d_weights',
           metrics_name='binary_classification_metrics',
@@ -830,8 +830,8 @@ class TrainerTest(parameterized.TestCase):
                            [0.5, 0.5], [0.5, 0.5]]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
           weights=np.array([0., 1., 1., 0., 1., 1.,]),
-          test_metric_names=['ce_loss'],
-          test_metric_vals=[1.448154]),
+          test_metric_names=['ce_loss', 'average_precision', 'auc_roc'],
+          test_metric_vals=[1.448154, 0.0, 0.0]),
       dict(
           testcase_name='binary_autoencoder_2d_weights',
           metrics_name='binary_autoencoder_metrics',
@@ -860,6 +860,16 @@ class TrainerTest(parameterized.TestCase):
           weights=None,
           test_metric_names=['sigmoid_mean_squared_error'],
           test_metric_vals=[0.5299926]),
+      dict(
+          testcase_name='binary_classification_metrics_ogbg_map',
+          metrics_name='binary_classification_metrics_ogbg_map',
+          logits=np.array([[100, 0.5], [0.75, 0.25], [0.15, -0.95], [0.5, 100],
+                           [0.15, 0.5], [0.5, 0.05], [-7.0, 8.1], [-7.0, 8.1]]),
+          targets=np.array(
+              [[1, 0], [1, 0], [1, 0], [0, 1], [1, 0], [0, 1], [0, 1], [0, 1]]),
+          weights=np.array([0., 1., 1., 0., 1., 1., 1., 0.]),
+          test_metric_names=['average_precision', 'ce_loss'],
+          test_metric_vals=[0.791666, 1.0799019]),
   )
   def test_evaluate(self, metrics_name, logits, targets, weights,
                     test_metric_names, test_metric_vals):

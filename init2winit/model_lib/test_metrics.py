@@ -39,10 +39,10 @@ class MetricsTest(parameterized.TestCase):
           logits=np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.7]]),
           weights=np.array([[1., 1.], [0., 1.], [1., 0.]]),
           result=0.5))
-  def test_MeanAveragePrecision(self, logits, targets, weights, result):
+  def test_map(self, logits, targets, weights, result):
     """Tests the mean average precision computation."""
 
-    average_precision = metrics.MeanAveragePrecision.from_model_output(
+    average_precision = metrics.OGBGMeanAveragePrecision.from_model_output(
         logits=logits, targets=targets, weights=weights).compute()
     self.assertAlmostEqual(average_precision, result)
 

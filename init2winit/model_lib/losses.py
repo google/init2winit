@@ -51,7 +51,7 @@ def conform_weights_to_targets(weights, targets):
     weights = jnp.expand_dims(
         weights, axis=tuple(range(weights.ndim, targets.ndim)))
   elif weights.shape != targets.shape:
-    raise ValueError('Incorrect shapes. Got shape %s weights and %s targets' %
+    raise ValueError('Incorrect shapes. Got shape %s weights and %s targets.' %
                      (str(weights.shape), str(targets.shape)))
   return weights
 

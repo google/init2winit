@@ -19,13 +19,12 @@ Metric functions take a batch of (logits, targets, weights) as input and
 return a batch of loss values. This is for safe aggregation across
 different-sized eval batches.
 """
-
 from clu import metrics
 import flax
 from init2winit.model_lib import losses
-import jax
 import jax.numpy as jnp
 import numpy as np
+from scipy.special import expit
 import sklearn.metrics
 
 
@@ -52,13 +51,21 @@ class NumExamples(metrics.Metric):
 # Following the Flax OGB example:
 # https://github.com/google/flax/blob/main/examples/ogbg_molpcba/train.py
 @flax.struct.dataclass
-class MeanAveragePrecision(
-    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))):
-  """Computes the mean average precision (mAP) over different tasks."""
+class OGBGMeanAveragePrecision(
+    metrics.CollectingMetric.from_outputs(
+        ('logits', 'targets', 'weights'))):
+  """Computes the mean average precision (mAP) over different tasks on CPU.
 
+  This implements the uncommon feature of allowing both per-example and
+  per-class masking, which is required for the OGBG graph NN workload. For most
+  use cases the BinaryMeanAveragePrecision metric should be used instead.
+  """
+
+  # Matches the official OGBG evaluation scheme for mean average precision.
   def compute(self):
-    # Matches the official OGB evaluation scheme for mean average precision.
     values = super().compute()
+    # Ensure the arrays are numpy and not jax.numpy.
+    values = {k: np.array(v) for k, v in values.items()}
     targets = values['targets']
     logits = values['logits']
     weights = values['weights']
@@ -71,12 +78,18 @@ class MeanAveragePrecision(
       weights = np.ones(targets.shape) * losses.conform_weights_to_targets(
           weights, targets)
 
-    assert logits.shape == targets.shape == weights.shape
-    assert len(logits.shape) == 2
-    assert np.logical_or(weights == 1, weights == 0).all()
+    if not (logits.shape == targets.shape == weights.shape):  # pylint: disable=superfluous-parens
+      raise ValueError(
+          f'Shape mismatch between logits ({logits.shape}), targets '
+          '({targets.shape}), and weights ({weights.shape}).')
+    if len(logits.shape) != 2:
+      raise ValueError(f'Rank of logits ({logits.shape}) must be 2.')
+    if not np.logical_or(weights == 1, weights == 0).all():
+      raise ValueError(f'Weights must be {0, 1}, received {weights}.')
+
     weights = weights.astype(np.bool)
 
-    probs = jax.nn.sigmoid(logits)
+    probs = expit(logits)  # Sigmoid.
     num_tasks = targets.shape[1]
     average_precisions = np.full(num_tasks, np.nan)
 
@@ -93,6 +106,107 @@ class MeanAveragePrecision(
     if np.isnan(average_precisions).all():
       return np.nan
     return np.nanmean(average_precisions)
+
+
+def _binary_auc_shape_fix_check(x, shape_error_msg):
+  """Assert that the input shape is compatible, or fix it."""
+  # One-hot targets, assumed to be shape [N, 2].
+  if len(x.shape) == 2:
+    if x.shape[1] > 2:
+      raise ValueError(shape_error_msg)
+    if x.shape[1] == 1:
+      x = np.squeeze(x, axis=1)
+    elif x.shape[1] == 2:
+      # Binary AUC wants the labels/probabilities for the positive class, which
+      # is the second element in the (n, 2) shaped array.
+      x = x[:, 1]
+  elif len(x.shape) > 2:
+    raise ValueError(shape_error_msg)
+  return x
+
+
+def _binary_auc_shape_fix(targets, logits, weights, metric_name):
+  """Ensure shapes are valid and convert them to dense shapes for sklearn.
+
+  If inputs are shape (n, 2), we slice out the second column via x[:, 1]. If the
+  inputs are shape (n, 1), we np.squeeze only the second dimension away. If the
+  inputs are shape (n.), they are left untouched. If they are any other shape
+  then a ValueError is raised.
+
+  Args:
+    targets: np.array of target labels, of shape (n,) or (n, 2).
+    logits: np.array of model logits, of shape (n,) or (n, 2).
+    weights: np.array of example weights, of shape (n,) or (n, 2).
+    metric_name: the name of the metrics being checked, used for error messages.
+
+  Returns:
+    A triple of (targets, logits, weights) that now all have shape (n,).
+  """
+  shape_error_msg = (
+      f'Inputs for {metric_name} should be of shape (n,) or (n, 2). Received '
+      f'targets={targets.shape}, logits={logits.shape}, '
+      f'weights={weights.shape}.')
+  targets = _binary_auc_shape_fix_check(targets, shape_error_msg)
+  logits = _binary_auc_shape_fix_check(logits, shape_error_msg)
+  weights = _binary_auc_shape_fix_check(weights, shape_error_msg)
+  # This happens if weights are None
+  if np.all(np.isnan(weights)):
+    weights = None
+  # We need weights to be the exact same shape as targets, not just
+  # compatible for broadcasting, so multiply by ones of the right shape.
+  weights = np.ones(targets.shape) * losses.conform_weights_to_targets(
+      weights, targets)
+  return targets, logits, weights
+
+
+@flax.struct.dataclass
+class BinaryMeanAveragePrecision(
+    metrics.CollectingMetric.from_outputs(
+        ('logits', 'targets', 'weights'))):
+  """Computes the mean average precision for a binary classifier on CPU."""
+
+  def compute(self):
+    values = super().compute()
+    # Ensure the arrays are numpy and not jax.numpy.
+    values = {k: np.array(v) for k, v in values.items()}
+    targets, logits, weights = _binary_auc_shape_fix(
+        values['targets'],
+        values['logits'],
+        values['weights'],
+        'BinaryMeanAveragePrecision')
+    valid_targets = targets[weights > 0]
+    targets_sum = np.sum(valid_targets)
+    # Do not compute AUC if positives only have one class.
+    if targets_sum == 0 or targets_sum == len(valid_targets):
+      return 0.0
+    probs = expit(logits)  # Sigmoid.
+    return sklearn.metrics.average_precision_score(
+        targets, probs, sample_weight=weights)
+
+
+@flax.struct.dataclass
+class BinaryAUCROC(
+    metrics.CollectingMetric.from_outputs(
+        ('targets', 'logits', 'weights'))):
+  """Compute the AUC-ROC for binary classification on the CPU."""
+
+  def compute(self):
+    values = super().compute()
+    # Ensure the arrays are numpy and not jax.numpy.
+    values = {k: np.array(v) for k, v in values.items()}
+    targets, logits, weights = _binary_auc_shape_fix(
+        values['targets'],
+        values['logits'],
+        values['weights'],
+        'BinaryAUCROC')
+    valid_targets = targets[weights > 0]
+    targets_sum = np.sum(valid_targets)
+    # Do not compute AUC if all labels are the same.
+    if targets_sum == 0 or targets_sum == len(valid_targets):
+      return 0.0
+    positive_probs = expit(logits)  # Sigmoid.
+    return sklearn.metrics.roc_auc_score(
+        targets, positive_probs, sample_weight=weights)
 
 
 # TODO(mbadura): Check if we can use metrics.Average with a mask
@@ -184,12 +298,19 @@ _METRICS = {
             ce_loss=weighted_average_metric(
                 losses.weighted_unnormalized_cross_entropy),
             num_examples=NumExamples),
+    'binary_classification_metrics_ogbg_map':
+        metrics.Collection.create(
+            ce_loss=weighted_average_metric(
+                losses.unnormalized_sigmoid_binary_cross_entropy),
+            num_examples=NumExamples,
+            average_precision=OGBGMeanAveragePrecision),
     'binary_classification_metrics':
         metrics.Collection.create(
             ce_loss=weighted_average_metric(
                 losses.unnormalized_sigmoid_binary_cross_entropy),
             num_examples=NumExamples,
-            average_precision=MeanAveragePrecision)
+            average_precision=BinaryMeanAveragePrecision,
+            auc_roc=BinaryAUCROC),
 }
 
 
