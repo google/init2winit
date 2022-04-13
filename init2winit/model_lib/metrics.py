@@ -58,9 +58,10 @@ class MeanAveragePrecision(
 
   def compute(self):
     # Matches the official OGB evaluation scheme for mean average precision.
-    targets = self.values['targets']
-    logits = self.values['logits']
-    weights = self.values['weights']
+    values = super().compute()
+    targets = values['targets']
+    logits = values['logits']
+    weights = values['weights']
     if weights.shape != targets.shape:
       # This happens if weights are None
       if np.all(np.isnan(weights)):
