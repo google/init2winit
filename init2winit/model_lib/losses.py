@@ -183,13 +183,58 @@ def ctc_loss(logits, logit_paddings, labels, label_paddings, blank_id=0):
                         blank_id)
 
 
+def weighted_unnormalized_mean_absolute_error(logits, targets, weights=None):
+  """Computes weighted mean absolute error (L1) loss.
+
+  Args:
+    logits: (batch,) + input.shape float array. Technically not a logit, but
+      keeping argument naming consistent.
+    targets: (batch,) + input.shape float array.
+    weights: None or array of shape (batch,)
+
+  Returns:
+    L1 loss computed per example with shape (batch,)
+  """
+  loss = jnp.abs(logits - targets).mean(axis=tuple(range(1, logits.ndim)))
+
+  if weights is not None:
+    if weights.shape[0] != loss.shape[0] or weights.ndim != loss.ndim:
+      raise ValueError('Incorrect shapes. Got shape %s weights and %s loss' %
+                       (str(weights.shape), str(loss.shape)))
+    loss = loss * weights
+
+  return loss
+
+
+def weighted_mean_absolute_error(logits, targets, weights=None):
+  """Same as weighted_unnormalized_mean_absolute_error, but takes the mean.
+
+  Args:
+    logits: (batch,) + input.shape float array. Technically not a logit, but
+      keeping argument naming consistent.
+    targets: (batch,) + input.shape float array.
+    weights: None or array of shape (batch,)
+
+  Returns:
+    L1 loss computed meaned over the batch.
+  """
+  if weights is None:
+    normalization = targets.shape[0]
+  else:
+    normalization = weights.sum()
+  unnormalized_mean_absolute_error = weighted_unnormalized_mean_absolute_error(
+      logits, targets, weights)
+  return jnp.sum(unnormalized_mean_absolute_error) / normalization
+
+
 # TODO(cheolmin): add mean_squared_error
 _ALL_LOSS_FUNCTIONS = {
     'sigmoid_mean_squared_error': (sigmoid_mean_squared_error, jax.nn.sigmoid),
     'sigmoid_binary_cross_entropy':
         (sigmoid_binary_cross_entropy, jax.nn.sigmoid),
     'cross_entropy': (weighted_cross_entropy, jax.nn.softmax),
-    'ctc': (ctc_loss, jax.nn.log_softmax)
+    'ctc': (ctc_loss, jax.nn.log_softmax),
+    'mean_absolute_error': (weighted_mean_absolute_error, None),
 }
 
 

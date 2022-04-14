@@ -205,5 +205,18 @@ class LossesTest(parameterized.TestCase):
 
     self.assertAlmostEqual(loss_value, jax.numpy.array([result]), places=6)
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='single_batch',
+          logits=np.array([[0.1, 0.8, 0.1], [0.1, 0.1, 0.8]]),
+          targets=np.array([[1., 2., 3.], [4., 5., 6.]]),
+          result=3.166667))
+  def test_weighted_mean_absolute_error(self, logits, targets, result):
+    """Tests computing MAE."""
+    mae = losses.get_loss_fn('mean_absolute_error')
+    loss_value = mae(logits, targets)
+
+    self.assertAlmostEqual(loss_value, jax.numpy.array([result]))
+
 if __name__ == '__main__':
   absltest.main()
