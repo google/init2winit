@@ -151,7 +151,7 @@ class UNet(nn.Module):
     final_conv = nn.Conv(self.out_chans, kernel_size=(1, 1), strides=(1, 1))
 
     stack = []
-    output = jax.expand_dims(x, axis=-1)
+    output = jnp.expand_dims(x, axis=-1)
 
     # apply down-sampling layers
     for layer in down_sample_layers:
