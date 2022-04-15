@@ -118,6 +118,37 @@ See the various WMT translation datasets in TFDS, e.g.
 As of early 2021, <http://www.statmt.org/wmt20/> should also have a lot of
 relevant information and links to the workshops for different years.
 
+### fastMRI
+
+Information and access information are available at
+[fastMRI](https://fastmri.org/)'s webpage. Of note, the data input pipeline
+we replicate consists of the knee single-coil challenge only.
+
+```
+@article{doi:10.1148/ryai.2020190007,
+  author = {Knoll, Florian and Zbontar, Jure and Sriram, Anuroop and Muckley, Matthew J. and Bruno, Mary and Defazio, Aaron and Parente, Marc and Geras, Krzysztof J. and Katsnelson, Joe and Chandarana, Hersh and Zhang, Zizhao and Drozdzalv, Michal and Romero, Adriana and Rabbat, Michael and Vincent, Pascal and Pinkerton, James and Wang, Duo and Yakubova, Nafissa and Owens, Erich and Zitnick, C. Lawrence and Recht, Michael P. and Sodickson, Daniel K. and Lui, Yvonne W.},
+  title = {fastMRI: A Publicly Available Raw k-Space and DICOM Dataset of Knee Images for Accelerated MR Image Reconstruction Using Machine Learning},
+  journal = {Radiology: Artificial Intelligence},
+  volume = {2},
+  number = {1},
+  pages = {e190007},
+  year = {2020},
+  doi = {10.1148/ryai.2020190007},
+  note = {PMID: 32076662},
+  URL = { https://doi.org/10.1148/ryai.2020190007 },
+  eprint = { https://doi.org/10.1148/ryai.2020190007 }
+}
+
+@inproceedings{zbontar2018fastMRI,
+  title={{fastMRI}: An Open Dataset and Benchmarks for Accelerated {MRI}},
+  author={Jure Zbontar and Florian Knoll and Anuroop Sriram and Tullie Murrell and Zhengnan Huang and Matthew J. Muckley and Aaron Defazio and Ruben Stern and Patricia Johnson and Mary Bruno and Marc Parente and Krzysztof J. Geras and Joe Katsnelson and Hersh Chandarana and Zizhao Zhang and Michal Drozdzal and Adriana Romero and Michael Rabbat and Pascal Vincent and Nafissa Yakubova and James Pinkerton and Duo Wang and Erich Owens and C. Lawrence Zitnick and Michael P. Recht and Daniel K. Sodickson and Yvonne W. Lui},
+  journal = {ArXiv e-prints},
+  archivePrefix = "arXiv",
+  eprint = {1811.08839},
+  year={2018}
+}
+```
+
 
 ## Models
 
@@ -147,5 +178,48 @@ relevant information and links to the workshops for different years.
   author={Zagoruyko, Sergey and Komodakis, Nikos},
   journal={arXiv preprint arXiv:1605.07146},
   year={2016}
+}
+```
+
+### Vision Transformers (ViT)
+```
+@article{dosovitskiy2020vit,
+  title={An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale},
+  author={Dosovitskiy, Alexey and Beyer, Lucas and Kolesnikov, Alexander and Weissenborn, Dirk and Zhai, Xiaohua and Unterthiner, Thomas and  Dehghani, Mostafa and Minderer, Matthias and Heigold, Georg and Gelly, Sylvain and Uszkoreit, Jakob and Houlsby, Neil},
+  journal={ICLR},
+  year={2021}
+}
+
+@article{steiner2021train,
+  title={How to train your ViT? data, augmentation, and regularization in vision transformers},
+  author={Steiner, Andreas and Kolesnikov, Alexander and Zhai, Xiaohua and Wightman, Ross and Uszkoreit, Jakob and Beyer, Lucas},
+  journal={arXiv preprint arXiv:2106.10270},
+  year={2021}
+}
+```
+
+### U-Net
+We implement a U-Net replicating the code provided [here](https://github.com/facebookresearch/fastMRI/blob/main/fastmri_examples/unet/train_unet_demo.py)
+as part of the fastMRI workload cited below.
+```
+@inproceedings{zbontar2018fastMRI,
+    title={{fastMRI}: An Open Dataset and Benchmarks for Accelerated {MRI}},
+    author={Jure Zbontar and Florian Knoll and Anuroop Sriram and Tullie Murrell and Zhengnan Huang and Matthew J. Muckley and Aaron Defazio and Ruben Stern and Patricia Johnson and Mary Bruno and Marc Parente and Krzysztof J. Geras and Joe Katsnelson and Hersh Chandarana and Zizhao Zhang and Michal Drozdzal and Adriana Romero and Michael Rabbat and Pascal Vincent and Nafissa Yakubova and James Pinkerton and Duo Wang and Erich Owens and C. Lawrence Zitnick and Michael P. Recht and Daniel K. Sodickson and Yvonne W. Lui},
+    journal = {ArXiv e-prints},
+    archivePrefix = "arXiv",
+    eprint = {1811.08839},
+    year={2018}
+}
+```
+
+Below is the citation for the original U-Net paper.
+```
+@inproceedings{ronneberger2015u,
+  title={U-net: Convolutional networks for biomedical image segmentation},
+  author={Ronneberger, Olaf and Fischer, Philipp and Brox, Thomas},
+  booktitle={International Conference on Medical image computing and computer-assisted intervention},
+  pages={234--241},
+  year={2015},
+  organization={Springer}
 }
 ```
