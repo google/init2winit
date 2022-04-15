@@ -44,7 +44,8 @@ METADATA = {
 }
 
 
-def _process_example(kspace, kspace_shape, target, target_shape, seed):
+def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
+                     seed):
   """Generate a single example (slice from mri image).
 
 
@@ -53,6 +54,8 @@ def _process_example(kspace, kspace_shape, target, target_shape, seed):
     kspace_shape: shape of kspace. We pass this in because it is not constant.
     target: target image.
     target_shape: shape of target.
+    volume_max: max value over the entire volume that the example slice was
+      originally derived from.
     seed: seed for stateless randomness.
 
   Returns:
@@ -131,16 +134,19 @@ def _process_example(kspace, kspace_shape, target, target_shape, seed):
   norm_target = (target - mean) / std
   target = tf.clip_by_value(norm_target, -6, 6)
 
-  return {'inputs': image, 'targets': target}
+  return {'inputs': image, 'targets': target, 'volume_max': volume_max}
 
 
 def _h5_to_examples(path):
   with tf.io.gfile.GFile(path, 'rb') as gf:
     path = gf
   with h5py.File(path, 'r') as hf:
+    # NOTE(dsuo): logic taken from reference code
+    volume_max = hf.attrs.get('max', 0.0)
+
     for i in range(hf['kspace'].shape[0]):
       yield hf['kspace'][i], hf['kspace'][i].shape, hf['reconstruction_esc'][
-          i], hf['reconstruction_esc'][i].shape
+          i], hf['reconstruction_esc'][i].shape, volume_max
 
 
 def _create_generator(filename):
@@ -149,6 +155,7 @@ def _create_generator(filename):
       tf.TensorSpec(shape=(2,), dtype=tf.int32),
       tf.TensorSpec(shape=(320, 320), dtype=tf.float32),
       tf.TensorSpec(shape=(2,), dtype=tf.int32),
+      tf.TensorSpec(shape=(), dtype=tf.float32),
   )
   return tf.data.Dataset.from_generator(
       _h5_to_examples, args=(filename,), output_signature=signature)

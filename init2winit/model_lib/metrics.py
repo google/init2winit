@@ -25,6 +25,7 @@ from init2winit.model_lib import losses
 import jax.numpy as jnp
 import numpy as np
 from scipy.special import expit
+from skimage.metrics import structural_similarity
 import sklearn.metrics
 
 
@@ -280,6 +281,37 @@ def weighted_misclassifications(logits, targets, weights=None):
   return loss
 
 
+def ssim(logits, targets, weights=None, volume_max=None):
+  """Computes example-wise structural similarity for a batch.
+
+  NOTE(dsuo): we use the same (default) arguments to `structural_similarity`
+  as in https://arxiv.org/abs/1811.08839.
+
+  Args:
+   logits: (batch,) + input.shape float array.
+   targets: (batch,) + input.shape float array.
+   weights: None or array of shape (batch,)
+   volume_max: (batch,) of the volume max for the volumes each example came
+    from.
+
+  Returns:
+    Structural similarity computed per example, shape [batch, ...].
+  """
+  ssims = []
+  if volume_max is None:
+    volume_max = np.zeros(logits.shape[0])
+
+  for logit, target, vmax in zip(logits, targets, volume_max):
+    ssims.append(structural_similarity(logit, target, data_range=vmax))
+
+  ssims = jnp.array(ssims)
+
+  if weights is not None:
+    ssims = ssims * weights
+
+  return ssims
+
+
 # All metrics used here must take three arguments named `logits`, `targets`,
 # `weights`. We don't use CLU's `mask` argument, the metric gets
 # that information from `weights`. The total weight for calculating the average
@@ -311,6 +343,13 @@ _METRICS = {
             num_examples=NumExamples,
             average_precision=BinaryMeanAveragePrecision,
             auc_roc=BinaryAUCROC),
+    'image_reconstruction_metrics':
+        metrics.Collection.create(
+            l1_loss=weighted_average_metric(
+                losses.weighted_unnormalized_mean_absolute_error),
+            ssim=weighted_average_metric(ssim),
+            num_examples=NumExamples,
+        ),
 }
 
 

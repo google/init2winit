@@ -265,6 +265,29 @@ class TransposeConvBlock(nn.Module):
 
 
 class UNetModel(base_model.BaseModel):
+  """U-Net model for fastMRI knee single-coil data."""
+
+  def evaluate_batch(self, params, batch_stats, batch):
+    """Evaluates metrics under self.metrics_name on the given_batch."""
+    variables = {'params': params, 'batch_stats': batch_stats}
+    logits = self.flax_module.apply(
+        variables, batch['inputs'], mutable=False, train=False)
+    targets = batch['targets']
+
+    # map the dict values (which are functions) to function(targets, logits)
+    weights = batch.get('weights')  # Weights might not be defined.
+    eval_batch_size = targets.shape[0]
+    if weights is None:
+      weights = jnp.ones(eval_batch_size)
+
+    # We don't use CLU's `mask` argument here, we handle it ourselves through
+    # `weights`.
+    return self.metrics_bundle.gather_from_model_output(
+        logits=logits,
+        targets=targets,
+        weights=weights,
+        volume_max=batch.get('volume_max'),
+        axis_name='batch')
 
   def build_flax_module(self):
     """Unet implementation."""
