@@ -16,6 +16,7 @@
 """Standard trainer for the init2winit project."""
 import functools
 import itertools
+import multiprocessing
 import os
 import time
 
@@ -463,6 +464,9 @@ def train(train_dir,
   # only used if checkpoints_steps is non-empty.
   checkpoint_dir = os.path.join(train_dir, 'checkpoints')
 
+  # For logging / processing off the main thread
+  pool = multiprocessing.pool.ThreadPool()
+
   if jax.process_index() == 0:
     logging.info('Let the training begin!')
     logging.info('Dataset input shape: %r', hps.input_shape)
@@ -588,7 +592,7 @@ def train(train_dir,
     return float(cur_step - start_step) / (time.time() - start_time)
 
   if jax.process_index() == 0:
-    logging.info('Starting training!')
+    trainer_utils.log_message('Starting training!', pool, xm_work_unit)
 
   # Numpy array of range(0, local_device_count) to send to each device to be
   # folded into the RNG inside each train step to get a unique per-device RNG.
@@ -730,6 +734,10 @@ def train(train_dir,
           report.update(callback_metrics)
         yield report
         if jax.process_index() == 0:
+          trainer_utils.log_eta(pool, xm_work_unit, global_step,
+                                train_steps_per_sec, num_train_steps,
+                                start_time, eval_frequency, eval_steps,
+                                eval_time)
           trainer_utils.log_epoch_report(report, metrics_logger)
           trainer_utils.maybe_log_training_metrics(metrics_state,
                                                    metrics_summary_fn,
@@ -798,6 +806,9 @@ def train(train_dir,
                   train_cost=mean_train_cost)
     yield report
     if jax.process_index() == 0:
+      trainer_utils.log_eta(pool, xm_work_unit, global_step,
+                            train_steps_per_sec, num_train_steps, start_time,
+                            eval_frequency, eval_steps, eval_time)
       trainer_utils.log_epoch_report(report, metrics_logger)
       trainer_utils.maybe_log_training_metrics(metrics_state,
                                                metrics_summary_fn,

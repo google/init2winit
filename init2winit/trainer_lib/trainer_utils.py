@@ -14,12 +14,54 @@
 # limitations under the License.
 
 """Utility functions related to training."""
+import time
+
 from absl import logging
 
 from flax import jax_utils
 from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
 import jax
+
+
+def format_time(s):
+  """Format time in hours/minutes/seconds."""
+  if s < 60:
+    return f'{s:.0f}s'
+  m, s = divmod(s, 60)
+  if m < 60:
+    return f'{m:.0f}m{s:.0f}s'
+  h, m = divmod(m, 60)
+  return f'{h:.0f}h{m:.0f}m'  # Seconds intentionally omitted
+
+
+def log_message(msg, pool=None, work_unit=None):
+  if work_unit is not None and pool is not None:
+    pool.apply_async(lambda msg=msg: work_unit.set_notes(msg))
+  logging.info('%s', msg)
+
+
+def log_eta(pool, work_unit, global_step, train_steps_per_sec, num_train_steps,
+            start_time, eval_frequency, eval_steps, eval_time):
+  """Construct and ETA / total time entry."""
+  msg = f'Steps: {global_step} / {num_train_steps} '
+  msg += f'[{global_step / num_train_steps:.1%}] '
+
+  # Time remaining from training
+  train_eta = (num_train_steps - global_step) / train_steps_per_sec
+
+  # Time remaining from eval
+  if eval_steps:
+    num_evals = len(list(filter(lambda x: x > global_step, eval_steps)))
+  else:
+    num_evals = (num_train_steps - global_step) // eval_frequency
+  eval_eta = eval_time * num_evals
+
+  msg += f'ETA: {format_time(train_eta + eval_eta)} '
+  total_time = time.time() - start_time
+  msg += f'Total time: {format_time(total_time)}'
+
+  log_message(msg, pool, work_unit)
 
 
 def log_epoch_report(report, metrics_logger):

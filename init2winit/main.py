@@ -205,6 +205,7 @@ def _run(
   if merged_hps.rng_seed < 0:
     rng_seed = _create_synchronized_rng_seed()
   xm_experiment = None
+  xm_work_unit = None
   if jax.process_index() == 0:
     logging.info('Running with seed %d', rng_seed)
   rng = jax.random.PRNGKey(rng_seed)
@@ -218,10 +219,7 @@ def _run(
     logging.info('rng: %s', rng)
     gfile.makedirs(trial_dir)
     # Set up the metric loggers for host 0.
-    xm_work_unit = None
-    metrics_logger, init_logger = utils.set_up_loggers(
-        trial_dir,
-        xm_work_unit)
+    metrics_logger, init_logger = utils.set_up_loggers(trial_dir, xm_work_unit)
     hparams_fname = os.path.join(trial_dir, 'hparams.json')
     logging.info('saving hparams to %s', hparams_fname)
     with gfile.GFile(hparams_fname, 'w') as f:
