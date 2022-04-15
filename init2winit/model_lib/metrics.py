@@ -22,7 +22,6 @@ different-sized eval batches.
 from clu import metrics
 import flax
 from init2winit.model_lib import losses
-import jax.numpy as jnp
 import numpy as np
 from scipy.special import expit
 import sklearn.metrics
@@ -268,9 +267,9 @@ def weighted_misclassifications(logits, targets, weights=None):
   if logits.ndim != targets.ndim:
     raise ValueError('Incorrect shapes. Got shape %s logits and %s targets' %
                      (str(logits.shape), str(targets.shape)))
-  preds = jnp.argmax(logits, axis=-1)
-  pred_targets = jnp.argmax(targets, axis=-1)
-  loss = jnp.not_equal(preds, pred_targets)
+  preds = np.argmax(logits, axis=-1)
+  pred_targets = np.argmax(targets, axis=-1)
+  loss = np.not_equal(preds, pred_targets)
   if weights is not None:
     if weights.ndim != targets.ndim - 1:
       raise ValueError(
