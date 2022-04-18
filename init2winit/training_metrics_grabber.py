@@ -18,6 +18,8 @@
 import operator
 
 from init2winit.model_lib import model_utils
+from init2winit.optimizer_lib import utils as optimizer_utils
+from init2winit.utils import total_tree_norm_sql2
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
@@ -31,6 +33,7 @@ DEFAULT_CONFIG = ConfigDict({
     'enable_param_norms': False,
     'enable_update_norms': False,
     'enable_ema': False,
+    'optstate_normsq_fields': [],
 })
 
 
@@ -70,6 +73,12 @@ def make_training_metrics(num_train_steps, **config_overrides):
         contain estimates of the gradient variance and update variance.
     - ema_beta (float): if enable_ema=true, the EMA's will use this value for
         their "beta" averaging parameter.
+    - optstate_normsq_fields (list of str): record the squared Euclidean norm of
+        each of these fields in the optimizer state.  If this list is non-empty,
+        the metrics state will have a field "optstate_normsq" which is a dict
+        where each key is a field name in optstate_normsq_fields, and each
+        value is a jnp array of length num_time_steps containing the time
+        series of the normsq of this optstate field.
 
   Args:
     num_train_steps: (int) the number of steps of training.  We use this to
@@ -114,9 +123,15 @@ def make_training_metrics(num_train_steps, **config_overrides):
       metrics_state['grad_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
       metrics_state['update_ema'] = jax.tree_map(jnp.zeros_like, params)
       metrics_state['update_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
+    if config['optstate_normsq_fields']:
+      metrics_state['optstate_normsq'] = {
+          field_name: jnp.zeros(num_train_steps)
+          for field_name in config['optstate_normsq_fields']
+      }
     return metrics_state
 
-  def update_fn(metrics_state, step, train_cost, grad, old_params, new_params):
+  def update_fn(metrics_state, step, train_cost, grad, old_params, new_params,
+                optimizer_state):
     """Update the training metrics state.
 
     Args:
@@ -128,6 +143,7 @@ def make_training_metrics(num_train_steps, **config_overrides):
         update.
       new_params: (pytree, of same shape as params): The parameters after the
         update.
+      optimizer_state: the optax optimizer state.
 
     Returns:
       next_metrics_state: (pytree) The next training metrics state.
@@ -161,7 +177,15 @@ def make_training_metrics(num_train_steps, **config_overrides):
           metrics_state['update_ema'], update, beta)
       next_metrics_state['update_sq_ema'] = _advance_ema(
           metrics_state['update_sq_ema'], update_sq, beta)
-
+    if config['optstate_normsq_fields']:
+      next_metrics_state['optstate_normsq'] = {}
+      for field_name in config['optstate_normsq_fields']:
+        field = optimizer_utils.extract_field(optimizer_state, field_name)
+        if field is None:
+          raise ValueError('optimizer state has no field {}'.format(field_name))
+        field_normsq = total_tree_norm_sql2(field)
+        next_metrics_state['optstate_normsq'][field_name] = metrics_state[
+            'optstate_normsq'][field_name].at[step].set(field_normsq)
     return next_metrics_state
 
   def summarize_fn(metrics_state):
