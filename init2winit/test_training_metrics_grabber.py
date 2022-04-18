@@ -21,6 +21,7 @@ from absl import flags
 from absl.testing import absltest
 from init2winit.shared_test_utilities import pytree_equal
 from init2winit.training_metrics_grabber import make_training_metrics
+from init2winit.utils import total_tree_norm_l2
 from init2winit.utils import total_tree_norm_sql2
 import jax
 import jax.numpy as jnp
@@ -67,6 +68,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
 
     zeros_like_params = jax.tree_map(jnp.zeros_like, self.mock_params0)
     zeros_scalar_like_params = jax.tree_map(lambda x: 0.0, self.mock_params0)
+    zeros_timeseries = jnp.zeros(self.num_train_steps)
     zeros_timeseries_like_params = jax.tree_map(
         lambda x: jnp.zeros(self.num_train_steps), self.mock_params0)
 
@@ -82,16 +84,20 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                           enable_ema=True,
                                           enable_train_cost=True,
                                           enable_param_norms=True,
+                                          enable_gradient_norm=True,
+                                          enable_update_norm=True,
                                           enable_update_norms=True)
     initial_metrics_state = init_fn(self.mock_params0)
     self.assertTrue(pytree_equal(initial_metrics_state, {
-                'train_cost': jnp.zeros(self.num_train_steps),
+                'train_cost': zeros_timeseries,
                 'param_norm': zeros_scalar_like_params,
                 'grad_ema': zeros_like_params,
                 'grad_sq_ema': zeros_like_params,
                 'update_ema': zeros_like_params,
                 'update_sq_ema': zeros_like_params,
                 'param_norms': zeros_timeseries_like_params,
+                'gradient_norm': zeros_timeseries,
+                'update_norm': zeros_timeseries,
                 'update_norms': zeros_timeseries_like_params
     }))
 
@@ -186,8 +192,10 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
             }))
 
   def test_update_update_norms(self):
-    """Ensure that we update update norms correctly."""
+    """Ensure that we update gradient and update norms correctly."""
     init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
+                                                  enable_gradient_norm=True,
+                                                  enable_update_norm=True,
                                                   enable_update_norms=True)
     initial_metrics_state = init_fn(self.mock_params0)
     updated_metrics_state = update_fn(initial_metrics_state,
@@ -224,6 +232,16 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                         ])
                 }
             }))
+
+    self.assertEqual(updated_metrics_state['update_norm'][0],
+                     total_tree_norm_l2(self.mock_grad1))
+    self.assertEqual(updated_metrics_state['update_norm'][1],
+                     total_tree_norm_l2(self.mock_grad2))
+
+    self.assertEqual(updated_metrics_state['update_norm'][0],
+                     self.step_size * total_tree_norm_l2(self.mock_grad1))
+    self.assertEqual(updated_metrics_state['update_norm'][1],
+                     self.step_size * total_tree_norm_l2(self.mock_grad2))
 
   def test_update_grad_ema(self):
     """Ensure that the training metrics updater updates grad ema correctly."""

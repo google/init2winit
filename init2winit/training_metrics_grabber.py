@@ -19,6 +19,7 @@ import operator
 
 from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import utils as optimizer_utils
+from init2winit.utils import total_tree_norm_l2
 from init2winit.utils import total_tree_norm_sql2
 import jax
 import jax.numpy as jnp
@@ -31,6 +32,8 @@ DEFAULT_CONFIG = ConfigDict({
     'ema_beta': 0.9,
     'enable_train_cost': False,
     'enable_param_norms': False,
+    'enable_gradient_norm': False,
+    'enable_update_norm': False,
     'enable_update_norms': False,
     'enable_ema': False,
     'optstate_normsq_fields': [],
@@ -63,6 +66,12 @@ def make_training_metrics(num_train_steps, **config_overrides):
     - enable_param_norms (bool): if true, the metrics state will have a field
         "param_norms" which is a pytree in the shape of the model params whose
         leaves are jnp arrays of length num_train_steps.
+    - enable_gradient_norm (bool) if true, the metrics state will have a field
+        "gradient_norm" which is a jnp array of length num_train_steps
+        containing a time series of the overall gradient norm.
+    - enable_update_norm (bool) if true, the metrics state will have a field
+        "update_norm" which is a jnp array of length num_train_steps containing
+        a time series of the overall update norm.
     - enable_update_norms (bool) if true, the metrics state will have a field
         "update_norms" which is a pytree in the shape of the model params whose
         leaves are jnp arrays of length num_train_steps.
@@ -115,6 +124,10 @@ def make_training_metrics(num_train_steps, **config_overrides):
     if config['enable_param_norms']:
       metrics_state['param_norms'] = jax.tree_map(
           lambda x: jnp.zeros(num_train_steps), params)
+    if config['enable_gradient_norm']:
+      metrics_state['gradient_norm'] = jnp.zeros(num_train_steps)
+    if config['enable_update_norm']:
+      metrics_state['update_norm'] = jnp.zeros(num_train_steps)
     if config['enable_update_norms']:
       metrics_state['update_norms'] = jax.tree_map(
           lambda x: jnp.zeros(num_train_steps), params)
@@ -150,7 +163,8 @@ def make_training_metrics(num_train_steps, **config_overrides):
     """
     param_norm = jax.tree_map(_compute_leaf_norms, old_params)
 
-    if config['enable_update_norms'] or config['enable_ema']:
+    if (config['enable_update_norm'] or config['enable_update_norms'] or
+        config['enable_ema']):
       update = jax.tree_map(lambda x, y: x - y, old_params, new_params)
 
     next_metrics_state = {}
@@ -161,6 +175,12 @@ def make_training_metrics(num_train_steps, **config_overrides):
     if config['enable_param_norms']:
       next_metrics_state['param_norms'] = _set_pytree_idx(
           metrics_state['param_norms'], param_norm, step)
+    if config['enable_gradient_norm']:
+      next_metrics_state['gradient_norm'] = metrics_state['gradient_norm'].at[
+          step].set(total_tree_norm_l2(grad))
+    if config['enable_update_norm']:
+      next_metrics_state['update_norm'] = metrics_state['update_norm'].at[
+          step].set(total_tree_norm_l2(update))
     if config['enable_update_norms']:
       update_norm = jax.tree_map(_compute_leaf_norms, update)
       next_metrics_state['update_norms'] = _set_pytree_idx(
