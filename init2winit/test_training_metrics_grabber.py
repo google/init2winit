@@ -23,6 +23,7 @@ from init2winit.shared_test_utilities import pytree_equal
 from init2winit.training_metrics_grabber import make_training_metrics
 from init2winit.utils import total_tree_norm_l2
 from init2winit.utils import total_tree_norm_sql2
+from init2winit.utils import total_tree_sum
 import jax
 import jax.numpy as jnp
 from optax import ScaleByAdamState
@@ -271,13 +272,20 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
             jax.tree_map(lambda x, y, z: 0.25 * x + 0.25 * y + 0.5 * z,
                          self.mock_zeros, self.mock_grad1, self.mock_grad2)))
 
-  def test_optstate_normsq(self):
-    """Test that optstate normsq is logged correctly."""
+  def test_optstate_sumsq(self):
+    """Test that optstate sumsq and sumsq are computed correctly."""
     init_fn, update_fn, _ = make_training_metrics(
-        self.num_train_steps, optstate_normsq_fields=['nu'])
+        self.num_train_steps,
+        optstate_sumsq_fields=['nu'],
+        optstate_sum_fields=['nu'])
     initial_metrics_state = init_fn(self.mock_params0)
     self.assertTrue(pytree_equal(
-        initial_metrics_state['optstate_normsq'], {
+        initial_metrics_state['optstate_sumsq'], {
+            'nu': jnp.zeros(self.num_train_steps)
+        }
+    ))
+    self.assertTrue(pytree_equal(
+        initial_metrics_state['optstate_sum'], {
             'nu': jnp.zeros(self.num_train_steps)
         }
     ))
@@ -296,10 +304,15 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_params2,
                                       self.mock_optimizer_state1)
 
-    self.assertEqual(updated_metrics_state['optstate_normsq']['nu'][0],
+    self.assertEqual(updated_metrics_state['optstate_sumsq']['nu'][0],
                      total_tree_norm_sql2(self.mock_nu0))
-    self.assertEqual(updated_metrics_state['optstate_normsq']['nu'][1],
+    self.assertEqual(updated_metrics_state['optstate_sumsq']['nu'][1],
                      total_tree_norm_sql2(self.mock_nu1))
+
+    self.assertEqual(updated_metrics_state['optstate_sum']['nu'][0],
+                     total_tree_sum(self.mock_nu0))
+    self.assertEqual(updated_metrics_state['optstate_sum']['nu'][1],
+                     total_tree_sum(self.mock_nu1))
 
   def test_summarize(self):
     """Test the training metrics summarizer."""

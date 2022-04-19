@@ -21,6 +21,7 @@ from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import utils as optimizer_utils
 from init2winit.utils import total_tree_norm_l2
 from init2winit.utils import total_tree_norm_sql2
+from init2winit.utils import total_tree_sum
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
@@ -36,7 +37,8 @@ DEFAULT_CONFIG = ConfigDict({
     'enable_update_norm': False,
     'enable_update_norms': False,
     'enable_ema': False,
-    'optstate_normsq_fields': [],
+    'optstate_sumsq_fields': [],
+    'optstate_sum_fields': [],
 })
 
 
@@ -82,12 +84,18 @@ def make_training_metrics(num_train_steps, **config_overrides):
         contain estimates of the gradient variance and update variance.
     - ema_beta (float): if enable_ema=true, the EMA's will use this value for
         their "beta" averaging parameter.
-    - optstate_normsq_fields (list of str): record the squared Euclidean norm of
+    - optstate_sumsq_fields (list of str): record the squared Euclidean norm of
         each of these fields in the optimizer state.  If this list is non-empty,
         the metrics state will have a field "optstate_normsq" which is a dict
         where each key is a field name in optstate_normsq_fields, and each
         value is a jnp array of length num_time_steps containing the time
         series of the normsq of this optstate field.
+    - optstate_sum_fields (list of str): record the sum of each of these fields
+        in the optimizer state.  If this list is non-empty, the metrics state
+        will have a field "optstate_sum" which is a dict where each key is a
+        field name in optstate_sum_fields, and each value is a jnp array
+        of length num_time_steps containing the time series of the sum
+        of this optstate field.
 
   Args:
     num_train_steps: (int) the number of steps of training.  We use this to
@@ -136,10 +144,15 @@ def make_training_metrics(num_train_steps, **config_overrides):
       metrics_state['grad_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
       metrics_state['update_ema'] = jax.tree_map(jnp.zeros_like, params)
       metrics_state['update_sq_ema'] = jax.tree_map(jnp.zeros_like, params)
-    if config['optstate_normsq_fields']:
-      metrics_state['optstate_normsq'] = {
+    if config['optstate_sumsq_fields']:
+      metrics_state['optstate_sumsq'] = {
           field_name: jnp.zeros(num_train_steps)
-          for field_name in config['optstate_normsq_fields']
+          for field_name in config['optstate_sumsq_fields']
+      }
+    if config['optstate_sum_fields']:
+      metrics_state['optstate_sum'] = {
+          field_name: jnp.zeros(num_train_steps)
+          for field_name in config['optstate_sum_fields']
       }
     return metrics_state
 
@@ -197,15 +210,24 @@ def make_training_metrics(num_train_steps, **config_overrides):
           metrics_state['update_ema'], update, beta)
       next_metrics_state['update_sq_ema'] = _advance_ema(
           metrics_state['update_sq_ema'], update_sq, beta)
-    if config['optstate_normsq_fields']:
-      next_metrics_state['optstate_normsq'] = {}
-      for field_name in config['optstate_normsq_fields']:
+    if config['optstate_sumsq_fields']:
+      next_metrics_state['optstate_sumsq'] = {}
+      for field_name in config['optstate_sumsq_fields']:
         field = optimizer_utils.extract_field(optimizer_state, field_name)
         if field is None:
           raise ValueError('optimizer state has no field {}'.format(field_name))
         field_normsq = total_tree_norm_sql2(field)
-        next_metrics_state['optstate_normsq'][field_name] = metrics_state[
-            'optstate_normsq'][field_name].at[step].set(field_normsq)
+        next_metrics_state['optstate_sumsq'][field_name] = metrics_state[
+            'optstate_sumsq'][field_name].at[step].set(field_normsq)
+    if config['optstate_sum_fields']:
+      next_metrics_state['optstate_sum'] = {}
+      for field_name in config['optstate_sum_fields']:
+        field = optimizer_utils.extract_field(optimizer_state, field_name)
+        if field is None:
+          raise ValueError('optimizer state has no field {}'.format(field_name))
+        field_normsq = total_tree_sum(field)
+        next_metrics_state['optstate_sum'][field_name] = metrics_state[
+            'optstate_sum'][field_name].at[step].set(field_normsq)
     return next_metrics_state
 
   def summarize_fn(metrics_state):

@@ -113,6 +113,10 @@ class UtilsTest(parameterized.TestCase):
     self.assertEqual(utils.tree_norm_sql2(pytree), {'foo': 10.0, 'baz': 20.0})
     self.assertEqual(utils.total_tree_norm_sql2(pytree), 30.0)
 
+  def testTreeSum(self):
+    """Test computing the sum of a pytree."""
+    pytree = {'foo': 2*jnp.ones(10), 'baz': jnp.ones(20)}
+    self.assertEqual(utils.total_tree_sum(pytree), 40)
 
 if __name__ == '__main__':
   absltest.main()

@@ -54,6 +54,12 @@ def total_tree_norm_l2(pytree):
   return jnp.sqrt(total_tree_norm_sql2(pytree))
 
 
+def total_tree_sum(pytree):
+  """Compute the overall sum of a pytree."""
+  sums = jax.tree_map(jnp.sum, pytree)
+  return jax.tree_util.tree_reduce(operator.add, sums, 0)
+
+
 def array_append(full_array, to_append):
   """Append to an array."""
   to_append = jnp.expand_dims(to_append, axis=0)
