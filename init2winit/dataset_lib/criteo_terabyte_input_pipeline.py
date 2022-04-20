@@ -31,8 +31,8 @@ CRITEO1TB_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     input_shape=(13 + 26,),
     train_file_path=os.path.join(CRITEO1TB_FILE_PATH, 'train/train*'),
     eval_file_path=os.path.join(CRITEO1TB_FILE_PATH, 'eval/eval*'),
-    # TODO(eamid): find the exact train_size
-    train_size=4e9,
+    train_size=4_195_197_692,
+    valid_size=89_137_318,
 ))
 CRITEO1TB_METADATA = {
     'apply_one_hot_in_loss': True,
