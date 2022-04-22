@@ -373,6 +373,12 @@ class TransformerLM(nn.Module):
     if not self.decode:
       y = shift_inputs(y, segment_ids=inputs_segmentation)
 
+    # TODO(gdahl,znado): this code appears to be accessing out-of-bounds
+    # indices for dataset_lib:proteins_test. This will break when jnp.take() is
+    # updated to return NaNs for out-of-bounds indices.
+    # Debug why this is the case.
+    y = jnp.clip(y, 0, self.vocab_size - 1)
+
     if self.shared_embedding is None:
       output_embed = nn.Embed(
           num_embeddings=self.vocab_size,
