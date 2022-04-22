@@ -19,13 +19,15 @@ Metric functions take a batch of (logits, targets, weights) as input and
 return a batch of loss values. This is for safe aggregation across
 different-sized eval batches.
 """
+import functools
+
 from clu import metrics
 import flax
 from init2winit.model_lib import losses
+import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.special import expit
-from skimage.metrics import structural_similarity
 import sklearn.metrics
 
 
@@ -279,6 +281,88 @@ def weighted_misclassifications(logits, targets, weights=None):
           (str(weights.shape), str(targets.shape)))
     loss = loss * weights
   return loss
+
+
+def uniform_filter(im, size=7):
+  def conv(im):
+    return jnp.convolve(
+        jnp.pad(im, pad_width=size // 2, mode='symmetric'),
+        jnp.ones(size),
+        mode='valid') / size
+  im = jax.vmap(conv, (0,))(im)
+  im = jax.vmap(conv, (1,))(im)
+  return im.T
+
+
+def structural_similarity(im1,
+                          im2,
+                          win_size=7,
+                          data_range=1.0,
+                          k1=0.01,
+                          k2=0.03):
+  """Compute the mean structural similarity index between two images.
+
+  NOTE(dsuo): modified from skimage.metrics.structural_similarity.
+
+  Args:
+    im1: ndarray Images. Any dimensionality with same shape.
+    im2: ndarray Images. Any dimensionality with same shape.
+    win_size: int or None. The side-length of the sliding window used
+      in comparison. Must be an odd value. If `gaussian_weights` is True, this
+      is ignored and the window size will depend on `sigma`.
+    data_range: float. The data range of the input image (distance
+      between minimum and maximum possible values). By default, this is
+      estimated from the image data-type.
+    k1: float. Algorithm parameter K1 (see [1]).
+    k2: float. Algorithm parameter K2 (see [2]).
+
+  Returns:
+    mssim: float
+        The mean structural similarity index over the image.
+
+  References
+    [1] Wang, Z., Bovik, A. C., Sheikh, H. R., & Simoncelli, E. P.
+      (2004). Image quality assessment: From error visibility to
+      structural similarity. IEEE Transactions on Image Processing,
+      13, 600-612.
+      https://ece.uwaterloo.ca/~z70wang/publications/ssim.pdf,
+      :DOI:`10.1109/TIP.2003.819861`
+  """
+  filter_func = functools.partial(uniform_filter, size=win_size)
+
+  num_points = win_size ** len(im1.shape)
+
+  # filter has already normalized by num_points
+  cov_norm = num_points / (num_points - 1)  # sample covariance
+
+  # compute (weighted) means
+  ux = filter_func(im1)
+  uy = filter_func(im2)
+
+  # compute (weighted) variances and covariances
+  uxx = filter_func(im1 * im1)
+  uyy = filter_func(im2 * im2)
+  uxy = filter_func(im1 * im2)
+  vx = cov_norm * (uxx - ux * ux)
+  vy = cov_norm * (uyy - uy * uy)
+  vxy = cov_norm * (uxy - ux * uy)
+
+  c1 = (k1 * data_range) ** 2
+  c2 = (k2 * data_range) ** 2
+
+  a1 = 2 * ux * uy + c1
+  a2 = 2 * vxy + c2
+  b1 = ux ** 2 + uy ** 2 + c1
+  b2 = vx + vy + c2
+
+  d = b1 * b2
+  s = (a1 * a2) / d
+
+  # to avoid edge effects will ignore filter radius strip around edges
+  pad = (win_size - 1) // 2
+
+  # compute (weighted) mean of ssim.
+  return jnp.mean(s.at[pad:-pad, pad:-pad].get())
 
 
 def ssim(logits, targets, weights=None, volume_max=None):
