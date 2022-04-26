@@ -15,6 +15,7 @@
 
 """FastMRI knee singlecoil input pipeline."""
 
+import datetime
 import itertools
 import os
 
@@ -47,7 +48,6 @@ METADATA = {
 def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
                      seed):
   """Generate a single example (slice from mri image).
-
 
   Args:
     kspace: raw mri data.
@@ -138,6 +138,9 @@ def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
 
 
 def _h5_to_examples(path):
+  """Yield MRI slices from an hdf5 file containing a single MRI volume."""
+  tf.print('fastmri_dataset._h5_to_examples call:', path,
+           datetime.datetime.now().strftime('%H:%M:%S:%f'))
   with tf.io.gfile.GFile(path, 'rb') as gf:
     path = gf
   with h5py.File(path, 'r') as hf:
