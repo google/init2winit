@@ -23,6 +23,7 @@ import functools
 
 from clu import metrics
 import flax
+from init2winit import utils
 from init2winit.model_lib import losses
 import jax
 import jax.numpy as jnp
@@ -72,6 +73,10 @@ class OGBGMeanAveragePrecision(
     targets = values['targets']
     logits = values['logits']
     weights = values['weights']
+
+    if np.any(np.isnan(logits)):
+      raise utils.TrainingDivergedError('NaN detected in logits')
+
     if weights.shape != targets.shape:
       # This happens if weights are None
       if np.all(np.isnan(weights)):
@@ -177,6 +182,10 @@ class BinaryMeanAveragePrecision(
         values['logits'],
         values['weights'],
         'BinaryMeanAveragePrecision')
+
+    if np.any(np.isnan(logits)):
+      raise utils.TrainingDivergedError('NaN detected in logits')
+
     valid_targets = targets[weights > 0]
     targets_sum = np.sum(valid_targets)
     # Do not compute AUC if positives only have one class.
