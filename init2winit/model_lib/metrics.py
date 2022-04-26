@@ -305,8 +305,8 @@ def uniform_filter(im, size=7):
 
 def structural_similarity(im1,
                           im2,
-                          win_size=7,
                           data_range=1.0,
+                          win_size=7,
                           k1=0.01,
                           k2=0.03):
   """Compute the mean structural similarity index between two images.
@@ -316,11 +316,11 @@ def structural_similarity(im1,
   Args:
     im1: ndarray Images. Any dimensionality with same shape.
     im2: ndarray Images. Any dimensionality with same shape.
+    data_range: float. The data range of the input image (distance
+      between minimum and maximum possible values). By default, this is
     win_size: int or None. The side-length of the sliding window used
       in comparison. Must be an odd value. If `gaussian_weights` is True, this
       is ignored and the window size will depend on `sigma`.
-    data_range: float. The data range of the input image (distance
-      between minimum and maximum possible values). By default, this is
       estimated from the image data-type.
     k1: float. Algorithm parameter K1 (see [1]).
     k2: float. Algorithm parameter K2 (see [2]).
@@ -390,14 +390,10 @@ def ssim(logits, targets, weights=None, volume_max=None):
   Returns:
     Structural similarity computed per example, shape [batch, ...].
   """
-  ssims = []
   if volume_max is None:
     volume_max = np.zeros(logits.shape[0])
 
-  for logit, target, vmax in zip(logits, targets, volume_max):
-    ssims.append(structural_similarity(logit, target, data_range=vmax))
-
-  ssims = jnp.array(ssims)
+  ssims = jax.vmap(structural_similarity)(logits, targets, volume_max)
 
   if weights is not None:
     ssims = ssims * weights
