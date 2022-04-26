@@ -242,8 +242,8 @@ def weighted_average_metric(fun):
     weight: np.float32
 
     @classmethod
-    def from_model_output(cls, logits, targets, weights, **_):
-      total = fun(logits, targets, weights).sum()
+    def from_model_output(cls, logits, targets, weights, **kwargs):
+      total = fun(logits, targets, weights, **kwargs).sum()
       if weights is None:
         weight = targets.shape[0]
       else:
