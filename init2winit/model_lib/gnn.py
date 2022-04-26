@@ -50,6 +50,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
             'beta1': 0.9,
             'beta2': 0.999,
             'epsilon': 1e-8,
+            'weight_decay': 0.0,
         },
         activation_function='relu',
         l2_decay_factor=.0005,
