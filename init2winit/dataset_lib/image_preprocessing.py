@@ -55,7 +55,7 @@ def crop(key, images, hps):
   return vcrop(key, images, hps)
 
 
-def mixup_tf(key, *args_to_mix, alpha=0.1, n=2):
+def mixup_tf(key, inputs, targets, alpha=0.1):
   """Perform mixup https://arxiv.org/abs/1710.09412.
 
   NOTE: Code taken from https://github.com/google/big_vision with variables
@@ -63,34 +63,26 @@ def mixup_tf(key, *args_to_mix, alpha=0.1, n=2):
 
   Args:
     key: The random key to use.
-    *args_to_mix: further arguments are the arrays to be mixed.
+    inputs: inputs to mix.
+    targets: targets to mix.
     alpha: the beta/dirichlet concentration parameter, typically 0.1 or 0.2.
-    n: with how many other images an image is mixed. Default mixup is n=2.
 
   Returns:
     A new key key. A list of mixed *things. A dict of mixed **more_things.
   """
-  gamma_shape = (2,)
-
   # NOTE(dsuo): we don't use split because it's not allowed in Graph execution.
   key_a = tf.random.experimental.stateless_fold_in(key, 0)
   key_b = tf.random.experimental.stateless_fold_in(key_a, 0)
 
   # Compute beta using gamma functions.
-  gamma_a = tf.random.stateless_gamma(gamma_shape, key_a, alpha)
-  gamma_b = tf.random.stateless_gamma(gamma_shape, key_b, alpha)
-  weight = gamma_a / (gamma_a + gamma_b)
+  gamma_a = tf.random.stateless_gamma((1,), key_a, alpha)
+  gamma_b = tf.random.stateless_gamma((1,), key_b, alpha)
+  weight = tf.squeeze(gamma_a / (gamma_a + gamma_b))
 
-  # Sort alpha values in decreasing order. This avoids destroying examples
-  # when the concentration parameter alpha is very small, due to Dirichlet's
-  # symmetry.
-  weight = -tf.sort(-weight, axis=-1)
-  weight = tf.expand_dims(weight, 0)
+  inputs = weight * inputs + (1.0 - weight) * tf.roll(inputs, 1, axis=0)
+  targets = weight * targets + (1.0 - weight) * tf.roll(targets, 1, axis=0)
 
-  def mix(batch):
-    return sum(weight[:, i] * tf.roll(batch, i, axis=0) for i in range(n))
-
-  return map(mix, args_to_mix)
+  return inputs, targets
 
 
 def mixup(key, alpha, images, labels):
