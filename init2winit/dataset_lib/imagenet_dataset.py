@@ -16,7 +16,6 @@
 """ImageNet input pipeline with resnet preprocessing."""
 
 from collections import abc
-import functools
 import itertools
 
 from absl import logging
@@ -261,8 +260,8 @@ def preprocess_for_train(image_bytes,
                                                        hps.randaug.num_layers,
                                                        hps.randaug.magnitude,
                                                        key)
-    image = tf.cast(image, tf.float32)
 
+  image = tf.cast(image, tf.float32)
   image = normalize_image(image)
   image = tf.image.convert_image_dtype(image, dtype=dtype)
   return image
@@ -388,28 +387,26 @@ def load_split(
   ds = ds.batch(per_host_batch_size, drop_remainder=False)
 
   if split == 'train' and hps.use_mixup:
-    per_batch_mixup_rng = tf.convert_to_tensor(shuffle_rng, dtype=tf.int32)
-    per_batch_mixup_rng = tf.random.experimental.stateless_fold_in(
-        per_batch_mixup_rng, 0)
-    per_batch_mixup_rng = multihost_utils.broadcast_one_to_all(
-        per_batch_mixup_rng, is_source=jax.process_index() == 0)
-    def mixup_batch(per_batch_mixup_rng, batch):
+    mixup_rng = tf.convert_to_tensor(shuffle_rng, dtype=tf.int32)
+    mixup_rng = tf.random.experimental.stateless_fold_in(
+        mixup_rng, 0)
+    mixup_rng = multihost_utils.broadcast_one_to_all(
+        mixup_rng, is_source=jax.process_index() == 0)
+    def mixup_batch(batch_index, batch):
       per_batch_mixup_rng = tf.random.experimental.stateless_fold_in(
-          per_batch_mixup_rng, 0)
-      (image, targets) = image_preprocessing.mixup_tf(
+          mixup_rng, batch_index)
+      (inputs, targets) = image_preprocessing.mixup_tf(
           per_batch_mixup_rng,
           batch['inputs'],
           batch['targets'],
           alpha=hps.mixup.alpha,
-          n=2
       )
-      batch['inputs'] = image
+      batch['inputs'] = inputs
       batch['targets'] = targets
       return batch
 
-    ds = ds.map(
-        functools.partial(mixup_batch, per_batch_mixup_rng),
-        num_parallel_calls=hps.num_tf_data_map_parallel_calls)
+    ds = ds.enumerate().map(
+        mixup_batch, num_parallel_calls=hps.num_tf_data_map_parallel_calls)
 
   if split != 'train':
     ds = ds.cache()
