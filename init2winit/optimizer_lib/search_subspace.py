@@ -15,7 +15,6 @@
 
 """Algorithms for narrowing hyperparameter search spaces.
 
-TODO(dsuo): `get_experiment_data` should sample `k` trials in some way.
 TODO(dsuo): suport discrete hparams.
 
 """
