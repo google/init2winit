@@ -39,7 +39,12 @@ CRITEO1TB_METADATA = {
 }
 
 
-class CriteoTsvReader(object):
+def _criteo_tsv_reader(
+    file_path=None,
+    num_dense_features=None,
+    vocab_sizes=None,
+    batch_size=None,
+    is_training=True):
   """Input reader fn for pre-processed Criteo data.
 
   Raw Criteo data is assumed to be preprocessed in the following way:
@@ -47,73 +52,65 @@ class CriteoTsvReader(object):
   2. Negative values are replaced with zeros.
   3. Integer features are transformed by log(x+1) and are hence tf.float32.
   4. Categorical data is bucketized and are hence tf.int32.
+
+  Args:
+    file_path: filepath to the criteo dataset.
+    num_dense_features: number of dense features.
+    vocab_sizes: vocabulary size.
+    batch_size: batch size.
+    is_training: whether or not this split is the one trained on.
+  Returns:
+    A tf.data.Dataset object.
   """
 
-  def __init__(self,
-               file_path=None,
-               num_dense_features=None,
-               vocab_sizes=None,
-               batch_size=None,
-               is_training=True,
-               parallelism=16):
-    self._file_path = file_path
-    self._num_dense_features = num_dense_features
-    self._vocab_sizes = vocab_sizes
-    self._batch_size = batch_size
-    self._is_training = is_training
-    self._parallelism = parallelism
+  @tf.function
+  def _parse_example_fn(example):
+    """Parser function for pre-processed Criteo TSV records."""
+    label_defaults = [[0.0]]
+    int_defaults = [[0.0] for _ in range(num_dense_features)]
+    categorical_defaults = [[0] for _ in range(len(vocab_sizes))]
+    record_defaults = label_defaults + int_defaults + categorical_defaults
+    fields = tf.io.decode_csv(
+        example, record_defaults, field_delim='\t', na_value='-1')
 
-  def __call__(self):
-    batch_size = self._batch_size
+    num_labels = 1
+    num_dense = len(int_defaults)
+    features = {}
+    features['targets'] = tf.reshape(fields[0], [batch_size])
 
-    @tf.function
-    def _parse_example_fn(example):
-      """Parser function for pre-processed Criteo TSV records."""
-      label_defaults = [[0.0]]
-      int_defaults = [[0.0] for _ in range(self._num_dense_features)]
-      categorical_defaults = [[0] for _ in range(len(self._vocab_sizes))]
-      record_defaults = label_defaults + int_defaults + categorical_defaults
-      fields = tf.io.decode_csv(
-          example, record_defaults, field_delim='\t', na_value='-1')
+    int_features = []
+    for idx in range(num_dense):
+      int_features.append(fields[idx + num_labels])
+    int_features = tf.stack(int_features, axis=1)
 
-      num_labels = 1
-      num_dense = len(int_defaults)
-      features = {}
-      features['targets'] = tf.reshape(fields[0], [batch_size])
+    cat_features = []
+    for idx in range(len(vocab_sizes)):
+      cat_features.append(
+          tf.cast(fields[idx + num_dense + num_labels], dtype=tf.int32))
+    cat_features = tf.cast(
+        tf.stack(cat_features, axis=1), dtype=int_features.dtype)
+    features['inputs'] = tf.concat([int_features, cat_features], axis=1)
+    features['weights'] = tf.ones(
+        shape=(features['inputs'].shape[0],), dtype=features['inputs'].dtype)
+    return features
 
-      int_features = []
-      for idx in range(num_dense):
-        int_features.append(fields[idx + num_labels])
-      int_features = tf.stack(int_features, axis=1)
+  filenames = tf.data.Dataset.list_files(file_path, shuffle=False)
+  index = jax.process_index()
+  num_hosts = jax.process_count()
+  ds = filenames.shard(num_hosts, index)
 
-      cat_features = []
-      for idx in range(len(self._vocab_sizes)):
-        cat_features.append(
-            tf.cast(fields[idx + num_dense + num_labels], dtype=tf.int32))
-      cat_features = tf.cast(
-          tf.stack(cat_features, axis=1), dtype=int_features.dtype)
-      features['inputs'] = tf.concat([int_features, cat_features], axis=1)
-      features['weights'] = tf.ones(
-          shape=(features['inputs'].shape[0],), dtype=features['inputs'].dtype)
-      return features
-
-    filenames = tf.data.Dataset.list_files(self._file_path, shuffle=False)
-    index = jax.process_index()
-    num_hosts = jax.process_count()
-    ds = filenames.shard(num_hosts, index)
-
-    if self._is_training:
-      ds = ds.repeat()
-    ds = ds.interleave(
-        tf.data.TextLineDataset,
-        cycle_length=128,
-        block_length=batch_size // 8,
-        num_parallel_calls=128,
-        deterministic=False)
-    ds = ds.batch(batch_size, drop_remainder=True)
-    ds = ds.map(_parse_example_fn, num_parallel_calls=16)
-    ds = ds.prefetch(tf.data.AUTOTUNE)
-    return ds
+  if is_training:
+    ds = ds.repeat()
+  ds = ds.interleave(
+      tf.data.TextLineDataset,
+      cycle_length=128,
+      block_length=batch_size // 8,
+      num_parallel_calls=128,
+      deterministic=False)
+  ds = ds.batch(batch_size, drop_remainder=True)
+  ds = ds.map(_parse_example_fn, num_parallel_calls=16)
+  ds = ds.prefetch(tf.data.AUTOTUNE)
+  return ds
 
 
 def convert_to_numpy_iterator_fn(num_batches, tf_dataset_fn):
@@ -136,14 +133,14 @@ def get_criteo1tb(unused_shuffle_rng,
         process_count, eval_batch_size))
   per_host_eval_batch_size = eval_batch_size // process_count
   per_host_batch_size = batch_size // process_count
-  train_dataset = CriteoTsvReader(
+  train_dataset = _criteo_tsv_reader(
       file_path=hps.train_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
       batch_size=per_host_batch_size,
       is_training=True)
   train_iterator_fn = lambda: tfds.as_numpy(train_dataset())
-  eval_train_dataset = CriteoTsvReader(
+  eval_train_dataset = _criteo_tsv_reader(
       file_path=hps.train_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
@@ -151,7 +148,7 @@ def get_criteo1tb(unused_shuffle_rng,
       is_training=False)
   eval_train_epoch = functools.partial(
       convert_to_numpy_iterator_fn, tf_dataset_fn=eval_train_dataset)
-  eval_dataset = CriteoTsvReader(
+  eval_dataset = _criteo_tsv_reader(
       file_path=hps.eval_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
