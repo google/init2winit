@@ -48,6 +48,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
             'weight_decay': 1e-1,
         },
         l2_decay_factor=None,
+        l2_decay_rank_threshold=2,
         batch_size=1024,
         rng_seed=-1,
         model_dtype='float32',
