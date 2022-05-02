@@ -34,6 +34,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         variant='B/32',
         rep_size=True,
         pool_type='gap',
+        posemb='sincos2d',
         lr_hparams={
             'base_lr': 1e-3,
             'schedule': 'cosine_warmup',
@@ -183,6 +184,7 @@ class ViT(nn.Module):
   depth: int = 12
   mlp_dim: Optional[int] = None  # Defaults to 4x input dim
   num_heads: int = 12
+  posemb: str = 'sincos2d'  # Can also be "learn"
   rep_size: Union[int, bool] = False
   dropout: float = 0.0
   pool_type: str = 'gap'  # Can also be 'map' or 'tok'
@@ -201,14 +203,15 @@ class ViT(nn.Module):
     n, h, w, c = x.shape
     x = jnp.reshape(x, [n, h * w, c])
 
+    # Add posemb before adding extra token.
+    x = out['with_posemb'] = x + get_posemb(
+        self, self.posemb, (h, w), c, 'pos_embedding', x.dtype)
+
     if self.pool_type == 'tok':
       cls = self.param('cls', nn.initializers.zeros, (1, 1, c), x.dtype)
       x = jnp.concatenate([jnp.tile(cls, [n, 1, 1]), x], axis=1)
 
-    # Add posemb
-    n, l, c = x.shape
-    x = out['with_posemb'] = x + get_posemb(
-        self, 'learn', l, c, 'pos_embedding', x.dtype)
+    n, l, c = x.shape  # pylint: disable=unused-variable
     x = nn.Dropout(rate=self.dropout)(x, not train)
 
     x, out['encoder'] = Encoder(
@@ -223,9 +226,6 @@ class ViT(nn.Module):
     if self.pool_type == 'map':
       x = out['head_input'] = MAPHead(
           num_heads=self.num_heads, mlp_dim=self.mlp_dim)(x)
-    elif self.pool_type == 'map_buggy':
-      x = out['head_input'] = MAPHead(
-          num_heads=self.num_heads, mlp_dim=self.mlp_dim, buggy=True)(x)
     elif self.pool_type == 'gap':
       x = out['head_input'] = jnp.mean(x, axis=1)
     elif self.pool_type == '0':
@@ -267,6 +267,7 @@ class ViTModel(base_model.BaseModel):
         num_classes=self.hps.num_classes,
         rep_size=self.hps.rep_size,
         pool_type=self.hps.pool_type,
+        posemb=self.hps.posemb,
         **{
             **decode_variant(self.hps.variant),
         })
