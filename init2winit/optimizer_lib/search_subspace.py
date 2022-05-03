@@ -16,8 +16,10 @@
 """Algorithms for narrowing hyperparameter search spaces.
 
 TODO(dsuo): suport discrete hparams.
-
+TODO(dsuo): check one_minus_
+TODO(dsuo): check parallel load trials
 """
+import copy
 import itertools
 import re
 
@@ -26,12 +28,20 @@ import numpy as np
 import pandas as pd
 
 
+def print_search_space(search_space):
+  """Prints search space."""
+  for key, hp in search_space.items():
+    print(f'{key}:')
+    print(f'\t- range: ({hp["min_value"]}, {hp["max_value"]})')
+    print(f'\t- scale_type: {hp["scale_type"]}')
+
+
 def find_best_cube(trials,
                    objective,
                    search_space,
                    k,
-                   cube_sizes,
-                   cube_strides,
+                   cube_sizes=None,
+                   cube_strides=None,
                    min_objective=True,
                    **kwargs):
   """Find best cube in original search space."""
@@ -41,30 +51,57 @@ def find_best_cube(trials,
   top_k_obj = trials[objective].apply(lambda x: x[-1]).sort_values(
       ascending=min_objective).head(n=k)
   top_k_idx = top_k_obj.index
-  hp_keys = [f'hps.{key}' for key in search_space.keys()]
+
+  hp_keys = [
+      f'hps.{key}'.replace('one_minus_', '') for key in search_space.keys()
+  ]
   top_k_df = pd.concat((trials.loc[top_k_idx][hp_keys], top_k_obj), axis=1)
+
+  cube_sizes = cube_sizes or {}
+  cube_strides = cube_strides or {}
 
   # Compute starting points of hyperparam cubes.
   cube_start_points = {}
   cube_end_points = {}
-  for key, hp in search_space.items():
+  for (key, hp), hp_key in zip(search_space.items(), hp_keys):
+    # Default size and stride to 1
+    if key not in cube_sizes:
+      ## Throw error message
+      cube_sizes[key] = 1
+    if key not in cube_strides:
+      ## Throw error message
+      cube_strides[key] = 1
+    max_trial_value = 1 - top_k_df[hp_key].min(
+    ) if 'one_minus_' in key else top_k_df[hp_key].max()
+    min_trial_value = 1 - top_k_df[hp_key].max(
+    ) if 'one_minus_' in key else top_k_df[hp_key].min()
+
+    ## Fix mapped range according to sampled points
     if hp['scale_type'] == 'UNIT_LOG_SCALE':
       hp['mapped_range'] = [
-          np.log10(float(hp['min_value'])),
-          np.log10(float(hp['max_value']))
+          np.floor(np.floor(np.log10(float(min_trial_value)))),
+          np.ceil(np.ceil(np.log10(float(max_trial_value))))
       ]
     elif hp['scale_type'] == 'UNIT_LINEAR_SCALE':
+      # This requires some work
       hp['mapped_range'] = [hp['min_value'], hp['max_value']]
-    cube_start_points[key] = np.arange(hp['mapped_range'][0],
-                                       hp['mapped_range'][1], cube_strides[key])
+
+    print(key, hp['mapped_range'])
+    cube_start_points[key] = np.arange(
+        hp['mapped_range'][0],
+        hp['mapped_range'][1] - cube_sizes[key] + cube_strides[key],
+        cube_strides[key])
     cube_end_points[key] = cube_start_points[key] + cube_sizes[key]
 
     if hp['scale_type'] == 'UNIT_LOG_SCALE':
       cube_start_points[key] = np.power(10, cube_start_points[key])
       cube_end_points[key] = np.power(10, cube_end_points[key])
 
+  print(cube_start_points)
   cube_start_points = list(itertools.product(*cube_start_points.values()))
+  print(cube_start_points)
   cube_end_points = list(itertools.product(*cube_end_points.values()))
+  print(cube_end_points)
 
   best_cube = None
   best_cube_mean = float('inf') if min_objective else -1.0 * float('inf')
@@ -82,7 +119,7 @@ def find_best_cube(trials,
       if top_trial_included:
         top_trial_included = selectors.iloc[0] or False
       points_df = points_df[selectors]
-
+    print(cube_start_point, cube_end_point, points_df[objective].mean())
     # Check if we have found a better cube.
     change_flag = points_df[objective].mean(
     ) < best_cube_mean if min_objective else points_df[objective].mean(
@@ -95,14 +132,16 @@ def find_best_cube(trials,
       best_cube_trials = points_df
       best_cube_top_trial_included = top_trial_included
 
-  new_search_space = {}
-  for val, (key, hp) in zip(best_cube, search_space.items()):
+  new_search_space = copy.deepcopy(search_space)
+  for val, (key, hp) in zip(best_cube, new_search_space.items()):
     if hp['scale_type'] == 'UNIT_LOG_SCALE':
-      new_search_space[key] = (np.power(10., np.log10(val)),
-                               np.power(10.,
-                                        np.log10(val) + cube_sizes[key]))
+      hp['min_value'] = np.power(10., np.log10(val))
+      hp['max_value'] = np.power(10., np.log10(val) + cube_sizes[key])
     elif hp['scale_type'] == 'UNIT_LINEAR_SCALE':
-      new_search_space[key] = (val, val + cube_sizes[key])
+      hp['min_value'] = val
+      hp['max_value'] = val + cube_sizes[key]
+
+    del hp['mapped_range']
 
   num_trials = len(best_cube_trials)
   logging.info('Total number of trials included in the reported cube is %d',
