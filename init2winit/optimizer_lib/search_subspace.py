@@ -16,8 +16,7 @@
 """Algorithms for narrowing hyperparameter search spaces.
 
 TODO(dsuo): suport discrete hparams.
-TODO(dsuo): check one_minus_
-TODO(dsuo): check parallel load trials
+TODO(dsuo): check parallel load trials.
 """
 import copy
 import itertools
@@ -52,29 +51,21 @@ def find_best_cube(trials,
       ascending=min_objective).head(n=k)
   top_k_idx = top_k_obj.index
 
-  hp_keys = [
-      f'hps.{key}'.replace('one_minus_', '') for key in search_space.keys()
-  ]
-  top_k_df = pd.concat((trials.loc[top_k_idx][hp_keys], top_k_obj), axis=1)
+  for key in search_space.keys():
+    if 'one_minus' in key:
+      trials[key] = 1 - trials[f'hps.{key.replace("one_minus_", "")}']
+    else:
+      trials[key] = trials[f'hps.{key}']
 
-  cube_sizes = cube_sizes or {}
-  cube_strides = cube_strides or {}
+  top_k_df = pd.concat((trials.loc[top_k_idx][search_space.keys()], top_k_obj),
+                       axis=1)
 
   # Compute starting points of hyperparam cubes.
   cube_start_points = {}
   cube_end_points = {}
-  for (key, hp), hp_key in zip(search_space.items(), hp_keys):
-    # Default size and stride to 1
-    if key not in cube_sizes:
-      ## Throw error message
-      cube_sizes[key] = 1
-    if key not in cube_strides:
-      ## Throw error message
-      cube_strides[key] = 1
-    max_trial_value = 1 - top_k_df[hp_key].min(
-    ) if 'one_minus_' in key else top_k_df[hp_key].max()
-    min_trial_value = 1 - top_k_df[hp_key].max(
-    ) if 'one_minus_' in key else top_k_df[hp_key].min()
+  for key, hp in search_space.items():
+    max_trial_value = top_k_df[key].max()
+    min_trial_value = top_k_df[key].min()
 
     ## Fix mapped range according to sampled points
     if hp['scale_type'] == 'UNIT_LOG_SCALE':
@@ -91,6 +82,8 @@ def find_best_cube(trials,
         hp['mapped_range'][0],
         hp['mapped_range'][1] - cube_sizes[key] + cube_strides[key],
         cube_strides[key])
+    if len(cube_start_points[key]) == 0:  # pylint: disable=g-explicit-length-test
+      cube_start_points[key] = np.array([hp['mapped_range'][0]])
     cube_end_points[key] = cube_start_points[key] + cube_sizes[key]
 
     if hp['scale_type'] == 'UNIT_LOG_SCALE':
