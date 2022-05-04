@@ -113,8 +113,8 @@ def _criteo_tsv_reader(
   return ds
 
 
-def convert_to_numpy_iterator_fn(num_batches, tf_dataset_fn):
-  return itertools.islice(tfds.as_numpy(tf_dataset_fn()), num_batches)
+def convert_to_numpy_iterator_fn(num_batches, tf_dataset):
+  return itertools.islice(tfds.as_numpy(tf_dataset), num_batches)
 
 
 def get_criteo1tb(unused_shuffle_rng,
@@ -139,7 +139,7 @@ def get_criteo1tb(unused_shuffle_rng,
       vocab_sizes=hps.vocab_sizes,
       batch_size=per_host_batch_size,
       is_training=True)
-  train_iterator_fn = lambda: tfds.as_numpy(train_dataset())
+  train_iterator_fn = lambda: tfds.as_numpy(train_dataset)
   eval_train_dataset = _criteo_tsv_reader(
       file_path=hps.train_file_path,
       num_dense_features=hps.num_dense_features,
@@ -147,7 +147,7 @@ def get_criteo1tb(unused_shuffle_rng,
       batch_size=per_host_eval_batch_size,
       is_training=False)
   eval_train_epoch = functools.partial(
-      convert_to_numpy_iterator_fn, tf_dataset_fn=eval_train_dataset)
+      convert_to_numpy_iterator_fn, tf_dataset=eval_train_dataset)
   eval_dataset = _criteo_tsv_reader(
       file_path=hps.eval_file_path,
       num_dense_features=hps.num_dense_features,
@@ -155,7 +155,7 @@ def get_criteo1tb(unused_shuffle_rng,
       batch_size=per_host_eval_batch_size,
       is_training=False)
   eval_iterator_fn = functools.partial(
-      convert_to_numpy_iterator_fn, tf_dataset_fn=eval_dataset)
+      convert_to_numpy_iterator_fn, tf_dataset=eval_dataset)
   # pylint: disable=unreachable
   def test_epoch(*args, **kwargs):
     del args
