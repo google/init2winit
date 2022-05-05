@@ -361,13 +361,10 @@ def load_split(
 
     return example_dict
 
-  # TODO(znado): make shuffling the input files deterministic, as this will
-  # yield a different order each time we are pre-empted.
   read_config = tfds.ReadConfig(add_tfds_id=True)
   ds = tfds.load(
       'imagenet2012:5.*.*',
       split=tfds_split,
-      shuffle_files=True,
       read_config=read_config,
       decoders={
           'image': tfds.decode.SkipDecoding(),
