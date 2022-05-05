@@ -93,4 +93,10 @@ class HessianCallback(base_callback.BaseCallBack):
       self.logger.append_pytree(hessian_metrics)
 
     max_eig_key = self.name + '/max_eig'
-    return {max_eig_key: hessian_metrics['max_eig_hess']}
+    ratio_key = self.name + '/max_eig_ratio'
+    pos_neg_key = self.name + '/pos_neg_ratio'
+    return {
+        max_eig_key: hessian_metrics['max_eig_hess'],
+        ratio_key: hessian_metrics['max_eig_hess_ratio'],
+        pos_neg_key: hessian_metrics['pos_neg_ratio'],
+    }

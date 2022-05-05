@@ -269,7 +269,8 @@ class RunLanczosTest(absltest.TestCase):
 
     # Check the dict keys.
     expected_keys = [
-        'step', 'tridiag_hess', 'max_eig_hess', 'tridiag_hess_grad_overlap'
+        'step', 'tridiag_hess', 'max_eig_hess', 'tridiag_hess_grad_overlap',
+        'pos_neg_ratio', 'max_eig_hess_ratio'
     ]
     self.assertEqual(set(pytree_list[0].keys()), set(expected_keys))
 

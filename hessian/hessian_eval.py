@@ -16,6 +16,7 @@
 """Code for evaluating the hessian and gradient covariance of i2w models."""
 import functools
 import itertools
+
 from absl import logging
 import flax
 from flax import jax_utils
@@ -26,9 +27,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-import spectral_density.hessian_computation as hessian_computation
+from spectral_density import hessian_computation
+from spectral_density import lanczos
 from spectral_density.hessian_computation import ravel_pytree
-import spectral_density.lanczos as lanczos
 
 
 DEFAULT_EVAL_CONFIG = {
@@ -659,6 +660,10 @@ class CurvatureEvaluator:
           verbose=True)
       evs = np.linalg.eigvalsh(row['tridiag_hess'])
       row['max_eig_hess'] = np.max(evs)
+
+      # We assume you run more than 1 step.
+      row['max_eig_hess_ratio'] = evs[-1] / evs[-2]
+      row['pos_neg_ratio'] = evs[0] / evs[-1]
 
     if self.eval_config['eval_hess_grad_overlap']:
       # compute gradient.
