@@ -89,7 +89,7 @@ class OGBGMeanAveragePrecision(
     if not (logits.shape == targets.shape == weights.shape):  # pylint: disable=superfluous-parens
       raise ValueError(
           f'Shape mismatch between logits ({logits.shape}), targets '
-          '({targets.shape}), and weights ({weights.shape}).')
+          f'({targets.shape}), and weights ({weights.shape}).')
     if len(logits.shape) != 2:
       raise ValueError(f'Rank of logits ({logits.shape}) must be 2.')
     if not np.logical_or(weights == 1, weights == 0).all():
