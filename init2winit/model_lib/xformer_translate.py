@@ -917,8 +917,8 @@ class TransformerTranslate(base_model.BaseModel):
         self.hps.dec_cross_attn_kernel_init]()
 
     return Transformer(
-        vocab_size=self.hps['output_shape'][-1],
-        output_vocab_size=self.hps['output_shape'][-1],
+        vocab_size=self.hps.vocab_size,
+        output_vocab_size=self.hps.vocab_size,
         share_embeddings=self.hps.share_embeddings,
         logits_via_embedding=self.hps.logits_via_embedding,
         emb_dim=self.hps.emb_dim,
