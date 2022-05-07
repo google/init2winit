@@ -176,6 +176,12 @@ class BaseModel(object):
         self.metrics_bundle,
         self.dataset_meta_data['apply_one_hot_in_loss'])
 
+  def apply(self, params, batch_stats, batch, rng, **apply_kwargs):
+    """Wrapper around flax_module.apply."""
+    del rng
+    variables = {'params': params, 'batch_stats': batch_stats}
+    return self.flax_module.apply(variables, batch['inputs'], **apply_kwargs)
+
   def predict_batch(self,
                     params,
                     batch_stats,
