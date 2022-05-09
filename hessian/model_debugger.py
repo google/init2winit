@@ -162,7 +162,7 @@ def create_forward_pass_stats_fn(flax_module,
 
 
 def _check_tuple(x):
-  return isinstance(x, tuple) and len(x) == 1
+  return isinstance(x, tuple)
 
 
 def _maybe_remove_tuple(x):
@@ -177,6 +177,10 @@ def remove_leaf_tuples(tree):
                       is_leaf=_check_tuple)
 
 
+# TOOD(gilmer): Currently the model debugger does not properly handle internal
+# activation of recurrant models. We will only grab the first instance of
+# a flax module's call in the case that a module is called multiple times with
+# shared weights in a recurrent model.
 class ModelDebugger:
   """Debugging tool for internal layers of a model."""
 
