@@ -131,6 +131,54 @@ class PreconditionerTest(parameterized.TestCase):
 
       chex.assert_trees_all_close(actual_params, decon_params, atol=1e-4)
 
+  @chex.variants(with_jit=True, with_pmap=True, without_jit=True)
+  @parameterized.product(
+      b2=[0.999, 0.9, 0.1],
+      eps=[1e-8, 1e-4, 1e-1],
+      eps_root=[1e-8, 1e-4, 0.0],
+      initial_accumulator_value=[1e-8, 1e-6, 1e-1],
+      debias=[True, False],
+  )
+  def test_precondition_by_yogi(self, b2, eps, eps_root,
+                                initial_accumulator_value, debias):
+    """Test precondition_by_yogi."""
+
+    actual_yogi = transform.precondition_by_yogi(
+        b2=b2,
+        eps=eps,
+        eps_root=eps_root,
+        initial_accumulator_value=initial_accumulator_value,
+        debias=debias)
+
+    decon_yogi = preconditioner.preconditioner(
+        preconditioner.nth_power, preconditioner.yogi_accumulator,
+        preconditioner.rexp_updater, {'power': 2}, {
+            'b2': b2,
+            'initial_accumulator_value': initial_accumulator_value,
+            'debias': debias
+        }, {
+            'eps': eps,
+            'eps_root': eps_root,
+        })
+
+    params = jax.random.uniform(jax.random.PRNGKey(0), (10, 10))
+
+    init = self.variant(decon_yogi.init)
+    update = self.variant(decon_yogi.update)
+
+    actual_state = actual_yogi.init(params)
+    decon_state = init(params)
+
+    for i in range(5):
+      grads = jax.random.uniform(jax.random.PRNGKey(i + 1), (10, 10))
+
+      actual_updates, actual_state = actual_yogi.update(grads, actual_state)
+      decon_updates, decon_state = update(grads, decon_state)
+
+      actual_params = optax.apply_updates(params, actual_updates)
+      decon_params = optax.apply_updates(params, decon_updates)
+
+      chex.assert_trees_all_close(actual_params, decon_params, atol=1e-4)
 
 if __name__ == '__main__':
   absltest.main()

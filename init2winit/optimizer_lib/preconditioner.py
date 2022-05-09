@@ -54,26 +54,26 @@ import optax
 
 
 def preconditioner(
-    grad_transformer,
+    variable_creator,
     accumulator,
     updater,
-    moment_creator_args,
+    variable_creator_args,
     accumulator_args,
     updater_args,
 ) -> optax.GradientTransformation:
   """Generic precondition update function."""
 
-  grad_transformer = grad_transformer(**moment_creator_args)
+  variable_creator = variable_creator(**variable_creator_args)
   accumulator = accumulator(**accumulator_args)
   updater = updater(**updater_args)
 
   def init(params: optax.Params) -> optax.OptState:
     """`init` function."""
-    grads_state = grad_transformer.init(params)
+    grads_state = variable_creator.init(params)
 
     # NOTE(dsuo): assumes params and updates have the same shape.
     updates = {'updates': params, 'variables': {}}
-    grads, _ = grad_transformer.update(updates, grads_state, params)
+    grads, _ = variable_creator.update(updates, grads_state, params)
 
     # NOTE(dsuo): assume accumulator only needs `gradients`.
     accumulator_state = accumulator.init(grads['variables'])
@@ -90,7 +90,7 @@ def preconditioner(
         'output': None
     }
     new_state = []
-    for s, transform in zip(state, [grad_transformer, accumulator, updater]):
+    for s, transform in zip(state, [variable_creator, accumulator, updater]):
       updates, new_s = transform.update(updates, s, params)
       new_state.append(new_s)
 
@@ -161,6 +161,35 @@ def ema_accumulator(decay: float = 0.999,
   return optax.GradientTransformation(init, update)
 
 
+# TODO(dsuo): from namanagarwal@: revisit `initial_accumulator_value`.
+#             `tensorflow` defaults to this value, but perhaps should consider
+#             0 or 1e-8 to match rms-type accumulators.
+def yogi_accumulator(b2: float = 0.999,
+                     initial_accumulator_value: float = 1e-6,
+                     debias: bool = False) -> optax.GradientTransformation:
+  """Create yogi accumulator."""
+
+  def init(params: optax.Params) -> optax.OptState:
+    return (jax.tree_map(lambda p: jnp.full_like(p, initial_accumulator_value),
+                         params), jnp.zeros([], dtype=jnp.int32))
+
+  def update(updates, state, params=None):
+    del params
+    moments, count = state
+
+    update_fn = lambda g, v: v - (1 - b2) * jnp.sign(v - g) * g
+    moments = jax.tree_map(update_fn, updates['variables'], moments)
+
+    count = count + jnp.array(1, dtype=jnp.int32)
+    beta = jnp.array(1, dtype=jnp.float32) - b2**count
+    updates['moments'] = moments if not debias else jax.tree_map(
+        lambda t: t / beta.astype(t.dtype), moments)
+
+    return updates, (moments, count)
+
+  return optax.GradientTransformation(init, update)
+
+
 def rexp_updater(
     exponent: float = 0.5,
     eps: float = 1e-8,
@@ -169,6 +198,7 @@ def rexp_updater(
     use_accumulated_gradient: bool = False,
 ) -> optax.GradientTransformation:
   """Apply an update function."""
+
   def init(params: optax.Params) -> optax.OptState:
     del params
     return None
