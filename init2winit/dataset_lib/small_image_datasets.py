@@ -116,12 +116,14 @@ def _eval_batches(images,
     data_dict = {
         'inputs': inputs,
         'targets': targets,
-        'weights': jnp.ones(per_host_batch_size, dtype=inputs.dtype),
+        'weights': jnp.ones(inputs.shape[0], dtype=inputs.dtype),
     }
-    if valid_example_keys is not None:
+    if valid_example_keys is not None and len(valid_example_keys) == len(
+        images):
       data_dict['example_key'] = valid_example_keys[idx:idx +
                                                     per_host_batch_size]
-    yield data_utils.maybe_pad_batch(data_dict, per_host_batch_size)
+    data_dict = data_utils.maybe_pad_batch(data_dict, per_host_batch_size)
+    yield data_dict
 
 
 def _shard_by_host_id(array):
