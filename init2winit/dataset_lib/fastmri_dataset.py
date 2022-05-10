@@ -67,7 +67,7 @@ def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
   num_cols_float = tf.cast(num_cols, dtype=tf.float32)
 
   # choose_acceleration
-  center_fraction = tf.convert_to_tensor(0.8, dtype=tf.float32)
+  center_fraction = tf.convert_to_tensor(0.08, dtype=tf.float32)
   acceleration = tf.convert_to_tensor(4.0, dtype=tf.float32)
 
   num_low_frequencies = tf.cast(
