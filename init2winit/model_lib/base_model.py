@@ -51,6 +51,7 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
   targets = batch['targets']
 
   if apply_one_hot_in_loss:
+    no_one_hot_targets = batch['targets']
     targets = one_hot(batch['targets'], logits.shape[-1])
 
   # map the dict values (which are functions) to function(targets, logits)
@@ -62,7 +63,11 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
   # We don't use CLU's `mask` argument here, we handle it ourselves through
   # `weights`.
   return metrics_bundle.gather_from_model_output(
-      logits=logits, targets=targets, weights=weights, axis_name='batch')
+      logits=logits,
+      targets=targets,
+      no_one_hot_targets=no_one_hot_targets,
+      weights=weights,
+      axis_name='batch')
 
 
 def _predict_batch(flax_module,
@@ -207,12 +212,17 @@ class BaseModel(object):
     weights = batch.get('weights')
     targets = batch['targets']
     if self.dataset_meta_data['apply_one_hot_in_loss']:
+      no_one_hot_targets = batch['targets']
       targets = one_hot(targets, logits.shape[-1])
     # Optionally apply label smoothing.
     if self.hps.get('label_smoothing') is not None:
       targets = model_utils.apply_label_smoothing(
           targets, self.hps.get('label_smoothing'))
-    total_loss = self.loss_fn(logits, targets, weights)
+    total_loss = self.loss_fn(
+        logits=logits,
+        targets=targets,
+        no_one_hot_targets=no_one_hot_targets,
+        weights=weights)
 
     if self.hps.get('l2_decay_factor'):
       l2_loss = model_utils.l2_regularization(params,

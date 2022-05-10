@@ -233,6 +233,30 @@ def weighted_mean_absolute_error(logits, targets, weights=None):
   return jnp.sum(unnormalized_mean_absolute_error) / normalization
 
 
+def pg19_softmax_cross_entropy_error(logits,
+                                     targets,
+                                     no_one_hot_targets,
+                                     weights=None):
+  """Calculates a normalized softmax cross entropy error.
+
+  Used for training a local attention transformer on a PG19 dataset.
+
+  Args:
+    logits: [batch, length, num_classes] float array.
+    targets: one hot vector of shape [batch, ..., num_classes].
+    no_one_hot_targets: vector of shape [batch, ...,].
+    weights: None or array of shape (batch,)
+
+  Returns:
+    Normalized softmax cross entropy error.
+  """
+  x_entropy = optax.softmax_cross_entropy(logits, targets).mean()
+  if weights is None:
+    weights = jnp.not_equal(no_one_hot_targets, 0).astype(jnp.float32)
+  loss = jnp.sum(x_entropy * weights) / jnp.sum(weights)
+  return loss
+
+
 # TODO(cheolmin): add mean_squared_error
 _ALL_LOSS_FUNCTIONS = {
     'sigmoid_mean_squared_error': (sigmoid_mean_squared_error, jax.nn.sigmoid),
@@ -241,6 +265,7 @@ _ALL_LOSS_FUNCTIONS = {
     'cross_entropy': (weighted_cross_entropy, jax.nn.softmax),
     'ctc': (ctc_loss, jax.nn.log_softmax),
     'mean_absolute_error': (weighted_mean_absolute_error, None),
+    'pg19_softmax_cross_entropy': (pg19_softmax_cross_entropy_error, None),
 }
 
 
