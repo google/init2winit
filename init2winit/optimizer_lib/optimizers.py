@@ -157,6 +157,11 @@ def get_optimizer(hps, model=None):
         b2=hps.opt_hparams['beta2'],
         eps=hps.opt_hparams['epsilon'],
         weight_decay=weight_decay)
+  elif hps.optimizer == 'adafactor':
+    opt_init, opt_update = optax.inject_hyperparams(optax.adafactor)(
+        learning_rate=0.0,  # Manually injected on each train step.
+        decay_rate=hps.opt_hparams['adafactor_decay_rate'],
+        clipping_threshold=hps.opt_hparams['clipping_threshold'])
   elif hps.optimizer == 'hessian_free':
     if model is None:
       raise ValueError(
