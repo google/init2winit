@@ -29,6 +29,14 @@ import numpy as np
 from tensorflow.io import gfile
 
 
+def qvalue(array):
+  return jnp.linalg.norm(array.reshape(-1)) ** 2 / array.size
+
+
+def tag_qvalue(module, activations, name):
+  module.sow('qvalues', name, qvalue(activations))
+
+
 def tag_residual_activations(module,
                              identity_path,
                              other_path,
@@ -47,10 +55,10 @@ def tag_residual_activations(module,
     other_path: The F(x) part.
     name: Used to further specify a named key in the sown path.
   """
-  res_norm = jnp.linalg.norm(identity_path.reshape(-1))
-  add_norm = jnp.linalg.norm(other_path.reshape(-1))
+  res_norm = qvalue(identity_path)
+  add_norm = qvalue(other_path)
   module.sow(
-      'residual_activations',
+      'qvalues',
       name,
       jnp.array((res_norm, add_norm)),
       reduce_fn=lambda x, y: y)

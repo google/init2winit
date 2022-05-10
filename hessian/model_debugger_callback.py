@@ -88,7 +88,6 @@ class ModelDebugCallback:
     del optimizer
     del batch_stats
     del optimizer_state
-    del callback_config  # In future CL's we will use this.
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
     # copy batch_stats as we close over it, and it gets modified.
     self.dataset = dataset
@@ -97,7 +96,9 @@ class ModelDebugCallback:
     logger = utils.MetricLogger(pytree_path=pytree_path)
 
     get_act_stats_fn = model_debugger.create_forward_pass_stats_fn(
-        model.flax_module, capture_activation_norms=True)
+        model.flax_module,
+        capture_activation_norms=True,
+        sown_collection_names=callback_config.get('sown_collection_names'))
 
     debugger = model_debugger.ModelDebugger(
         use_pmap=True, forward_pass=get_act_stats_fn, metrics_logger=logger)

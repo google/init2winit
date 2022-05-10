@@ -24,9 +24,9 @@ import tempfile
 from absl.testing import absltest
 import flax
 from flax import linen as nn
-import checkpoint as checkpoint  # local file import
-import hessian.model_debugger as model_debugger  # local file import
-import utils as utils  # local file import
+from init2winit import checkpoint
+from init2winit import utils
+from init2winit.hessian import model_debugger
 import jax.numpy as jnp
 import jax.random
 import numpy as np
@@ -143,7 +143,7 @@ class ModelDebuggerTest(absltest.TestCase):
 
     get_act_stats_fn = model_debugger.create_forward_pass_stats_fn(
         lin_model, capture_activation_norms=True,
-        sown_collection_names=['residual_activations'])
+        sown_collection_names=['qvalues'])
 
     debugger = model_debugger.ModelDebugger(
         forward_pass=get_act_stats_fn,
@@ -153,9 +153,10 @@ class ModelDebuggerTest(absltest.TestCase):
 
     expected_output = np.dot(xs[0], params['Dense_0']['kernel'])
     expected_q_value = np.linalg.norm(expected_output)**2 / expected_output.size
-    expected_output_norm = np.linalg.norm(expected_output)
-    expected_input_norm = float(np.linalg.norm(xs))
-    expected_keys = ['residual_activations', 'intermediate_norms', 'step',
+    expected_output_norm = np.linalg.norm(
+        expected_output) ** 2 / expected_output.size
+    expected_input_norm = float(np.linalg.norm(xs)) ** 2 / xs.size
+    expected_keys = ['qvalues', 'intermediate_norms', 'step',
                      'param_norms_sql2', 'global_param_norm_sql2']
 
     self.assertEqual(set(expected_keys), set(metrics.keys()))
@@ -166,10 +167,10 @@ class ModelDebuggerTest(absltest.TestCase):
         places=5)
     self.assertAlmostEqual(
         expected_input_norm,
-        float(metrics['residual_activations']['residual'][0]), places=5)
+        float(metrics['qvalues']['residual'][0]), places=5)
     self.assertAlmostEqual(
         expected_output_norm,
-        float(metrics['residual_activations']['residual'][1]), places=5)
+        float(metrics['qvalues']['residual'][1]), places=5)
 
   def test_model_debugger_pmap(self):
     """Test training for two epochs on MNIST with a small model."""
