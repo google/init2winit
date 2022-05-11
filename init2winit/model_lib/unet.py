@@ -51,11 +51,22 @@ opt_hparams = {
 
 # NOTE(dsuo): This lives here because decay_events / decay_factors is too large
 # to pass via the config file.
-num_train_steps = 217137
+_FASTMRI_TRAIN_SIZE = 34742
+_FASTMRI_VALID_SIZE = 7135
+
+batch_size = 8
+num_epochs = 50
+steps_per_epoch = int(_FASTMRI_TRAIN_SIZE / batch_size)
+num_train_steps = num_epochs * steps_per_epoch
 lr_gamma = 0.1
-lr_step_size = 40
+lr_step_size = 40 * steps_per_epoch
 decay_events = list(range(lr_step_size, num_train_steps, lr_step_size))
 decay_factors = [lr_gamma] * len(decay_events)
+decay_factors = [
+    decay_factor**i
+    for decay_factor, i in zip(decay_factors, range(1,
+                                                    len(decay_events) + 1))
+]
 
 lr_hparams = {
     'schedule': 'piecewise_constant',
@@ -74,7 +85,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         opt_hparams=opt_hparams,
         lr_hparams=lr_hparams,
         l2_decay_factor=None,
-        batch_size=64,
+        batch_size=batch_size,
         rng_seed=-1,
         model_dtype='float32',
         grad_clip=None
