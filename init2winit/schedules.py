@@ -42,6 +42,36 @@ def cosine_schedule(schedule_hparams, max_training_steps):
   return lr_fn
 
 
+# code based on
+# https://github.com/tensorflow/lingvo/blob/master/lingvo/core/schedule.py#L305
+def transformer_schedule(schedule_hparams, max_training_steps):
+  """Computes a reverse sqrt style decay schedule scaled by sqrt of model's encoder dimension.
+
+  lr = base_lr * min((step + 1) / sqrt(warmup_steps**3) , 1/sqrt(step + 1)) *
+  (1/sqrt(enocder_dim))
+  Args:
+    schedule_hparams: Relevant hparams are base_lr, encoder_dim, warmup_steps.
+    max_training_steps: This is ignored (needed to match API of other lr
+      functions).
+
+  Returns:
+    lr_fn: A function mapping global_step to lr.
+  """
+  del max_training_steps
+  _check_schedule_hparams(
+      schedule_hparams, ['schedule', 'warmup_steps', 'base_lr', 'encoder_dim'])
+
+  def lr_fn(t):
+    warmup_steps = schedule_hparams['warmup_steps']
+    model_dim = schedule_hparams['encoder_dim']
+    decay_factor = model_dim**-0.5 * np.minimum((t + 1) * warmup_steps**-1.5,
+                                                (t + 1)**-0.5)
+
+    return schedule_hparams['base_lr'] * decay_factor
+
+  return lr_fn
+
+
 def rsqrt_normalized_decay(schedule_hparams, max_training_steps):
   """Computes a "squashed" reverse sqrt decay schedule.
 
@@ -322,7 +352,8 @@ lr_fn_dict = {
     'mlperf_polynomial': mlperf_polynomial_schedule,
     'compound': compound_schedule,
     'warmup_then_piecewise_constant': warmup_then_piecewise_constant_schedule,
-    'rsqrt_normalized_decay': rsqrt_normalized_decay
+    'rsqrt_normalized_decay': rsqrt_normalized_decay,
+    'transformer_schedule': transformer_schedule,
 }
 
 
