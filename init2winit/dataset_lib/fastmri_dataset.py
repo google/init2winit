@@ -134,7 +134,13 @@ def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
   norm_target = (target - mean) / std
   target = tf.clip_by_value(norm_target, -6, 6)
 
-  return {'inputs': image, 'targets': target, 'volume_max': volume_max}
+  return {
+      'inputs': image,
+      'targets': target,
+      'mean': mean,
+      'std': std,
+      'volume_max': volume_max
+  }
 
 
 def _h5_to_examples(path):

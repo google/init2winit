@@ -374,7 +374,7 @@ def structural_similarity(im1,
   return jnp.mean(s.at[pad:-pad, pad:-pad].get())
 
 
-def ssim(logits, targets, weights=None, volume_max=None):
+def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
   """Computes example-wise structural similarity for a batch.
 
   NOTE(dsuo): we use the same (default) arguments to `structural_similarity`
@@ -383,7 +383,9 @@ def ssim(logits, targets, weights=None, volume_max=None):
   Args:
    logits: (batch,) + input.shape float array.
    targets: (batch,) + input.shape float array.
-   weights: None or array of shape (batch,)
+   weights: None or array of shape (batch,).
+   mean: (batch,) mean of original images.
+   std: (batch,) std of original images.
    volume_max: (batch,) of the volume max for the volumes each example came
     from.
 
@@ -391,8 +393,18 @@ def ssim(logits, targets, weights=None, volume_max=None):
     Structural similarity computed per example, shape [batch, ...].
   """
   if volume_max is None:
-    volume_max = np.zeros(logits.shape[0])
+    volume_max = jnp.zeros(logits.shape[0])
 
+  if mean is None:
+    mean = jnp.zeros(logits.shape[0])
+
+  if std is None:
+    std = jnp.ones(logits.shape[0])
+
+  mean = mean.reshape((-1,) + (1,) * (len(logits.shape) - 1))
+  std = std.reshape((-1,) + (1,) * (len(logits.shape) - 1))
+  logits = logits * std - mean
+  targets = targets * std - mean
   ssims = jax.vmap(structural_similarity)(logits, targets, volume_max)
 
   if weights is not None:
