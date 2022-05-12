@@ -137,6 +137,7 @@ class InitializersTest(parameterized.TestCase):
     init_hps.update(model_hps)
     loss_name = 'cross_entropy'
     loss_fn = losses.get_loss_fn(loss_name)
+
     new_params = sparse_init.sparse_init(
         loss_fn=loss_fn,
         flax_module=flax_module,
@@ -148,10 +149,10 @@ class InitializersTest(parameterized.TestCase):
 
     # Check new params are sparse
     for key in new_params:
-      num_units = new_params[key]['kernel'].shape[0]
-      self.assertEqual(
+      num_units_in, num_units_out = new_params[key]['kernel'].shape
+      self.assertLess(
           jnp.count_nonzero(new_params[key]['kernel']),
-          num_units * non_zero_connection_weights)
+          (num_units_in + num_units_out) * non_zero_connection_weights)
       self.assertEqual(jnp.count_nonzero(new_params[key]['bias']), 0)
 
 
