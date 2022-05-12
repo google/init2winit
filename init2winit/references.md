@@ -35,6 +35,28 @@
 }
 ```
 
+### Graph network
+```
+@article{graphnetwork,
+title = {Relational inductive biases, deep learning, and graph networks},
+author  = {Peter Battaglia and Jessica Blake Chandler Hamrick and Victor Bapst and Alvaro Sanchez and Vinicius Zambaldi and Mateusz Malinowski and Andrea Tacchetti and David Raposo and Adam Santoro and Ryan Faulkner and Caglar Gulcehre and Francis Song and Andy Ballard and Justin Gilmer and George E. Dahl and Ashish Vaswani and Kelsey Allen and Charles Nash and Victoria Jayne Langston and Chris Dyer and Nicolas Heess and Daan Wierstra and Pushmeet Kohli and Matt Botvinick and Oriol Vinyals and Yujia Li and Razvan Pascanu},
+year  = {2018},
+URL = {https://arxiv.org/pdf/1806.01261.pdf},
+journal = {arXiv}
+}
+```
+
+```
+@inproceedings{
+xu2018how,
+title={How Powerful are Graph Neural Networks?},
+author={Keyulu Xu and Weihua Hu and Jure Leskovec and Stefanie Jegelka},
+booktitle={International Conference on Learning Representations},
+year={2019},
+url={https://openreview.net/forum?id=ryGs6iA5Km},
+}
+```
+
 ### ogbg_molpcba
 ```
 @inproceedings{ogbg_molpcba,

@@ -15,14 +15,15 @@
 
 """Graph neural network model.
 
-Implements a Graph Isomorphism Network (GIN) (https://arxiv.org/abs/1810.00826)
-with edge features, also known as GINE (https://arxiv.org/abs/1905.12265).
-The model replicates the GIN entry for the ogbg-molcpba benchmark
-(https://ogb.stanford.edu/docs/leader_graphprop/).
+Implements a basic GraphNetwork (Battaglia et al., 2018) with explicit node,
+edge, and global state updates using a fully connected neural network as
+described in https://arxiv.org/abs/1806.01261. The input node and edge features
+are encoded using a linear layer.
 
-TODO(mbadura): Add more config to make this closer to the original paper. Enable
-not using edges and globals during the message passing steps. Add a possible
-epsilon parameter for adding weights of the node itself.
+On the OGBG leaderboard:
+https://ogb.stanford.edu/docs/leader_graphprop/#ogbg-molpcba, the model is the
+closest to the GIN+Virtual Node (Xu et al., 2018) model, and it reaches
+equivalent performance on the ogbg-molpcba dataset.
 """
 from typing import Tuple
 
@@ -129,8 +130,7 @@ class GNN(nn.Module):
       graph = net(graph)
 
     # Map globals to represent the final result
-    decoder = jraph.GraphMapFeatures(
-        embed_global_fn=nn.Dense(self.num_outputs))
+    decoder = jraph.GraphMapFeatures(embed_global_fn=nn.Dense(self.num_outputs))
     graph = decoder(graph)
 
     return graph.globals
