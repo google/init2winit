@@ -43,6 +43,30 @@ def _bias_correction(moment, decay, count):
   return jax.tree_map(lambda t: t / beta.astype(t.dtype), moment)
 
 
+def _bias_corrected_decay(decay, count):
+  """Incorporates bias correction into decay.
+
+  Please see section 7.1 in https://arxiv.org/pdf/1804.04235.pdf for the
+  derivation of the formulas below. With bias-corrected decay, we can simply
+  do
+
+  m_{t} = decay1 * m_{t-1} + (1 - decay1) * g
+  v_{t} = decay2 * v_{t-1} + (1 - decay2) * g ^ 2
+
+  without further bias correction.
+
+  Args:
+    decay: the raw decay. As t -> infinity, bias corrected decay converges to
+      this value.
+    count: current step, 0-based.
+
+  Returns:
+    Bias corrected decay.
+  """
+  t = count.astype(jnp.float32) + 1.
+  return decay * (1. - jnp.power(decay, t - 1.)) / (1. - jnp.power(decay, t))
+
+
 def scale_by_learning_rate(learning_rate, flip_sign=True):
   m = -1 if flip_sign else 1
   if callable(learning_rate):
@@ -305,7 +329,8 @@ def scale_by_adam(
     b2: float = 0.999,
     eps: float = 1e-8,
     eps_root: float = 0.0,
-    debias: bool = True) -> optax.GradientTransformation:
+    debias: bool = True,
+    use_decay_bias_correction: bool = False) -> optax.GradientTransformation:
   """Rescale updates according to the Adam algorithm.
 
   Args:
@@ -314,7 +339,9 @@ def scale_by_adam(
     eps: term added to the denominator to improve numerical stability.
     eps_root: term added to the denominator inside the square-root to improve
       numerical stability when backpropagating gradients through the rescaling.
-    debias: whether to use bias correction.
+    debias: whether to use moment bias correction.
+    use_decay_bias_correction: whether to use adafactor style decay bias
+      correction.
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -326,14 +353,113 @@ def scale_by_adam(
 
   def update_fn(updates, state, params=None):
     del params
-    mu = _update_moment(updates, state.mu, b1, 1)
-    nu = _update_moment(updates, state.nu, b2, 2)
+
+    b1_hat = b1
+    b2_hat = b2
+
+    if use_decay_bias_correction:
+      if debias:
+        raise ValueError('Adam error: decay bias correction and moment bias'
+                         'correction cannot be combined.')
+
+      b1_hat = _bias_corrected_decay(b1, state.count)
+      b2_hat = _bias_corrected_decay(b2, state.count)
+
+    mu = _update_moment(updates, state.mu, b1_hat, 1)
+    nu = _update_moment(updates, state.nu, b2_hat, 2)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     mu_hat = mu if not debias else _bias_correction(mu, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
     updates = jax.tree_multimap(
         lambda m, v: m / (jnp.sqrt(v + eps_root) + eps), mu_hat, nu_hat)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def _sanitize_values(array, replacement=0.0):
+  """Sanitizes NaN and Infinity values."""
+  return jnp.nan_to_num(
+      array, nan=replacement, posinf=replacement, neginf=replacement)
+
+
+def sanitize_values(replacement=0.0):
+  """Sanitizes updates by replacing NaNs and Infinity values with zeros.
+
+  Args:
+    replacement: value to replace NaNs and Infinity.
+
+  Returns:
+    An (init_fn, update_fn) tuple.0
+  """
+
+  def init_fn(params):
+    del params
+    return
+
+  def update_fn(updates, state, params=None):
+    del params
+
+    updates = jax.tree_map(lambda x: _sanitize_values(x, replacement), updates)
+    return updates, state
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def _reduce_mean(array):
+  num_elements = array.size
+  if num_elements > 1e8:
+    # When x is too large, simple jnp.mean() can result in nan or inf values.
+    array_sum = jnp.sum(array, axis=-1)
+    array_sum = jnp.sum(array_sum)
+    return array_sum / jnp.array(num_elements, dtype=array_sum.dtype)
+  else:
+    return jnp.mean(array)
+
+
+def _reduce_rms(array):
+  """Computes the RMS of `array` (in a numerically stable way).
+
+  Args:
+    array: Input array.
+
+  Returns:
+    The root mean square of the input array as a scalar array.
+  """
+  sq = jnp.square(array)
+  sq_mean = _reduce_mean(sq)
+  return jnp.sqrt(sq_mean)
+
+
+def _clip_update(update, clip_threshold):
+  mean_update = _sanitize_values(_reduce_rms(update), 1.0)
+  clip_threshold = jnp.array(clip_threshold, dtype=update.dtype)
+  denom = jnp.maximum(1.0, mean_update / clip_threshold)
+
+  return update / denom
+
+
+def clip_updates(clip_threshold=1.0):
+  """Implemented update capping as described in adafactor paper.
+
+  http://proceedings.mlr.press/v80/shazeer18a/shazeer18a.pdf
+
+  Args:
+    clip_threshold: upper threshold beyond which we scale updates.
+
+  Returns:
+    An (init_fn, update_fn) tuple.0
+  """
+
+  def init_fn(params):
+    del params
+    return
+
+  def update_fn(updates, state, params=None):
+    del params
+
+    updates = jax.tree_map(lambda x: _clip_update(x, clip_threshold), updates)
+    return updates, state
 
   return optax.GradientTransformation(init_fn, update_fn)
 
@@ -735,3 +861,32 @@ def adafactor(
   # In gradient "descent" we follow the negative gradient.
   tx.append(optax.scale(-1))
   return optax.chain(*tx)
+
+
+class Polyak_AveragingState(NamedTuple):
+  """State for Polyak Averaging."""
+  ema: optax.Updates
+
+
+def polyak_averaging(decay: float = 0.999) -> optax.GradientTransformation:
+  """Preconditions updates according to the RMS Preconditioner from Adam.
+
+  References:
+    [Polyak, Juditsky 1992] -
+    https://epubs.siam.org/doi/abs/10.1137/0330046?journalCode=sjcodc
+
+  Args:
+    decay: decay rate for exponentially weighted average of moments of params.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  def init_fn(params):
+    return Polyak_AveragingState(ema=jax.tree_map(jnp.zeros_like, params))
+
+  def update_fn(updates, state, params):
+    new_ema = _update_moment(params, state.ema, decay, 1)
+    return updates, Polyak_AveragingState(ema=new_ema)
+
+  return optax.GradientTransformation(init_fn, update_fn)

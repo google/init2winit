@@ -25,13 +25,16 @@ import functools
 from typing import Any, Callable, Dict, List, Union
 
 import flax
+from init2winit.optimizer_lib.transform import clip_updates
 from init2winit.optimizer_lib.transform import first_moment_ema
 from init2winit.optimizer_lib.transform import nesterov
+from init2winit.optimizer_lib.transform import polyak_averaging
 from init2winit.optimizer_lib.transform import polyak_hb
 from init2winit.optimizer_lib.transform import precondition_by_amsgrad
 from init2winit.optimizer_lib.transform import precondition_by_layered_adaptive_rms
 from init2winit.optimizer_lib.transform import precondition_by_rms
 from init2winit.optimizer_lib.transform import precondition_by_yogi
+from init2winit.optimizer_lib.transform import sanitize_values
 from init2winit.optimizer_lib.transform import scale_by_adam
 from init2winit.optimizer_lib.transform import scale_by_amsgrad
 from init2winit.optimizer_lib.transform import scale_by_learning_rate
@@ -66,7 +69,10 @@ _preconditioners = {
 }
 
 _miscellaneous = {
-    'add_decayed_weights': optax.add_decayed_weights
+    'add_decayed_weights': optax.add_decayed_weights,
+    'polyak_averaging': polyak_averaging,
+    'clip_updates': clip_updates,
+    'sanitize_values': sanitize_values
 }
 
 
