@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Provides op for tokenizing a dataset.
+"""Sentence Piece Tokenizer and ops for tokenizing / de-tokenizing a dataset.
 
 forked from
 https://github.com/google/flax/blob/b60f7f45b90f8fc42a88b1639c9cc88a40b298d3/examples/lm1b/tokenizer.py

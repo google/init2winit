@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Union
 
 from absl import logging
 from clu import deterministic_data
-from init2winit.dataset_lib import lm1b_tokenizer
+from init2winit.dataset_lib import spm_tokenizer
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
@@ -332,15 +332,15 @@ def get_lm1b_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
   eval_data = get_raw_dataset(eval_ds_builder, hps.eval_split)
 
   # Tokenize data.
-  sp_tokenizer = lm1b_tokenizer.load_or_train_tokenizer(
+  sp_tokenizer = spm_tokenizer.load_or_train_tokenizer(
       train_data,
       vocab_path=vocab_path,
       vocab_size=hps.vocab_size,
       max_corpus_chars=hps.max_corpus_chars)
   train_data = train_data.map(
-      lm1b_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
+      spm_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
   eval_data = eval_data.map(
-      lm1b_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
+      spm_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
 
   train_ds = preprocess_data(
       train_data,
