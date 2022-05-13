@@ -57,6 +57,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     dropout_rate=0.0,
     grad_clip=None,
     activation_function='relu',
+    extra_norm_on_residual=False,
 ))
 
 
@@ -80,6 +81,7 @@ class PreActResidualBlock(nn.Module):
   bn_relu_conv: bool = True
   use_bn: bool = True
   activation_function: str = 'relu'
+  extra_norm_on_residual: bool = False
 
   @nn.compact
   def __call__(self, x, train):
@@ -123,6 +125,9 @@ class PreActResidualBlock(nn.Module):
     y = _bn_nonlin(y, 'bn3')
     y = conv(self.filters * 4, (1, 1), name='conv3')(y)
 
+    if self.extra_norm_on_residual:
+      return maybe_normalize(name='extra')(
+          y + residual, use_running_average=not train)
     return y + residual
 
 
@@ -140,6 +145,7 @@ class ResidualBlock(nn.Module):
   use_bn: bool = True
   bn_relu_conv: bool = True  # Unused.
   activation_function: str = 'relu'
+  extra_norm_on_residual: bool = False
 
   @nn.compact
   def __call__(self, x, train):
@@ -178,7 +184,10 @@ class ResidualBlock(nn.Module):
 
     y = maybe_normalize(name='bn3', scale_init=nn.initializers.zeros)(
         y, use_running_average=not train)
+
     y = model_utils.ACTIVATIONS[self.activation_function](residual + y)
+    if self.extra_norm_on_residual:
+      return maybe_normalize(name='extra')(y, use_running_average=not train)
     return y
 
 
@@ -199,6 +208,7 @@ class ResNet(nn.Module):
   use_bn: bool = True
   dropout_rate: float = 0.0
   activation_function: str = 'relu'
+  extra_norm_on_residual: bool = False
 
   @nn.compact
   def __call__(self, x, train):
@@ -244,7 +254,9 @@ class ResNet(nn.Module):
             data_format=self.data_format,
             bn_relu_conv=self.bn_relu_conv,
             use_bn=self.use_bn,
-            activation_function=self.activation_function)(x, train=train)
+            activation_function=self.activation_function,
+            extra_norm_on_residual=self.extra_norm_on_residual,
+            )(x, train=train)
     x = jnp.mean(x, axis=(1, 2))
     if self.dropout_rate > 0.0:
       x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
@@ -285,4 +297,5 @@ class ResnetModel(base_model.BaseModel):
         bn_relu_conv=self.hps.bn_relu_conv,
         use_bn=self.hps.use_bn,
         dropout_rate=self.hps.dropout_rate,
-        activation_function=self.hps.activation_function)
+        activation_function=self.hps.activation_function,
+        extra_norm_on_residual=self.hps.extra_norm_on_residual)
