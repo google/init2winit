@@ -97,6 +97,39 @@ def rsqrt_normalized_decay(schedule_hparams, max_training_steps):
   return lr_fn
 
 
+def t2t_rsqrt_normalized_decay(schedule_hparams, max_training_steps):
+  """Computes rsqrt_normalized_decay according to T2T implementation.
+
+  It's an implemetation of T2T learning_rate_schedule function
+  with 'constant*rsqrt_normalized_decay' schedule.
+
+  https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/utils/learning_rate.py
+
+  lr = base_lr * (sqrt(defer_steps) / sqrt(max(step, defer_steps))
+
+  Used in training of a local attention transformer on PG19 dataset.
+
+  Args:
+    schedule_hparams: Relevant hparams are base_lr, defer_steps.
+    max_training_steps: This is ignored (needed to match API of other lr
+      functions).
+
+  Returns:
+    lr_fn: A function mapping global_step to lr.
+  """
+  del max_training_steps
+  _check_schedule_hparams(schedule_hparams,
+                          ['schedule', 'base_lr', 'defer_steps'])
+
+  def lr_fn(step):
+    scale = np.sqrt(schedule_hparams['defer_steps'])
+    scale /= np.sqrt(np.maximum(step, schedule_hparams['defer_steps'])).astype(
+        np.float32)
+    return schedule_hparams['base_lr'] * scale
+
+  return lr_fn
+
+
 def polynomial_schedule(schedule_hparams, max_training_steps):
   """Same behavior as tf.train.polynomial_decay.
 
@@ -353,6 +386,7 @@ lr_fn_dict = {
     'compound': compound_schedule,
     'warmup_then_piecewise_constant': warmup_then_piecewise_constant_schedule,
     'rsqrt_normalized_decay': rsqrt_normalized_decay,
+    't2t_rsqrt_normalized_decay': t2t_rsqrt_normalized_decay,
     'transformer_schedule': transformer_schedule,
 }
 

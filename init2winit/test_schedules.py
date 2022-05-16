@@ -144,6 +144,30 @@ class LearningRateTest(absltest.TestCase):
     for step in range(max_training_steps):
       self.assertAlmostEqual(lr_fn(step), expected_lrs[step])
 
+  def test_t2t_rsqrt_normalized_decay(self):
+    """Test t2t_rsqrt_normalized_decay schedule works correctly."""
+    hps = config_dict.ConfigDict(
+        dict(
+            lr_hparams={
+                'schedule': 't2t_rsqrt_normalized_decay',
+                'base_lr': 0.01,
+                'defer_steps': 10,
+            }))
+    expected_lrs = [
+        0.009999999776482582, 0.009999999776482582, 0.009999999776482582,
+        0.009999999776482582, 0.009999999776482582, 0.009999999776482582,
+        0.009999999776482582, 0.009999999776482582, 0.009999999776482582,
+        0.009999999776482582, 0.009999999776482582, 0.009534625336527824,
+        0.009128709323704243, 0.008770580403506756, 0.008451541885733604,
+        0.00816496554762125, 0.007905693724751472, 0.0076696500182151794,
+        0.007453559897840023, 0.007254762575030327
+    ]
+
+    max_training_steps = 20
+    lr_fn = schedules.get_schedule_fn(hps.lr_hparams, max_training_steps)
+    for step, expected_lr in zip(range(max_training_steps), expected_lrs):
+      self.assertAlmostEqual(lr_fn(step), expected_lr)
+
   def test_raises(self):
     """Test that an exception is raised with extra hparams."""
     good_hps = config_dict.ConfigDict(dict(
