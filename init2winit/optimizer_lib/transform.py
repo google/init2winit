@@ -15,7 +15,7 @@
 
 """Transforms."""
 import dataclasses
-from typing import Any, NamedTuple, Optional, List, Tuple, Callable, Union
+from typing import Any, Callable, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import chex
 import jax
@@ -610,6 +610,9 @@ def precondition_by_layered_adaptive_rms(
   return optax.GradientTransformation(init_fn, update_fn)
 
 
+Shape = Sequence[int]
+
+
 def _decay_rate_pow(i: int, exponent: float = 0.8) -> float:
   """Second-order moment decay schedule."""
   t = jnp.array(i, jnp.float32) + 1.0
@@ -617,7 +620,7 @@ def _decay_rate_pow(i: int, exponent: float = 0.8) -> float:
 
 
 def _factored_dims(
-    shape: base.Shape,
+    shape: Shape,
     factored: bool,
     min_dim_size_to_factor: int
 ) -> Optional[Tuple[int, int]]:
@@ -650,7 +653,6 @@ class _UpdateResult:
   v_row: chex.Array  # used for factored params.
   v_col: chex.Array  # used for factored params.
   v: chex.Array  # used for params where factoring is skipped.
-  factored_dims: Optional[Tuple[int]]  # factored dims.
 
 
 class FactoredState(NamedTuple):
@@ -659,16 +661,14 @@ class FactoredState(NamedTuple):
   v_row: chex.ArrayTree  # Tree of factored params.
   v_col: chex.ArrayTree  # Tree of factored params.
   v: chex.ArrayTree  # Tree for params where factoring is skipped.
-  factored_dims: chex.ArrayTree  # Tree of factored dims.
 
 
-def scale_by_factored_rms(
-    factored: bool = True,
-    decay_rate: float = 0.8,
-    step_offset: int = 0,
-    min_dim_size_to_factor: int = 128,
-    epsilon: float = 1e-30,
-    decay_rate_fn: Callable[[int, float], chex.Array] = _decay_rate_pow):
+def scale_by_factored_rms(decay_rate: float = 0.8,
+                          step_offset: int = 0,
+                          epsilon: float = 1e-30,
+                          decay_rate_fn: Callable[[int, float],
+                                                  chex.Array] = _decay_rate_pow,
+                          factored_dims=None):
   """Scaling by a factored estimate of the gradient rms (as in Adafactor).
 
   This is a so-called "1+epsilon" scaling algorithms, that is extremely memory
@@ -679,12 +679,9 @@ def scale_by_factored_rms(
     [Shazeer et al, 2018](https://arxiv.org/abs/1804.04235)
 
   Args:
-      factored: boolean: whether to use factored second-moment estimates..
       decay_rate: float: controls second-moment exponential decay schedule.
       step_offset: for finetuning, one may set this to the starting step-number
         of the fine tuning phase.
-      min_dim_size_to_factor: only factor accumulator if two array dimensions
-        are at least this size.
       epsilon: Regularization constant for squared gradient.
       decay_rate_fn: A function that accepts the current step, the decay rate
         parameter and controls the schedule for the second momentum. Defaults to
@@ -693,53 +690,49 @@ def scale_by_factored_rms(
         which effectively freezes the second momentum. To prevent this the user
         can opt for a custom schedule that sets an upper bound for the second
         momentum, like in [Zhai et al., 2021](https://arxiv.org/abs/2106.04560).
+      factored_dims: (tuple) parameter factored_dimensions.
 
   Returns:
     the corresponding `GradientTransformation`.
   """
-
   def _to_state(count: chex.Array, result_tree):
     """Maps from a tree of (factored) values to separate trees of values."""
     return FactoredState(
         count=count,
         v_row=jax.tree_map(lambda o: o.v_row, result_tree),
         v_col=jax.tree_map(lambda o: o.v_col, result_tree),
-        v=jax.tree_map(lambda o: o.v, result_tree),
-        factored_dims=jax.tree_map(lambda o: o.factored_dims, result_tree))
+        v=jax.tree_map(lambda o: o.v, result_tree))
 
   def init_fn(params):
     """Initialise the optimiser's state."""
 
-    def _init(param):
+    def _init(param, param_factored_dims):
       shape = param.shape
-      factored_dims = _factored_dims(shape, factored, min_dim_size_to_factor)
-      if factored_dims is not None:
-        d1, d0 = factored_dims
+      if param_factored_dims is not None:
+        d1, d0 = param_factored_dims
         vr_shape = np.delete(shape, d0)
         vc_shape = np.delete(shape, d1)
         return _UpdateResult(
             update=jnp.zeros((1,)),
             v_row=jnp.zeros(vr_shape),
             v_col=jnp.zeros(vc_shape),
-            v=jnp.zeros((1,)),
-            factored_dims=factored_dims)
+            v=jnp.zeros((1,)))
       else:
         return _UpdateResult(
             update=jnp.zeros((1,)),
             v_row=jnp.zeros((1,)),
             v_col=jnp.zeros((1,)),
-            v=jnp.zeros(param.shape),
-            factored_dims=None)
+            v=jnp.zeros(param.shape))
 
-    return _to_state(jnp.zeros([], jnp.int32), jax.tree_map(_init, params))
+    return _to_state(
+        jnp.zeros([], jnp.int32), jax.tree_map(_init, params, factored_dims))
 
   def update_fn(grads, state, params):
     """Apply gradient transformation."""
     if params is None:
-      raise ValueError(base.NO_PARAMS_MSG)
+      raise ValueError(optax.NO_PARAMS_MSG)
 
-    def _update(grad, v_row, v_col, v, factored_dims, param, step):
-      del param
+    def _update(grad, v_row, v_col, v, param_factored_dims, step):
       decay_rate_t = decay_rate_fn(step - step_offset, decay_rate)
 
       # Scaled by factorized second moment statistics.
@@ -747,8 +740,8 @@ def scale_by_factored_rms(
       new_v_col = jnp.zeros((1,))
       new_v = jnp.zeros((1,))
 
-      if factored_dims is not None:
-        d1, d0 = factored_dims
+      if param_factored_dims is not None:
+        d1, d0 = param_factored_dims
         grad_sqr = numerics.abs_sq(grad) + epsilon
         new_v_row = (
             decay_rate_t * v_row +
@@ -769,27 +762,33 @@ def scale_by_factored_rms(
         new_v = decay_rate_t * v + (1. - decay_rate_t) * grad_sqr
         update = grad * (new_v)**-0.5
 
-      return _UpdateResult(update, new_v_row, new_v_col, new_v, factored_dims)
+      return _UpdateResult(update, new_v_row, new_v_col, new_v)
 
     # Transform grad and compute new per-parameter stats.
     output = jax.tree_map(
         lambda *args: _update(*args, state.count),
-        grads, state.v_row, state.v_col, state.v, state.factored_dims, params)
+        grads, state.v_row, state.v_col, state.v, factored_dims)
 
     # Unpack updates / stats and return.
     updates = jax.tree_map(lambda o: o.update, output)
-    return updates, _to_state(utils.safe_int32_increment(state.count), output)
+    return updates, _to_state(optax.safe_int32_increment(state.count), output)
 
-  return base.GradientTransformation(init_fn, update_fn)
+  return optax.GradientTransformation(init_fn, update_fn)
 
 
 ScalarOrSchedule = Union[float, base.Schedule]
 MaskOrFn = Optional[Union[Any, Callable[[base.Params], Any]]]
 
 
+def _scale_by_learning_rate(learning_rate: ScalarOrSchedule, flip_sign=True):
+  m = -1 if flip_sign else 1
+  if callable(learning_rate):
+    return optax.scale_by_schedule(lambda count: m * learning_rate(count))
+  return optax.scale(m * learning_rate)
+
+
 def adafactor(
     learning_rate: Optional[ScalarOrSchedule] = None,
-    min_dim_size_to_factor: int = 128,
     decay_rate: float = 0.8,
     decay_offset: int = 0,
     multiply_by_parameter_scale: float = True,
@@ -798,9 +797,9 @@ def adafactor(
     dtype_momentum: Any = jnp.float32,
     weight_decay_rate: Optional[float] = None,
     eps: float = 1e-30,
-    factored: bool = True,
     weight_decay_mask: MaskOrFn = None,
-    ) -> optax.GradientTransformation:
+    factored_dims=None,
+) -> optax.GradientTransformation:
   """The Adafactor optimiser.
 
   Adafactor is an adaptive learning rate optimiser that focuses on fast
@@ -814,8 +813,6 @@ def adafactor(
       learning_rate: (float) a step size. Note: the natural scale for
         Adafactor's LR is markedly different from Adam, one doesn't use the
         1/sqrt(hidden) correction for this optim with attention-based models.
-      min_dim_size_to_factor: (int) only factor the statistics if two array
-        dimensions have at least this size.
       decay_rate: (float) controls second-moment exponential decay schedule.
       decay_offset: (int) for finetuning, one may set this to the starting
         step number of the finetuning phase.
@@ -827,12 +824,12 @@ def adafactor(
       dtype_momentum: (dtype) dtype of momentum buffers.
       weight_decay_rate: (float) optional rate at which to decay weights.
       eps: (float) regularization constant for root mean squared gradient.
-      factored: (bool) whether to use factored second-moment estimates.
       weight_decay_mask: a tree with same structure as (or a prefix of)
         the params PyTree, or a Callable that returns such a pytree given
         the params/updates. The leaves should be booleans, `True`
         for leaves/subtrees you want to apply the transformation to,
         and `False` for those you want to skip.
+      factored_dims: (tuple) parameter factored_dimensions.
 
   Returns:
     the corresponding `GradientTransformation`.
@@ -843,13 +840,17 @@ def adafactor(
   # by not having to hold a separate estimate for each weight.
   tx = [
       scale_by_factored_rms(
-          factored, decay_rate, decay_offset, min_dim_size_to_factor, eps)]
+          decay_rate,
+          decay_offset,
+          eps,
+          factored_dims=factored_dims)
+  ]
   # This basic rescaling is typically combined with one or more of the following
   # transformation (all can be disabled via adafactor's constructor args).
   if clipping_threshold is not None:
     tx.append(optax.clip_by_block_rms(clipping_threshold))
   if learning_rate is not None:
-    tx.append(scale_by_learning_rate(learning_rate, flip_sign=False))
+    tx.append(_scale_by_learning_rate(learning_rate, flip_sign=False))
   if multiply_by_parameter_scale:
     tx.append(optax.scale_by_param_block_rms())
   if momentum is not None:
