@@ -25,15 +25,15 @@ import jax.numpy as jnp
 import optax
 
 
-class GradTransformTest(parameterized.TestCase):
+class VariableCreatorTest(parameterized.TestCase):
   """Test grad transforms."""
 
   @parameterized.product(
       power=[1, 2, 4, [1, 2], [0, 3]],
       seed=[0, 1],
   )
-  def test_nth_power(self, power, seed):
-    """Test nth_power."""
+  def test_variable_creator(self, power, seed):
+    """Test variable_creator."""
     grads = jax.random.uniform(jax.random.PRNGKey(seed), (10, 10))
     grads = {'updates': grads, 'variables': {}, 'moments': {}, 'output': None}
 
@@ -45,7 +45,7 @@ class GradTransformTest(parameterized.TestCase):
         str(int(o)): jax.tree_map(lambda x: x**o, grads['updates'])  # pylint: disable=cell-var-from-loop
         for o in actual_power
     }
-    nth_grads, _ = preconditioner.nth_power(power).update(grads, None)
+    nth_grads, _ = preconditioner.variable_creator(power).update(grads, None)
 
     chex.assert_trees_all_close(actual_grads, nth_grads['variables'])
 
@@ -62,7 +62,7 @@ class AccumulatorTest(parameterized.TestCase):
     grads = jax.random.uniform(jax.random.PRNGKey(0), (10, 10))
     grads = {'updates': grads, 'variables': {}, 'moments': {}, 'output': None}
 
-    nth_grads = preconditioner.nth_power(power=[1, 2])
+    nth_grads = preconditioner.variable_creator(power=[1, 2])
     accumulator = preconditioner.ema_accumulator(decay, debias)
 
     grads, _ = nth_grads.update(grads, None)
@@ -101,7 +101,7 @@ class PreconditionerTest(parameterized.TestCase):
     actual_rms = transform.precondition_by_rms(
         decay=decay, eps=eps, eps_root=eps_root, debias=debias)
 
-    decon_rms = preconditioner.preconditioner(preconditioner.nth_power,
+    decon_rms = preconditioner.preconditioner(preconditioner.variable_creator,
                                               preconditioner.ema_accumulator,
                                               preconditioner.rexp_updater,
                                               {'power': 2}, {
@@ -151,7 +151,7 @@ class PreconditionerTest(parameterized.TestCase):
         debias=debias)
 
     decon_yogi = preconditioner.preconditioner(
-        preconditioner.nth_power, preconditioner.yogi_accumulator,
+        preconditioner.variable_creator, preconditioner.yogi_accumulator,
         preconditioner.rexp_updater, {'power': 2}, {
             'b2': b2,
             'initial_accumulator_value': initial_accumulator_value,

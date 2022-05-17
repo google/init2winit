@@ -44,36 +44,38 @@ three `optax.GradientTransformation`s adhering to above rules and correctly
 initializes each and forms the `updates` dictionary.
 """
 
+from typing import Callable
 from typing import Optional
 from typing import Tuple
 from typing import Union
 
+import chex
 import jax
 import jax.numpy as jnp
 import optax
 
 
 def preconditioner(
-    variable_creator,
+    var_creator,
     accumulator,
     updater,
-    variable_creator_args,
+    var_creator_args,
     accumulator_args,
     updater_args,
 ) -> optax.GradientTransformation:
   """Generic precondition update function."""
 
-  variable_creator = variable_creator(**variable_creator_args)
+  var_creator = var_creator(**var_creator_args)
   accumulator = accumulator(**accumulator_args)
   updater = updater(**updater_args)
 
   def init(params: optax.Params) -> optax.OptState:
     """`init` function."""
-    grads_state = variable_creator.init(params)
+    grads_state = var_creator.init(params)
 
     # NOTE(dsuo): assumes params and updates have the same shape.
     updates = {'updates': params, 'variables': {}}
-    grads, _ = variable_creator.update(updates, grads_state, params)
+    grads, _ = var_creator.update(updates, grads_state, params)
 
     # NOTE(dsuo): assume accumulator only needs `gradients`.
     accumulator_state = accumulator.init(grads['variables'])
@@ -90,7 +92,7 @@ def preconditioner(
         'output': None
     }
     new_state = []
-    for s, transform in zip(state, [variable_creator, accumulator, updater]):
+    for s, transform in zip(state, [var_creator, accumulator, updater]):
       updates, new_s = transform.update(updates, s, params)
       new_state.append(new_s)
 
@@ -99,16 +101,29 @@ def preconditioner(
   return optax.GradientTransformation(init, update)
 
 
-def nth_power(
-    power: Union[int, Tuple[int]] = 2) -> optax.GradientTransformation:
-  """Create nth power(s) from gradients."""
+def variable_creator(
+    power: Union[int, Tuple[int]] = 2,
+    agg_fn: Union[str, Callable[[optax.Params], chex.Array]] = None,
+    axis: Optional[Union[int, Tuple[int]]] = None,
+) -> optax.GradientTransformation:
+  """Create variables from gradients."""
 
   if not hasattr(power, '__iter__'):
-    power = [power]
+    power = (power,)
 
   for p in power:
     if p != int(p):
       raise ValueError(f'Currently we only support integer orders; got {p}.')
+
+  if axis is not None and not hasattr(axis, '__iter__'):
+    axis = (axis,)
+
+  if agg_fn is None:
+    agg_fn = lambda x: x
+  elif agg_fn == 'mean':
+    agg_fn = lambda x: x.mean(axis=axis, keepdims=True)
+  elif agg_fn == 'max':
+    agg_fn = lambda x: x.max(axis=axis, keepdims=True)
 
   def init(params: optax.Params) -> optax.OptState:
     del params
@@ -126,6 +141,7 @@ def nth_power(
         updates['variables'][str(int(p))] = updates['updates']
       else:
         gradients = jax.tree_map(lambda x: x**p, updates['updates'])  # pylint: disable=cell-var-from-loop
+        gradients = jax.tree_map(agg_fn, gradients)
         updates['variables'][str(int(p))] = gradients
 
     return updates, state
