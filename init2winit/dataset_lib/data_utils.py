@@ -81,7 +81,8 @@ def image_iterator(data,
 def maybe_pad_batch(batch,
                     desired_batch_size,
                     data_format=None,
-                    mask_key=None):
+                    mask_key=None,
+                    padding_value=0.0):
   """Zero pad the batch on the right to desired_batch_size.
 
   All keys in the batch dictionary will have their corresponding arrays padded.
@@ -101,6 +102,7 @@ def maybe_pad_batch(batch,
       encoder only models like language models) or 'targets'
       (for encoder-decoder models like seq2seq tasks) to decide weights for
       padded sequence. For Image datasets, this will be (most likely) unused.
+    padding_value: value to be used as padding.
 
   Returns:
     A dictionary mapping the same keys to the padded batches. Additionally we
@@ -131,7 +133,7 @@ def maybe_pad_batch(batch,
   def zero_pad(ar, pad_axis):
     pw = [(0, 0)] * ar.ndim
     pw[pad_axis] = (0, batch_pad)
-    return np.pad(ar, pw, mode='constant')
+    return np.pad(ar, pw, mode='constant', constant_values=padding_value)
 
   padded_batch = {'inputs': zero_pad(batch['inputs'], batch_axis)}
   batch_keys = list(batch.keys())

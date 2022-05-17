@@ -116,10 +116,10 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
   return abs_model_path
 
 
-def _load_sentencepiece_tokenizer(model_path: str,
-                                  add_bos: bool = False,
-                                  add_eos: bool = True,
-                                  reverse: bool = False):
+def load_tokenizer(model_path: str,
+                   add_bos: bool = False,
+                   add_eos: bool = True,
+                   reverse: bool = False):
   """Load a tf-text SentencePiece tokenizer from given model filepath."""
   with tf.io.gfile.GFile(model_path, 'rb') as model_fp:
     sp_model = model_fp.read()
@@ -136,7 +136,7 @@ def load_or_train_tokenizer(dataset: tf.data.Dataset,
                             data_keys: Tuple[str, str] = ('inputs', 'targets')):
   """Loads the tokenizer at `vocab_path` or trains a one from `dataset`."""
   try:
-    return _load_sentencepiece_tokenizer(vocab_path)
+    return load_tokenizer(vocab_path)
   except tf.errors.NotFoundError:
     logging.info('SentencePiece vocab not found, building one from data.')
     vocab_path = _train_sentencepiece(
@@ -146,7 +146,7 @@ def load_or_train_tokenizer(dataset: tf.data.Dataset,
         model_path=vocab_path,
         data_keys=data_keys)
     logging.info('vocab_path dumped by tokenizer = %s', vocab_path)
-    return _load_sentencepiece_tokenizer(vocab_path)
+    return load_tokenizer(vocab_path)
 
 
 @dataclasses.dataclass

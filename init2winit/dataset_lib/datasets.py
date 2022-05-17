@@ -21,6 +21,7 @@ from init2winit.dataset_lib import criteo_terabyte_input_pipeline
 from init2winit.dataset_lib import fake_dataset
 from init2winit.dataset_lib import fastmri_dataset
 from init2winit.dataset_lib import imagenet_dataset
+from init2winit.dataset_lib import librispeech
 from init2winit.dataset_lib import mlperf_imagenet_dataset
 from init2winit.dataset_lib import nqm_noise
 from init2winit.dataset_lib import ogbg_molpcba
@@ -78,6 +79,9 @@ _ALL_DATASETS = {
     'translate_wmt':
         _Dataset(translate_wmt.get_translate_wmt, translate_wmt.DEFAULT_HPARAMS,
                  translate_wmt.METADATA),
+    'librispeech':
+        _Dataset(librispeech.get_librispeech, librispeech.DEFAULT_HPARAMS,
+                 librispeech.METADATA),
     'mlperf_imagenet':
         _Dataset(mlperf_imagenet_dataset.get_mlperf_imagenet,
                  mlperf_imagenet_dataset.DEFAULT_HPARAMS,
