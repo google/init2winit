@@ -413,6 +413,43 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
   return ssims
 
 
+def average_ctc_loss(fun):
+  """Returns a clu.Metric that computes average CTC loss taking padding into account.
+
+  Args:
+    fun: function with the API
+    f(logits, logit_paddings, targets, target_paddings)
+
+  Returns:
+    clu.Metric that maintains a weighted average of the values.
+  """
+
+  @flax.struct.dataclass
+  class _Metric(metrics.Metric):
+    """Applies `fun` and computes the average."""
+    total: np.float32
+    weight: np.float32
+
+    @classmethod
+    def from_model_output(cls, logits, logit_paddings, targets, target_paddings,
+                          **_):
+      per_seq_loss = fun(logits, logit_paddings, targets, target_paddings)
+      normalizer = np.sum(1 - target_paddings)
+
+      normalized_loss = np.sum(per_seq_loss) / jnp.maximum(normalizer, 1)
+
+      return cls(total=normalized_loss, weight=1.0)
+
+    def merge(self, other):
+      return type(self)(
+          total=self.total + other.total, weight=self.weight + other.weight)
+
+    def compute(self):
+      return self.total / self.weight
+
+  return _Metric
+
+
 # All metrics used here must take three arguments named `logits`, `targets`,
 # `weights`. We don't use CLU's `mask` argument, the metric gets
 # that information from `weights`. The total weight for calculating the average
@@ -451,6 +488,9 @@ _METRICS = {
             ssim=weighted_average_metric(ssim),
             num_examples=NumExamples,
         ),
+    'ctc_metrics':
+        metrics.Collection.create(
+            ctc_loss=average_ctc_loss(losses.ctc_loss))
 }
 
 
