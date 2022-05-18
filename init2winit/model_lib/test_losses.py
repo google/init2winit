@@ -16,6 +16,7 @@
 """Tests for losses.py.
 
 """
+import functools
 import types
 
 from absl.testing import absltest
@@ -24,9 +25,10 @@ from init2winit.model_lib import losses
 import jax
 import numpy as np
 
-CLASSIFICATION_LOSSES = ['cross_entropy']
+CLASSIFICATION_LOSSES = ['cross_entropy', 'bi_tempered_cross_entropy']
 RECONSTRUCTION_LOSSES = [
     'sigmoid_binary_cross_entropy',
+    'bi_tempered_sigmoid_binary_cross_entropy',
     'sigmoid_mean_squared_error',
 ]
 
@@ -39,8 +41,14 @@ CLASSIFICATION_TEST_DATA = [{
                   [0, 0, 0, 0, 1], [0, 1, 0, 0, 0]]),
     'weights':
         None,
+    'bi_tempered_t1':
+        0.9,
+    'bi_tempered_t2':
+        2.0,
     'cross_entropy':
         8.956906,
+    'bi_tempered_cross_entropy':
+        1.9120569,
 }, {
     'logits':
         np.array([[4, 2, 0, -4, 5], [14, 2, -5, 10, 12], [20, -3, 7, -9, 6],
@@ -50,8 +58,14 @@ CLASSIFICATION_TEST_DATA = [{
                   [0, 0, 0, 0, 1], [0, 0, 1, 0, 0]]),
     'weights':
         np.array([2, 7, 0, 3, 0]),
+    'bi_tempered_t1':
+        0.9,
+    'bi_tempered_t2':
+        2.0,
     'cross_entropy':
         6.7589717,
+    'bi_tempered_cross_entropy':
+        1.7393580,
 }]
 
 RECONSTRUCTION_TEST_DATA = [{
@@ -63,8 +77,14 @@ RECONSTRUCTION_TEST_DATA = [{
                   [0.68, 0.92, 0.12, 0.22], [0.34, 0.44, 0.29, 0.2]]),
     'weights':
         None,
+    'bi_tempered_t1':
+        0.9,
+    'bi_tempered_t2':
+        2.0,
     'sigmoid_binary_cross_entropy':
         11.996754,
+    'bi_tempered_sigmoid_binary_cross_entropy':
+        1.9910424,
     'sigmoid_mean_squared_error':
         1.180348,
 }, {
@@ -76,8 +96,14 @@ RECONSTRUCTION_TEST_DATA = [{
                   [[0.68, 0.92], [0.12, 0.22]], [[0.34, 0.44], [0.29, 0.2]]]),
     'weights':
         None,
+    'bi_tempered_t1':
+        0.9,
+    'bi_tempered_t2':
+        2.0,
     'sigmoid_binary_cross_entropy':
         11.996754,
+    'bi_tempered_sigmoid_binary_cross_entropy':
+        1.9910425,
     'sigmoid_mean_squared_error':
         1.180348,
 }, {
@@ -89,8 +115,14 @@ RECONSTRUCTION_TEST_DATA = [{
                   [0.68, 0.92, 0.12, 0.22], [0.34, 0.44, 0.29, 0.2]]),
     'weights':
         np.array([0, 4, 0, 2]),
+    'bi_tempered_t1':
+        0.9,
+    'bi_tempered_t2':
+        2.0,
     'sigmoid_binary_cross_entropy':
         16.259,
+    'bi_tempered_sigmoid_binary_cross_entropy':
+        2.6654808,
     'sigmoid_mean_squared_error':
         1.5073959,
 }]
@@ -102,6 +134,10 @@ CROSS_ENTROPY_TEST_DATA = [{
         np.array([[1, 0], [0, 1], [1, 0], [1, 0], [0, 1]]),
     'weights':
         None,
+    'bi_tempered_t1':
+        0.9,
+    'bi_tempered_t2':
+        2.0,
 }, {
     'logits':
         np.array([[4, 7], [-2, 5], [8, 6], [-10, -4], [3, -5]]).astype(float),
@@ -109,6 +145,10 @@ CROSS_ENTROPY_TEST_DATA = [{
         np.array([[1, 0], [0, 1], [1, 0], [1, 0], [0, 1]]),
     'weights':
         np.array([2, 0, 0, 6, 1]),
+    'bi_tempered_t1':
+        0.9,
+    'bi_tempered_t2':
+        2.0,
 }]
 
 CLASSIFICATION_KEYS = [
@@ -125,7 +165,7 @@ class LossesTest(parameterized.TestCase):
   def test_loss_fn_registry(self):
     for loss_name in losses._ALL_LOSS_FUNCTIONS:  # pylint: disable=protected-access
       loss_fn = losses.get_loss_fn(loss_name)
-      self.assertIsInstance(loss_fn, types.FunctionType)
+      self.assertIsInstance(loss_fn, (types.FunctionType, functools.partial))
     with self.assertRaises(ValueError):
       losses.get_loss_fn('__test__loss__name__')
 
@@ -137,8 +177,9 @@ class LossesTest(parameterized.TestCase):
 
   @parameterized.named_parameters(*CLASSIFICATION_KEYS)
   def test_classification_losses(self, loss_name):
-    loss_fn = losses.get_loss_fn(loss_name)
     for data in CLASSIFICATION_TEST_DATA:
+      loss_fn = losses.get_loss_fn(loss_name, data['bi_tempered_t1'],
+                                   data['bi_tempered_t2'])
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['one_hot_targets'], data['weights']),
           data[loss_name],
@@ -146,8 +187,9 @@ class LossesTest(parameterized.TestCase):
 
   @parameterized.named_parameters(*RECONSTRUCTION_KEYS)
   def test_regression_losses(self, loss_name):
-    loss_fn = losses.get_loss_fn(loss_name)
     for data in RECONSTRUCTION_TEST_DATA:
+      loss_fn = losses.get_loss_fn(loss_name, data['bi_tempered_t1'],
+                                   data['bi_tempered_t2'])
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['targets'], data['weights']),
           data[loss_name],
@@ -155,35 +197,46 @@ class LossesTest(parameterized.TestCase):
 
   def test_cross_entropy_loss_fn(self):
     for data in CROSS_ENTROPY_TEST_DATA:
-      sigmoid_binary_ce_fn = losses.get_loss_fn('sigmoid_binary_cross_entropy')
-      ce_fn = losses.get_loss_fn('cross_entropy')
-      self.assertAlmostEqual(
-          sigmoid_binary_ce_fn(
-              np.array([[logits[0] - logits[1]] for logits in data['logits']]),
-              np.array([[targets[0]] for targets in data['targets']]),
-              data['weights']),
-          ce_fn(data['logits'], data['targets'], data['weights']),
-          places=5)
+      for binary_loss_name, loss_name in [
+          ('sigmoid_binary_cross_entropy', 'cross_entropy'),
+          ('bi_tempered_sigmoid_binary_cross_entropy',
+           'bi_tempered_cross_entropy')
+      ]:
+        sigmoid_binary_ce_fn = losses.get_loss_fn(binary_loss_name)
+        ce_fn = losses.get_loss_fn(loss_name)
+        self.assertAlmostEqual(
+            sigmoid_binary_ce_fn(
+                np.array([[logits[0] - logits[1]] for logits in data['logits']
+                         ]),
+                np.array([[targets[0]] for targets in data['targets']]),
+                data['weights']),
+            ce_fn(data['logits'], data['targets'], data['weights']),
+            places=5)
 
   def test_sigmoid_cross_entropy_per_label_weights(self):
     """Tests whether per label weights mask the correct entries."""
-    sigmoid_binary_ce_fn = losses.get_loss_fn('sigmoid_binary_cross_entropy')
-    logits = np.arange(15).reshape(3, 5)
-    targets = np.arange(15, 30).reshape(3, 5)
+    for binary_loss_name in [
+        'sigmoid_binary_cross_entropy',
+        'bi_tempered_sigmoid_binary_cross_entropy']:
+      sigmoid_binary_ce_fn = losses.get_loss_fn(
+          binary_loss_name, bi_tempered_t1=0.9, bi_tempered_t2=2.0)
+      logits = np.arange(15).reshape(3, 5)
+      targets = np.arange(15, 30).reshape(3, 5)
+      targets = targets / np.max(targets)
 
-    per_label_weights = np.array([
-        [1, 1, 1, 1, 0],
-        [1, 1, 1, 1, 0],
-        [0, 0, 0, 0, 0],
-    ])
-    per_example_weights = np.array([1, 1, 0])
+      per_label_weights = np.array([
+          [1, 1, 1, 1, 0],
+          [1, 1, 1, 1, 0],
+          [0, 0, 0, 0, 0],
+      ])
+      per_example_weights = np.array([1, 1, 0])
 
-    # Both calls normalize by the sum of weights, which is higher in the
-    # per-label case.
-    self.assertAlmostEqual(
-        sigmoid_binary_ce_fn(logits, targets, per_label_weights),
-        sigmoid_binary_ce_fn(logits[:, :4], targets[:, :4],
-                             per_example_weights) / 4)
+      # Both calls normalize by the sum of weights, which is higher in the
+      # per-label case.
+      self.assertAlmostEqual(
+          sigmoid_binary_ce_fn(logits, targets, per_label_weights),
+          sigmoid_binary_ce_fn(logits[:, :4], targets[:, :4],
+                               per_example_weights) / 4)
 
   # optax ctc loss blank token has id = 0 by default
   @parameterized.named_parameters(

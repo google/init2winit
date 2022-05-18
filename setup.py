@@ -21,6 +21,7 @@ setup(
         'clu',
         'flax',
         'jax',
+        'jax-bitempered-loss',
         'jraph',
         'ml_collections',
         'numpy>=1.7',
