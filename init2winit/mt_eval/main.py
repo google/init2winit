@@ -29,9 +29,8 @@ from init2winit.dataset_lib import datasets
 from init2winit.model_lib import models
 from init2winit.mt_eval import bleu_evaluator
 import jax
+from ml_collections.config_dict import config_dict
 import tensorflow.compat.v2 as tf
-
-
 
 
 # Enable flax xprof trace labelling.
@@ -49,6 +48,16 @@ flags.DEFINE_string(
 flags.DEFINE_string(
     'dataset', '', 'Name of the dataset used to evaluate (not'
     'needed if experiment_config_filenmae is provided).')
+flags.DEFINE_integer(
+    'num_tf_data_prefetches', -1, 'The number of batches to to prefetch from '
+    'network to host at each step. Set to -1 for tf.data.AUTOTUNE.')
+flags.DEFINE_integer(
+    'num_device_prefetches', 0, 'The number of batches to to prefetch from '
+    'host to device at each step.')
+flags.DEFINE_integer(
+    'num_tf_data_map_parallel_calls', -1, 'The number of parallel calls to '
+    'make from tf.data.map. Set to -1 for tf.data.AUTOTUNE.'
+)
 flags.DEFINE_string(
     'hparam_overrides', '', 'json representation of a flattened dict of hparam '
     'overrides. For nested dictionaries, the override key '
@@ -101,12 +110,19 @@ def main(unused_argv):
     if isinstance(FLAGS.hparam_overrides, str):
       hparam_overrides = json.loads(FLAGS.hparam_overrides)
 
+  input_pipeline_hps = config_dict.ConfigDict(dict(
+      num_tf_data_prefetches=FLAGS.num_tf_data_prefetches,
+      num_device_prefetches=FLAGS.num_device_prefetches,
+      num_tf_data_map_parallel_calls=FLAGS.num_tf_data_map_parallel_calls,
+  ))
+
   merged_hps = hyperparameters.build_hparams(
       model_name=model_name,
       initializer_name=experiment_config['initializer'],
       dataset_name=dataset_name,
       hparam_file=FLAGS.trial_hparams_filename,
-      hparam_overrides=hparam_overrides)
+      hparam_overrides=hparam_overrides,
+      input_pipeline_hps=input_pipeline_hps)
 
   if jax.process_index() == 0:
     logging.info('Merged hps are: %s', json.dumps(merged_hps.to_json()))

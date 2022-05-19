@@ -39,6 +39,7 @@ DEFAULT_EVAL_CONFIG = {
     'ckpt_to_evaluate': None,
     'min_step': None,
     'ckpt_avg_window': 0,
+    'tl_code': None,
 }
 
 
@@ -68,6 +69,7 @@ class BLEUEvaluator(object):
     self.encoder = self.load_tokenizer(hps.vocab_path)
     self.initialize_model(model_cls, dataset_meta_data, dropout_rng, params_rng)
     self.min_step = mt_eval_config['min_step']
+    self.tl_code = mt_eval_config['tl_code']
 
   def iterate_checkpoints(self):
     """Iterates over all checkpoints."""
@@ -180,12 +182,6 @@ class BLEUEvaluator(object):
     self.build_predictor()
     bleu_scores_list = []
     for _, step in self.iterate_checkpoints():
-      # If already done, don't redo.
-      bleu_score = eval_utils.load_evals(self.checkpoint_dir, step,
-                                         self.eval_split)
-      if bleu_score:
-        bleu_scores_list.append(bleu_score)
-        continue
       ckpt_paths = eval_utils.get_checkpoints_in_range(
           checkpoint_dir=self.checkpoint_dir,
           lower_bound=step - self.ckpt_avg_window,
@@ -222,9 +218,7 @@ class BLEUEvaluator(object):
           predictions.append(curr_pred)
 
       bleu_score = eval_utils.compute_bleu_from_predictions(
-          predictions, references, 'sacrebleu')['sacrebleu']
+          predictions, references, self.tl_code, 'sacrebleu')['sacrebleu']
       logging.info('Sacre bleu score at step %d: %f', step, bleu_score)
       bleu_scores_list.append(bleu_score)
-      eval_utils.save_evals(self.checkpoint_dir, step, self.eval_split,
-                            bleu_score)
     return bleu_scores_list
