@@ -29,17 +29,77 @@ from init2winit.optimizer_lib.hessian_free import gvp
 from init2winit.optimizer_lib.hessian_free import mf_conjgrad_solver
 from init2winit.optimizer_lib.hessian_free import relative_per_iteration_progress_test
 from init2winit.optimizer_lib.hessian_free import residual_norm_test
+from init2winit.optimizer_lib.hessian_free import tree_slice
 import jax
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import numpy as np
 from optax import apply_updates
+import tree_math as tm
+
+_INPUT_SHAPE = (2, 2, 1)
+_OUTPUT_SHAPE = (4,)
+_INPUT_DATA = np.array([
+    [[1, 0], [1, 1]],
+    [[1, 0], [0, 1]]
+])
 
 
-def get_pd_mat(mat):
+def _get_pd_mat(mat):
   """Returns a positive-definite matrix."""
   n = mat.shape[0]
   return mat @ np.transpose(mat) / n**2 + np.eye(n)
+
+
+def _load_autoencoder_model():
+  """Load a test autoencoder model."""
+  model_str = 'autoencoder'
+  model_cls = models.get_model(model_str)
+  model_hps = models.get_model_hparams(model_str)
+
+  loss = 'sigmoid_binary_cross_entropy'
+  metrics = 'binary_autoencoder_metrics'
+
+  hps = copy.copy(model_hps)
+  hps.update({
+      'optimizer': 'hessian_free',
+      'opt_hparams': {
+          'weight_decay': 0.0,
+      },
+      'hid_sizes': [2],
+      'activation_function': ['id'],
+      'input_shape': _INPUT_SHAPE,
+      'output_shape': _OUTPUT_SHAPE
+  })
+
+  model = model_cls(hps, {}, loss, metrics)
+  init_fn, update_fn = optimizers.get_optimizer(hps, model)
+  params = {
+      'Dense_0': {
+          'kernel': np.array([[-1., 2.], [2., 0.], [-1., 3.], [-2., 2.]]),
+          'bias': np.array([0., 0.])
+      },
+      'Dense_1': {
+          'kernel': np.array([[4., 2., -2., 4.], [-3., 1., 2., -4.]]),
+          'bias': np.array([0., 0., 0., 0.])
+      }
+  }
+  state = init_fn(params)
+  variables = {'params': params}
+
+  return model, update_fn, state, variables
+
+
+def _load_autoencoder_data():
+  """Load a test autoencoder data."""
+  targets = _INPUT_DATA.reshape(
+      tuple([_INPUT_DATA.shape[0]] + list(_OUTPUT_SHAPE)))
+  return {'inputs': _INPUT_DATA, 'targets': targets}
+
+
+@partial(tm.unwrap, out_vectors=False)
+def tm_norm(x):
+  return np.linalg.norm(x)
 
 
 class HessianFreeTest(absltest.TestCase):
@@ -65,105 +125,78 @@ class HessianFreeTest(absltest.TestCase):
   def test_conjgrad(self):
     """Tests conjugate gradient method."""
     n = 5
-    mat = get_pd_mat(
+    mat = _get_pd_mat(
         np.array(
             [[2., 4., 5., 2., 8.],
              [0., 4., 3., 5., 3.],
              [-2., -2., 9., -2., -6.],
              [4., 1., -11., 1., 4.],
              [-5., 4., -9., 3., -2.]]))
-    b = np.array([-3, 2, 0, 3, -4])
-    x0 = np.ones(n)
+    b = tm.Vector(np.array([-3, 2, 0, 3, -4]))
+    x0 = tm.Vector(np.ones(n))
 
-    test_matmul_fn = lambda x: mat @ x
-    x_arr, x_arr_idx = mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10,
-                                          None, 'residual_norm_test')
-    x = x_arr[x_arr_idx]
-    self.assertAlmostEqual(np.linalg.norm(test_matmul_fn(x) - b), 0, places=3)
+    test_matmul_fn = tm.unwrap(lambda x: mat @ x)
+    x_arr, x_arr_idx = mf_conjgrad_solver(
+        test_matmul_fn, b, x0, n, 1e-6, 10, None, 'residual_norm_test')
+    x = tree_slice(x_arr, x_arr_idx)
+    self.assertAlmostEqual(tm_norm(test_matmul_fn(x) - b), 0, places=3)
 
   def test_conjgrad_preconditioning(self):
     """Tests conjugate gradient method with preconditioning."""
     n = 5
-    mat = get_pd_mat(
+    mat = _get_pd_mat(
         np.array(
             [[2., 4., 5., 2., 8.],
              [0., 4., 3., 5., 3.],
              [-2., -2., 9., -2., -6.],
              [4., 1., -11., 1., 4.],
              [-5., 4., -9., 3., -2.]]))
-    precond_mat = get_pd_mat(
+    precond_mat = _get_pd_mat(
         np.array(
             [[4., 2., 0., 2., 4.],
              [-2., 4., 4., 2., 6.],
              [4., 4., -8., -2., -4.],
              [-2., 2., 4., 0., -2.],
              [2., 2., -6., 4., 0.]]))
-    b = np.array([-3, 2, 0, 3, -4])
-    x0 = np.ones(n)
+    b = tm.Vector(np.array([-3, 2, 0, 3, -4]))
+    x0 = tm.Vector(np.ones(n))
 
-    test_matmul_fn = lambda x: mat @ x
-    test_precond_fn = lambda x: precond_mat @ x
-    x_arr, x_arr_idx = mf_conjgrad_solver(test_matmul_fn, b, x0, n, 1e-6, 10,
-                                          test_precond_fn, 'residual_norm_test')
-    x = x_arr[x_arr_idx]
-    self.assertAlmostEqual(np.linalg.norm(test_matmul_fn(x) - b), 0, places=3)
+    test_matmul_fn = tm.unwrap(lambda x: mat @ x)
+    test_precond_fn = tm.unwrap(lambda x: precond_mat @ x)
+    x_arr, x_arr_idx = mf_conjgrad_solver(
+        test_matmul_fn, b, x0, n, 1e-6, 10, test_precond_fn,
+        'residual_norm_test')
+    x = tree_slice(x_arr, x_arr_idx)
+    self.assertAlmostEqual(tm_norm(test_matmul_fn(x) - b), 0, places=3)
 
   def test_conjgrad_martens_termination_criterion(self):
     """Tests conjugate gradient method with martens termination criterion."""
     n = 500
-    mat = get_pd_mat(
+    mat = _get_pd_mat(
         np.array([[((i + j) % n) for j in range(n)] for i in range(n)]))
-    b = np.linspace(1, n, n) / n
-    x0 = np.zeros(n)
+    b = tm.Vector(np.linspace(1, n, n) / n)
+    x0 = tm.Vector(np.zeros(n))
 
-    test_mvm_fn = lambda x: mat @ x
+    test_mvm_fn = tm.unwrap(lambda x: mat @ x)
 
     x_arr, x_arr_idx = mf_conjgrad_solver(
         test_mvm_fn, b, x0, n, 1e-6, 500, None,
         'relative_per_iteration_progress_test')
-    x = x_arr[x_arr_idx]
-    f_value = np.dot(x, test_mvm_fn(x) - 2 * b) / 2
+    x = tree_slice(x_arr, x_arr_idx)
+    f_value = x @ (test_mvm_fn(x) - 2 * b) / 2
     self.assertAlmostEqual(f_value, -0.223612576, places=5)
 
   def test_cg_backtracking(self):
     """Tests CG backtracking."""
-
-    model_str = 'autoencoder'
-    model_cls = models.get_model(model_str)
-    model_hps = models.get_model_hparams(model_str)
-
-    loss = 'sigmoid_binary_cross_entropy'
-    metrics = 'binary_autoencoder_metrics'
-
-    input_shape = (2, 2, 1)
-    output_shape = (4,)
-
-    hps = copy.copy(model_hps)
-    hps.update({
-        'optimizer': 'hessian_free',
-        'opt_hparams': {
-            'weight_decay': 0.0,
-        },
-        'hid_sizes': [2],
-        'activation_function': ['id'],
-        'input_shape': input_shape,
-        'output_shape': output_shape
-    })
-
-    model = model_cls(hps, {}, loss, metrics)
-
-    inputs = jnp.array([
-        [[1, 0], [1, 1]],
-        [[1, 0], [0, 1]]
-    ])
-    targets = inputs.reshape(tuple([inputs.shape[0]] + list(output_shape)))
-    batch = {'inputs': inputs, 'targets': targets}
+    model, _, _, variables = _load_autoencoder_model()
+    batch = _load_autoencoder_data()
 
     def forward_fn(variables, inputs):
       return model.flax_module.apply(variables, inputs, train=False)
 
     def opt_cost(params):
-      return model.loss_fn(forward_fn(params, inputs), targets)
+      return model.loss_fn(forward_fn(params, batch['inputs']),
+                           batch['targets'])
 
     params = {
         'Dense_0': {
@@ -175,19 +208,27 @@ class HessianFreeTest(absltest.TestCase):
             'bias': jnp.array([0., 0., 0., 0.])
         }
     }
-    unravel_fn = ravel_pytree(params)[1]
 
-    p1 = np.array([
-        0.5, 0.2, 0.1, -0.4, -0.6, 0.4, 0.6, -0.7, 0.0, 0.5, -0.7, 0.2, 0.1,
-        -0.2, 0.4, -0.6, -0.8, 0.7, 0.2, 0.9, -0.1, 0.5
-    ])
-    p2 = np.array([
-        0.3, -0.1, -0.5, 0.2, -0.4, 0.8, -0.2, 0.0, 0.2, -0.4, 0.6, -0.2, -0.4,
-        0.2, 0.3, 0.2, -0.2, -0.4, -0.5, 0.2, 0.2, -0.4
-    ])
-
-    p_arr = jnp.array([p1, p2])
-    p_arr_idx = 1
+    p_arr = tm.Vector({
+        'Dense_0': {
+            'kernel': jnp.array([
+                [[0.1, -0.4], [-0.6, 0.4], [0.6, -0.7], [0.0, 0.5]],
+                [[-0.5, 0.2], [-0.4, 0.8], [-0.2, 0.0], [0.2, -0.4]],
+                [[-0.2, -0.2], [-0.2, 0.0], [0.4, 0.1], [0.2, 0.4]]]),
+            'bias': jnp.array([[0.5, 0.2], [0.3, -0.1], [0.2, 0.4]])
+        },
+        'Dense_1': {
+            'kernel': jnp.array([
+                [[0.4, -0.6, -0.8, 0.7], [0.3, 0.2, -0.2, -0.4]],
+                [[0.2, 0.9, -0.1, 0.5], [-0.5, 0.2, 0.2, -0.4]],
+                [[0.2, -0.4, -0.4, 0.8], [-0.1, 0.3, 0.2, 0.2]]]),
+            'bias': jnp.array([
+                [-0.7, 0.2, 0.1, -0.2],
+                [0.6, -0.2, -0.4, 0.2],
+                [0.2, 0.3, -0.2, 0.4]])
+        }
+    })
+    p_arr_idx = 2
 
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
     partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
@@ -195,88 +236,35 @@ class HessianFreeTest(absltest.TestCase):
     def obj_fn(variables):
       return partial_loss_fn(partial_forward_fn(variables))
 
-    flattened_p, obj_val = cg_backtracking(p_arr, p_arr_idx, obj_fn,
-                                           {'params': params}, unravel_fn)
+    p, obj_val = cg_backtracking(p_arr, p_arr_idx, obj_fn, variables)
+    expected = tree_slice(p_arr, 0).tree
 
     # Test the backtracking function.
-    self.assertSameElements(flattened_p, p1)
-    updated_params = apply_updates(params, unravel_fn(p1))
-    self.assertEqual(opt_cost({'params': updated_params}), obj_val)
+    self.assertSameElements(p.tree, expected)
+    updated_params = apply_updates(params, expected)
+    self.assertAlmostEqual(opt_cost({'params': updated_params}),
+                           obj_val, places=4)
 
-  def test_hessian_free_optimizer(self):
-    """Tests the Hessian-free optimizer."""
-
-    model_str = 'autoencoder'
-    model_cls = models.get_model(model_str)
-    model_hps = models.get_model_hparams(model_str)
-
-    loss = 'sigmoid_binary_cross_entropy'
-    metrics = 'binary_autoencoder_metrics'
-
-    input_shape = (2, 2, 1)
-    output_shape = (4,)
-
-    hps = copy.copy(model_hps)
-    hps.update({
-        'optimizer': 'hessian_free',
-        'opt_hparams': {
-            'weight_decay': 0.0,
-        },
-        'hid_sizes': [2],
-        'activation_function': ['id'],
-        'input_shape': input_shape,
-        'output_shape': output_shape
-    })
-
-    model = model_cls(hps, {}, loss, metrics)
-
-    inputs = jnp.array([
-        [[1, 0], [1, 1]],
-        [[1, 0], [0, 1]]
-    ])
-    targets = inputs.reshape(tuple([inputs.shape[0]] + list(output_shape)))
-    batch = {'inputs': inputs, 'targets': targets}
+  def test_gvp(self):
+    """Tests the gvp function."""
+    model, _, state, variables = _load_autoencoder_model()
+    batch = _load_autoencoder_data()
 
     def forward_fn(variables, inputs):
-      logits = model.flax_module.apply(variables, inputs, train=True)
-      return logits
-
-    def opt_cost(variables):
-      return model.loss_fn(forward_fn(variables, inputs), targets)
-
-    init_fn, update_fn = optimizers.get_optimizer(hps, model)
-
-    params = {
-        'Dense_0': {
-            'kernel': jnp.array([[-1., 2.], [2., 0.], [-1., 3.], [-2., 2.]]),
-            'bias': jnp.array([0., 0.])
-        },
-        'Dense_1': {
-            'kernel': jnp.array([[4., 2., -2., 4.], [-3., 1., 2., -4.]]),
-            'bias': jnp.array([0., 0., 0., 0.])
-        }
-    }
-    variables = {'params': params}
-
-    grad_fn = jax.grad(opt_cost)
-    grads = grad_fn(variables)['params']
+      return model.flax_module.apply(variables, inputs, train=True)
 
     outputs = forward_fn(variables, batch['inputs'])
 
-    n = inputs.shape[0]
+    n = batch['inputs'].shape[0]
     m = outputs.shape[-1]
-    d = ravel_pytree(params)[0].shape[0]
-
-    v = np.ones(d)
-
-    state = init_fn(params)
+    d = ravel_pytree(variables['params'])[0].shape[0]
 
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
     partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
 
-    matmul_fn = partial(gvp, variables, outputs,
-                        state.inner_state.damping, partial_forward_fn,
-                        partial_loss_fn)
+    matmul_fn = tm.unwrap(
+        partial(gvp, variables, outputs, state.inner_state.damping,
+                partial_forward_fn, partial_loss_fn), out_vectors=False)
 
     jacobian = jax.jacfwd(partial_forward_fn)(variables)['params']
     jacobian_tensor = np.concatenate((
@@ -293,23 +281,66 @@ class HessianFreeTest(absltest.TestCase):
     ggn_matrix /= n
     ggn_matrix += state.inner_state.damping * np.identity(d)
 
-    expected = ggn_matrix @ v
+    expected = ggn_matrix @ np.ones(d)
 
+    ones = tm.Vector(
+        jax.tree_map(lambda x: jnp.ones(x.shape), variables['params']))
     # Test the gvp function
     self.assertAlmostEqual(
-        jnp.linalg.norm(matmul_fn(v) - expected), 0, places=4)
+        jnp.linalg.norm(
+            ravel_pytree(matmul_fn(ones))[0] - expected), 0, places=4)
+
+  def test_hessian_free_optimizer(self):
+    """Tests the Hessian-free optimizer."""
+
+    model, update_fn, state, variables = _load_autoencoder_model()
+    batch = _load_autoencoder_data()
+
+    def forward_fn(variables, inputs):
+      logits = model.flax_module.apply(variables, inputs, train=True)
+      return logits
+
+    def opt_cost(variables):
+      return model.loss_fn(forward_fn(variables, batch['inputs']),
+                           batch['targets'])
+
+    outputs = forward_fn(variables, batch['inputs'])
+
+    n = batch['inputs'].shape[0]
+    m = outputs.shape[-1]
+    d = ravel_pytree(variables['params'])[0].shape[0]
+
+    partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
+    partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
+
+    jacobian = jax.jacfwd(partial_forward_fn)(variables)['params']
+    jacobian_tensor = np.concatenate((
+        jacobian['Dense_0']['bias'].reshape(n, m, -1),
+        jacobian['Dense_0']['kernel'].reshape(n, m, -1),
+        jacobian['Dense_1']['bias'].reshape(n, m, -1),
+        jacobian['Dense_1']['kernel'].reshape(n, m, -1)), axis=2)
+
+    ggn_matrix = 0
+    for i in range(n):
+      jacobian_matrix = jacobian_tensor[i]
+      hessian = jax.hessian(partial_loss_fn)(outputs[i, None])[0, :, 0, :]
+      ggn_matrix += np.transpose(jacobian_matrix) @ hessian @ jacobian_matrix
+    ggn_matrix /= n
+    ggn_matrix += state.inner_state.damping * np.identity(d)
+
+    grad_fn = jax.grad(opt_cost)
+    grads = grad_fn(variables)['params']
 
     update_pmapped = jax.pmap(
         update_fn, axis_name='batch', in_axes=(None, None, None, 0, None))
 
     batch_shard = data_utils.shard(batch)
-
     state.hyperparams['learning_rate'] = 1.0
-
-    p, state = update_pmapped(grads, state, params, batch_shard, None)
+    p, state = update_pmapped(grads, state, variables['params'], batch_shard,
+                              None)
 
     # Test the damping parameter update
-    self.assertEqual(state.inner_state.damping, 3/2)
+    self.assertEqual(state.inner_state.damping, 1.5)
 
     # Test the search direction
     self.assertAlmostEqual(
