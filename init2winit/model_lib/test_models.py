@@ -51,7 +51,7 @@ seq2seq_models = ['xformer_translate']
 
 autoencoder_keys = [('test_{}'.format(m), m) for m in autoencoder_models]
 excluded_classification_models = text_models + autoencoder_models + seq2seq_models + [
-    'nqm', 'gnn', 'dlrm', 'vit', 'unet'
+    'nqm', 'gnn', 'dlrm', 'vit', 'unet', 'conformer'
 ]
 classification_keys = [
     ('test_{}'.format(m), m)

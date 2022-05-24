@@ -19,6 +19,7 @@ from init2winit.model_lib import adabelief_densenet
 from init2winit.model_lib import adabelief_resnet
 from init2winit.model_lib import adabelief_vgg
 from init2winit.model_lib import autoencoder
+from init2winit.model_lib import conformer
 from init2winit.model_lib import convolutional_autoencoder
 from init2winit.model_lib import dlrm
 from init2winit.model_lib import fully_connected
@@ -58,6 +59,7 @@ _ALL_MODELS = {
         (mlperf_resnet.ResnetModelMLPerf, mlperf_resnet.MLPERF_DEFAULT_HPARAMS),
     'transformer':
         (transformer_lm.TransformerLM1B, transformer_lm.DEFAULT_HPARAMS),
+    'conformer': (conformer.ConformerModel, conformer.DEFAULT_HPARAMS),
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
     'xformer_translate': (xformer_translate.TransformerTranslate,
                           xformer_translate.DEFAULT_HPARAMS),

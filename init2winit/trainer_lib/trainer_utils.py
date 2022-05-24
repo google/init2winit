@@ -98,9 +98,10 @@ def maybe_sync_batchnorm_stats(batch_stats):
 
 
 def should_eval(global_step, eval_frequency, eval_steps):
-  if eval_steps:
-    return global_step in eval_steps
-  return global_step % eval_frequency == 0
+  on_step = eval_steps and global_step in eval_steps
+  on_freq = (global_step % eval_frequency == 0)
+
+  return on_step or on_freq
 
 
 def check_for_early_stopping(

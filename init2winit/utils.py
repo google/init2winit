@@ -142,13 +142,6 @@ def run_in_parallel(function, list_of_kwargs_to_function, num_workers):
   return [f.result() for f in futures]
 
 
-def should_eval(global_step, eval_frequency, eval_steps):
-  on_step = eval_steps and global_step in eval_steps
-  on_freq = global_step % eval_frequency == 0
-
-  return on_step or on_freq
-
-
 def add_log_file(logfile):
   """Replicate logs to an additional logfile.
 
