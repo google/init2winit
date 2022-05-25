@@ -27,12 +27,9 @@ from tensorflow.io import gfile
 
 def compute_bleu_from_predictions(predictions, references, language_code, name):
   """Computes BLEU score given predictions and references."""
-
-  if language_code:
-    bleu_score = sacrebleu.corpus_bleu(
-        predictions, [references], tokenize=language_code).score
-  else:
-    bleu_score = sacrebleu.corpus_bleu(predictions, [references]).score
+  sacrebleu_tokenizer = 'zh' if language_code == 'zh' else sacrebleu.DEFAULT_TOKENIZER
+  bleu_score = sacrebleu.corpus_bleu(
+      predictions, [references], tokenize=sacrebleu_tokenizer).score
   return {name: bleu_score}
 
 
