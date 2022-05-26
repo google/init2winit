@@ -65,34 +65,6 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
       logits=logits, targets=targets, weights=weights, axis_name='batch')
 
 
-def _predict_batch(flax_module,
-                   params,
-                   batch_stats,
-                   batch,
-                   output_activation_fn=None):
-  """Compute predictions for a batch of data.
-
-  NOTE: We assume that batch_stats has been sync'ed.
-
-  Args:
-    flax_module: the evaluation Flax nn.Module (with train=False).
-    params: A dict of trainable model parameters. Passed as {'params': params}
-      into flax_module.apply().
-    batch_stats: A dict of non-trainable model state. Passed as
-      {'batch_stats': batch_stats} into flax_module.apply().
-    batch: A dictionary with keys 'inputs', 'targets', 'weights'.
-    output_activation_fn: An output activation function from jax.nn.functions
-
-  Returns:
-    An array of shape [batch_size, num_classes] that contains all the logits.
-  """
-  variables = {'params': params, 'batch_stats': batch_stats}
-  logits = flax_module.apply(variables, batch['inputs'], mutable=False)
-  if output_activation_fn:
-    return output_activation_fn(logits)
-  return logits
-
-
 class BaseModel(object):
   """Defines commonalities between all models.
 
@@ -176,17 +148,33 @@ class BaseModel(object):
         self.metrics_bundle,
         self.dataset_meta_data['apply_one_hot_in_loss'])
 
+  def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
+    """Wrapper around flax_module.apply.
+
+    NOTE: We assume that batch_stats has been sync'ed.
+
+    Args:
+      params: A dict of trainable model parameters. Passed as {'params': params}
+        into flax_module.apply().
+      batch_stats: A dict of non-trainable model state. Passed as
+        {'batch_stats': batch_stats} into flax_module.apply().
+      batch: A dictionary with keys 'inputs', 'targets', 'weights'.
+      **apply_kwargs: Any valid kwargs to flax_module.apply.
+
+    Returns:
+      An array of shape [batch_size, num_classes] that contains all the logits.
+    """
+    variables = {'params': params, 'batch_stats': batch_stats}
+    return self.flax_module.apply(variables, batch['inputs'], **apply_kwargs)
+
   def predict_batch(self,
                     params,
                     batch_stats,
-                    batch,
-                    apply_output_activation_fn=False):
+                    batch):
     """Returns predictions from all the model outputs on the given batch."""
-    if apply_output_activation_fn:
-      return _predict_batch(self.flax_module, batch_stats, batch,
-                            self.output_activation_fn)
-    else:
-      return _predict_batch(self.flax_module, params, batch_stats, batch)
+    logits = self.apply_on_batch(params, batch_stats, batch, mutable=False)
+
+    return self.output_activation_fn(logits)
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return loss with an optional L2 penalty on the weights."""

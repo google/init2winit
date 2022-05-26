@@ -872,6 +872,19 @@ class TransformerTranslate(base_model.BaseModel):
     return self.metrics_bundle.gather_from_model_output(
         logits=logits, targets=targets, weights=weights, axis_name='batch')
 
+  def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
+    """Wrapper around flax_module.apply."""
+    variables = {'params': params, 'batch_stats': batch_stats}
+    return self.flax_module.apply(
+        variables,
+        batch['inputs'],
+        batch['targets'],
+        batch.get('inputs_positions'),
+        batch.get('targets_positions'),
+        batch.get('inputs_segmentation'),
+        batch.get('targets_segmentation'),
+        **apply_kwargs)
+
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return cross entropy loss with (optional) L2 penalty on the weights."""
 
