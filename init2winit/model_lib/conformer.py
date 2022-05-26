@@ -684,6 +684,80 @@ class ConformerModel(base_model.BaseModel):
   outputs probability distribution over vocab size for each time step.
   """
 
+  # Adapted form lingvo's greedy decoding logic here:
+  # https://github.com/tensorflow/lingvo/blob/2ee26814c57b7dcead3f0382170f2f3da006f810/lingvo/jax/layers/ctc_objectives.py#L138
+  def sequence_mask(self, lengths, maxlen):
+    batch_size = lengths.shape[0]
+    a = jnp.ones([batch_size, maxlen])
+    b = jnp.cumsum(a, axis=-1)
+    c = jnp.less_equal(b, lengths[:, jnp.newaxis]).astype(lengths.dtype)
+    return c
+
+  def compute_loss(self, logits, logit_paddings, labels, label_paddings):
+    logprobs = nn.log_softmax(logits)
+    per_seq_loss = self.loss_fn(logprobs, logit_paddings, labels,
+                                label_paddings)
+    normalizer = jnp.sum(1 - label_paddings)
+
+    normalized_loss = jnp.sum(per_seq_loss) / jnp.maximum(normalizer, 1)
+    return normalized_loss
+
+  def collapse_and_remove_blanks(self, labels, seq_length, blank_id: int = 0):
+    b, t = labels.shape
+    # Zap out blank
+    blank_mask = 1 - jnp.equal(labels, blank_id)
+    labels = (labels * blank_mask).astype(labels.dtype)
+
+    # Mask labels that don't equal previous label.
+    label_mask = jnp.concatenate([
+        jnp.ones_like(labels[:, :1], dtype=jnp.int32),
+        jnp.not_equal(labels[:, 1:], labels[:, :-1])
+    ], axis=1)
+
+    # Filter labels that aren't in the original sequence.
+    maxlen = labels.shape[1]
+    seq_mask = self.sequence_mask(seq_length, maxlen=maxlen)
+    label_mask = label_mask * seq_mask
+
+    # remove repetitions from the labels
+    ulabels = label_mask * labels
+
+    # Count masks for new sequence lengths.
+    label_mask = jnp.not_equal(ulabels, 0).astype(labels.dtype)
+    new_seq_len = jnp.sum(label_mask, axis=1)
+
+    # Mask indexes based on sequence length mask.
+    new_maxlen = maxlen
+    idx_mask = self.sequence_mask(new_seq_len, maxlen=new_maxlen)
+
+    # Flatten everything and mask out labels to keep and sparse indices.
+    flat_labels = jnp.reshape(ulabels, [-1])
+    flat_idx_mask = jnp.reshape(idx_mask, [-1])
+
+    indices = jnp.nonzero(flat_idx_mask, size=b * t)[0]
+    values = jnp.nonzero(flat_labels, size=b * t)[0]
+    updates = jnp.take_along_axis(flat_labels, values, axis=-1)
+
+    # Scatter to flat shape.
+    flat = jnp.zeros(flat_idx_mask.shape).astype(labels.dtype)
+    flat = flat.at[indices].set(updates)
+    # 0'th position in the flat array gets clobbered by later padded updates,
+    # so reset it here to its original value
+    flat = flat.at[0].set(updates[0])
+
+    # Reshape back to square batch.
+    batch_size = labels.shape[0]
+    new_shape = [batch_size, new_maxlen]
+    return (jnp.reshape(flat, new_shape).astype(labels.dtype),
+            new_seq_len.astype(seq_length.dtype))
+
+  def greedy_decode(self, logits, logit_paddings):
+    per_frame_max = jnp.argmax(logits, axis=-1)
+    seqlen = jnp.sum(1.0 - logit_paddings, axis=-1)
+    hyp, _ = self.collapse_and_remove_blanks(per_frame_max, seqlen, blank_id=0)
+    hyp_paddings = jnp.equal(hyp, 0).astype(jnp.int32)
+    return hyp, hyp_paddings
+
   def evaluate_batch(self, params, batch_stats, batch):
     """Evaluates cross_entopy on the given batch."""
 
@@ -700,10 +774,14 @@ class ConformerModel(base_model.BaseModel):
     labels = batch['targets']
     label_paddings = batch['target_paddings']
 
-    logprobs = nn.log_softmax(logits)
+    normalized_loss = self.compute_loss(logits, logit_paddings, labels,
+                                        label_paddings)
+    hyps, hyp_paddings = self.greedy_decode(logits, logit_paddings)
+
     return self.metrics_bundle.gather_from_model_output(
-        logits=logprobs,
-        logit_paddings=logit_paddings,
+        normalized_loss=normalized_loss,
+        hyps=hyps,
+        hyp_paddings=hyp_paddings,
         targets=labels,
         target_paddings=label_paddings,
         axis_name='batch')
@@ -724,15 +802,11 @@ class ConformerModel(base_model.BaseModel):
         mutable=['batch_stats'],
         train=True)
 
-    targets = batch['targets']
+    labels = batch['targets']
     label_paddings = batch['target_paddings']
 
-    logprobs = nn.log_softmax(outputs)
-    per_seq_loss = self.loss_fn(logprobs, output_paddings, targets,
-                                label_paddings)
-    normalizer = jnp.sum(1 - label_paddings)
-
-    normalized_loss = jnp.sum(per_seq_loss) / jnp.maximum(normalizer, 1)
+    normalized_loss = self.compute_loss(outputs, output_paddings, labels,
+                                        label_paddings)
     return normalized_loss, new_batch_stats
 
   def build_flax_module(self):
