@@ -44,6 +44,7 @@ three `optax.GradientTransformation`s adhering to above rules and correctly
 initializes each and forms the `updates` dictionary.
 """
 
+from typing import Any
 from typing import Optional
 from typing import Tuple
 from typing import Union
@@ -99,16 +100,18 @@ def preconditioner(
   return optax.GradientTransformation(init, update)
 
 
-def nth_power(
-    power: Union[int, Tuple[int]] = 2) -> optax.GradientTransformation:
+def nth_power(power: Union[int, Tuple[int]] = 2,
+              dtype: Optional[Any] = float) -> optax.GradientTransformation:
   """Create nth power(s) from gradients."""
 
-  if not hasattr(power, '__iter__'):
-    power = [power]
+  if not isinstance(power, tuple) and not isinstance(power, list):
+    power = (power,)
 
   for p in power:
     if p != int(p):
       raise ValueError(f'Currently we only support integer orders; got {p}.')
+
+  dtype = jax.dtypes.canonicalize_dtype(dtype)
 
   def init(params: optax.Params) -> optax.OptState:
     del params
@@ -125,8 +128,8 @@ def nth_power(
       if p == 1:
         updates['variables'][str(int(p))] = updates['updates']
       else:
-        gradients = jax.tree_map(lambda x: x**p, updates['updates'])  # pylint: disable=cell-var-from-loop
-        updates['variables'][str(int(p))] = gradients
+        var = jax.tree_map(lambda x: (x**p).astype(dtype), updates['updates'])  # pylint: disable=cell-var-from-loop
+        updates['variables'][str(int(p))] = var
 
     return updates, state
 
