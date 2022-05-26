@@ -29,6 +29,7 @@ from flax.training import checkpoints as flax_checkpoints
 from init2winit import checkpoint
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 from tensorflow.io import gfile
 
@@ -310,3 +311,49 @@ def log_pytree_shape_and_statistics(pytree, json_path=None):
   total_params = jax.tree_util.tree_reduce(
       operator.add, jax.tree_map(lambda x: x.size, pytree))
   absl_logging.info('Total params: %d', total_params)
+
+
+def edit_distance(source, target):
+  """Computes edit distance between source string and target string.
+
+  Args:
+    source: source string.
+    target: target string.
+
+  Returns:
+    Edit distance between source string and target string.
+  """
+  source = source.split(' ')
+  target = target.split(' ')
+
+  num_source_words = len(source)
+  num_target_words = len(target)
+
+  distance = np.zeros((num_source_words + 1, num_target_words + 1))
+
+  for i in range(num_source_words + 1):
+    for j in range(num_target_words + 1):
+      # If first string is empty, only option is to
+      # insert all words of second string
+      if i == 0:
+        distance[i][j] = j  # Min. operations = j
+
+      # If second string is empty, only option is to
+      # remove all characters of second string
+      elif j == 0:
+        distance[i][j] = i  # Min. operations = i
+
+      # If last characters are same, ignore last char
+      # and recur for remaining string
+      elif source[i - 1] == target[j - 1]:
+        distance[i][j] = distance[i - 1][j - 1]
+
+      # If last character are different, consider all
+      # possibilities and find minimum
+      else:
+        distance[i][j] = 1 + min(
+            distance[i][j - 1],  # Insert
+            distance[i - 1][j],  # Remove
+            distance[i - 1][j - 1])  # Replace
+
+  return distance[num_source_words][num_target_words]

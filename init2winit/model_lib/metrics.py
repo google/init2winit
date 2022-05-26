@@ -24,6 +24,7 @@ import functools
 from clu import metrics
 import flax
 from init2winit import utils
+from init2winit.dataset_lib import wpm_tokenizer
 from init2winit.model_lib import losses
 import jax
 import jax.numpy as jnp
@@ -413,15 +414,8 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
   return ssims
 
 
-def average_ctc_loss(fun):
+def average_ctc_loss():
   """Returns a clu.Metric that computes average CTC loss taking padding into account.
-
-  Args:
-    fun: function with the API
-    f(logits, logit_paddings, targets, target_paddings)
-
-  Returns:
-    clu.Metric that maintains a weighted average of the values.
   """
 
   @flax.struct.dataclass
@@ -431,13 +425,7 @@ def average_ctc_loss(fun):
     weight: np.float32
 
     @classmethod
-    def from_model_output(cls, logits, logit_paddings, targets, target_paddings,
-                          **_):
-      per_seq_loss = fun(logits, logit_paddings, targets, target_paddings)
-      normalizer = np.sum(1 - target_paddings)
-
-      normalized_loss = np.sum(per_seq_loss) / jnp.maximum(normalizer, 1)
-
+    def from_model_output(cls, normalized_loss, **_):
       return cls(total=normalized_loss, weight=1.0)
 
     def merge(self, other):
@@ -449,6 +437,55 @@ def average_ctc_loss(fun):
 
   return _Metric
 
+
+def compute_wer(decoded, decoded_paddings, targets, target_paddings, tokenizer):
+  """Computes word error rate."""
+  word_errors = 0.0
+  num_words = 0.0
+
+  decoded_sentences = tokenizer.ids_to_strings(decoded, decoded_paddings)
+  target_sentences = tokenizer.ids_to_strings(targets, target_paddings)
+
+  for decoded_sentence, target_sentence in zip(decoded_sentences,
+                                               target_sentences):
+    target_num_words = len(target_sentence.split(' '))
+
+    word_errors += utils.edit_distance(decoded_sentence, target_sentence)
+    num_words += target_num_words
+
+  return word_errors, num_words
+
+
+def wer(hps):
+  """Returns a clu.Metric that computes word error rate.
+
+  Args:
+    hps: hyperparameters providing vocab path for tokenizer.
+
+  Returns:
+    clu.Metric computing word error rate.
+  """
+
+  tokenizer = wpm_tokenizer.WpmTokenizer(hps.wpm_vocab_path)
+
+  @flax.struct.dataclass
+  class WER(
+      metrics.CollectingMetric.from_outputs(
+          ('hyps', 'hyp_paddings', 'targets', 'target_paddings'))):
+    """Metric computing word error rate."""
+
+    def compute(self):
+      values = super().compute()
+      # Ensure the arrays are numpy and not jax.numpy.
+      values = {k: np.array(v) for k, v in values.items()}
+
+      word_errors, num_words = compute_wer(values['hyps'],
+                                           values['hyp_paddings'],
+                                           values['targets'],
+                                           values['target_paddings'], tokenizer)
+      return word_errors / num_words
+
+  return WER
 
 # All metrics used here must take three arguments named `logits`, `targets`,
 # `weights`. We don't use CLU's `mask` argument, the metric gets
@@ -488,23 +525,23 @@ _METRICS = {
             ssim=weighted_average_metric(ssim),
             num_examples=NumExamples,
         ),
-    'ctc_metrics':
-        metrics.Collection.create(
-            ctc_loss=average_ctc_loss(losses.ctc_loss))
 }
 
 
-def get_metrics(metrics_name):
+def get_metrics(metrics_name, hps=None):
   """Get the metric functions based on the metrics string.
 
   Args:
     metrics_name: (str) e.g. classification_metrics.
+    hps: optional hyperparameters to be used while creating metric classes.
 
   Returns:
     A dictionary of metric functions.
   Raises:
     ValueError if the metrics is unrecognized.
   """
+  if metrics_name == 'ctc_metrics':
+    return metrics.Collection.create(ctc_loss=average_ctc_loss(), wer=wer(hps))
   try:
     return _METRICS[metrics_name]
   except KeyError as metric_not_found_error:
