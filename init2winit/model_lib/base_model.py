@@ -194,20 +194,38 @@ class BaseModel(object):
         all_variables, batch['inputs'], **apply_kwargs)
     weights = batch.get('weights')
     targets = batch['targets']
+
+    return self.training_objective_fn(params, logits, targets,
+                                      weights), new_batch_stats
+
+  def training_objective_fn(self, params, logits, targets, weights):
+    """Returns the training objective (loss + regularizer) on a batch of logits.
+
+    Args:
+      params: A dict of model parameters. Only used for regularization.
+      logits: A jnp.array of shape (batch, output_shape).
+      targets: A jnp.array of shape (batch, output_shape).
+      weights: None or jnp.array of shape (batch,)
+
+    Returns:
+      A training objective value.
+
+    """
     if self.dataset_meta_data['apply_one_hot_in_loss']:
       targets = one_hot(targets, logits.shape[-1])
     # Optionally apply label smoothing.
     if self.hps.get('label_smoothing') is not None:
       targets = model_utils.apply_label_smoothing(
           targets, self.hps.get('label_smoothing'))
-    total_loss = self.loss_fn(logits, targets, weights)
+
+    objective_value = self.loss_fn(logits, targets, weights)
 
     if self.hps.get('l2_decay_factor'):
       l2_loss = model_utils.l2_regularization(params,
                                               self.hps.l2_decay_rank_threshold)
-      total_loss += 0.5 * self.hps.l2_decay_factor * l2_loss
+      objective_value += 0.5 * self.hps.l2_decay_factor * l2_loss
 
-    return total_loss, new_batch_stats
+    return objective_value
 
   def get_fake_batch(self, hps):
     del hps

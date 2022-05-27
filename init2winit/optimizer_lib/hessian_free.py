@@ -27,6 +27,7 @@ import jax.numpy as jnp
 from optax import apply_updates
 from optax._src import base
 import tree_math as tm
+import tree_math.numpy as tnp
 
 
 @jit
@@ -269,11 +270,7 @@ def mf_conjgrad_solver(A_fn,
     # Update r, y and the square of residual norm
     refresh_residual = jnp.equal(
         jnp.remainder(step, residual_refresh_frequency), 0)
-
-    def _update_residual(Ax, b, r, Ap):
-      return jnp.where(refresh_residual, Ax - b, r + alpha * Ap)
-
-    r = jax.tree_map(_update_residual, A_fn(x), b, r, Ap)
+    r = tnp.where(refresh_residual, A_fn(x) - b, r + alpha * Ap)
     y = precond_fn(r)
     rss_new = r @ y
 
@@ -301,16 +298,15 @@ def mf_conjgrad_solver(A_fn,
 
   init_state = (x, x_arr, x_arr_idx, False, next_save_step, r, y, p, alpha,
                 beta, obj_val, obj_arr, 0, rss)
-  x, x_arr, x_arr_idx, save_step, *_ = lax.while_loop(termination_condition,
-                                                      one_step_conjgrad,
-                                                      init_state)
+  x, x_arr, x_arr_idx, save_step, *_, step, rss = lax.while_loop(
+      termination_condition, one_step_conjgrad, init_state)
 
   # Save the last iterate if not saved yet.
   x_arr_idx = jnp.where(save_step, x_arr_idx, x_arr_idx + 1)
   x_arr = conditional_tree_index_update(x_arr, x, x_arr_idx,
                                         jnp.logical_not(save_step))
 
-  return x_arr, x_arr_idx
+  return x_arr, x_arr_idx, step, rss
 
 
 # pylint: enable=invalid-name
@@ -425,6 +421,74 @@ def cg_backtracking(p_arr, p_arr_idx, obj_fn, variables):
   return p, obj_val
 
 
+def line_search(initial_lr,
+                initial_obj_val,
+                obj_fn,
+                variables,
+                grads,
+                p,
+                sufficient_decrease_constant=10**-2,
+                shrinkage_factor=0.8,
+                max_line_search_step=60):
+  """Determines the learning rate using backtracking line search.
+
+  Incrementing step from 0 to max_line_search_step, this method finds
+    lr(step) = initial_lr * shrinkage_factor ** step
+  that satisfies the Armijo-Goldstein inequality:
+    get_obj_val(obj_fn, variables, lr(step) * p) <=
+    obj_fn(variables) + sufficient_decrease_constant * lr(step) * dot(p, grads).
+  If this is not met until max_line_search_step, returns 0.0 (no update).
+
+  Args:
+    initial_lr: A learning rate to start line search with.
+    initial_obj_val: The objective value with the initial step size.
+    obj_fn: A function mapping outputs to the total loss.
+    variables: A dict of variables is passed directly into flax_module.apply,
+      required to have a key 'params' that is a pytree of model parameters.
+    grads: A tm.Vector of model parameter gradients.
+    p: A tm.Vector of search direction.
+    sufficient_decrease_constant: A constant in the Armijo-Goldstein inequality.
+
+    shrinkage_factor: A constant used to shrink the learning rate.
+    max_line_search_step: The max number of line search steps.
+
+  Returns:
+    A step size on [0.0, initial_lr].
+  """
+  obj_val_ref = obj_fn(variables)
+  p_dot_grads = p @ grads
+  def line_search_should_continue(state):
+    step, lr, obj_val = state
+    return jnp.logical_and(
+        step <= max_line_search_step,
+        jnp.greater(
+            obj_val,
+            obj_val_ref + sufficient_decrease_constant * lr * p_dot_grads))
+
+  def one_step_line_search(state):
+    """One step of line search iteration."""
+    step, lr, _ = state
+    lr *= shrinkage_factor
+    obj_val = get_obj_val(obj_fn, variables, lr * p)
+
+    return step + 1, lr, obj_val
+
+  init_state = 0, initial_lr, initial_obj_val
+  step, lr, _ = lax.while_loop(
+      line_search_should_continue, one_step_line_search, init_state)
+
+  return jnp.where(step == max_line_search_step, 0.0, lr)
+
+
+def update_damping(damping, rho, damping_ub, damping_lb):
+  """Updates the damping parameter."""
+  damping_new = damping * jnp.where(rho < 0.25, 1.5,
+                                    jnp.where(rho > 0.75, 2.0 / 3.0, 1.0))
+  damping_new = jnp.where(damping_new > damping_ub, damping_ub, damping_new)
+  damping_new = jnp.where(damping_new < damping_lb, damping_lb, damping_new)
+  return damping_new
+
+
 class HessianFreeState(NamedTuple):
   """State for Hessian-free updates.
 
@@ -433,25 +497,51 @@ class HessianFreeState(NamedTuple):
   """
   p0: base.Params
   damping: float
+  total_cg_steps: int
+  final_lr: float
 
 
 def hessian_free(flax_module,
-                 loss_fn,
+                 training_objective_fn,
                  learning_rate=1.0,
-                 max_iter=100,
+                 cg_max_iter=100,
                  tol=0.0005,
                  residual_refresh_frequency=10,
-                 termination_criterion='relative_per_iteration_progress_test'):
+                 termination_criterion='relative_per_iteration_progress_test',
+                 use_cg_backtracking=True,
+                 use_line_search=True,
+                 line_search_sufficient_increase_constant=10**(-2),
+                 line_search_shrinkage_factor=0.8,
+                 max_line_search_step=60,
+                 warmstart_refresh_rss_threshold=1.0,
+                 init_damping=50.0,
+                 damping_ub=10**2,
+                 damping_lb=10**-6):
   """Hessian-free optimizer.
+
+  In this implementation, every dot product is computed by tree_math.numpy.dot.
+  Note that this might have a different default precision than jax.numpy.dot.
+  For more information, see
+  https://github.com/google/tree-math/blob/main/tree_math/_src/vector.py#L104.
 
   Args:
     flax_module: A flax linen.nn.module.
-    loss_fn: A loss function.
+    training_objective_fn: A training objective function.
     learning_rate: A learning rate.
-    max_iter: The number of CG iterations.
+    cg_max_iter: The max number of CG iterations.
     tol: The convergence tolerance.
     residual_refresh_frequency: A frequency to refresh the residual.
     termination_criterion: A function chekcing a termination criterion.
+    use_cg_backtracking: A bool indicating whether to use cg backtracking.
+    use_line_search: A bool indicating whether to use line search.
+    line_search_sufficient_increase_constant: A constant for backtracking line
+      search.
+    line_search_shrinkage_factor: A constant used to shrink the learning rate.
+    max_line_search_step: The max number of line search steps.
+    warmstart_refresh_rss_threshold: A rss threshold used to refresh warmstart.
+    init_damping: An initial damping value.
+    damping_ub: The upper bound of the damping parameter.
+    damping_lb: The lower bound of the damping parameter.
 
   Returns:
     A base.GradientTransformation object of (init_fn, update_fn) tuple.
@@ -459,17 +549,22 @@ def hessian_free(flax_module,
 
   def init_fn(params):
     """Initializes the HessianFreeState object for Hessian-free updates."""
-    return HessianFreeState(p0=params, damping=1)
+    return HessianFreeState(
+        p0=params,
+        final_lr=0.0,
+        damping=init_damping,
+        total_cg_steps=0)
 
   @partial(tm.wrap, vector_argnames=['grads', 'p0'])
-  def _update_fn(grads, p0, damping, variables, batch):
-    def partial_forward_fn(variables):
+  def _update_fn(grads, p0, damping, total_cg_steps, variables, batch):
+    def forward_fn(variables):
       return flax_module.apply(variables, batch['inputs'], train=False)
 
-    def partial_loss_fn(logits):
-      return loss_fn(logits, batch['targets'])
+    def loss_fn(logits):
+      return training_objective_fn(
+          variables['params'], logits, batch['targets'], batch.get('weights'))
 
-    outputs = partial_forward_fn(variables)
+    outputs = forward_fn(variables)
 
     @tm.unwrap
     def matmul_fn(v):
@@ -483,23 +578,22 @@ def hessian_free(flax_module,
         A tm.Vector of the product of the Gauss-Newton matrix and a tm.Vector.
       """
       return lax.pmean(
-          gvp(variables, outputs, damping, partial_forward_fn,
-              partial_loss_fn, v),
+          gvp(variables, outputs, damping, forward_fn, loss_fn, v),
           axis_name='batch')
 
     def obj_fn(variables):
-      return lax.pmean(partial_loss_fn(partial_forward_fn(variables)),
-                       axis_name='batch')
+      return lax.pmean(loss_fn(forward_fn(variables)), axis_name='batch')
 
-    p_arr, p_arr_idx = mf_conjgrad_solver(
+    p_arr, p_arr_idx, cg_steps, rss = mf_conjgrad_solver(
         A_fn=matmul_fn,
         b=-grads,
         x0=p0,
-        max_iter=max_iter,
+        max_iter=cg_max_iter,
         tol=tol,
         residual_refresh_frequency=residual_refresh_frequency,
         precond_fn=None,
         termination_criterion=termination_criterion)
+    total_cg_steps += cg_steps
 
     ## CG backtracking
     # CG solution to be used to initialize the next CG run.
@@ -508,17 +602,36 @@ def hessian_free(flax_module,
     # CG backtracking uses a logarithmic amount of memory to save CG iterates.
     # If this causes OOM, we can consider computing the objective value at
     # each save step in the CG loop and keeping the best one.
-    p, obj_val = cg_backtracking(p_arr, p_arr_idx, obj_fn, variables)
+    if use_cg_backtracking:
+      p, obj_val = cg_backtracking(p_arr, p_arr_idx, obj_fn, variables)
+    else:
+      p = p_sol
+      obj_val = get_obj_val(obj_fn, variables, p)
 
-    # update the damping parameter
-    reduction_f = obj_val - lax.pmean(partial_loss_fn(outputs),
-                                      axis_name='batch')
+    # Update the damping parameter.
+    reduction_f = obj_val - lax.pmean(loss_fn(outputs), axis_name='batch')
     reduction_q = p @ (grads + 0.5 * matmul_fn(p))
+    rho = reduction_f / reduction_q
+    damping_new = update_damping(damping, rho, damping_ub, damping_lb)
 
-    damping_new = damping * jnp.where(reduction_f / reduction_q < 0.25,
-                                      3.0 / 2.0, 2.0 / 3.0)
+    # Line search
+    final_lr = learning_rate
+    if use_line_search:
+      initial_lr = learning_rate
+      initial_obj_val = get_obj_val(obj_fn, variables, initial_lr * p)
+      final_lr = line_search(initial_lr, initial_obj_val, obj_fn, variables,
+                             grads, p, line_search_sufficient_increase_constant,
+                             line_search_shrinkage_factor, max_line_search_step)
 
-    return learning_rate * p, HessianFreeState(p_sol, damping_new)
+    refresh_warmstart = jnp.logical_or(final_lr == 0.0,
+                                       rss > warmstart_refresh_rss_threshold)
+    p_warmstart = (1 - refresh_warmstart) * p_sol
+
+    return final_lr * p, HessianFreeState(
+        p0=p_warmstart,
+        final_lr=final_lr,
+        damping=damping_new,
+        total_cg_steps=total_cg_steps)
 
   @jit
   def update_fn(grads, state, variables_batch_tuple):
@@ -537,6 +650,8 @@ def hessian_free(flax_module,
       A tuple of (pytree of the model updates, new HessianFreeState).
     """
     variables, batch = variables_batch_tuple
-    return _update_fn(grads, state.p0, state.damping, variables, batch)
+    return _update_fn(grads, state.p0, state.damping, state.total_cg_steps,
+                      variables, batch)
 
   return base.GradientTransformation(init_fn, update_fn)
+

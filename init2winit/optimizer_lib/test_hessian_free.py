@@ -25,7 +25,9 @@ from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import models
 from init2winit.optimizer_lib import optimizers
 from init2winit.optimizer_lib.hessian_free import cg_backtracking
+from init2winit.optimizer_lib.hessian_free import get_obj_val
 from init2winit.optimizer_lib.hessian_free import gvp
+from init2winit.optimizer_lib.hessian_free import line_search
 from init2winit.optimizer_lib.hessian_free import mf_conjgrad_solver
 from init2winit.optimizer_lib.hessian_free import relative_per_iteration_progress_test
 from init2winit.optimizer_lib.hessian_free import residual_norm_test
@@ -65,6 +67,10 @@ def _load_autoencoder_model():
       'optimizer': 'hessian_free',
       'opt_hparams': {
           'weight_decay': 0.0,
+          'init_damping': 1.0,
+          'damping_ub': 10 ** 2,
+          'damping_lb': 10 ** -6,
+          'use_line_search': False,
       },
       'hid_sizes': [2],
       'activation_function': ['id'],
@@ -72,7 +78,7 @@ def _load_autoencoder_model():
       'output_shape': _OUTPUT_SHAPE
   })
 
-  model = model_cls(hps, {}, loss, metrics)
+  model = model_cls(hps, {'apply_one_hot_in_loss': False}, loss, metrics)
   init_fn, update_fn = optimizers.get_optimizer(hps, model)
   params = {
       'Dense_0': {
@@ -136,7 +142,7 @@ class HessianFreeTest(absltest.TestCase):
     x0 = tm.Vector(np.ones(n))
 
     test_matmul_fn = tm.unwrap(lambda x: mat @ x)
-    x_arr, x_arr_idx = mf_conjgrad_solver(
+    x_arr, x_arr_idx, *_ = mf_conjgrad_solver(
         test_matmul_fn, b, x0, n, 1e-6, 10, None, 'residual_norm_test')
     x = tree_slice(x_arr, x_arr_idx)
     self.assertAlmostEqual(tm_norm(test_matmul_fn(x) - b), 0, places=3)
@@ -163,14 +169,14 @@ class HessianFreeTest(absltest.TestCase):
 
     test_matmul_fn = tm.unwrap(lambda x: mat @ x)
     test_precond_fn = tm.unwrap(lambda x: precond_mat @ x)
-    x_arr, x_arr_idx = mf_conjgrad_solver(
+    x_arr, x_arr_idx, *_ = mf_conjgrad_solver(
         test_matmul_fn, b, x0, n, 1e-6, 10, test_precond_fn,
         'residual_norm_test')
     x = tree_slice(x_arr, x_arr_idx)
     self.assertAlmostEqual(tm_norm(test_matmul_fn(x) - b), 0, places=3)
 
   def test_conjgrad_martens_termination_criterion(self):
-    """Tests conjugate gradient method with martens termination criterion."""
+    """Tests conjugate gradient method with Martens termination criterion."""
     n = 500
     mat = _get_pd_mat(
         np.array([[((i + j) % n) for j in range(n)] for i in range(n)]))
@@ -179,7 +185,7 @@ class HessianFreeTest(absltest.TestCase):
 
     test_mvm_fn = tm.unwrap(lambda x: mat @ x)
 
-    x_arr, x_arr_idx = mf_conjgrad_solver(
+    x_arr, x_arr_idx, *_ = mf_conjgrad_solver(
         test_mvm_fn, b, x0, n, 1e-6, 500, None,
         'relative_per_iteration_progress_test')
     x = tree_slice(x_arr, x_arr_idx)
@@ -244,6 +250,43 @@ class HessianFreeTest(absltest.TestCase):
     updated_params = apply_updates(params, expected)
     self.assertAlmostEqual(opt_cost({'params': updated_params}),
                            obj_val, places=4)
+
+  def test_line_search(self):
+    """Tests the line search algorithm."""
+    model, _, _, variables = _load_autoencoder_model()
+    batch = _load_autoencoder_data()
+
+    def forward_fn(variables, inputs):
+      return model.flax_module.apply(variables, inputs, train=False)
+
+    def opt_cost(params):
+      return model.loss_fn(forward_fn(params, batch['inputs']),
+                           batch['targets'])
+
+    unravel_fn = ravel_pytree(variables['params'])[1]
+
+    p = tm.Vector(
+        unravel_fn(jnp.array([
+            0.5, 0.2, 0.1, -0.4, -0.6, 0.4, 0.6, -0.7, 0.0, 0.5, -0.7, 0.2, 0.1,
+            -0.2, 0.4, -0.6, -0.8, 0.7, 0.2, 0.9, -0.1, 0.5])))
+
+    partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
+    partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
+
+    def obj_fn(variables):
+      return partial_loss_fn(partial_forward_fn(variables))
+
+    initial_lr = 1.0
+    initial_obj_val = get_obj_val(obj_fn, variables, p)
+
+    grad_fn = jax.grad(opt_cost)
+    grads = tm.Vector(grad_fn(variables)['params'])
+
+    final_lr = line_search(
+        initial_lr, initial_obj_val, obj_fn, variables, grads, p)
+
+    # Test the final learning rate value.
+    self.assertEqual(final_lr, initial_lr)
 
   def test_gvp(self):
     """Tests the gvp function."""

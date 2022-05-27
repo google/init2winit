@@ -35,7 +35,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         hid_sizes=[128, 64, 32, 64, 128],
         activation_function=['relu', 'relu', 'relu', 'relu', 'relu'],
-        kernel_scales=[0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+        kernel_scales=[1.0] * 6,
         lr_hparams={
             'base_lr': 0.1,
             'schedule': 'constant'
@@ -43,15 +43,20 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         layer_rescale_factors={},
         optimizer='hessian_free',
         opt_hparams={
-            'cg_max_iters': 250,
+            'cg_max_iter': 250,
+            'use_cg_backtracking': True,
+            'use_line_search': True,
+            'init_damping': 50.0,
+            'damping_ub': 10 ** 2,
+            'damping_lb': 10 ** -6,
         },
         batch_size=128,
-        l2_decay_factor=None,
-        l2_decay_rank_threshold=0,
         label_smoothing=None,
         rng_seed=-1,
         use_shallue_label_smoothing=False,
         model_dtype='float32',
+        l2_decay_factor=2e-5,
+        l2_decay_rank_threshold=1,
     ))
 
 
@@ -59,7 +64,7 @@ class AutoEncoderModel(base_model.BaseModel):
 
   def build_flax_module(self):
     kernel_inits = [
-        initializers.variance_scaling(scale, 'fan_in', 'truncated_normal')
+        initializers.normal(scale)
         for scale in self.hps.kernel_scales
     ]
 

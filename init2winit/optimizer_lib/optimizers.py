@@ -169,14 +169,19 @@ def get_optimizer(hps, model=None):
           'Model info should be provided for using the hessian free optimizer.')
     # These arguments are ignored by inject_hyperparams, which should only set
     # a schedule for learning_rate.
-    static_args = ['flax_module', 'loss_fn', 'max_iter']
+    static_args = ['flax_module', 'training_objective_fn', 'cg_max_iter']
     opt_init, opt_update = optax.inject_hyperparams(
         hessian_free,
         static_args=static_args)(
             flax_module=model.flax_module,
-            loss_fn=model.loss_fn,
+            training_objective_fn=model.training_objective_fn,
             learning_rate=0.0,  # Manually injected on each train step.
-            max_iter=hps.opt_hparams['cg_max_iters'])
+            cg_max_iter=hps.opt_hparams['cg_max_iter'],
+            use_cg_backtracking=hps.opt_hparams['use_cg_backtracking'],
+            use_line_search=hps.opt_hparams['use_line_search'],
+            init_damping=hps.opt_hparams['init_damping'],
+            damping_ub=hps.opt_hparams['damping_ub'],
+            damping_lb=hps.opt_hparams['damping_lb'])
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = kitchen_sink.from_hparams(hps.opt_hparams)
   elif hps.optimizer == 'samuel':
