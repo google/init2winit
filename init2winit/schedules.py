@@ -199,6 +199,35 @@ def piecewise_constant_schedule(schedule_hparams, max_training_steps):
   return lr_fn
 
 
+def two_piece_linear_schedule(schedule_hparams, max_training_steps):
+  """Computes a two-piece linear schedule.
+
+  We introduce this as a special case of `piecewise_linear_schedule`
+  because the halton generator code does not allow us to specify
+  an hyperparameter by list index (i.e., first decay event).
+
+  Args:
+    schedule_hparams: Relevant hparams are base_lr, decay_events decay_factors.
+    max_training_steps: This is ignored (needed to match API of other lr
+      functions).
+
+  Returns:
+    lr_fn: A function mapping global_step to lr.
+  """
+  del max_training_steps
+  _check_schedule_hparams(schedule_hparams, [
+      'schedule', 'base_lr', 'first_event', 'last_event', 'first_factor',
+      'last_factor'
+  ])
+  schedule_hparams['decay_events'] = [
+      schedule_hparams['first_event'], schedule_hparams['last_event']
+  ]
+  schedule_hparams['decay_events'] = [
+      schedule_hparams['first_event'], schedule_hparams['last_event']
+  ]
+  return piecewise_linear_schedule(schedule_hparams, max_training_steps)
+
+
 def piecewise_linear_schedule(schedule_hparams, max_training_steps):
   """Computes a piecewise linear decay schedule.
 
@@ -379,6 +408,7 @@ def warmup_then_piecewise_constant_schedule(schedule_hparams,
 lr_fn_dict = {
     'constant': constant_schedule,
     'cosine': cosine_schedule,
+    'two_piece_linear': two_piece_linear_schedule,
     'piecewise_linear': piecewise_linear_schedule,
     'piecewise_constant': piecewise_constant_schedule,
     'polynomial': polynomial_schedule,
