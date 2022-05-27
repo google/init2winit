@@ -297,6 +297,8 @@ class UNetModel(base_model.BaseModel):
         logits=logits,
         targets=targets,
         weights=weights,
+        mean=batch.get('mean'),
+        std=batch.get('std'),
         volume_max=batch.get('volume_max'),
         axis_name='batch')
 

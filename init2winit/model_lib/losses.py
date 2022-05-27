@@ -304,8 +304,6 @@ def ctc_loss(logits, logit_paddings, labels, label_paddings, blank_id=0):
 def weighted_unnormalized_mean_absolute_error(logits,
                                               targets,
                                               weights=None,
-                                              mean=None,
-                                              std=None,
                                               **kwargs):
   """Computes weighted mean absolute error (L1) loss.
 
@@ -314,8 +312,6 @@ def weighted_unnormalized_mean_absolute_error(logits,
       keeping argument naming consistent.
     targets: (batch,) + input.shape float array.
     weights: None or array of shape (batch,)
-    mean: (batch,) mean of original images.
-    std: (batch,) std of original images.
     **kwargs: extra keyword args that are ignored.
 
   Returns:
@@ -323,16 +319,6 @@ def weighted_unnormalized_mean_absolute_error(logits,
   """
   del kwargs
 
-  if mean is None:
-    mean = jnp.zeros(logits.shape[0])
-
-  if std is None:
-    std = jnp.ones(logits.shape[0])
-
-  mean = mean.reshape((-1,) + (1,) * (len(logits.shape) - 1))
-  std = std.reshape((-1,) + (1,) * (len(logits.shape) - 1))
-  logits = logits * std - mean
-  targets = targets * std - mean
   loss = jnp.abs(logits - targets).mean(axis=tuple(range(1, logits.ndim)))
 
   if weights is not None:

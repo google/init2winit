@@ -393,7 +393,11 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
     Structural similarity computed per example, shape [batch, ...].
   """
   if volume_max is None:
-    volume_max = jnp.zeros(logits.shape[0])
+    volume_max = jnp.ones(logits.shape[0])
+
+  # NOTE(dsuo): `volume_max` can be 0 if we have a padded batch, but this will
+  # lead to NaN values in `ssim`.
+  volume_max = jnp.where(volume_max == 0, jnp.ones_like(volume_max), volume_max)
 
   if mean is None:
     mean = jnp.zeros(logits.shape[0])
@@ -403,8 +407,8 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
 
   mean = mean.reshape((-1,) + (1,) * (len(logits.shape) - 1))
   std = std.reshape((-1,) + (1,) * (len(logits.shape) - 1))
-  logits = logits * std - mean
-  targets = targets * std - mean
+  logits = logits * std + mean
+  targets = targets * std + mean
   ssims = jax.vmap(structural_similarity)(logits, targets, volume_max)
 
   if weights is not None:
