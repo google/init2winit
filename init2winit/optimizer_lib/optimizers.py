@@ -15,16 +15,12 @@
 
 """Getter function for selecting optimizers."""
 
-import functools
 from absl import logging
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib.hessian_free import hessian_free
-from init2winit.optimizer_lib.transform import _factored_dims
-from init2winit.optimizer_lib.transform import adafactor
 import jax
-import numpy as np
 import optax
 
 
@@ -162,29 +158,11 @@ def get_optimizer(hps, model=None):
         eps=hps.opt_hparams['epsilon'],
         weight_decay=weight_decay)
   elif hps.optimizer == 'adafactor':
-    # TODO(krasowiak): Remove the workaround once the optax bug is fixed
-    params_rng, dropout_rng = jax.random.split(jax.random.PRNGKey(0), num=2)
-    module = model.flax_module
-    model_init_fn = jax.jit(functools.partial(module.init, train=False))
-    fake_input_batch = np.zeros((2, 16), np.float32)
-    init_dict = model_init_fn({
-        'params': params_rng,
-        'dropout': dropout_rng
-    }, fake_input_batch)
-    params = init_dict['params']
-    factored = hps.opt_hparams['factored']
-    min_dim_size_to_factor = hps.opt_hparams['min_dim_size_to_factor']
-    factored_dims = jax.tree_map(
-        lambda p: _factored_dims(p.shape, factored, min_dim_size_to_factor),
-        params)
-
-    static_args = ['factored_dims']
     opt_init, opt_update = optax.inject_hyperparams(
-        adafactor, static_args=static_args)(
-            learning_rate=0.0,  # Manually injected on each train step.
+        optax.adafactor, static_args='min_dim_size_to_factor')(
+            learning_rate=0.0,
             decay_rate=hps.opt_hparams['adafactor_decay_rate'],
-            clipping_threshold=hps.opt_hparams['clipping_threshold'],
-            factored_dims=factored_dims)
+            clipping_threshold=hps.opt_hparams['clipping_threshold'])
   elif hps.optimizer == 'hessian_free':
     if model is None:
       raise ValueError(
