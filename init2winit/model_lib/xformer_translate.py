@@ -252,11 +252,15 @@ class Encoder1DBlock(nn.Module):
     assert inputs.ndim == 3
     if self.normalizer in [
         'batch_norm', 'layer_norm', 'pre_layer_norm', 'none']:
-      maybe_pre_normalize = model_utils.get_normalizer(self.normalizer, train)
-      maybe_post_normalize = model_utils.get_normalizer('none', train)
+      maybe_pre_normalize = model_utils.get_normalizer(
+          self.normalizer, train, dtype=self.dtype)
+      maybe_post_normalize = model_utils.get_normalizer(
+          'none', train, dtype=self.dtype)
     elif self.normalizer == 'post_layer_norm':
-      maybe_pre_normalize = model_utils.get_normalizer('none', train)
-      maybe_post_normalize = model_utils.get_normalizer(self.normalizer, train)
+      maybe_pre_normalize = model_utils.get_normalizer(
+          'none', train, dtype=self.dtype)
+      maybe_post_normalize = model_utils.get_normalizer(
+          self.normalizer, train, dtype=self.dtype)
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
@@ -341,11 +345,15 @@ class EncoderDecoder1DBlock(nn.Module):
     assert targets.ndim == 3
     if self.normalizer in [
         'batch_norm', 'layer_norm', 'pre_layer_norm', 'none']:
-      maybe_pre_normalize = model_utils.get_normalizer(self.normalizer, train)
-      maybe_post_normalize = model_utils.get_normalizer('none', train)
+      maybe_pre_normalize = model_utils.get_normalizer(
+          self.normalizer, train, dtype=self.dtype)
+      maybe_post_normalize = model_utils.get_normalizer(
+          'none', train, dtype=self.dtype)
     elif self.normalizer == 'post_layer_norm':
-      maybe_pre_normalize = model_utils.get_normalizer('none', train)
-      maybe_post_normalize = model_utils.get_normalizer(self.normalizer, train)
+      maybe_pre_normalize = model_utils.get_normalizer(
+          'none', train, dtype=self.dtype)
+      maybe_post_normalize = model_utils.get_normalizer(
+          self.normalizer, train, dtype=self.dtype)
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
@@ -486,7 +494,8 @@ class Encoder(nn.Module):
               encoder_mask=encoder_mask,
               train=train)
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
-      maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
+      maybe_normalize = model_utils.get_normalizer(
+          self.normalizer, train, dtype=dtype)
       x = maybe_normalize()(x)
     return x
 
@@ -602,7 +611,8 @@ class Decoder(nn.Module):
               encoder_decoder_mask=encoder_decoder_mask,
               train=train)
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
-      maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
+      maybe_normalize = model_utils.get_normalizer(
+          self.normalizer, train, dtype=dtype)
       y = maybe_normalize()(y)
 
     # Decoded Logits
@@ -772,8 +782,9 @@ class Transformer(nn.Module):
              inputs_segmentation=None,
              train=False):
     # Make padding attention mask.
+    dtype = jnp.bfloat16 if self.use_bfloat16 else jnp.float32
     encoder_mask = nn.make_attention_mask(
-        inputs > 0, inputs > 0, dtype=inputs.dtype)
+        inputs > 0, inputs > 0, dtype=dtype)
     # Add segmentation block-diagonal attention mask if using segmented data.
     if inputs_segmentation is not None:
       encoder_mask = nn.combine_masks(
@@ -781,7 +792,7 @@ class Transformer(nn.Module):
           nn.make_attention_mask(inputs_segmentation,
                                  inputs_segmentation,
                                  jnp.equal,
-                                 dtype=inputs_segmentation.dtype))
+                                 dtype=dtype))
     encoded = self.encoder(
         inputs,
         inputs_positions=inputs_positions,
@@ -928,12 +939,14 @@ class TransformerTranslate(base_model.BaseModel):
         self.hps.dec_self_attn_kernel_init]()
     dec_cross_attn_kernel_init_fn = model_utils.INITIALIZERS[
         self.hps.dec_cross_attn_kernel_init]()
+    use_bfloat16 = self.hps.model_dtype == 'bfloat16'
 
     return Transformer(
         vocab_size=self.hps['output_shape'][-1],
         output_vocab_size=self.hps['output_shape'][-1],
         share_embeddings=self.hps.share_embeddings,
         logits_via_embedding=self.hps.logits_via_embedding,
+        use_bfloat16=use_bfloat16,
         emb_dim=self.hps.emb_dim,
         num_heads=self.hps.num_heads,
         enc_num_layers=self.hps.enc_num_layers,

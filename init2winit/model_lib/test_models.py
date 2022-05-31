@@ -215,6 +215,7 @@ class ModelsTest(parameterized.TestCase):
             'schedule': 'constant'
         },
         'output_shape': (vocab_size,),
+        'model_dtype': 'float32',
         # Training HParams.
         'l2_decay_factor': 1e-4,
         'enc_self_attn_kernel_init': 'xavier_uniform',
