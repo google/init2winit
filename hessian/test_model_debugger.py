@@ -141,8 +141,12 @@ class ModelDebuggerTest(absltest.TestCase):
     params = lin_model.init(rng, xs[0])['params']  # init with unsharded batch
     rep_params = flax.jax_utils.replicate(params)
 
+    def apply_on_batch(params, batch_stats, batch, **apply_kwargs):
+      del batch_stats
+      return lin_model.apply({'params': params}, batch, **apply_kwargs)
+
     get_act_stats_fn = model_debugger.create_forward_pass_stats_fn(
-        lin_model, capture_activation_norms=True,
+        apply_on_batch, capture_activation_norms=True,
         sown_collection_names=['qvalues'])
 
     debugger = model_debugger.ModelDebugger(

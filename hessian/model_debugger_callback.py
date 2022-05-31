@@ -96,7 +96,7 @@ class ModelDebugCallback:
     logger = utils.MetricLogger(pytree_path=pytree_path)
 
     get_act_stats_fn = model_debugger.create_forward_pass_stats_fn(
-        model.flax_module,
+        model.apply_on_batch,
         capture_activation_norms=True,
         sown_collection_names=callback_config.get('sown_collection_names'))
 

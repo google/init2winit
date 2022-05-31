@@ -113,7 +113,7 @@ def append_pytree_leaves(full_pytree, to_append):
                            full_pytree)
 
 
-def create_forward_pass_stats_fn(flax_module,
+def create_forward_pass_stats_fn(apply_fn,
                                  capture_activation_norms=False,
                                  sown_collection_names=None):
   """Creates a function which grabs intermediate values from forward pass.
@@ -125,7 +125,7 @@ def create_forward_pass_stats_fn(flax_module,
   the forward pass, add the collection name to the sown_collection_names list.
 
   Args:
-    flax_module: A flax module.
+    apply_fn: See model_lib/base_model.apply_on_batch.
     capture_activation_norms: If true then all intermediate activation norms
       will be returned in the key 'intermediate_norms'.
     sown_collection_names: Any additional stats logged via flax.sow can be
@@ -144,9 +144,10 @@ def create_forward_pass_stats_fn(flax_module,
   if sown_collection_names is not None:
     mutables.extend(sown_collection_names)
   def get_forward_pass_statistics(params, batch):
-    _, forward_pass_statistics = flax_module.apply(
-        {'params': params},
-        batch,
+    _, forward_pass_statistics = apply_fn(
+        params=params,
+        batch_stats=None,  # We run in train mode so don't need batch_stats.
+        batch=batch,
         capture_intermediates=capture_activation_norms,
         mutable=mutables,
         train=True)
