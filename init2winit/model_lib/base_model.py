@@ -135,7 +135,7 @@ class BaseModel(object):
     self.dataset_meta_data = dataset_meta_data
     self.loss_fn = losses.get_loss_fn(loss_name)
     self.output_activation_fn = losses.get_output_activation_fn(loss_name)
-    self.metrics_bundle = metrics.get_metrics(metrics_name)
+    self.metrics_bundle = metrics.get_metrics(metrics_name, hps)
     self.flax_module = self.build_flax_module()
 
   def evaluate_batch(self, params, batch_stats, batch):
