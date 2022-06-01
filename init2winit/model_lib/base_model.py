@@ -164,7 +164,9 @@ class BaseModel(object):
     Returns:
       An array of shape [batch_size, num_classes] that contains all the logits.
     """
-    variables = {'params': params, 'batch_stats': batch_stats}
+    variables = {'params': params}
+    if batch_stats is not None:
+      variables['batch_stats'] = batch_stats
     return self.flax_module.apply(variables, batch['inputs'], **apply_kwargs)
 
   def predict_batch(self,
@@ -178,24 +180,17 @@ class BaseModel(object):
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return loss with an optional L2 penalty on the weights."""
-    all_variables = {'params': params}
     apply_kwargs = {'train': True}
 
     if batch_stats is not None:
-      all_variables['batch_stats'] = batch_stats
       apply_kwargs['mutable'] = ['batch_stats']
-
     if dropout_rng is not None:
       apply_kwargs['rngs'] = {'dropout': dropout_rng}
 
-    # For more information on flax.linen.Module.apply, see the docs at
-    # https://flax.readthedocs.io/en/latest/flax.linen.html#flax.linen.Module.apply.
-    logits, new_batch_stats = self.flax_module.apply(
-        all_variables, batch['inputs'], **apply_kwargs)
+    logits, new_batch_stats = self.apply_on_batch(params, batch_stats, batch,
+                                                  **apply_kwargs)
     weights = batch.get('weights')
-    targets = batch['targets']
-
-    return self.training_objective_fn(params, logits, targets,
+    return self.training_objective_fn(params, logits, batch['targets'],
                                       weights), new_batch_stats
 
   def training_objective_fn(self, params, logits, targets, weights):
