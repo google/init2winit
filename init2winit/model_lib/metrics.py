@@ -235,6 +235,7 @@ def weighted_average_metric(fun):
   Returns:
     clu.Metric that maintains a weighted average of the values.
   """
+  arg_names = fun.__code__.co_varnames
 
   @flax.struct.dataclass
   class _Metric(metrics.Metric):
@@ -244,7 +245,10 @@ def weighted_average_metric(fun):
 
     @classmethod
     def from_model_output(cls, logits, targets, weights, **kwargs):
-      total = fun(logits, targets, weights, **kwargs).sum()
+      valid_kwargs = {
+          key: val for key, val in kwargs.items() if key in arg_names
+      }
+      total = fun(logits, targets, weights, **valid_kwargs).sum()
       if weights is None:
         weight = targets.shape[0]
       else:
