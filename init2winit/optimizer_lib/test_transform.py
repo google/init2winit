@@ -18,7 +18,9 @@
 from typing import NamedTuple
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import chex
+from init2winit.optimizer_lib import transform
 from init2winit.optimizer_lib.kitchen_sink import transform_chain
 import jax
 import jax.numpy as jnp
@@ -37,6 +39,31 @@ def _optimizer_loop(optimizer, iterations=5):
     params = optax.apply_updates(params, updates)
     results.append(params)
   return results
+
+
+def _optimizers_all_close(tx1, tx2, iterations=5, rtol=1e-5):
+  chex.assert_trees_all_close(
+      _optimizer_loop(tx1, iterations),
+      _optimizer_loop(tx2, iterations),
+      rtol=rtol)
+
+
+class AdamTest(parameterized.TestCase):
+  """Test adam."""
+
+  @parameterized.product(
+      b1=[0.1, 0.5, 0.9, 0.999],
+      b2=[0.1, 0.5, 0.9, 0.999],
+      eps=[1e-8, 1e-4],
+      eps_root=[0.0, 1e-8],
+  )
+  def test_adam(self, b1, b2, eps, eps_root):
+    """Test adam. Thoroughly."""
+    tx1 = optax.scale_by_adam(b1=b1, b2=b2, eps=eps, eps_root=eps_root)
+    tx2 = transform.scale_by_adam(
+        b1=b1, b2=b2, eps=eps, eps_root=eps_root, debias=True)
+
+    _optimizers_all_close(tx1, tx2)
 
 
 class NesterovTest(chex.TestCase):
