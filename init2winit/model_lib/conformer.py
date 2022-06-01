@@ -51,6 +51,10 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
             'epsilon': 1e-9,
             'weight_decay': 0.0
         },
+        lr_hparams={
+            'base_lr': 0.1,
+            'schedule': 'constant'
+        },
         batch_size=256,
         eval_batch_size=128,
         l2_decay_factor=1e-6,
