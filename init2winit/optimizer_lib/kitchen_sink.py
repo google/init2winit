@@ -40,6 +40,7 @@ from init2winit.optimizer_lib.transform import scale_by_amsgrad
 from init2winit.optimizer_lib.transform import scale_by_learning_rate
 from init2winit.optimizer_lib.transform import scale_by_nadam
 from init2winit.optimizer_lib.utils import create_weight_decay_mask
+from init2winit.optimizer_lib.utils import static_inject_hyperparams
 import jax
 import jax.numpy as jnp
 import optax
@@ -251,7 +252,7 @@ def from_hparams(opt_hparams):
   # NOTE: we inject learning_rate = -1.0 to be a no-op. `scale_by_learning_rate`
   # has flip_sign=True by default, so optax.scale(m * learning_rate) where
   # m = -1 requires learning_rate = -1.0 top no-op.
-  return optax.inject_hyperparams(kitchen_sink)(
+  return static_inject_hyperparams(kitchen_sink)(
       learning_rate=-1.0, chains=chains, combinator=combinator)
 
 

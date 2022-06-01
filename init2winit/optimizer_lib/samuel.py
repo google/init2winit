@@ -24,6 +24,7 @@ from typing import Dict
 from typing import List
 from typing import NamedTuple
 
+from init2winit.optimizer_lib.utils import static_inject_hyperparams
 import jax
 import jax.numpy as jnp
 import optax
@@ -148,5 +149,5 @@ def from_hparams(opt_hparams):
     hps.append(hp)
     index += 1
 
-  return optax.inject_hyperparams(samuel)(
+  return static_inject_hyperparams(samuel)(
       optimizers=optimizers, hps=hps, **opt_hparams['args'])

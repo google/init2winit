@@ -14,8 +14,55 @@
 # limitations under the License.
 
 """Optimizer utilities."""
+import functools
+import inspect
+from typing import Callable
+from typing import Iterable
+from typing import Union
 
 import flax
+import optax
+
+
+def static_inject_hyperparams(
+    inner_factory: Callable[..., optax.GradientTransformation],
+    injectable_args: Union[str, Iterable[str]] = ('learning_rate',)
+) -> Callable[..., optax.GradientTransformation]:
+  """Wrapper for `optax.inject_hyperparams` making all args static by default.
+
+  This wrapper resolves two issues:
+
+  1. If anyone adds an optional argument to an `optax` optimizer, code
+     will break because `optax.inject_hyperparams` will pass 0.0.
+  2. Optimizers like `adafactor` have arguments that are not boolean, but are
+     used in boolean statements, which leads to ConcretizationTypeErrors.
+
+  Args:
+    inner_factory: a function that returns the inner
+      ``optax.GradientTransformation`` given the hyperparameters.
+    injectable_args: a string or iterable of strings specifying which callable
+      parameters **are** schedules.
+
+  Returns:
+    A callable that returns a ``optax.GradientTransformation``. This callable
+    accepts the same arguments as ``inner_factory`` and you may provide
+    schedules for the args listed in `injectable_args`.
+  """
+
+  injectable_args = ({injectable_args} if isinstance(injectable_args, str) else
+                     set(injectable_args))
+  inner_signature = inspect.signature(inner_factory)
+
+  @functools.wraps(inner_factory)
+  def wrapped_transform(*args, **kwargs) -> optax.GradientTransformation:
+    bound_arguments = inner_signature.bind(*args, **kwargs)
+    bound_arguments.apply_defaults()
+    static_args = set(bound_arguments.arguments.keys()) - injectable_args
+
+    return optax.inject_hyperparams(inner_factory,
+                                    static_args)(*args, **kwargs)
+
+  return wrapped_transform
 
 
 def create_mask(fn):

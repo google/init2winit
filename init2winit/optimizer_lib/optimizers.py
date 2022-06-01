@@ -19,6 +19,7 @@ from absl import logging
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import samuel
+from init2winit.optimizer_lib import utils
 from init2winit.optimizer_lib.hessian_free import hessian_free
 import jax
 import optax
@@ -88,45 +89,19 @@ def get_optimizer(hps, model=None):
   opt_update = None
 
   if hps.optimizer == 'sgd':
-    opt_init, opt_update = optax.inject_hyperparams(sgd)(
+    opt_init, opt_update = utils.static_inject_hyperparams(sgd)(
         learning_rate=0.0,  # Manually injected on each train step.
         weight_decay=weight_decay)
   elif hps.optimizer == 'momentum' or hps.optimizer == 'nesterov':
-    opt_init, opt_update = optax.inject_hyperparams(sgd)(
+    opt_init, opt_update = utils.static_inject_hyperparams(sgd)(
         learning_rate=0.0,  # Manually injected on each train step.
         weight_decay=weight_decay,
         momentum=hps.opt_hparams['momentum'],
         nesterov=(hps.optimizer == 'nesterov'))
   elif hps.optimizer == 'distributed_shampoo':
-    static_args = [
-        'block_size',
-        'beta1',
-        'beta2',
-        'diagonal_epsilon',
-        'matrix_epsilon',
-        'weight_decay',
-        'start_preconditioning_step',
-        'preconditioning_compute_steps',
-        'statistics_compute_steps',
-        'best_effort_shape_interpretation',
-        'graft_type',
-        'nesterov',
-        'exponent_override',
-        'batch_axis_name',
-        'statistics_partition_spec',
-        'preconditioner_partition_spec',
-        'num_devices_for_pjit',
-        'shard_optimizer_states',
-        'best_effort_memory_usage_reduction',
-        'inverse_failure_threshold',
-        'moving_average_for_momentum',
-        'skip_preconditioning_dim_size_gt',
-        'clip_by_scaled_gradient_norm',
-        'precision',
-    ]
     # pylint: disable=line-too-long
-    opt_init, opt_update = optax.inject_hyperparams(
-        distributed_shampoo.distributed_shampoo, static_args=static_args)(
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        distributed_shampoo.distributed_shampoo)(
             learning_rate=0.0,
             block_size=hps.opt_hparams['block_size'],
             beta1=hps.opt_hparams['beta1'],
@@ -151,37 +126,31 @@ def get_optimizer(hps, model=None):
             clip_by_scaled_gradient_norm=hps.opt_hparams['clip_by_scaled_gradient_norm'])
     # pylint: enable=line-too-long
   elif hps.optimizer == 'adam':
-    opt_init, opt_update = optax.inject_hyperparams(optax.adamw)(
+    opt_init, opt_update = utils.static_inject_hyperparams(optax.adamw)(
         learning_rate=0.0,  # Manually injected on each train step.
         b1=hps.opt_hparams['beta1'],
         b2=hps.opt_hparams['beta2'],
         eps=hps.opt_hparams['epsilon'],
         weight_decay=weight_decay)
   elif hps.optimizer == 'adafactor':
-    opt_init, opt_update = optax.inject_hyperparams(
-        optax.adafactor, static_args='min_dim_size_to_factor')(
-            learning_rate=0.0,
-            decay_rate=hps.opt_hparams['adafactor_decay_rate'],
-            clipping_threshold=hps.opt_hparams['clipping_threshold'])
+    opt_init, opt_update = utils.static_inject_hyperparams(optax.adafactor)(
+        learning_rate=0.0,
+        decay_rate=hps.opt_hparams['adafactor_decay_rate'],
+        clipping_threshold=hps.opt_hparams['clipping_threshold'])
   elif hps.optimizer == 'hessian_free':
     if model is None:
       raise ValueError(
           'Model info should be provided for using the hessian free optimizer.')
-    # These arguments are ignored by inject_hyperparams, which should only set
-    # a schedule for learning_rate.
-    static_args = ['flax_module', 'training_objective_fn', 'cg_max_iter']
-    opt_init, opt_update = optax.inject_hyperparams(
-        hessian_free,
-        static_args=static_args)(
-            flax_module=model.flax_module,
-            training_objective_fn=model.training_objective_fn,
-            learning_rate=0.0,  # Manually injected on each train step.
-            cg_max_iter=hps.opt_hparams['cg_max_iter'],
-            use_cg_backtracking=hps.opt_hparams['use_cg_backtracking'],
-            use_line_search=hps.opt_hparams['use_line_search'],
-            init_damping=hps.opt_hparams['init_damping'],
-            damping_ub=hps.opt_hparams['damping_ub'],
-            damping_lb=hps.opt_hparams['damping_lb'])
+    opt_init, opt_update = utils.static_inject_hyperparams(hessian_free)(
+        flax_module=model.flax_module,
+        training_objective_fn=model.training_objective_fn,
+        learning_rate=0.0,  # Manually injected on each train step.
+        cg_max_iter=hps.opt_hparams['cg_max_iter'],
+        use_cg_backtracking=hps.opt_hparams['use_cg_backtracking'],
+        use_line_search=hps.opt_hparams['use_line_search'],
+        init_damping=hps.opt_hparams['init_damping'],
+        damping_ub=hps.opt_hparams['damping_ub'],
+        damping_lb=hps.opt_hparams['damping_lb'])
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = kitchen_sink.from_hparams(hps.opt_hparams)
   elif hps.optimizer == 'samuel':
