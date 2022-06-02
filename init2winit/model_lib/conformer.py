@@ -74,7 +74,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         time_mask_max_ratio=0.05,
         time_masks_per_frame=0.0,
         use_dynamic_time_mask_max_frames=True,
-        use_specaug=True,))
+        use_specaug=True,
+        residual_dropout_rate=0.1,
+        input_dropout_rate=0.1))
 
 
 @struct.dataclass
@@ -87,7 +89,7 @@ class ConformerConfig:
   num_encoder_layers: int = 0
   attention_dropout_rate: float = 0.0
   attention_residual_dropout_rate: float = 0.1
-  input_dropout_rate: float = 0.1
+  input_dropout_rate: float = 0.0
   conv_residual_dropout_rate: float = 0.0
   feed_forward_dropout_rate: float = 0.0
   feed_forward_residual_dropout_rate: float = 0.1
@@ -828,7 +830,10 @@ class ConformerModel(base_model.BaseModel):
         time_masks_per_frame=self.hps.time_masks_per_frame,
         use_dynamic_time_mask_max_frames=self.hps
         .use_dynamic_time_mask_max_frames,
-        use_specaug=self.hps.use_specaug)
+        use_specaug=self.hps.use_specaug,
+        attention_residual_dropout_rate=self.hps.residual_dropout_rate,
+        feed_forward_residual_dropout_rate=self.hps.residual_dropout_rate,
+        input_dropout_rate=self.hps.input_dropout_rate)
     module = ConformerEncoderDecoder(config)
 
     return module
