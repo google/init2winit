@@ -328,8 +328,7 @@ def scale_by_adam(
     b2: float = 0.999,
     eps: float = 1e-8,
     eps_root: float = 0.0,
-    debias: bool = True,
-    use_decay_bias_correction: bool = False) -> optax.GradientTransformation:
+    debias: bool = True) -> optax.GradientTransformation:
   """Rescale updates according to the Adam algorithm.
 
   Args:
@@ -339,8 +338,6 @@ def scale_by_adam(
     eps_root: term added to the denominator inside the square-root to improve
       numerical stability when backpropagating gradients through the rescaling.
     debias: whether to use moment bias correction.
-    use_decay_bias_correction: whether to use adafactor style decay bias
-      correction.
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -354,19 +351,8 @@ def scale_by_adam(
   def update_fn(updates, state, params=None):
     del params
 
-    b1_hat = b1
-    b2_hat = b2
-
-    if use_decay_bias_correction:
-      if debias:
-        raise ValueError('Adam error: decay bias correction and moment bias'
-                         'correction cannot be combined.')
-
-      b1_hat = _bias_corrected_decay(b1, state.count)
-      b2_hat = _bias_corrected_decay(b2, state.count)
-
-    mu = _update_moment(updates, state.mu, b1_hat, 1)
-    nu = _update_moment(updates, state.nu, b2_hat, 2)
+    mu = _update_moment(updates, state.mu, b1, 1)
+    nu = _update_moment(updates, state.nu, b2, 2)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     mu_hat = mu if not debias else _bias_correction(mu, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
