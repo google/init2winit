@@ -25,6 +25,8 @@ import tensorflow_datasets as tfds
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 Features = Dict[str, tf.Tensor]
 
+ALLOWED_TOKENIZERS = ['WPM', 'SPM', 'RAW']
+
 
 class CharacterTokenizer():
   """Tokenizer that uses raw character level vocab."""
@@ -130,7 +132,7 @@ def _preprocess_output(features, tokenizer, hps):
   Returns:
     outputs tf data features with tokenized transcripts.
   """
-  if hps.use_wpm_tokenizer:
+  if hps.tokenizer_type == 'WPM':
     tokenizer_input = features['targets'][tf.newaxis, ...]
 
     def cpu_tokenizer_fn(*args, **kwargs):
@@ -145,11 +147,11 @@ def _preprocess_output(features, tokenizer, hps):
 
     features['targets'] = tokens[0, :]
     features['target_paddings'] = token_paddings[0, :]
-  elif hps.use_spm_tokenizer:
+  elif hps.tokenizer_type == 'SPM':
     features['targets'] = tokenizer.tokenize(features['targets'])
     features['target_paddings'] = tf.zeros_like(
         features['targets'], dtype=tf.float32)
-  elif hps.use_character_tokenizer:
+  elif hps.tokenizer_type == 'RAW':
     features['targets'] = tf.py_function(
         func=tokenizer.tokenize, inp=[features['targets']], Tout=tf.int32)
     features['target_paddings'] = tf.zeros_like(
@@ -212,17 +214,18 @@ def preprocess_data(
   max_target_length = hps.max_target_length
   max_input_length = hps.max_input_length
 
-  if hps.use_wpm_tokenizer:
-    tokenizer = wpm_tokenizer.WpmTokenizer(hps.wpm_vocab_path)
-  elif hps.use_spm_tokenizer:
-    tokenizer = spm_tokenizer.load_tokenizer(hps.spm_vocab_path)
-  elif hps.use_character_tokenizer:
-    tokenizer = CharacterTokenizer()
-
-  if tokenizer is None:
+  if hps.tokenizer_type not in ALLOWED_TOKENIZERS:
     raise ValueError(
-        'Failed to create tokenizer, '
-        'make sure one of WPM, SPM or Character tokenizer flags are set.')
+        'Passed in tokenizer_type value does not correspond to currently '
+        'supported tokenizers, make sure one of WPM, SPM or RAW is set'
+        ' as tokenizer_type flag.')
+
+  if hps.tokenizer_type == 'WPM':
+    tokenizer = wpm_tokenizer.WpmTokenizer(hps.tokenizer_vocab_path)
+  elif hps.tokenizer_type == 'SPM':
+    tokenizer = spm_tokenizer.load_tokenizer(hps.tokenizer_vocab_path)
+  elif hps.tokenizer_type == 'RAW':
+    tokenizer = CharacterTokenizer()
 
   dataset = dataset.map(
       functools.partial(_preprocess_output, tokenizer=tokenizer, hps=hps),

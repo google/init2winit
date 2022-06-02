@@ -24,6 +24,7 @@ import functools
 from clu import metrics
 import flax
 from init2winit import utils
+from init2winit.dataset_lib import spm_tokenizer
 from init2winit.dataset_lib import wpm_tokenizer
 from init2winit.model_lib import losses
 import jax
@@ -474,7 +475,13 @@ def wer(hps):
     clu.Metric computing word error rate.
   """
 
-  tokenizer = wpm_tokenizer.WpmTokenizer(hps.wpm_vocab_path)
+  if hps.tokenizer_type == 'WPM':
+    tokenizer = wpm_tokenizer.WpmTokenizer(hps.tokenizer_vocab_path)
+  elif hps.tokenizer_type == 'SPM':
+    tokenizer = spm_tokenizer.load_tokenizer(hps.tokenizer_vocab_path)
+  else:
+    raise ValueError(
+        'WER computation is currently supported for WPM and SPM tokenizers.')
 
   @flax.struct.dataclass
   class WER(
