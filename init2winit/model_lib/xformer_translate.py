@@ -885,7 +885,11 @@ class TransformerTranslate(base_model.BaseModel):
 
   def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
     """Wrapper around flax_module.apply."""
-    variables = {'params': params, 'batch_stats': batch_stats}
+    if batch_stats is not None:
+      variables = {'params': params, 'batch_stats': batch_stats}
+    else:
+      variables = {'params': params}
+
     return self.flax_module.apply(
         variables,
         batch['inputs'],

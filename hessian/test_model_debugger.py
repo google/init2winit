@@ -121,8 +121,9 @@ class ModelDebuggerTest(absltest.TestCase):
     variables = cnn.init(rng, batch[0])
 
     debugger = model_debugger.ModelDebugger(use_pmap=False)
+    rep_rng = flax.jax_utils.replicate(rng)
     metrics = debugger.full_eval(
-        10, params=variables['params'], grad=variables['params'])
+        10, params=variables['params'], grad=variables['params'], rng=rep_rng)
     expected_keys = [
         'step',
         'global_param_norm_sql2',
@@ -135,6 +136,7 @@ class ModelDebuggerTest(absltest.TestCase):
   def test_create_forward_pass_stats_fn(self):
     """Test that we properly capture intermediate values."""
     rng = jax.random.PRNGKey(0)
+    rep_rng = flax.jax_utils.replicate(rng)
     xs = np.random.normal(size=(1, 10, 5))
 
     lin_model = Linear()
@@ -150,10 +152,10 @@ class ModelDebuggerTest(absltest.TestCase):
         sown_collection_names=['qvalues'])
 
     debugger = model_debugger.ModelDebugger(
-        forward_pass=get_act_stats_fn,
-        use_pmap=True)
+        forward_pass=get_act_stats_fn, use_pmap=True)
 
-    metrics = debugger.full_eval(step=0, params=rep_params, batch=xs)
+    metrics = debugger.full_eval(
+        step=0, params=rep_params, batch=xs, rng=rep_rng)
 
     expected_output = np.dot(xs[0], params['Dense_0']['kernel'])
     expected_q_value = np.linalg.norm(expected_output)**2 / expected_output.size

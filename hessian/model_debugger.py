@@ -143,11 +143,12 @@ def create_forward_pass_stats_fn(apply_fn,
   mutables = ['intermediates', 'batch_stats']
   if sown_collection_names is not None:
     mutables.extend(sown_collection_names)
-  def get_forward_pass_statistics(params, batch):
+  def get_forward_pass_statistics(params, batch, rng):
     _, forward_pass_statistics = apply_fn(
         params=params,
         batch_stats=None,  # We run in train mode so don't need batch_stats.
         batch=batch,
+        rngs={'dropout': rng},
         capture_intermediates=capture_activation_norms,
         mutable=mutables,
         train=True)
@@ -288,7 +289,8 @@ class ModelDebugger:
                 grad_norms_sql2=None,
                 update_norms_sql2=None,
                 extra_scalar_metrics=None,
-                batch=None):
+                batch=None,
+                rng=None):
     """Computes statistics of the forward and backward pass and save to disk.
 
     Currently what is written to disk is a pytree, with a dict at the top level
@@ -324,6 +326,7 @@ class ModelDebugger:
       extra_scalar_metrics: A dict of any addional metrics to log.
       batch: A batch of data to use in grabbing forward pass statistics. Only
         used when self.forward_pass is not None.
+      rng: A jax.random.PRNGKey (replicated if use_pmap=True).
 
     Returns:
       Dictionary of all computed metrics. Note, if self.metrics_logger exists
@@ -351,7 +354,7 @@ class ModelDebugger:
       if batch is None:
         raise ValueError(
             'Must supply a batch when computing forward pass stats.')
-      forward_stats = self.forward_pass(params, batch)
+      forward_stats = self.forward_pass(params, batch, rng)
       all_metrics.update(forward_stats)
 
     # When using metrics_logger.append_pytree(pytree, append=True), what is

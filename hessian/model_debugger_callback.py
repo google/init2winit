@@ -18,12 +18,14 @@
 import functools
 import os
 
+import flax
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
 from init2winit.hessian import model_debugger
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 
 DEFAULT_CONFIG = {
     'name': 'model_debugger',
@@ -84,7 +86,6 @@ class ModelDebugCallback:
   def __init__(self, model, optimizer, batch_stats, optimizer_state, dataset,
                hps, callback_config, train_dir, rng):
     del hps
-    del rng
     del optimizer
     del batch_stats
     del optimizer_state
@@ -123,6 +124,8 @@ class ModelDebugCallback:
     batch = next(dataset.train_iterator_fn())
     self.batch = data_utils.shard(batch)
 
+    self.batch_rng = flax.jax_utils.replicate(rng)
+
   def run_eval(self, params, batch_stats, optimizer_state, global_step):
     """Runs ModelDebugger.full_eval on the given params.
 
@@ -156,6 +159,7 @@ class ModelDebugCallback:
         params=params,
         grad_norms_sql2=g_norms,
         param_norms_sql2=p_norms,
-        batch=self.batch['inputs'])
+        batch=self.batch,
+        rng=self.batch_rng)
 
     return {}
