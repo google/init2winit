@@ -33,8 +33,22 @@ def qvalue(array):
   return jnp.linalg.norm(array.reshape(-1)) ** 2 / array.size
 
 
-def tag_qvalue(module, activations, name):
-  module.sow('qvalues', name, qvalue(activations))
+def cvalue(activations):
+  """Return c-values for the activations."""
+  activations = activations.astype(jnp.float32)
+  # reshape to (batch_size, activation_dim)
+  activations = activations.reshape((activations.shape[0], -1))
+  norms = jnp.linalg.norm(activations, axis=1)
+  xxt = activations.dot(activations.T)
+  diag = jnp.diag(1.0 / norms)
+  cvalues = jnp.dot(jnp.dot(diag, xxt), diag)
+  # avg cosine_sim
+  return jnp.mean(cvalues)
+
+
+def tag_qcvalue(module, activations, name):
+  qc_value = (qvalue(activations), cvalue(activations))
+  module.sow('qcvalues', name, qc_value)
 
 
 def tag_residual_activations(module,
@@ -55,12 +69,20 @@ def tag_residual_activations(module,
     other_path: The F(x) part.
     name: Used to further specify a named key in the sown path.
   """
-  res_norm = qvalue(identity_path)
-  add_norm = qvalue(other_path)
+  res_values_q = qvalue(identity_path)
+  add_values_q = qvalue(other_path)
   module.sow(
       'qvalues',
-      name,
-      jnp.array((res_norm, add_norm)),
+      name + 'q',  # avoid scope collision with the cvalue
+      jnp.array((res_values_q, add_values_q)),
+      reduce_fn=lambda x, y: y)
+
+  res_values_c = cvalue(identity_path)
+  add_values_c = cvalue(other_path)
+  module.sow(
+      'cvalues',
+      name + 'c',
+      jnp.array((res_values_c, add_values_c)),
       reduce_fn=lambda x, y: y)
 
 
@@ -160,8 +182,11 @@ def create_forward_pass_stats_fn(apply_fn,
       forward_pass_statistics.pop('batch_stats')
     if 'intermediates' in forward_pass_statistics:
       # This calculation corresponds to the average q-value across the batch.
-      forward_pass_statistics['intermediate_norms'] = jax.tree_map(
-          lambda x: jnp.linalg.norm(x.reshape(-1)) ** 2 / x.size,
+      forward_pass_statistics['intermediate_qvalue'] = jax.tree_map(
+          qvalue,
+          forward_pass_statistics['intermediates'])
+      forward_pass_statistics['intermediate_cvalue'] = jax.tree_map(
+          cvalue,
           forward_pass_statistics['intermediates'])
 
       # Don't want to store the full activations.

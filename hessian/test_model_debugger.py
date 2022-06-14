@@ -159,24 +159,31 @@ class ModelDebuggerTest(absltest.TestCase):
 
     expected_output = np.dot(xs[0], params['Dense_0']['kernel'])
     expected_q_value = np.linalg.norm(expected_output)**2 / expected_output.size
+    expected_c_value = model_debugger.cvalue(expected_output)
     expected_output_norm = np.linalg.norm(
-        expected_output) ** 2 / expected_output.size
-    expected_input_norm = float(np.linalg.norm(xs)) ** 2 / xs.size
-    expected_keys = ['qvalues', 'intermediate_norms', 'step',
-                     'param_norms_sql2', 'global_param_norm_sql2']
+        expected_output)**2 / expected_output.size
+    expected_input_norm = float(np.linalg.norm(xs))**2 / xs.size
+    expected_keys = [
+        'qvalues', 'intermediate_qvalue', 'intermediate_cvalue', 'step',
+        'param_norms_sql2', 'global_param_norm_sql2'
+    ]
 
     self.assertEqual(set(expected_keys), set(metrics.keys()))
 
     self.assertAlmostEqual(
         float(expected_q_value),
-        float(metrics['intermediate_norms']['__call__'][0]),
+        float(metrics['intermediate_qvalue']['__call__'][0]),
+        places=5)
+    self.assertAlmostEqual(
+        float(expected_c_value),
+        float(metrics['intermediate_cvalue']['__call__'][0]),
         places=5)
     self.assertAlmostEqual(
         expected_input_norm,
-        float(metrics['qvalues']['residual'][0]), places=5)
+        float(metrics['qvalues']['residualq'][0]), places=5)
     self.assertAlmostEqual(
         expected_output_norm,
-        float(metrics['qvalues']['residual'][1]), places=5)
+        float(metrics['qvalues']['residualq'][1]), places=5)
 
   def test_model_debugger_pmap(self):
     """Test training for two epochs on MNIST with a small model."""
