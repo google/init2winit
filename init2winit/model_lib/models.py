@@ -21,6 +21,7 @@ from init2winit.model_lib import adabelief_vgg
 from init2winit.model_lib import autoencoder
 from init2winit.model_lib import conformer
 from init2winit.model_lib import convolutional_autoencoder
+from init2winit.model_lib import deepspeech
 from init2winit.model_lib import dlrm
 from init2winit.model_lib import fully_connected
 from init2winit.model_lib import gnn
@@ -60,6 +61,7 @@ _ALL_MODELS = {
     'transformer':
         (transformer_lm.TransformerLM1B, transformer_lm.DEFAULT_HPARAMS),
     'conformer': (conformer.ConformerModel, conformer.DEFAULT_HPARAMS),
+    'deepspeech': (deepspeech.DeepSpeechModel, deepspeech.DEFAULT_HPARAMS),
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
     'xformer_translate': (xformer_translate.TransformerTranslate,
                           xformer_translate.DEFAULT_HPARAMS),
