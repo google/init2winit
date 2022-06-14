@@ -34,6 +34,7 @@ from flax import linen as nn
 from flax import struct
 from init2winit.model_lib import base_model
 from init2winit.model_lib import librispeech_preprocessor as preprocessor
+from init2winit.model_lib import lingvo_attention
 from init2winit.model_lib import spectrum_augmenter
 import jax
 import jax.numpy as jnp
@@ -76,7 +77,10 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         use_dynamic_time_mask_max_frames=True,
         use_specaug=True,
         residual_dropout_rate=0.1,
-        input_dropout_rate=0.1))
+        input_dropout_rate=0.1,
+        enable_decoder_pre_layer_norm=True,
+        enable_conformer_post_layer_norm=True,
+        use_lingvo_attention=False))
 
 
 @struct.dataclass
@@ -109,6 +113,9 @@ class ConformerConfig:
   use_dynamic_time_mask_max_frames: bool = False
   batch_norm_momentum: float = 0.999
   batch_norm_epsilon: float = 0.001
+  enable_conformer_post_layer_norm: bool = False
+  enable_decoder_pre_layer_norm: bool = False
+  use_lingvo_attention: bool = False
 
 
 class LayerNorm(nn.Module):
@@ -414,6 +421,14 @@ class MultiHeadedSelfAttention(nn.Module):
   """
   config: ConformerConfig = None
 
+  def setup(self):
+    dim_per_head = self.config.encoder_dim // self.config.num_attention_heads
+    self.self_attention = lingvo_attention.DotProductAttention(
+        num_heads=self.config.num_attention_heads,
+        hidden_dim=self.config.encoder_dim,
+        input_dim=self.config.encoder_dim,
+        dim_per_head=dim_per_head)
+
   def _get_large_negative_number(self, dtype):
     if jnp.issubdtype(dtype, jnp.inexact):
       dtype_max = jnp.finfo(dtype).max
@@ -439,18 +454,27 @@ class MultiHeadedSelfAttention(nn.Module):
 
     inputs = LayerNorm(dim=config.encoder_dim)(inputs)
 
-    result = nn.SelfAttention(
-        num_heads=config.num_attention_heads,
-        qkv_features=config.encoder_dim,
-        decode=False,
-        dtype=config.dtype,
-        kernel_init=nn.initializers.xavier_uniform(),
-        bias_init=nn.initializers.zeros,
-        use_bias=True,
-        broadcast_dropout=False,
-        attention_fn=dot_product_attention,
-        dropout_rate=config.attention_dropout_rate,
-        deterministic=not train)(inputs, attention_mask)
+    if self.config.use_lingvo_attention:
+      atten_mask = self.convert_paddings_to_mask(paddings, inputs.dtype)
+
+      result = self.self_attention(
+          query_vec=inputs,
+          key_vec=inputs,
+          value_vec=inputs,
+          atten_mask=atten_mask)[0]
+    else:
+      result = nn.SelfAttention(
+          num_heads=config.num_attention_heads,
+          qkv_features=config.encoder_dim,
+          decode=False,
+          dtype=config.dtype,
+          kernel_init=nn.initializers.xavier_uniform(),
+          bias_init=nn.initializers.zeros,
+          use_bias=True,
+          broadcast_dropout=False,
+          attention_fn=dot_product_attention,
+          dropout_rate=config.attention_dropout_rate,
+          deterministic=not train)(inputs, attention_mask)
 
     result = nn.Dropout(
         rate=config.attention_residual_dropout_rate, deterministic=not train)(
@@ -618,7 +642,9 @@ class ConformerBlock(nn.Module):
     inputs = inputs + 0.5 * FeedForwardModule(config=self.config)(
         inputs, padding_mask, train)
 
-    inputs = LayerNorm(dim=config.encoder_dim)(inputs)
+    if config.enable_conformer_post_layer_norm:
+      inputs = LayerNorm(dim=config.encoder_dim)(inputs)
+
     return inputs
 
 
@@ -673,8 +699,8 @@ class ConformerEncoderDecoder(nn.Module):
     for _ in range(config.num_encoder_layers):
       outputs = ConformerBlock(config)(outputs, output_paddings, train)
 
-    outputs = LayerNorm(config.encoder_dim)(outputs)
-
+    if config.enable_decoder_pre_layer_norm:
+      outputs = LayerNorm(config.encoder_dim)(outputs)
     # Run the decoder which in this case is a trivial projection layer.
     outputs = nn.Dense(
         config.vocab_size,
@@ -815,6 +841,19 @@ class ConformerModel(base_model.BaseModel):
                                         label_paddings)
     return normalized_loss, new_batch_stats
 
+  def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
+    """Wrapper around flax_module.apply."""
+    if batch_stats is not None:
+      variables = {'params': params, 'batch_stats': batch_stats}
+    else:
+      variables = {'params': params}
+
+    return self.flax_module.apply(
+        variables,
+        batch['inputs'],
+        batch['input_paddings'],
+        **apply_kwargs)
+
   def build_flax_module(self):
     config = ConformerConfig(
         vocab_size=self.hps.output_shape[1],
@@ -833,7 +872,11 @@ class ConformerModel(base_model.BaseModel):
         use_specaug=self.hps.use_specaug,
         attention_residual_dropout_rate=self.hps.residual_dropout_rate,
         feed_forward_residual_dropout_rate=self.hps.residual_dropout_rate,
-        input_dropout_rate=self.hps.input_dropout_rate)
+        input_dropout_rate=self.hps.input_dropout_rate,
+        enable_conformer_post_layer_norm=self.hps
+        .enable_conformer_post_layer_norm,
+        enable_decoder_pre_layer_norm=self.hps.enable_decoder_pre_layer_norm,
+        use_lingvo_attention=self.hps.use_lingvo_attention)
     module = ConformerEncoderDecoder(config)
 
     return module
