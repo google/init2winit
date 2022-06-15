@@ -21,15 +21,20 @@ paper : https://arxiv.org/abs/1512.02595
 
 from typing import Any, List
 
+from absl import logging
 from flax import linen as nn
 from flax import struct
-from flax_nlp import recurrent
 from init2winit.model_lib import base_model
 from init2winit.model_lib import librispeech_preprocessor as preprocessor
 from init2winit.model_lib import spectrum_augmenter
 import jax
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
+
+try:
+  from flax_nlp import recurrent  # pylint: disable=g-import-not-at-top
+except ModuleNotFoundError:
+  logging.exception('\n\nUnable to import lingvo WPM Encoder.\n\n')
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
