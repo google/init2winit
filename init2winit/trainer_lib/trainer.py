@@ -218,7 +218,8 @@ def _merge_and_apply_prefix(d1, d2, prefix):
 
 @utils.timed
 def eval_metrics(params, batch_stats, dataset, eval_num_batches,
-                 eval_train_num_batches, evaluate_batch_pmapped):
+                 test_num_batches, eval_train_num_batches,
+                 evaluate_batch_pmapped):
   """Evaluates the given network on the train, validation, and test sets.
 
   WARNING: we assume that `batch_stats` has already been synchronized across
@@ -235,8 +236,10 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
       {'batch_stats': batch_stats} into flax_module.apply().
     dataset: Dataset returned from datasets.get_dataset. train, validation, and
       test sets.
-    eval_num_batches: (int) The batch size used for evaluating on validation,
-      and test sets. Set to None to evaluate on the whole test set.
+    eval_num_batches: (int) The batch size used for evaluating on validation
+      sets. Set to None to evaluate on the whole validation set.
+    test_num_batches: (int) The batch size used for evaluating on test
+      sets. Set to None to evaluate on the whole test set.
     eval_train_num_batches: (int) The batch size used for evaluating on train
       set. Set to None to evaluate on the whole training set.
     evaluate_batch_pmapped: Computes the metrics on a sharded batch.
@@ -246,7 +249,7 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
   """
   train_iter = dataset.eval_train_epoch(eval_train_num_batches)
   valid_iter = dataset.valid_epoch(eval_num_batches)
-  test_iter = dataset.test_epoch(eval_num_batches)
+  test_iter = dataset.test_epoch(test_num_batches)
 
   metrics = {}
   for split_iter, split_name in zip([train_iter, valid_iter, test_iter],
@@ -260,27 +263,29 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
   return metrics
 
 
-def train(train_dir,
-          model,
-          dataset_builder,
-          initializer,
-          num_train_steps,
-          hps,
-          rng,
-          eval_batch_size,
-          eval_num_batches,
-          eval_train_num_batches,
-          eval_frequency,
-          checkpoint_steps,
-          early_stopping_target_name=None,
-          early_stopping_target_value=None,
-          early_stopping_mode=None,
-          eval_steps=None,
-          metrics_logger=None,
-          init_logger=None,
-          training_metrics_config=None,
-          callback_configs=None,
-          external_checkpoint_path=None):
+def train(
+    train_dir,
+    model,
+    dataset_builder,
+    initializer,
+    num_train_steps,
+    hps,
+    rng,
+    eval_batch_size,
+    eval_num_batches,
+    test_num_batches,
+    eval_train_num_batches,
+    eval_frequency,
+    checkpoint_steps,
+    early_stopping_target_name=None,
+    early_stopping_target_value=None,
+    early_stopping_mode=None,
+    eval_steps=None,
+    metrics_logger=None,
+    init_logger=None,
+    training_metrics_config=None,
+    callback_configs=None,
+    external_checkpoint_path=None):
   """Main training loop.
 
   Trains the given network on the specified dataset for the given number of
@@ -297,7 +302,9 @@ def train(train_dir,
       shuffling.
     eval_batch_size: the evaluation batch size. If None, use hps.batch_size.
     eval_num_batches: (int) The number of batches used for evaluating on
-      validation and test sets. Set to None to evaluate on the whole train set.
+      validation sets. Set to None to evaluate on the whole eval set.
+    test_num_batches: (int) The number of batches used for evaluating on
+      test sets. Set to None to evaluate on the whole test set.
     eval_train_num_batches: (int) The number of batches for evaluating on train.
       Set to None to evaluate on the whole training set.
     eval_frequency: (int) Evaluate every k steps.
@@ -548,7 +555,7 @@ def train(train_dir,
         eval_start_time = time.time()
         batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
         report, eval_time = eval_metrics(params, batch_stats, dataset,
-                                         eval_num_batches,
+                                         eval_num_batches, test_num_batches,
                                          eval_train_num_batches,
                                          evaluate_batch_pmapped)
         mean_train_cost = sum_train_cost.mean().item() / max(
@@ -616,10 +623,8 @@ def train(train_dir,
     train_steps_per_sec = (global_step - eval_start_step) / (
         time.time() - eval_start_time)
     batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
-    report, eval_time = eval_metrics(params,
-                                     batch_stats,
-                                     dataset,
-                                     eval_num_batches,
+    report, eval_time = eval_metrics(params, batch_stats, dataset,
+                                     eval_num_batches, test_num_batches,
                                      eval_train_num_batches,
                                      evaluate_batch_pmapped)
     lr = lr_fn(global_step)
@@ -655,5 +660,3 @@ def train(train_dir,
           sum_train_cost)
   # To make sure the last checkpoint was correctly saved.
   checkpoint.wait_for_checkpoint_save()
-
-

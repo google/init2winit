@@ -70,9 +70,14 @@ flags.DEFINE_integer(
     'make from tf.data.map. Set to -1 for tf.data.AUTOTUNE.'
 )
 flags.DEFINE_integer('eval_batch_size', None, 'Batch size for evaluation.')
-flags.DEFINE_integer('eval_num_batches', None,
-                     'Number of batches for evaluation. Leave None to evaluate '
-                     'on the entire validation and test set.')
+flags.DEFINE_integer(
+    'eval_num_batches', None,
+    'Number of batches for evaluation. Leave None to evaluate '
+    'on the entire validation and test set.')
+flags.DEFINE_integer(
+    'test_num_batches', None,
+    'Number of batches for eval on test set. Leave None to evaluate '
+    'on the entire test set.')
 flags.DEFINE_integer('eval_train_num_batches', 0,
                      'Number of batches when evaluating on the training set.')
 flags.DEFINE_integer('eval_frequency', 1000, 'Evaluate every k steps.')
@@ -156,6 +161,7 @@ def _run(
     dataset_name,
     eval_batch_size,
     eval_num_batches,
+    test_num_batches,
     eval_train_num_batches,
     eval_frequency,
     checkpoint_steps,
@@ -177,8 +183,7 @@ def _run(
     worker_id,
     training_metrics_config,
     callback_configs,
-    external_checkpoint_path
-    ):
+    external_checkpoint_path):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
   initializer = initializers.get_initializer(initializer_name)
@@ -240,6 +245,7 @@ def _run(
             rng,
             eval_batch_size,
             eval_num_batches,
+            test_num_batches,
             eval_train_num_batches,
             eval_frequency,
             checkpoint_steps,
@@ -251,8 +257,7 @@ def _run(
             init_logger,
             training_metrics_config=training_metrics_config,
             callback_configs=callback_configs,
-            external_checkpoint_path=external_checkpoint_path
-        ))
+            external_checkpoint_path=external_checkpoint_path))
     logging.info(epoch_reports)
     meta_data['status'] = 'done'
   except utils.TrainingDivergedError as err:
@@ -299,6 +304,7 @@ def main(unused_argv):
         dataset_name=FLAGS.dataset,
         eval_batch_size=FLAGS.eval_batch_size,
         eval_num_batches=FLAGS.eval_num_batches,
+        test_num_batches=FLAGS.test_num_batches,
         eval_train_num_batches=FLAGS.eval_train_num_batches,
         eval_frequency=FLAGS.eval_frequency,
         checkpoint_steps=checkpoint_steps,
@@ -321,7 +327,7 @@ def main(unused_argv):
         training_metrics_config=training_metrics_config,
         callback_configs=callback_configs,
         external_checkpoint_path=FLAGS.external_checkpoint_path,
-        )
+    )
 
 
 if __name__ == '__main__':

@@ -50,6 +50,7 @@ def eval_checkpoints(
     hps,
     rng,
     eval_num_batches,
+    test_num_batches,
     model_cls,
     dataset_builder,
     dataset_meta_data,
@@ -69,7 +70,9 @@ def eval_checkpoints(
     rng: (jax.random.PRNGKey) Rng seed used in model initialization and data
       shuffling.
     eval_num_batches: (int) The batch size used for evaluating on
-      validation, and test sets. Set to None to evaluate on the whole test set.
+      validation sets. Set to None to evaluate on the whole set.
+    test_num_batches: (int) The batch size used for evaluating on
+      test sets. Set to None to evaluate on the whole set.
     model_cls: One of the model classes (not an instance) defined in model_lib.
     dataset_builder: dataset builder returned by datasets.get_dataset.
     dataset_meta_data: dict of meta_data about the dataset.
@@ -184,8 +187,8 @@ def eval_checkpoints(
     batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
     # pylint: enable=protected-access
     report, _ = trainer.eval_metrics(params, batch_stats, dataset,
-                                     eval_num_batches, eval_num_batches,
-                                     evaluate_batch_pmapped)
+                                     eval_num_batches, test_num_batches,
+                                     eval_num_batches, evaluate_batch_pmapped)
     if jax.process_index() == 0:
       logging.info('Global Step: %d', step)
       logging.info(report)

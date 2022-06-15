@@ -117,6 +117,7 @@ class RunLanczosTest(absltest.TestCase):
 
     num_train_steps = 41
     eval_num_batches = 5
+    test_num_batches = 0
     eval_every = 10
     checkpoint_steps = [10, 30, 40]
     metrics_logger, init_logger = None, None
@@ -131,6 +132,7 @@ class RunLanczosTest(absltest.TestCase):
             rng=rng,
             eval_batch_size=eval_batch_size,
             eval_num_batches=eval_num_batches,
+            test_num_batches=test_num_batches,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
@@ -145,6 +147,7 @@ class RunLanczosTest(absltest.TestCase):
         hps,
         rng,
         eval_num_batches,
+        test_num_batches,
         model_cls=model_cls,
         dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
         dataset_meta_data=datasets.get_dataset_meta_data(dataset_name),
@@ -250,6 +253,7 @@ class RunLanczosTest(absltest.TestCase):
             rng=rng,
             eval_batch_size=eval_batch_size,
             eval_num_batches=eval_num_batches,
+            test_num_batches=0,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,

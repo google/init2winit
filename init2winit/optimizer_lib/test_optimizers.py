@@ -120,6 +120,7 @@ class OptimizersTest(absltest.TestCase):
             rng=jax.random.PRNGKey(42),
             eval_batch_size=hps.batch_size,
             eval_num_batches=None,
+            test_num_batches=0,
             eval_train_num_batches=None,
             eval_frequency=10,
             checkpoint_steps=[],

@@ -423,6 +423,7 @@ class TrainerTest(parameterized.TestCase):
             rng=rng,
             eval_batch_size=eval_batch_size,
             eval_num_batches=eval_num_batches,
+            test_num_batches=0,
             eval_train_num_batches=eval_num_batches,
             # Note that for some reason, moving from the deprecated to linen
             # Flax model API made training less stable so we need to eval more
@@ -485,6 +486,7 @@ class TrainerTest(parameterized.TestCase):
             rng=rng,
             eval_batch_size=eval_batch_size,
             eval_num_batches=eval_num_batches,
+            test_num_batches=0,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=2,
             checkpoint_steps=[],
@@ -565,6 +567,7 @@ class TrainerTest(parameterized.TestCase):
             rng=rng,
             eval_batch_size=eval_batch_size,
             eval_num_batches=eval_num_batches,
+            test_num_batches=eval_num_batches,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
@@ -594,6 +597,7 @@ class TrainerTest(parameterized.TestCase):
             rng=rng,
             eval_batch_size=eval_batch_size,
             eval_num_batches=eval_num_batches,
+            test_num_batches=eval_num_batches,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
@@ -689,6 +693,7 @@ class TrainerTest(parameterized.TestCase):
 
     num_train_steps = 40
     eval_num_batches = 5
+    test_num_batches = 5
     eval_every = 10
     checkpoint_steps = [1, 3, 15]
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
@@ -703,6 +708,7 @@ class TrainerTest(parameterized.TestCase):
             rng=rng,
             eval_batch_size=eval_batch_size,
             eval_num_batches=eval_num_batches,
+            test_num_batches=test_num_batches,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
@@ -744,6 +750,7 @@ class TrainerTest(parameterized.TestCase):
             rng=rng,
             eval_batch_size=eval_batch_size,
             eval_num_batches=eval_num_batches,
+            test_num_batches=test_num_batches,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
@@ -978,6 +985,7 @@ class TrainerTest(parameterized.TestCase):
     early_stopping_target_value = 0.005
     early_stopping_mode = 'less'
     eval_num_batches = 5
+    test_num_batches = 5
     eval_every = 10
     checkpoint_steps = [1, 3, 15]
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
@@ -992,6 +1000,7 @@ class TrainerTest(parameterized.TestCase):
             rng=rng,
             eval_batch_size=eval_batch_size,
             eval_num_batches=eval_num_batches,
+            test_num_batches=test_num_batches,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
