@@ -202,11 +202,11 @@ def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
 def preprocess_data(
     dataset,
     train=True,
-    shuffle_buffer_size=2000,
+    shuffle_buffer_size=512,
     hps=None,
     batch_size=256,
     drop_remainder=True,
-    prefetch_size=AUTOTUNE,
+    prefetch_size=64,
     shuffle_seed=None,
 ):
   """Process, shuffle, pad and batch the given dataset."""
@@ -229,9 +229,9 @@ def preprocess_data(
 
   dataset = dataset.map(
       functools.partial(_preprocess_output, tokenizer=tokenizer, hps=hps),
-      num_parallel_calls=AUTOTUNE)
+      num_parallel_calls=10)
 
-  dataset = dataset.map(_make_input_paddings, num_parallel_calls=AUTOTUNE)
+  dataset = dataset.map(_make_input_paddings, num_parallel_calls=10)
 
   # Filter out audio and transcriptions that are longer than given lengths.
   # note that audio filtering is post frequency domain conversion.
