@@ -25,6 +25,7 @@ from init2winit.model_lib import deepspeech
 from init2winit.model_lib import dlrm
 from init2winit.model_lib import fully_connected
 from init2winit.model_lib import gnn
+from init2winit.model_lib import local_attention_transformer
 from init2winit.model_lib import max_pooling_cnn
 from init2winit.model_lib import mlperf_resnet
 from init2winit.model_lib import nqm
@@ -61,6 +62,9 @@ _ALL_MODELS = {
     'transformer':
         (transformer_lm.TransformerLM1B, transformer_lm.DEFAULT_HPARAMS),
     'conformer': (conformer.ConformerModel, conformer.DEFAULT_HPARAMS),
+    'local_attention_transformer':
+        (local_attention_transformer.LocalAttentionTransformer,
+         local_attention_transformer.DEFAULT_HPARAMS),
     'deepspeech': (deepspeech.DeepSpeechModel, deepspeech.DEFAULT_HPARAMS),
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
     'xformer_translate': (xformer_translate.TransformerTranslate,
