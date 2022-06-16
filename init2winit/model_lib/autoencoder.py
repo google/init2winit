@@ -44,7 +44,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         optimizer='hessian_free',
         opt_hparams={
             'cg_max_iter': 250,
-            'use_cg_backtracking': True,
+            'cg_iter_tracking_method': 'back_tracking',
             'use_line_search': True,
             'init_damping': 50.0,
             'damping_ub': 10 ** 2,

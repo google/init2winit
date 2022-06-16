@@ -25,6 +25,7 @@ from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import models
 from init2winit.optimizer_lib import optimizers
 from init2winit.optimizer_lib.hessian_free import cg_backtracking
+from init2winit.optimizer_lib.hessian_free import CGIterationTrackingMethod
 from init2winit.optimizer_lib.hessian_free import get_obj_val
 from init2winit.optimizer_lib.hessian_free import gvp
 from init2winit.optimizer_lib.hessian_free import line_search
@@ -53,8 +54,49 @@ def _get_pd_mat(mat):
   return mat @ np.transpose(mat) / n**2 + np.eye(n)
 
 
+def _load_conjgrad_inputs():
+  """Loads inputs to the conjugate gradient solver."""
+  params = {
+      'Dense_0': {
+          'kernel': np.array([[0., 0.], [0., 0.], [0., 0.], [0., 0.]]),
+          'bias': np.array([0., 0.])
+      }
+  }
+  variables = {'params': params}
+  n = 10
+  mat = np.array([[2., -1., 2., 3., 4., -2., 3., 5., -10., 2.],
+                  [-1., -1., 2., 3., 4., -2., 3., 5., -10., 4.],
+                  [2., 2., 5., -2., 12., -6., 2., 6., -3., 0.],
+                  [3., 3., -2., 6., 1., -2., 7., 1., 6., -2.],
+                  [4., 4., 12., 1., 4., 5., -6., 2., 8., 1.],
+                  [-2., -2., -6., -2., 4., -6., 3., 5., -10., 2.],
+                  [3., 3., 2., 7., -4., 2., 3., 5., -10., 2.],
+                  [5., 5., 6., 1., 2., 8., 3., 5., -10., 2.],
+                  [-10., -10., -3., 6., 4., 1., 3., 5., -10., 2.],
+                  [2., 4., 0., -2., 4., -2., 3., 5., -10., 2.]])
+  def test_matmul_fn(v):
+    flattened_v, unravel_fn = ravel_pytree(v)
+    return unravel_fn(mat @ flattened_v)
+  def obj_fn(v):
+    flattened_v = ravel_pytree(v)[0]
+    return flattened_v @ np.array([10., 6., -7., 5., 2., 8., 2, 2., 10, -20.])
+  b = tm.Vector({
+      'Dense_0': {
+          'kernel': np.array([[-5., 10.], [-5., 20.], [-7., -5.], [8., 2.]]),
+          'bias': np.array([4., -6.])
+      }
+  })
+  x0 = tm.Vector({
+      'Dense_0': {
+          'kernel': np.array([[1., -4.], [6., -3.], [4., 5.], [1., -9.]]),
+          'bias': np.array([4., 8.])
+      }
+  })
+  return test_matmul_fn, b, x0, n, obj_fn, variables
+
+
 def _load_autoencoder_model():
-  """Load a test autoencoder model."""
+  """Loads a test autoencoder model."""
   model_str = 'autoencoder'
   model_cls = models.get_model(model_str)
   model_hps = models.get_model_hparams(model_str)
@@ -68,14 +110,15 @@ def _load_autoencoder_model():
       'opt_hparams': {
           'weight_decay': 0.0,
           'init_damping': 1.0,
-          'damping_ub': 10 ** 2,
-          'damping_lb': 10 ** -6,
+          'damping_ub': 10**2,
+          'damping_lb': 10**-6,
           'use_line_search': False,
+          'cg_iter_tracking_method': 'back_tracking',
       },
       'hid_sizes': [2],
       'activation_function': ['id'],
       'input_shape': _INPUT_SHAPE,
-      'output_shape': _OUTPUT_SHAPE
+      'output_shape': _OUTPUT_SHAPE,
   })
 
   model = model_cls(hps, {'apply_one_hot_in_loss': False}, loss, metrics)
@@ -97,7 +140,7 @@ def _load_autoencoder_model():
 
 
 def _load_autoencoder_data():
-  """Load a test autoencoder data."""
+  """Loads test autoencoder data."""
   targets = _INPUT_DATA.reshape(
       tuple([_INPUT_DATA.shape[0]] + list(_OUTPUT_SHAPE)))
   return {'inputs': _INPUT_DATA, 'targets': targets}
@@ -105,7 +148,7 @@ def _load_autoencoder_data():
 
 @partial(tm.unwrap, out_vectors=False)
 def tm_norm(x):
-  return np.linalg.norm(x)
+  return np.linalg.norm(ravel_pytree(x)[0])
 
 
 class HessianFreeTest(absltest.TestCase):
@@ -142,10 +185,44 @@ class HessianFreeTest(absltest.TestCase):
     x0 = tm.Vector(np.ones(n))
 
     test_matmul_fn = tm.unwrap(lambda x: mat @ x)
-    x_arr, x_arr_idx, *_ = mf_conjgrad_solver(
+    x, *_ = mf_conjgrad_solver(
         test_matmul_fn, b, x0, n, 1e-6, 10, None, 'residual_norm_test')
-    x = tree_slice(x_arr, x_arr_idx)
     self.assertAlmostEqual(tm_norm(test_matmul_fn(x) - b), 0, places=3)
+
+  def test_conjgrad_iteration_last_tracking(self):
+    """Tests conjugate gradient method with iteration last-tracking."""
+    test_matmul_fn, b, x0, n, obj_fn, variables = _load_conjgrad_inputs()
+    expected, x, *_ = mf_conjgrad_solver(
+        test_matmul_fn, b, x0, n, 1e-6, 10, None, 'residual_norm_test',
+        CGIterationTrackingMethod.LAST_TRACKING,
+        obj_fn=obj_fn, variables=variables)
+    self.assertAlmostEqual(tm_norm(x - expected), 0, places=3)
+
+  def test_conjgrad_iteration_best_tracking(self):
+    """Tests conjugate gradient method with iteration best-tracking."""
+    test_matmul_fn, b, x0, n, obj_fn, variables = _load_conjgrad_inputs()
+    x = mf_conjgrad_solver(
+        test_matmul_fn, b, x0, n, 1e-6, 10, None, 'residual_norm_test',
+        CGIterationTrackingMethod.BEST_TRACKING,
+        obj_fn=obj_fn, variables=variables)[1]
+    expected = mf_conjgrad_solver(
+        test_matmul_fn, b, x0, 5, 1e-6, 10, None, 'residual_norm_test',
+        CGIterationTrackingMethod.BEST_TRACKING,
+        obj_fn=obj_fn, variables=variables)[0]
+    self.assertAlmostEqual(tm_norm(x - expected), 0, places=3)
+
+  def test_conjgrad_iteration_back_tracking(self):
+    """Tests conjugate gradient method with iteration back-tracking."""
+    test_matmul_fn, b, x0, n, obj_fn, variables = _load_conjgrad_inputs()
+    x = mf_conjgrad_solver(
+        test_matmul_fn, b, x0, n, 1e-6, 10, None, 'residual_norm_test',
+        CGIterationTrackingMethod.BACK_TRACKING,
+        obj_fn=obj_fn, variables=variables)[1]
+    expected = mf_conjgrad_solver(
+        test_matmul_fn, b, x0, 9, 1e-6, 10, None, 'residual_norm_test',
+        CGIterationTrackingMethod.BEST_TRACKING,
+        obj_fn=obj_fn, variables=variables)[0]
+    self.assertAlmostEqual(tm_norm(x - expected), 0, places=3)
 
   def test_conjgrad_preconditioning(self):
     """Tests conjugate gradient method with preconditioning."""
@@ -169,10 +246,9 @@ class HessianFreeTest(absltest.TestCase):
 
     test_matmul_fn = tm.unwrap(lambda x: mat @ x)
     test_precond_fn = tm.unwrap(lambda x: precond_mat @ x)
-    x_arr, x_arr_idx, *_ = mf_conjgrad_solver(
+    x, *_ = mf_conjgrad_solver(
         test_matmul_fn, b, x0, n, 1e-6, 10, test_precond_fn,
         'residual_norm_test')
-    x = tree_slice(x_arr, x_arr_idx)
     self.assertAlmostEqual(tm_norm(test_matmul_fn(x) - b), 0, places=3)
 
   def test_conjgrad_martens_termination_criterion(self):
@@ -185,10 +261,9 @@ class HessianFreeTest(absltest.TestCase):
 
     test_mvm_fn = tm.unwrap(lambda x: mat @ x)
 
-    x_arr, x_arr_idx, *_ = mf_conjgrad_solver(
+    x, *_ = mf_conjgrad_solver(
         test_mvm_fn, b, x0, n, 1e-6, 500, None,
         'relative_per_iteration_progress_test')
-    x = tree_slice(x_arr, x_arr_idx)
     f_value = x @ (test_mvm_fn(x) - 2 * b) / 2
     self.assertAlmostEqual(f_value, -0.223612576, places=5)
 

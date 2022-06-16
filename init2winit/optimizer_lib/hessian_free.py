@@ -15,6 +15,7 @@
 
 """Hessian-free optimization algorithm."""
 
+import enum
 from functools import partial  # pylint: disable=g-importing-member
 import math
 from typing import NamedTuple
@@ -161,18 +162,39 @@ def generate_updated_variables(variables, params):
   return updated_variables
 
 
+class CGIterationTrackingMethod(enum.Enum):
+  """Methods to track iterates in the conjugate gradient solver.
+
+  LAST_TRACKING means only the last iterate will be tracked.
+
+  BEST_TRACKING means that an objective value will be computed at each tracking
+  step and the iterate with the best objective value will be tracked.
+
+  BACK_TRACKING means iterates at tracking steps will be saved and backtracked
+  later to find an iterate that has a better objective value than the one saved
+  right before it.
+  """
+  LAST_TRACKING = 'last_tracking'
+  BEST_TRACKING = 'best_tracking'
+  BACK_TRACKING = 'back_tracking'
+
+
 # pylint: disable=invalid-name
-@partial(jit, static_argnums=(0, 3, 6, 7))
-def mf_conjgrad_solver(A_fn,
-                       b,
-                       x0,
-                       max_iter,
-                       tol=1e-6,
-                       residual_refresh_frequency=10,
-                       precond_fn=None,
-                       termination_criterion='residual_norm_test',
-                       initial_save_step=5.0,
-                       gamma=1.3):
+@partial(jit, static_argnums=(0, 3, 6, 7, 8, 11))
+def mf_conjgrad_solver(
+    A_fn,
+    b,
+    x0,
+    max_iter,
+    tol=1e-6,
+    residual_refresh_frequency=10,
+    precond_fn=None,
+    termination_criterion='residual_norm_test',
+    iter_tracking_method=CGIterationTrackingMethod.LAST_TRACKING,
+    initial_tracking_step=5.0,
+    next_tracking_step_multiplier=1.3,
+    obj_fn=None,
+    variables=None):
   """Solves Ax = b using 'matrix-free' preconditioned conjugate gradient method.
 
   This implements the preconditioned conjugate gradient algorithm in page 32 of
@@ -187,13 +209,17 @@ def mf_conjgrad_solver(A_fn,
     A_fn: A linear operator that returns Ax given a tm.Vector x.
     b: A right-hand side tm.Vector.
     x0: An initial guess tm.Vector.
-    max_iter: The number of iterations to run.
+    max_iter: The maximum number of iterations to run.
     tol: The convergence tolerance.
     residual_refresh_frequency: A frequency to refresh the residual.
     precond_fn: A linear operator that returns the solution of Py=r for any r.
     termination_criterion: A termination criterion function name.
-    initial_save_step: The first step to save an iterate for CG bactracking.
-    gamma: A constant used to determine next save step for CG backtracking.
+    iter_tracking_method: A CGIterationTrackingMethod.
+    initial_tracking_step: The first step to track an iterate.
+    next_tracking_step_multiplier: A constant used to determine next track step.
+    obj_fn: A function that maps variables to a loss value.
+    variables: A dict of variables is passed directly into flax_module.apply,
+      required to have a key 'params' that is a pytree of model parameters.
 
   Returns:
     An approximate solution to the linear system Ax=b.
@@ -223,19 +249,46 @@ def mf_conjgrad_solver(A_fn,
     obj_arr = jnp.zeros(max(10, math.ceil(0.1 * max_iter)))
   arr_len = len(obj_arr)
 
-  # define a pytree to save iterates for CG backtracking
-  # an iterate at every ceil(initial_save_step * gamma^j)-th step (j >= 0),
-  # and the last iterate will be saved.
-  # if the last step satisfies ceil(initial_save_step * gamma^j*) for some j*,
-  # only one copy will be saved.
-  # the max number of copies is ceil(log(max_iter / initial_save_step, gamma))
-  # this amounts to 10/13/16/19/28 copies for 50/100/200/500/5000 max_iter
-  # when initial_save_step = 5 and gamma = 1.3.
-  max_save_size = math.ceil(math.log(max_iter / initial_save_step, gamma)) + 1
-  x_arr = jax.tree_map(lambda x: jnp.zeros((max_save_size, *x.shape)), x)
-  # index to track the last saved element in the array
-  x_arr_idx = -1
-  next_save_step = initial_save_step
+  ## CG iteration best-tracking
+  # an iterate with the best objective is tracked with its objective value
+  x_best = jax.tree_map(lambda x: jnp.array([]), x)
+  x_best_obj = 0.0
+  if iter_tracking_method == CGIterationTrackingMethod.BEST_TRACKING:
+    x_best = x0
+    x_best_obj = get_obj_val(obj_fn, variables, x_best)
+
+  ## CG iteration backtracking
+  # a tm.Vector of an array of iterates for backtracking
+  # iterates at every ceil(initial_tracking_step * next_tracking_step_multiplier
+  # ^j)-th step (j >= 0), and the last iterate (if not saved in the loop) will
+  # be saved. ceil(log(max_iter / initial_track_step, gamma)) is the max number
+  # of copies. this amounts to 10/13/16/19/28 for 50/100/200/500/5000 max_iter
+  # when initial_track_step = 5 and next_tracking_step_multiplier = 1.3.
+  x_arr = jax.tree_map(lambda x: jnp.array([]), x)
+  x_arr_idx = -1  # index to track the last saved element in x_arr
+  if iter_tracking_method == CGIterationTrackingMethod.BACK_TRACKING:
+    max_save_size = math.ceil(
+        math.log(max_iter / initial_tracking_step,
+                 next_tracking_step_multiplier)) + 1
+    # define a pytree to save iterates for backtracking
+    x_arr = jax.tree_map(lambda x: jnp.zeros((max_save_size, *x.shape)), x)
+
+  next_tracking_step = initial_tracking_step
+
+  def conditional_iteration_tracking_update(x, x_best, x_best_obj, x_arr,
+                                            x_arr_idx, condition):
+    if iter_tracking_method == CGIterationTrackingMethod.BEST_TRACKING:
+      x_obj = jnp.where(condition, get_obj_val(obj_fn, variables, x),
+                        x_best_obj)
+      update_x_best = jnp.less(x_obj, x_best_obj)
+      x_best_obj = jnp.where(update_x_best, x_obj, x_best_obj)
+      x_best = tnp.where(update_x_best, x, x_best)
+
+    if iter_tracking_method == CGIterationTrackingMethod.BACK_TRACKING:
+      x_arr_idx = jnp.where(condition, x_arr_idx + 1, x_arr_idx)
+      x_arr = conditional_tree_index_update(x_arr, x, x_arr_idx, condition)
+
+    return x_best, x_best_obj, x_arr, x_arr_idx
 
   def termination_condition(state):
     *_, obj_val, obj_arr, step, rss = state
@@ -251,11 +304,12 @@ def mf_conjgrad_solver(A_fn,
 
   @partial(tm.unwrap, vector_argnames=['orig', 'new'])
   def conditional_tree_index_update(orig, new, idx, condition):
-    return jax.tree_map(
-        lambda x, y: jnp.where(condition, x.at[idx].set(y), x), orig, new)
+    return jax.tree_map(lambda x, y: jnp.where(condition, x.at[idx].set(y), x),
+                        orig, new)
 
-  def _one_step_conjgrad(x, x_arr, x_arr_idx, save_step, next_save_step, r, y,
-                         p, alpha, beta, obj_val, obj_arr, step, rss):
+  def _one_step_conjgrad(x, x_best, x_best_obj, x_arr, x_arr_idx,
+                         should_track_step, next_tracking_step, r, y, p, alpha,
+                         beta, obj_val, obj_arr, step, rss):
 
     if use_obj_arr:
       obj_arr = index_update(obj_arr, step % arr_len, obj_val)
@@ -283,32 +337,47 @@ def mf_conjgrad_solver(A_fn,
     beta = rss_new / rss
     p = p * beta - y
 
-    # Save iterates for CG backtracking
-    save_step = jnp.equal(step, jnp.int32(lax.ceil(next_save_step)))
-    x_arr_idx = jnp.where(save_step, x_arr_idx + 1, x_arr_idx)
-    x_arr = conditional_tree_index_update(x_arr, x, x_arr_idx, save_step)
-
-    next_save_step *= jnp.where(save_step, gamma, 1)
-
-    return (x, x_arr, x_arr_idx, save_step, next_save_step, r, y, p, alpha,
-            beta, obj_val, obj_arr, step, rss_new)
+    # Update for CG iteration tracking
+    should_track_step = jnp.equal(step, jnp.int32(lax.ceil(next_tracking_step)))
+    x_best, x_best_obj, x_arr, x_arr_idx = conditional_iteration_tracking_update(
+        x, x_best, x_best_obj, x_arr, x_arr_idx, should_track_step)
+    next_tracking_step *= jnp.where(should_track_step,
+                                    next_tracking_step_multiplier, 1)
+    return (x, x_best, x_best_obj, x_arr, x_arr_idx, should_track_step,
+            next_tracking_step, r, y, p, alpha, beta, obj_val, obj_arr,
+            step, rss_new)
 
   @jit
   def one_step_conjgrad(state):
     """One step of conjugate gradient iteration."""
     return _one_step_conjgrad(*state)
 
-  init_state = (x, x_arr, x_arr_idx, False, next_save_step, r, y, p, alpha,
-                beta, obj_val, obj_arr, 0, rss)
-  x, x_arr, x_arr_idx, save_step, *_, step, rss = lax.while_loop(
+  init_state = (x, x_best, x_best_obj, x_arr, x_arr_idx, False,
+                next_tracking_step, r, y, p, alpha, beta, obj_val, obj_arr, 0,
+                rss)
+  x, x_best, x_best_obj, x_arr, x_arr_idx, track_step, *_, step, rss = lax.while_loop(
       termination_condition, one_step_conjgrad, init_state)
 
-  # Save the last iterate if not saved yet.
-  x_arr_idx = jnp.where(save_step, x_arr_idx, x_arr_idx + 1)
-  x_arr = conditional_tree_index_update(x_arr, x, x_arr_idx,
-                                        jnp.logical_not(save_step))
+  # Track the step if not tracked yet.
+  x_best, x_best_obj, x_arr, x_arr_idx = conditional_iteration_tracking_update(
+      x, x_best, x_best_obj, x_arr, x_arr_idx, jnp.logical_not(track_step))
 
-  return x_arr, x_arr_idx, step, rss
+  # Whatever the tracked solution is, the last iterate will be used to
+  # initialize the next CG run.
+
+  if iter_tracking_method == CGIterationTrackingMethod.BEST_TRACKING:
+    return x, x_best, x_best_obj, step, rss
+
+  # CG iteration backtracking uses a logarithmic amount of memory.
+  # If this causes OOM, switch to CGIterationTrackingMethod.BEST_TRACKING.
+  if iter_tracking_method == CGIterationTrackingMethod.BACK_TRACKING:
+    return x, *cg_backtracking(x_arr, x_arr_idx, obj_fn, variables), step, rss
+
+  x_obj = None
+  if obj_fn:
+    x_obj = get_obj_val(obj_fn, variables, x)
+
+  return x, x, x_obj, step, rss
 
 
 # pylint: enable=invalid-name
@@ -444,7 +513,7 @@ def line_search(initial_lr,
   Args:
     initial_lr: A learning rate to start line search with.
     initial_obj_val: The objective value with the initial step size.
-    obj_fn: A function mapping outputs to the total loss.
+    obj_fn: A function that maps variables to a loss value.
     variables: A dict of variables is passed directly into flax_module.apply,
       required to have a key 'params' that is a pytree of model parameters.
     grads: A tm.Vector of model parameter gradients.
@@ -504,22 +573,23 @@ class HessianFreeState(NamedTuple):
   final_lr: chex.Array
 
 
-def hessian_free(flax_module,
-                 training_objective_fn,
-                 learning_rate=1.0,
-                 cg_max_iter=100,
-                 tol=0.0005,
-                 residual_refresh_frequency=10,
-                 termination_criterion='relative_per_iteration_progress_test',
-                 use_cg_backtracking=True,
-                 use_line_search=True,
-                 line_search_sufficient_increase_constant=10**(-2),
-                 line_search_shrinkage_factor=0.8,
-                 max_line_search_step=60,
-                 warmstart_refresh_rss_threshold=1.0,
-                 init_damping=50.0,
-                 damping_ub=10**2,
-                 damping_lb=10**-6):
+def hessian_free(
+    flax_module,
+    training_objective_fn,
+    learning_rate=1.0,
+    cg_max_iter=100,
+    cg_iter_tracking_method=CGIterationTrackingMethod.BACK_TRACKING,
+    tol=0.0005,
+    residual_refresh_frequency=10,
+    termination_criterion='relative_per_iteration_progress_test',
+    use_line_search=True,
+    line_search_sufficient_increase_constant=10**(-2),
+    line_search_shrinkage_factor=0.8,
+    max_line_search_step=60,
+    warmstart_refresh_rss_threshold=1.0,
+    init_damping=50.0,
+    damping_ub=10**2,
+    damping_lb=10**-6):
   """Hessian-free optimizer.
 
   In this implementation, every dot product is computed by tree_math.numpy.dot.
@@ -532,10 +602,10 @@ def hessian_free(flax_module,
     training_objective_fn: A training objective function.
     learning_rate: A learning rate.
     cg_max_iter: The max number of CG iterations.
+    cg_iter_tracking_method: A CGIterationTrackingMethod.
     tol: The convergence tolerance.
     residual_refresh_frequency: A frequency to refresh the residual.
     termination_criterion: A function chekcing a termination criterion.
-    use_cg_backtracking: A bool indicating whether to use cg backtracking.
     use_line_search: A bool indicating whether to use line search.
     line_search_sufficient_increase_constant: A constant for backtracking line
       search.
@@ -587,7 +657,7 @@ def hessian_free(flax_module,
     def obj_fn(variables):
       return lax.pmean(loss_fn(forward_fn(variables)), axis_name='batch')
 
-    p_arr, p_arr_idx, cg_steps, rss = mf_conjgrad_solver(
+    p_warmstart, p, obj_val, cg_steps, rss = mf_conjgrad_solver(
         A_fn=matmul_fn,
         b=-grads,
         x0=p0,
@@ -595,21 +665,11 @@ def hessian_free(flax_module,
         tol=tol,
         residual_refresh_frequency=residual_refresh_frequency,
         precond_fn=None,
-        termination_criterion=termination_criterion)
+        termination_criterion=termination_criterion,
+        iter_tracking_method=cg_iter_tracking_method,
+        obj_fn=obj_fn,
+        variables=variables)
     total_cg_steps += cg_steps
-
-    ## CG backtracking
-    # CG solution to be used to initialize the next CG run.
-    p_sol = tree_slice(p_arr, p_arr_idx)
-
-    # CG backtracking uses a logarithmic amount of memory to save CG iterates.
-    # If this causes OOM, we can consider computing the objective value at
-    # each save step in the CG loop and keeping the best one.
-    if use_cg_backtracking:
-      p, obj_val = cg_backtracking(p_arr, p_arr_idx, obj_fn, variables)
-    else:
-      p = p_sol
-      obj_val = get_obj_val(obj_fn, variables, p)
 
     # Update the damping parameter.
     reduction_f = obj_val - lax.pmean(loss_fn(outputs), axis_name='batch')
@@ -628,7 +688,7 @@ def hessian_free(flax_module,
 
     refresh_warmstart = jnp.logical_or(final_lr == 0.0,
                                        rss > warmstart_refresh_rss_threshold)
-    p_warmstart = (1 - refresh_warmstart) * p_sol
+    p_warmstart = (1 - refresh_warmstart) * p_warmstart
 
     return final_lr * p, HessianFreeState(
         p0=p_warmstart,

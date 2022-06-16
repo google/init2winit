@@ -20,6 +20,7 @@ from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib import utils
+from init2winit.optimizer_lib.hessian_free import CGIterationTrackingMethod
 from init2winit.optimizer_lib.hessian_free import hessian_free
 import jax
 import optax
@@ -146,7 +147,8 @@ def get_optimizer(hps, model=None):
         training_objective_fn=model.training_objective_fn,
         learning_rate=0.0,  # Manually injected on each train step.
         cg_max_iter=hps.opt_hparams['cg_max_iter'],
-        use_cg_backtracking=hps.opt_hparams['use_cg_backtracking'],
+        cg_iter_tracking_method=CGIterationTrackingMethod(
+            hps.opt_hparams['cg_iter_tracking_method']),
         use_line_search=hps.opt_hparams['use_line_search'],
         init_damping=hps.opt_hparams['init_damping'],
         damping_ub=hps.opt_hparams['damping_ub'],
