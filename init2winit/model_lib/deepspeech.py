@@ -595,7 +595,8 @@ class DeepSpeechModel(base_model.BaseModel):
         input_dropout_rate=self.hps.input_dropout_rate,
         feed_forward_dropout_rate=self.hps.feed_forward_dropout_rate,
         enable_residual_connections=self.hps.enable_residual_connections,
-        enable_decoder_layer_norm=self.hps.enable_decoder_layer_norm)
+        enable_decoder_layer_norm=self.hps.enable_decoder_layer_norm,
+        bidirectional=self.hps.bidirectional)
     module = DeepSpeechEncoderDecoder(config)
 
     return module
