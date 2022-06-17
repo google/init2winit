@@ -665,11 +665,12 @@ class CurvatureEvaluator:
       row['max_eig_hess_ratio'] = evs[-1] / evs[-2]
       row['pos_neg_ratio'] = evs[0] / evs[-1]
 
-      # Compute the breakdown of the max eigenvector across variables in the
-      # model (shown some promise in localizing issues causing large curvature).
-      max_evec = self.unravel(hess_evecs[-1])
-      row['max_evec_decomp'] = jax.tree_map(lambda x: jnp.linalg.norm(x)**2,
-                                            max_evec)
+      if num_evs > 0:
+        # Compute the breakdown of the max eigenvector across variables in the
+        # model (shown promise in localizing issues causing large curvature).
+        max_evec = self.unravel(hess_evecs[-1])
+        row['max_evec_decomp'] = jax.tree_map(lambda x: jnp.linalg.norm(x)**2,
+                                              max_evec)
 
     if self.eval_config['eval_hess_grad_overlap']:
       # compute gradient.
