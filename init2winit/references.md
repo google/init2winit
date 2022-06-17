@@ -149,6 +149,19 @@ we replicate consists of the knee single-coil challenge only.
 }
 ```
 
+### PG-19
+
+```
+@article{raecompressive2019,
+author = {Rae, Jack W and Potapenko, Anna and Jayakumar, Siddhant M and
+          Hillier, Chloe and Lillicrap, Timothy P},
+title = {Compressive Transformers for Long-Range Sequence Modelling},
+journal = {arXiv preprint},
+url = {https://arxiv.org/abs/1911.05507},
+year = {2019},
+}
+```
+
 
 ## Models
 
@@ -243,5 +256,19 @@ author={Keyulu Xu and Weihua Hu and Jure Leskovec and Stefanie Jegelka},
 booktitle={International Conference on Learning Representations},
 year={2019},
 url={https://openreview.net/forum?id=ryGs6iA5Km},
+}
+```
+
+### Local attention transformer
+
+```
+@article{roy2021efficient,
+  title={Efficient content-based sparse attention with routing transformers},
+  author={Roy, Aurko and Saffar, Mohammad and Vaswani, Ashish and Grangier, David},
+  journal={Transactions of the Association for Computational Linguistics},
+  volume={9},
+  pages={53--68},
+  year={2021},
+  publisher={MIT Press}
 }
 ```
