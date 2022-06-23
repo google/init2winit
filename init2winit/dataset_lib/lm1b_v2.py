@@ -21,9 +21,8 @@ from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import lm1b_input_pipeline_v2
 from init2winit.dataset_lib.data_utils import Dataset
 import jax
-import jax.numpy as jnp
-
 from ml_collections.config_dict import config_dict
+import numpy as np
 
 VOCAB_SIZE = 30000
 
@@ -49,7 +48,6 @@ METADATA = {
 
 def _batch_to_dict(batch):
   batch_np = data_utils.tf_to_numpy(batch)
-  batch_np['weights'] = jnp.where(batch_np['inputs'] > 0, 1.0, 0.0)
   return batch_np
 
 
@@ -71,6 +69,60 @@ def get_lm1b(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
 
   return _get_lm1b(hps, per_host_batch_size, per_host_eval_batch_size,
                    shuffle_rng)
+
+
+def maybe_pad_batch(batch,
+                    desired_batch_size,
+                    mask_key='targets'):
+  """Zero pad the batch on the right to desired_batch_size.
+
+  All keys in the batch dictionary will have their corresponding arrays padded.
+  Will return a dictionary with the same keys, additionally with the key
+  'weights' added, with 1.0 indicating indices which are true data and 0.0
+  indicating a padded index.
+
+  Args:
+    batch: A dictionary mapping keys to arrays. We assume that inputs is one of
+      the keys.
+    desired_batch_size: All arrays in the dict will be padded to have first
+      dimension equal to desired_batch_size.
+    mask_key: Typically used for text datasets, it's either 'inputs' (for
+      encoder only models like language models) or 'targets'
+      (for encoder-decoder models like seq2seq tasks) to decide weights for
+      padded sequence. For Image datasets, this will be (most likely) unused.
+
+  Returns:
+    A dictionary mapping the same keys to the padded batches. Additionally we
+    add a key representing weights, to indicate how the batch was padded.
+  """
+  batch_size = batch['inputs'].shape[0]
+  batch_pad = desired_batch_size - batch_size
+
+  if mask_key not in ['targets', 'inputs']:
+    raise ValueError(f'Incorrect mask key {mask_key}.')
+
+  if 'weights' in batch:
+    batch['weights'] = np.multiply(batch['weights'],
+                                   np.where(batch[mask_key] > 0, 1, 0))
+  else:
+    batch['weights'] = np.where(batch[mask_key] > 0, 1, 0)
+
+  # Most batches will not need padding so we quickly return to avoid slowdown.
+  if batch_pad == 0:
+    new_batch = jax.tree_map(lambda x: x, batch)
+    return new_batch
+
+  def zero_pad(ar, pad_axis):
+    pw = [(0, 0)] * ar.ndim
+    pw[pad_axis] = (0, batch_pad)
+    return np.pad(ar, pw, mode='constant')
+
+  padded_batch = {'inputs': zero_pad(batch['inputs'], 0)}
+  batch_keys = list(batch.keys())
+  batch_keys.remove('inputs')
+  for key in batch_keys:
+    padded_batch[key] = zero_pad(batch[key], 0)
+  return padded_batch
 
 
 def _get_lm1b(hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng):
@@ -95,12 +147,18 @@ def _get_lm1b(hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng):
   def eval_train_epoch(num_batches=None):
     eval_train_iter = iter(train_ds)
     for batch in itertools.islice(eval_train_iter, num_batches):
-      yield _batch_to_dict(batch)
+      batch = _batch_to_dict(batch)
+      batch = maybe_pad_batch(batch, per_host_eval_batch_size)
+
+      yield batch
 
   def valid_epoch(num_batches=None):
     valid_iter = iter(eval_ds)
     for batch in itertools.islice(valid_iter, num_batches):
-      yield _batch_to_dict(batch)
+      batch = _batch_to_dict(batch)
+      batch = maybe_pad_batch(batch, per_host_eval_batch_size)
+
+      yield batch
 
   # pylint: disable=unreachable
   def test_epoch(*args, **kwargs):
