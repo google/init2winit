@@ -35,6 +35,23 @@ def print_search_space(search_space):
     print(f'\t- scale_type: {hp["scale_type"]}')
 
 
+def get_top_k_random_sweep(trials, objective, min_objective, num_top_trials,
+                           num_random_seeds, **kwargs):
+  """Generate num_random trials for top k experiments."""
+  del kwargs
+
+  # Get the top k trials as ordered by objective
+  top_k_obj = trials[objective].apply(lambda x: x[-1]).sort_values(
+      ascending=min_objective).head(n=num_top_trials)
+  top_k = trials.loc[top_k_obj.index]
+
+  hparams = [top_k.iloc[i].hparams for i in range(num_top_trials)]
+  for hparam in hparams:
+    hparam['rng_seed'] = -1
+
+  return [[hparam] * num_random_seeds for hparam in hparams], list(top_k_obj)
+
+
 def find_best_cube(trials,
                    objective,
                    search_space,
