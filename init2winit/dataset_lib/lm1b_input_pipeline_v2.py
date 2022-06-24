@@ -25,8 +25,10 @@ from typing import Dict, List, Optional, Union
 from absl import logging
 from clu import deterministic_data
 from init2winit.dataset_lib import spm_tokenizer
-import tensorflow as tf
+import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
+
+tf.enable_v2_behavior()
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 Features = Dict[str, tf.Tensor]

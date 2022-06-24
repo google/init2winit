@@ -36,7 +36,7 @@ class HyperParameterTest(absltest.TestCase):
     merged_hps = hyperparameters.build_hparams(
         model_name='transformer',
         initializer_name='noop',
-        dataset_name='lm1b',
+        dataset_name='lm1b_v2',
         hparam_file=None,
         hparam_overrides=hps_overrides)
 

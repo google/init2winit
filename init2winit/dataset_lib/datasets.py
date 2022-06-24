@@ -22,6 +22,7 @@ from init2winit.dataset_lib import fake_dataset
 from init2winit.dataset_lib import fastmri_dataset
 from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import librispeech
+from init2winit.dataset_lib import lm1b_v2
 from init2winit.dataset_lib import mlperf_imagenet_dataset
 from init2winit.dataset_lib import nqm_noise
 from init2winit.dataset_lib import ogbg_molpcba
@@ -82,6 +83,8 @@ _ALL_DATASETS = {
     'librispeech':
         _Dataset(librispeech.get_librispeech, librispeech.DEFAULT_HPARAMS,
                  librispeech.METADATA),
+    'lm1b_v2':
+        _Dataset(lm1b_v2.get_lm1b, lm1b_v2.DEFAULT_HPARAMS, lm1b_v2.METADATA),
     'mlperf_imagenet':
         _Dataset(mlperf_imagenet_dataset.get_mlperf_imagenet,
                  mlperf_imagenet_dataset.DEFAULT_HPARAMS,
@@ -119,7 +122,7 @@ def get_dataset_hparams(dataset_name):
       if 'input_edge_shape' in hparams and 'input_node_shape' in hparams:
         hparams.input_shape = (hparams.input_node_shape,
                                hparams.input_edge_shape)
-      elif dataset_name == 'lm1b':
+      elif dataset_name == 'lm1b_v2':
         max_len = max(hparams.max_target_length, hparams.max_eval_target_length)
         hparams.input_shape = (max_len,)
       elif dataset_name == 'translate_wmt':
