@@ -24,6 +24,9 @@ import optax
 import sacrebleu
 from tensorflow.io import gfile
 
+exists = gfile.exists
+glob = gfile.glob
+
 
 def compute_bleu_from_predictions(predictions, references, language_code, name):
   """Computes BLEU score given predictions and references."""
@@ -41,7 +44,7 @@ def get_eval_fpath(ckpt_dir, ckpt_step, eval_split):
 def load_evals(ckpt_dir, ckpt_step, eval_split):
   """Loads results if already available, else return None."""
   ckpt_eval_fpath = get_eval_fpath(ckpt_dir, ckpt_step, eval_split)
-  if not gfile.exists(ckpt_eval_fpath):
+  if not exists(ckpt_eval_fpath):
     return None
   else:
     with gfile.GFile(ckpt_eval_fpath, 'r') as f:
@@ -118,8 +121,7 @@ def average_checkpoints(
 def get_checkpoints_in_range(checkpoint_dir, lower_bound, upper_bound):
   """Get checkpoint paths in step range [lower_bound, upper_bound]."""
   checkpoint_paths = []
-  for checkpoint_path in gfile.glob(
-      os.path.join(checkpoint_dir, 'ckpt_*')):
+  for checkpoint_path in glob(os.path.join(checkpoint_dir, 'ckpt_*')):
     ckpt_step = int(checkpoint_path.split('_')[-1])
     if ckpt_step >= lower_bound and ckpt_step <= upper_bound:
       checkpoint_paths.append(os.path.join(checkpoint_dir, checkpoint_path))

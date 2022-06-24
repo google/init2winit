@@ -43,6 +43,8 @@ from ml_collections.config_dict import config_dict
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
+exists = tf.io.gfile.exists
+makedirs = tf.io.gfile.makedirs
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
@@ -241,8 +243,8 @@ def write_pg19_tfrecords(data_dir: str, split: str, vocab_path: str,
   Returns:
     output: a TF Example.
   """
-  if not tf.io.gfile.exists(data_dir):
-    tf.io.gfile.makedirs(data_dir)
+  if not exists(data_dir):
+    makedirs(data_dir)
 
   train_data = generate_dataset(dataset_builder, 'train')
 
@@ -339,7 +341,7 @@ def get_dataset(data_dir: str,
   if split == 'validation':
     split = 'dev'
   data_files = tf.io.matching_files(os.path.join(data_dir, (split + '*')))
-  if not tf.io.gfile.exists(data_dir) and tf.size(data_files) == 0:
+  if not exists(data_dir) and tf.size(data_files) == 0:
     logging.info('There is no directory like %s or'
                  ' there is no TFRecords for %s split', data_dir, split)
     logging.info('Generating TFRecords for the %s split.'

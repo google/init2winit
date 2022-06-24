@@ -30,6 +30,8 @@ import jax.numpy as jnp
 import numpy as np
 from tensorflow.io import gfile
 
+glob = gfile.glob
+
 DEFAULT_EVAL_CONFIG = {
     'eval_batch_size': 16,
     'eval_split': 'test',
@@ -78,8 +80,7 @@ class BLEUEvaluator(object):
       full_path = os.path.join(self.checkpoint_dir, self.ckpt_to_evaluate)
       yield full_path, step
     else:
-      for checkpoint_path in gfile.glob(
-          os.path.join(self.checkpoint_dir, 'ckpt_*')):
+      for checkpoint_path in glob(os.path.join(self.checkpoint_dir, 'ckpt_*')):
         step = int(checkpoint_path.split('_')[-1])
         if self.min_step and step < int(self.min_step):
           continue

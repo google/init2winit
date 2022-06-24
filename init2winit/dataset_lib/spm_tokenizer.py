@@ -32,6 +32,11 @@ import tensorflow_text as tftxt
 
 import sentencepiece as spm
 
+gfile = tf.io.gfile
+copy = tf.io.gfile.copy
+exists = tf.io.gfile.exists
+rename = tf.io.gfile.rename
+
 Features = Dict[str, tf.Tensor]
 
 
@@ -106,11 +111,11 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
     # Use an intermediate filename that is renamed to the target name to address
     # create and fill delays.
     copy_rename_path = abs_model_path + '.rntmp'
-    tf.io.gfile.copy(model_fp.name + '.model', copy_rename_path, overwrite=True)
-    tf.io.gfile.rename(copy_rename_path, abs_model_path, overwrite=True)
+    copy(model_fp.name + '.model', copy_rename_path, overwrite=True)
+    rename(copy_rename_path, abs_model_path, overwrite=True)
     logging.info('copied %s to %s', model_fp.name + '.model', abs_model_path)
   else:
-    while not tf.io.gfile.exists(abs_model_path):
+    while not exists(abs_model_path):
       time.sleep(1)
     time.sleep(1)
   return abs_model_path
@@ -121,7 +126,7 @@ def load_tokenizer(model_path: str,
                    add_eos: bool = True,
                    reverse: bool = False):
   """Load a tf-text SentencePiece tokenizer from given model filepath."""
-  with tf.io.gfile.GFile(model_path, 'rb') as model_fp:
+  with gfile.GFile(model_path, 'rb') as model_fp:
     sp_model = model_fp.read()
   sp_tokenizer = tftxt.SentencepieceTokenizer(
       model=sp_model, add_bos=add_bos, add_eos=add_eos, reverse=reverse)

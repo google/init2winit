@@ -33,6 +33,8 @@ import numpy as np
 import pandas as pd
 from tensorflow.io import gfile
 
+exists = gfile.exists
+
 
 
 class TrainingDivergedError(Exception):
@@ -209,7 +211,7 @@ class MetricLogger(object):
       metrics: a Dict of metric names to scalar values. 'global_step' is the
         only required key.
     """
-    if gfile.exists(self._csv_path):
+    if exists(self._csv_path):
       with gfile.GFile(self._csv_path) as csv_file:
         measurements = pd.read_csv(csv_file)
       measurements = measurements.append([metrics])
@@ -278,7 +280,7 @@ class MetricLogger(object):
 
     if not self._json_path:
       raise ValueError('Attempting to write to a null json path')
-    if gfile.exists(self._json_path):
+    if exists(self._json_path):
       with gfile.GFile(self._json_path) as json_file:
         json_objs = json.loads(json_file.read())
       json_objs.append(json_obj)

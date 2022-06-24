@@ -28,6 +28,8 @@ import jax.numpy as jnp
 import numpy as np
 from tensorflow.io import gfile
 
+exists = gfile.exists
+
 
 def qvalue(array):
   return jnp.linalg.norm(array.reshape(-1)) ** 2 / array.size
@@ -263,7 +265,7 @@ class ModelDebugger:
     if metrics_logger:
       metrics_file = os.path.join(metrics_logger._pytree_path,
                                   'training_metrics')
-      if gfile.exists(metrics_file):
+      if exists(metrics_file):
         self._stored_metrics = load_pytree(metrics_file)
 
   def _grab_statistics(self,

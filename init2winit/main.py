@@ -30,19 +30,24 @@ from absl import logging
 
 from flax import jax_utils
 from init2winit import hyperparameters
+from init2winit import utils
 from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
 from init2winit.trainer_lib import trainers
-import utils as utils  # local file import
 import jax
 from jax import lax
 from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow as tf
-from tensorflow.io import gfile
+
+gfile = tf.io.gfile
 # Don't let TF see the GPU, because all we use it for is tf.data loading.
 tf.config.experimental.set_visible_devices([], 'GPU')
+
+# For internal compatibility reasons, we need to pull this function out.
+makedirs = tf.io.gfile.makedirs
+
 
 # Enable flax xprof trace labelling.
 os.environ['FLAX_PROFILE'] = 'true'
@@ -222,7 +227,7 @@ def _run(
   meta_data = {'worker_id': worker_id, 'status': 'incomplete'}
   if jax.process_index() == 0:
     logging.info('rng: %s', rng)
-    gfile.makedirs(trial_dir)
+    makedirs(trial_dir)
     # Set up the metric loggers for host 0.
     metrics_logger, init_logger = utils.set_up_loggers(trial_dir, xm_work_unit)
     hparams_fname = os.path.join(trial_dir, 'hparams.json')
@@ -283,12 +288,12 @@ def main(unused_argv):
   checkpoint_steps = [int(s.strip()) for s in FLAGS.checkpoint_steps]
   eval_steps = [int(s.strip()) for s in FLAGS.eval_steps]
   if jax.process_index() == 0:
-    tf.io.gfile.makedirs(FLAGS.experiment_dir)
+    makedirs(FLAGS.experiment_dir)
   log_dir = os.path.join(FLAGS.experiment_dir, 'r=3/')
-  tf.io.gfile.makedirs(log_dir)
+  makedirs(log_dir)
   log_path = os.path.join(
       log_dir, 'worker{}_{}.log'.format(FLAGS.worker_id, jax.process_index()))
-  with tf.io.gfile.GFile(log_path, 'a') as logfile:
+  with gfile.GFile(log_path, 'a') as logfile:
     utils.add_log_file(logfile)
     if jax.process_index() == 0:
       logging.info('argv:\n%s', ' '.join(sys.argv))

@@ -25,14 +25,14 @@ from absl import app
 from absl import flags
 from absl import logging
 from init2winit.dataset_lib import datasets
-import hessian.hessian_eval as hessian_eval  # local file import
-import hessian.run_lanczos as run_lanczos  # local file import
+from init2winit.hessian import hessian_eval
+from init2winit.hessian import  run_lanczos
 from init2winit.model_lib import models
 import jax
 from ml_collections.config_dict import config_dict
 import tensorflow.compat.v2 as tf
 
-
+gfile = tf.io.gfile
 
 # Enable flax xprof trace labelling.
 os.environ['FLAX_PROFILE'] = 'true'
@@ -81,7 +81,7 @@ def main(unused_argv):
     hessian_eval_config = hessian_eval.DEFAULT_EVAL_CONFIG
 
   if FLAGS.experiment_config_filename:
-    with tf.io.gfile.GFile(FLAGS.experiment_config_filename, 'r') as f:
+    with gfile.GFile(FLAGS.experiment_config_filename, 'r') as f:
       experiment_config = json.load(f)
     if jax.process_index() == 0:
       logging.info('experiment_config: %r', experiment_config)
@@ -102,7 +102,7 @@ def main(unused_argv):
   dataset_builder = datasets.get_dataset(dataset_name)
   dataset_meta_data = datasets.get_dataset_meta_data(dataset_name)
 
-  with tf.io.gfile.GFile(FLAGS.trial_hparams_filename, 'r') as f:
+  with gfile.GFile(FLAGS.trial_hparams_filename, 'r') as f:
     hps = config_dict.ConfigDict(json.load(f))
 
   if FLAGS.hparam_overrides:

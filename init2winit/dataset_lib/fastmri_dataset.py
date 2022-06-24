@@ -26,6 +26,8 @@ from ml_collections.config_dict import config_dict
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
+gfile = tf.io.gfile
+listdir = tf.io.gfile.listdir
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     input_shape=(320, 320),
@@ -147,7 +149,7 @@ def _h5_to_examples(path):
   """Yield MRI slices from an hdf5 file containing a single MRI volume."""
   tf.print('fastmri_dataset._h5_to_examples call:', path,
            datetime.datetime.now().strftime('%H:%M:%S:%f'))
-  with tf.io.gfile.GFile(path, 'rb') as gf:
+  with gfile.GFile(path, 'rb') as gf:
     path = gf
   with h5py.File(path, 'r') as hf:
     # NOTE(dsuo): logic taken from reference code
@@ -210,7 +212,7 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
     data_dir = os.path.join(data_dir, hps.val_dir)
 
   h5_paths = [
-      os.path.join(data_dir, path) for path in tf.io.gfile.listdir(data_dir)
+      os.path.join(data_dir, path) for path in listdir(data_dir)
   ][start:end]
 
   ds = tf.data.Dataset.from_tensor_slices(h5_paths)

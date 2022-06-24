@@ -21,22 +21,26 @@ import os
 from absl import logging
 from flax import jax_utils
 from init2winit import checkpoint
+from init2winit import utils
 from init2winit.hessian import hessian_eval
 from init2winit.init_lib import init_utils
 from init2winit.init_lib import initializers
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer
 from init2winit.trainer_lib import trainer_utils
-import utils as utils  # local file import
 import jax
 import optax
 
 from tensorflow.io import gfile
 
+exists = gfile.exists
+glob = gfile.glob
+mkdir = gfile.mkdir
+
 
 def iterate_checkpoints(checkpoint_dir, min_global_step, max_global_step):
   """Iterates over all checkpoints in the interval [lb, ub)."""
-  for checkpoint_path in gfile.glob(os.path.join(checkpoint_dir, 'ckpt_*')):
+  for checkpoint_path in glob(os.path.join(checkpoint_dir, 'ckpt_*')):
 
     step = int(checkpoint_path.split('_')[-1])
     if min_global_step is None or (min_global_step <= step < max_global_step):
@@ -114,8 +118,8 @@ def eval_checkpoints(
     logging.info(hps)
     # Save the hessian computation hps to the experiment directory
     exp_dir = os.path.join(checkpoint_dir, hessian_eval_config['name'])
-    if not gfile.exists(exp_dir):
-      gfile.mkdir(exp_dir)
+    if not exists(exp_dir):
+      mkdir(exp_dir)
     if min_global_step == 0:
       hparams_fname = os.path.join(exp_dir, 'hparams.json')
       with gfile.GFile(hparams_fname, 'w') as f:

@@ -32,6 +32,8 @@ import jax
 from ml_collections.config_dict import config_dict
 import tensorflow.compat.v2 as tf
 
+gfile = tf.io.gfile
+
 
 # Enable flax xprof trace labelling.
 os.environ['FLAX_PROFILE'] = 'true'
@@ -84,7 +86,7 @@ def main(unused_argv):
   mt_eval_config = json.loads(FLAGS.mt_eval_config)
 
   if FLAGS.experiment_config_filename:
-    with  tf.io.gfile.GFile(FLAGS.experiment_config_filename) as f:
+    with  gfile.GFile(FLAGS.experiment_config_filename) as f:
       experiment_config = json.load(f)
     if jax.process_index() == 0:
       logging.info('experiment_config: %r', experiment_config)
