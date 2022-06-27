@@ -108,7 +108,7 @@ def _criteo_tsv_reader(
       num_parallel_calls=128,
       deterministic=False)
   ds = ds.batch(batch_size, drop_remainder=True)
-  ds = ds.map(_parse_example_fn, num_parallel_calls=16)
+  ds = ds.map(_parse_example_fn, num_parallel_calls=128)
   ds = ds.prefetch(tf.data.AUTOTUNE)
   return ds
 
