@@ -181,7 +181,9 @@ class BLEUEvaluator(object):
   def translate_and_calculate_bleu(self):
     """Iterate over all checkpoints and calculate BLEU."""
     self.build_predictor()
-    bleu_scores_list = []
+    # Output is List of (step, bleu_score, (sources, references, predictions))
+    # Its a list because we evaluate multiple checkpoints.
+    bleu_output = []
     for _, step in self.iterate_checkpoints():
       ckpt_paths = eval_utils.get_checkpoints_in_range(
           checkpoint_dir=self.checkpoint_dir,
@@ -221,5 +223,5 @@ class BLEUEvaluator(object):
       bleu_score = eval_utils.compute_bleu_from_predictions(
           predictions, references, self.tl_code, 'sacrebleu')['sacrebleu']
       logging.info('Sacre bleu score at step %d: %f', step, bleu_score)
-      bleu_scores_list.append(bleu_score)
-    return bleu_scores_list
+      bleu_output.append((step, bleu_score, (sources, references, predictions)))
+    return bleu_output
