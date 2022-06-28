@@ -192,7 +192,7 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
   # NOTE(dsuo): we split on h5 files, but each h5 file has some number of slices
   # that each represent an example. h5 files have approximately the same number
   # of slices, so we just split files equally among hosts.
-  if split in ['train']:
+  if split in ['train', 'eval_train']:
     split_size = hps.num_train_h5_files // jax.process_count()
   else:
     split_size = hps.num_valid_h5_files // jax.process_count()
