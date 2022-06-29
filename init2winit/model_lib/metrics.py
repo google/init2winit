@@ -533,6 +533,12 @@ _METRICS = {
             num_examples=NumExamples,
             average_precision=BinaryMeanAveragePrecision,
             auc_roc=BinaryAUCROC),
+    'binary_classification_metrics_dlrm_no_auc':
+        metrics.Collection.create(
+            ce_loss=weighted_average_metric(
+                losses.unnormalized_sigmoid_binary_cross_entropy),
+            num_examples=NumExamples,
+            ),
     'image_reconstruction_metrics':
         metrics.Collection.create(
             l1_loss=weighted_average_metric(
