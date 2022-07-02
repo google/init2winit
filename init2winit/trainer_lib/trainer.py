@@ -503,9 +503,9 @@ def train(
   rng, callback_rng = jax.random.split(rng)
   callback_rngs = jax.random.split(callback_rng, len(callback_configs))
   for callback_rng, config in zip(callback_rngs, callback_configs):
-    eval_callback = callbacks.get_callback(
-        config['callback_name'])(model, params, batch_stats, optimizer_state,
-                                 dataset, hps, config, train_dir, callback_rng)
+    eval_callback = callbacks.get_callback(config['callback_name'])(
+        model, params, batch_stats, optimizer_state, optimizer_update_fn,
+        dataset, hps, config, train_dir, callback_rng)
     eval_callbacks.append(eval_callback)
 
 

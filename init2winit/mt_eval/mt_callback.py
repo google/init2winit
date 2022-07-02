@@ -139,10 +139,12 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     return d1
 
   def __init__(self, model, flax_module, batch_stats, optimizer_state,
-               dataset, hps, callback_config, train_dir, rng):
+               optimizer_update_fn, dataset, hps, callback_config, train_dir,
+               rng):
     del flax_module
     del batch_stats
     del optimizer_state
+    del optimizer_update_fn
     del train_dir
     del dataset
     self.callback_config = callback_config

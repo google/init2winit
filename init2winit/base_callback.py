@@ -37,8 +37,9 @@ scalar metrics.
 class BaseCallBack:
   """Base callback to specify the required API."""
 
-  def __init__(self, model, params, batch_stats, optimizer_state, dataset, hps,
-               callback_config, train_dir, rng):
+  def __init__(self, model, params, batch_stats, optimizer_state,
+               optimizer_update_fn, dataset, hps, callback_config, train_dir,
+               rng):
     """Defines the API for callback construction."""
     pass
 

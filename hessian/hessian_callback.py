@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Callback which runs the hessian eval."""
+r"""Callback which runs the hessian eval."""
 
 import os
 
@@ -51,7 +51,8 @@ class HessianCallback(base_callback.BaseCallBack):
   """Used to run the hessian eval in the trainer binary."""
 
   def __init__(self, model, flax_module, batch_stats, optimizer_state,
-               dataset, hps, callback_config, train_dir, rng):
+               optimizer_update_fn, dataset, hps, callback_config, train_dir,
+               rng):
     del rng
     del optimizer_state
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
@@ -62,6 +63,7 @@ class HessianCallback(base_callback.BaseCallBack):
     self.callback_config = FrozenConfigDict(callback_config)
     self.hps = hps
     self.name = callback_config['name']
+    self.optimizer_update_fn = optimizer_update_fn
 
   def run_eval(self, flax_module, batch_stats, optimizer_state, global_step):
     """Computes the loss hessian and returns the max eigenvalue.
@@ -87,11 +89,22 @@ class HessianCallback(base_callback.BaseCallBack):
           jax_utils.unreplicate(optimizer_state), precondition_config)
     else:
       diag_preconditioner = None
-    hessian_metrics, _, _ = self.hessian_evaluator.evaluate_spectrum(
+    hessian_metrics, hvex, _ = self.hessian_evaluator.evaluate_spectrum(
         flax_module, global_step, diag_preconditioner=diag_preconditioner)
+
+    if self.callback_config.get('compute_stats'):
+      grads, updates = self.hessian_evaluator.compute_dirs(
+          flax_module, optimizer_state, self.optimizer_update_fn)
+      stats_row = self.hessian_evaluator.evaluate_stats(flax_module, grads,
+                                                        updates, hvex, [],
+                                                        global_step)
+      hessian_metrics.update(stats_row)
+      interps_row = self.hessian_evaluator.compute_interpolations(
+          flax_module, grads, updates, hvex, [], global_step)
+
+      hessian_metrics.update(interps_row)
     if jax.host_id() == 0:
       self.logger.append_pytree(hessian_metrics)
-
     max_eig_key = self.name + '/max_eig'
     ratio_key = self.name + '/max_eig_ratio'
     pos_neg_key = self.name + '/pos_neg_ratio'

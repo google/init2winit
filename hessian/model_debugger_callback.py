@@ -83,12 +83,14 @@ def get_stats(
 class ModelDebugCallback:
   """Used to run the hessian eval in the trainer binary."""
 
-  def __init__(self, model, optimizer, batch_stats, optimizer_state, dataset,
-               hps, callback_config, train_dir, rng):
+  def __init__(self, model, optimizer, batch_stats, optimizer_state,
+               optimizer_update_fn, dataset, hps, callback_config, train_dir,
+               rng):
     del hps
     del optimizer
     del batch_stats
     del optimizer_state
+    del optimizer_update_fn
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
     # copy batch_stats as we close over it, and it gets modified.
     self.dataset = dataset

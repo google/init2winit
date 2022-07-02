@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Code for evaluating the hessian and gradient covariance of i2w models."""
+
 import functools
 import itertools
 
@@ -23,6 +24,7 @@ from flax import jax_utils
 from flax.core.frozen_dict import unfreeze
 from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import partition_tree
+from init2winit.utils import total_tree_norm_sql2
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -33,24 +35,32 @@ from spectral_density.hessian_computation import ravel_pytree
 
 
 DEFAULT_EVAL_CONFIG = {
-    'average_hosts': True,
-    'compute_interps': False,
-    'compute_stats': False,
-    'eval_gradient_covariance': False,
-    'eval_hess_grad_overlap': True,
+    'callback_name': 'hessian',
+    'num_batches': 1,
+    'num_eval_draws': 1,
     'eval_hessian': True,
-    'hparam_overrides': {},
-    'max_eig_num_steps': 30,
-    'name': 'hessian',
-    'num_batches': 10,
-    'num_eigens': 5,
-    'num_eval_draws': 3,
+    'eval_max_eig': False,
+    'precondition': False,
+    'max_eig_num_steps': 0,
     'num_lanczos_steps': 60,
     'rng_key': 0,
-    'update_stats': False,
     'use_training_gen': True,
-    'block_hessian': False,
-    'param_partition_fn': None  # only used with block_hessian=True
+    'name': 'hessian',
+    'eval_gradient_covariance': False,
+    'compute_stats': False,
+    'compute_interps': False,
+    'update_stats': False,
+    'hparam_overrides': {},
+    'average_hosts': True,
+    'num_eigens': 5,
+    'eval_hess_grad_overlap': True,
+    'block_hessian': False,  # see hessian_eval.py -> block_hessian
+    'param_partition_fn': None,  # see model_lib/partition_tree.py
+    'batch_start_idx': 0,
+    'lower_thresh': -1.0,
+    'upper_thresh': 1.0,
+    'num_points': 20,
+    'scale_by_update_norm': True,
 }
 
 
@@ -515,7 +525,12 @@ class CurvatureEvaluator:
     lower = self.eval_config['lower_thresh']
     upper = self.eval_config['upper_thresh']
     num_points = self.eval_config['num_points']
-    etas = np.linspace(lower, upper, num=num_points, endpoint=True)
+    scale = 1.0
+    if self.eval_config.get('scale_by_update_norm'):
+      # mean update norm
+      scale = np.mean([np.sqrt(total_tree_norm_sql2(tree)) for tree in udirs])
+
+    etas = np.linspace(lower, upper, num=num_points, endpoint=True) * scale
     row = {'step_size': etas}
     for i, u_dir in enumerate(gdirs):
       u_dir = _tree_normalize(u_dir)
