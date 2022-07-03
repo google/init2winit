@@ -34,7 +34,8 @@ def _optimizer_loop(optimizer, iterations=5):
   results = []
   for _ in range(iterations):
     compute_loss = lambda params, x, y: optax.l2_loss(params['w'].dot(x), y)
-    grads = jax.grad(compute_loss)(params, jnp.array([5.0, 6.0]), 4.0)
+    grads = jax.grad(compute_loss)(params, jnp.array([5.0, 6.0]),
+                                   jnp.array(4.0))
     updates, opt_state = optimizer.update(grads, opt_state, params)
     params = optax.apply_updates(params, updates)
     results.append(params)
