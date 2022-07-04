@@ -212,7 +212,7 @@ def rexp_updater(
     grads = updates['updates'] if not use_accumulated_gradient else updates[
         'moments']['1']
 
-    updates['output'] = jax.tree_multimap(
+    updates['output'] = jax.tree_map(
         lambda u, v: u / (jnp.power(v + eps_root, exponent) + eps), grads,
         updates['moments'][str(moment)])
 

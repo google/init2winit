@@ -29,8 +29,8 @@ from optax._src import utils  # pylint:disable=protected-access
 
 def _update_moment(updates, moments, decay, order):
   """Compute the exponential moving average of the `order-th` moment."""
-  return jax.tree_multimap(lambda g, t: (1 - decay) * (g**order) + decay * t,
-                           updates, moments)
+  return jax.tree_map(lambda g, t: (1 - decay) * (g**order) + decay * t,
+                      updates, moments)
 
 
 def _bias_correction(moment, decay, count):
@@ -138,8 +138,8 @@ def precondition_by_rms(
     nu = _update_moment(updates, state.nu, decay, 2)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     nu_hat = nu if not debias else _bias_correction(nu, decay, count)
-    updates = jax.tree_multimap(lambda u, v: u / (jnp.sqrt(v + eps_root) + eps),
-                                updates, nu_hat)
+    updates = jax.tree_map(lambda u, v: u / (jnp.sqrt(v + eps_root) + eps),
+                           updates, nu_hat)
     return updates, PreconditionBySecondMomentCoordinateWiseState(
         count=count, nu=nu)
 
@@ -180,13 +180,12 @@ def precondition_by_yogi(b2: float = 0.999,
 
   def update_fn(updates, state, params=None):
     del params
-    nu = jax.tree_multimap(
-        lambda g, v: v - (1 - b2) * jnp.sign(v - g**2) * (g**2), updates,
-        state.nu)
+    nu = jax.tree_map(lambda g, v: v - (1 - b2) * jnp.sign(v - g**2) * (g**2),
+                      updates, state.nu)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_multimap(lambda u, v: u / (jnp.sqrt(v + eps_root) + eps),
-                                updates, nu_hat)
+    updates = jax.tree_map(lambda u, v: u / (jnp.sqrt(v + eps_root) + eps),
+                           updates, nu_hat)
     return updates, PreconditionBySecondMomentCoordinateWiseState(
         count=count, nu=nu)
 
@@ -222,9 +221,9 @@ def precondition_by_amsgrad(
     del params
     nu = _update_moment(updates, state.nu, b2, 2)
     count = state.count + jnp.array(1, dtype=jnp.int32)
-    nu_hat = jax.tree_multimap(jnp.maximum, nu, state.nu)
-    updates = jax.tree_multimap(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
-                                updates, nu_hat)
+    nu_hat = jax.tree_map(jnp.maximum, nu, state.nu)
+    updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
+                           updates, nu_hat)
     return updates, PreconditionBySecondMomentCoordinateWiseState(
         count=count, nu=nu)
 
@@ -272,9 +271,9 @@ def scale_by_amsgrad(
     del params
     mu = _update_moment(updates, state.mu, b1, 1)
     nu = _update_moment(updates, state.nu, b2, 2)
-    nu_hat = jax.tree_multimap(jnp.maximum, nu, state.nu)
-    updates = jax.tree_multimap(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
-                                mu, nu_hat)
+    nu_hat = jax.tree_map(jnp.maximum, nu, state.nu)
+    updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps), mu,
+                           nu_hat)
     return updates, ScaleByAMSGradState(mu=mu, nu=nu)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -323,12 +322,11 @@ class ScaleByAdamState(NamedTuple):
   nu: optax.Updates
 
 
-def scale_by_adam(
-    b1: float = 0.9,
-    b2: float = 0.999,
-    eps: float = 1e-8,
-    eps_root: float = 0.0,
-    debias: bool = True) -> optax.GradientTransformation:
+def scale_by_adam(b1: float = 0.9,
+                  b2: float = 0.999,
+                  eps: float = 1e-8,
+                  eps_root: float = 0.0,
+                  debias: bool = True) -> optax.GradientTransformation:
   """Rescale updates according to the Adam algorithm.
 
   Args:
@@ -356,8 +354,8 @@ def scale_by_adam(
     count = state.count + jnp.array(1, dtype=jnp.int32)
     mu_hat = mu if not debias else _bias_correction(mu, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_multimap(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
-                                mu_hat, nu_hat)
+    updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
+                           mu_hat, nu_hat)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -491,8 +489,8 @@ def scale_by_nadam(b1: float = 0.9,
     mu_hat = _update_moment(updates, mu, b1, 1)
     mu_hat = mu_hat if not debias else _bias_correction(mu_hat, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_multimap(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
-                                mu_hat, nu_hat)
+    updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
+                           mu_hat, nu_hat)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -581,12 +579,12 @@ def precondition_by_layered_adaptive_rms(
 
   def update_fn(updates, state, params=None):
     del params
-    nu = jax.tree_multimap(lambda g, t, b: _update_moment_general(g, t, b, 2),
-                           updates, state.nu, state.beta_array)
+    nu = jax.tree_map(lambda g, t, b: _update_moment_general(g, t, b, 2),
+                      updates, state.nu, state.beta_array)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     # Decide what to do with bias correction
     # nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_multimap(
+    updates = jax.tree_map(
         lambda m, v, s: s * (m / (jnp.sqrt(v + eps_root) + eps)), updates, nu,
         state.scale_array)
     return updates, PreconditionByLayeredAdaptiveRMSState(

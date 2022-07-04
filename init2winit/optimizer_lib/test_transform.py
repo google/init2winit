@@ -302,9 +302,9 @@ class AMSGradTest(chex.TestCase):
         prev_nu = state.nu
         _, state = adam.update(updates, state, params)
         curr_nu = state.nu
-        nu_hat = jax.tree_multimap(jnp.maximum, curr_nu, prev_nu)
-        updates = jax.tree_multimap(lambda m, v: m / (jnp.sqrt(v + 0.0) + 1e-8),
-                                    state.mu, nu_hat)
+        nu_hat = jax.tree_map(jnp.maximum, curr_nu, prev_nu)
+        updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + 0.0) + 1e-8),
+                               state.mu, nu_hat)
 
         return updates, optax.ScaleByAdamState(
             count=state.count, mu=state.mu, nu=nu_hat)

@@ -49,7 +49,8 @@ class KitchenSinkSuccessTest(absltest.TestCase):
     params = {'w': jnp.ones((num_weights,))}
     opt_state = optimizer.init(flax.core.FrozenDict(params))
 
-    compute_loss = lambda params, x, y: optax.l2_loss(params['w'].dot(x), y)
+    compute_loss = lambda params, x, y: optax.l2_loss(params['w'].dot(x),
+                                                      jnp.array(y))
     grads = jax.grad(compute_loss)(params, xs, ys)
 
     updates, opt_state = optimizer.update(grads, opt_state, params)
@@ -305,7 +306,7 @@ class GraftCombinatorTest(chex.TestCase):
 
     def loss_fn(params):
       yhat = model.apply(params, x)
-      loss = jnp.sum((y-yhat)**2)
+      loss = jnp.sum((y - yhat)**2)
       return loss
 
     for _ in range(10):
@@ -317,8 +318,8 @@ class GraftCombinatorTest(chex.TestCase):
 
       u_m_n = jax.tree_map(jnp.linalg.norm, u_m)
       u_d_n = jax.tree_map(jnp.linalg.norm, u_d)
-      u_g2 = jax.tree_multimap(lambda m, d, dn: -lr * d / (dn + 1e-6) * m,
-                               u_m_n, u_d, u_d_n)
+      u_g2 = jax.tree_map(lambda m, d, dn: -lr * d / (dn + 1e-6) * m, u_m_n,
+                          u_d, u_d_n)
 
       chex.assert_trees_all_close(u_g, u_g2)
 

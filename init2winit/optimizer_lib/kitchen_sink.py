@@ -86,7 +86,7 @@ _transformations.update(_miscellaneous)
 
 def _sum_combinator(*args):
   return functools.reduce(
-      lambda x, y: jax.tree_multimap(lambda i, j: i + j, x, y), args)
+      lambda x, y: jax.tree_map(lambda i, j: i + j, x, y), args)
 
 
 def _grafting_helper(chain, use_global_norm=False):
@@ -117,7 +117,7 @@ def _grafting_combinator(mag_chain,
   mag_norm = _grafting_helper(mag_chain, use_global_norm=use_global_norm)
   dir_norm = _grafting_helper(dir_chain, use_global_norm=use_global_norm)
 
-  norm = jax.tree_multimap(
+  norm = jax.tree_map(
       lambda dir, dirn, magn: dir / (dirn + eps) * magn,
       dir_chain, dir_norm, mag_norm
   )
