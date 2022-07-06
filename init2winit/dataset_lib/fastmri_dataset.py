@@ -150,14 +150,13 @@ def _h5_to_examples(path):
   tf.print('fastmri_dataset._h5_to_examples call:', path,
            datetime.datetime.now().strftime('%H:%M:%S:%f'))
   with gfile.GFile(path, 'rb') as gf:
-    path = gf
-  with h5py.File(path, 'r') as hf:
-    # NOTE(dsuo): logic taken from reference code
-    volume_max = hf.attrs.get('max', 0.0)
+    with h5py.File(gf, 'r') as hf:
+      # NOTE(dsuo): logic taken from reference code
+      volume_max = hf.attrs.get('max', 0.0)
 
-    for i in range(hf['kspace'].shape[0]):
-      yield hf['kspace'][i], hf['kspace'][i].shape, hf['reconstruction_esc'][
-          i], hf['reconstruction_esc'][i].shape, volume_max
+      for i in range(hf['kspace'].shape[0]):
+        yield hf['kspace'][i], hf['kspace'][i].shape, hf['reconstruction_esc'][
+            i], hf['reconstruction_esc'][i].shape, volume_max
 
 
 def _create_generator(filename):
