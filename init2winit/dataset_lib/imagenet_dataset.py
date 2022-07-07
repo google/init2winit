@@ -328,7 +328,7 @@ def load_split(
   # entirely to the end of it on the last host, because otherwise we will drop
   # the last `{train,valid}_size % split_size` elements.
   if jax.process_index() == jax.process_count() - 1:
-    end = -1
+    end = ''
 
   logging.info('Loaded data [%d: %d] from %s', start, end, split)
   if split in ['train', 'eval_train']:
