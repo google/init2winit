@@ -24,7 +24,6 @@ from init2winit.dataset_lib import data_utils
 from init2winit.hessian import model_debugger
 import jax
 import jax.numpy as jnp
-import numpy as np
 
 
 DEFAULT_CONFIG = {
@@ -32,52 +31,37 @@ DEFAULT_CONFIG = {
 }
 
 
-def get_stats(
+def get_grad(
     params,
-    batch_stats,
     batch,
-    step,
     rng,
-    local_device_index,
     training_cost):
   """Single step of the training loop.
 
   Args:
     params: the Flax param pytree.
-    batch_stats: a flax.nn.Collection object tracking the model state, usually
       batch norm statistics.
     batch: the per-device batch of data to process.
-    step: the current global step of this update. Used to fold in to `rng` to
-      produce a unique per-device, per-step RNG.
     rng: the RNG used for calling the model. `step` and `local_device_index`
       will be folded into this to produce a unique per-device, per-step RNG.
-    local_device_index: an integer that is unique to this device amongst all
-      devices on this host, usually in the range [0, jax.local_device_count()].
-      It is folded in to `rng` to produce a unique per-device, per-step RNG.
     training_cost: a function used to calculate the training objective that will
       be differentiated to generate updates. Takes
       (`params`, `batch_stats`, `batch`, `rng`) as inputs.
 
   Returns:
-    A tuple of the new optimizer, the new batch stats, the scalar training cost,
-    and the updated metrics_grabber.
+    Gradient of the given loss.
   """
   # `jax.random.split` is very slow outside the train step, so instead we do a
   # `jax.random.fold_in` here.
-  rng = jax.random.fold_in(rng, step)
-  rng = jax.random.fold_in(rng, local_device_index)
 
   def opt_cost(params):
-    return training_cost(params, batch, batch_stats, rng)
+    return training_cost(params, batch, None, rng)
 
   grad_fn = jax.value_and_grad(opt_cost, has_aux=True)
-  (cost_value, _), grad = grad_fn(params)
+  (_, _), grad = grad_fn(params)
 
-  cost_value, grad = jax.lax.pmean((cost_value, grad), axis_name='batch')
-  grad_norms = jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1))**2, grad)
-  param_norms = jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1))**2,
-                             params)
-  return param_norms, grad_norms
+  grad = jax.lax.pmean(grad, axis_name='batch')
+  return grad
 
 
 class ModelDebugCallback:
@@ -102,23 +86,19 @@ class ModelDebugCallback:
         model.apply_on_batch,
         capture_activation_norms=True,
         sown_collection_names=callback_config.get('sown_collection_names'))
-
+    grad_fn = functools.partial(
+        get_grad,
+        training_cost=model.training_cost,
+    )
     debugger = model_debugger.ModelDebugger(
-        use_pmap=True, forward_pass=get_act_stats_fn, metrics_logger=logger)
+        use_pmap=True, forward_pass=get_act_stats_fn, metrics_logger=logger,
+        grad_fn=grad_fn)
     # pmap functions for the training loop
     # in_axes = (optimizer = 0, batch_stats = 0, batch = 0, step = None,
     # lr = None, rng = None, local_device_index = 0, training_metrics_grabber=0,
     # training_metrics_grabber, training_cost )
     # Also, we can donate buffers for 'optimizer', 'batch_stats',
     # 'batch' and 'training_metrics_grabber' for update's pmapped computation.
-
-    self.get_stats_pmapped = jax.pmap(
-        functools.partial(
-            get_stats,
-            training_cost=model.training_cost,
-            ),
-        axis_name='batch',
-        in_axes=(0, 0, 0, None, None, 0))
     self.debugger = debugger
     self.logger = logger
     self.dataset = dataset
@@ -144,22 +124,13 @@ class ModelDebugCallback:
       Max eigenvalue of the loss (full tridiag is saved to disk).
     """
     del optimizer_state
-    rng = jax.random.PRNGKey(0)
-    local_device_indices = np.arange(jax.local_device_count())
-    p_norms, g_norms = self.get_stats_pmapped(
-        params,
-        batch_stats,
-        self.batch,
-        global_step,
-        rng,
-        local_device_indices)
-    g_norms = jax.tree_map(lambda x: x[0], g_norms)
-    p_norms = jax.tree_map(lambda x: x[0], p_norms)
+    del batch_stats
+    p_norms = jax.tree_map(lambda x: jnp.linalg.norm(x[0].reshape(-1))**2,
+                           params)
 
     self.debugger.full_eval(
         step=global_step,
         params=params,
-        grad_norms_sql2=g_norms,
         param_norms_sql2=p_norms,
         batch=self.batch,
         rng=self.batch_rng)

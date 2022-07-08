@@ -905,14 +905,10 @@ class TransformerTranslate(base_model.BaseModel):
 
     # inputs/targets positions and segmentations are required when we have
     # packed examples.
-    logits, new_batch_stats = self.flax_module.apply(
-        {'params': params, 'batch_stats': batch_stats},
-        batch['inputs'],
-        batch['targets'],
-        batch.get('inputs_positions'),
-        batch.get('targets_positions'),
-        batch.get('inputs_segmentation'),
-        batch.get('targets_segmentation'),
+    logits, new_batch_stats = self.apply_on_batch(
+        params,
+        batch_stats,
+        batch,
         mutable=['batch_stats'],
         rngs={'dropout': dropout_rng},
         train=True)

@@ -26,6 +26,7 @@ from init2winit.utils import tree_norm_sql2
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from tensorflow.io import gfile
 
 exists = gfile.exists
@@ -223,6 +224,7 @@ class ModelDebugger:
 
   def __init__(self,
                forward_pass=None,
+               grad_fn=None,
                use_pmap=True,
                save_every=1,
                metrics_logger=None):
@@ -233,6 +235,7 @@ class ModelDebugger:
 
     Args:
       forward_pass: A function mapping batch to a dict of intermediate values.
+      grad_fn: A function mapping batch and parameters to the loss gradient.
       use_pmap: Boolean which determines whether or not computations are meant
         to be pmapped. If true, then full_eval will expect all pytrees to be
         replicated.
@@ -248,6 +251,7 @@ class ModelDebugger:
     self._metrics_logger = metrics_logger
     self._use_pmap = use_pmap
     self.forward_pass = None
+    self.grad_fn = None
 
     # In both the pmap case and non-pmap case, _tree_norm_fn_sql2 returns
     # unreplicated results on the host cpu.
@@ -255,9 +259,13 @@ class ModelDebugger:
       self._tree_norm_fn_sql2 = pmap_then_unreplicate(tree_norm_sql2)
       if forward_pass is not None:
         self.forward_pass = pmap_then_unreplicate(forward_pass)
+      if grad_fn is not None:
+        # Regular pmap here to comply with _grab_statistics
+        self.grad_fn = jax.pmap(grad_fn, axis_name='batch')
     else:
       self._tree_norm_fn_sql2 = tree_norm_sql2
       self.forward_pass = forward_pass
+      self.grad_fn = grad_fn
 
     self._stored_metrics = {}
 
@@ -270,6 +278,8 @@ class ModelDebugger:
 
   def _grab_statistics(self,
                        step,
+                       batch=None,
+                       rng=None,
                        params=None,
                        grad=None,
                        update=None,
@@ -278,20 +288,19 @@ class ModelDebugger:
                        param_norms_sql2=None):
     """Computes layerwise gradient and parameter norm statistics."""
     metrics_dict = {'step': step}
+    if grad is None and grad_norms_sql2 is None and self.grad_fn is not None:
+      grad = self.grad_fn(params, batch, rng)
 
-    def maybe_compute_and_add_sql2_to_metrics_dict(variable_tree,
-                                                   norm_tree_sql2, key):
+    for tup in zip([params, grad, update],
+                   [param_norms_sql2, grad_norms_sql2, update_norms_sql2],
+                   ['param', 'grad', 'update']):
+      variable_tree, norm_tree_sql2, key = tup
       if variable_tree and not norm_tree_sql2:
         norm_tree_sql2 = self._tree_norm_fn_sql2(variable_tree)
       if norm_tree_sql2:
         metrics_dict['{}_norms_sql2'.format(key)] = norm_tree_sql2
         metrics_dict['global_{}_norm_sql2'.format(key)] = sum(
             jax.tree_leaves(norm_tree_sql2))
-
-    for tup in zip([params, grad, update],
-                   [param_norms_sql2, grad_norms_sql2, update_norms_sql2],
-                   ['param', 'grad', 'update']):
-      maybe_compute_and_add_sql2_to_metrics_dict(*tup)
 
     return metrics_dict
 
@@ -362,10 +371,12 @@ class ModelDebugger:
     all_metrics = {'step': step}
     if any([
         params, grad, update, param_norms_sql2, grad_norms_sql2,
-        update_norms_sql2
+        update_norms_sql2, self.grad_fn
     ]):
       metrics_dict = self._grab_statistics(
-          step,
+          step=step,
+          rng=rng,
+          batch=batch,
           params=params,
           grad=grad,
           update=update,

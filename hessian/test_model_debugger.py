@@ -194,8 +194,13 @@ class ModelDebuggerTest(absltest.TestCase):
     metrics_logger = utils.MetricLogger(
         pytree_path=pytree_path,
         events_dir=self.test_dir)
+
+    # Fake grad_fn for testing.
+    def grad_fn(params, batch, rng):
+      del params, batch, rng
+      return rep_variables['params']
     debugger = model_debugger.ModelDebugger(
-        use_pmap=True, metrics_logger=metrics_logger)
+        use_pmap=True, grad_fn=grad_fn, metrics_logger=metrics_logger)
 
     # eval twice to test the concat
     extra_metrics = {'train_loss': 1.0}
@@ -208,7 +213,7 @@ class ModelDebuggerTest(absltest.TestCase):
     metrics = debugger.full_eval(
         10,
         params=rep_variables['params'],
-        grad=rep_variables['params'],
+        grad=None,  # use internal gradient comp
         extra_scalar_metrics=extra_metrics2)
     expected_keys = [
         'step',
