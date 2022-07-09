@@ -66,7 +66,7 @@ def log_eta(pool, work_unit, global_step, train_steps_per_sec, num_train_steps,
 
 def log_epoch_report(report, metrics_logger):
   logging.info('Step %d, steps/second: %f, report: %r', report['global_step'],
-               report['train_steps_per_sec'], report)
+               report['steps_per_sec_train_only'], report)
   if metrics_logger:
     metrics_logger.append_scalar_metrics(report)
   logging.info('Finished (estimated) epoch %d. Saving checkpoint.',

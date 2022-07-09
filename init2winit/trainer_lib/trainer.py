@@ -465,21 +465,16 @@ def train(
   #     metrics_state_update_fn)
   # Also, we can donate buffers for 'optimizer', 'batch_stats',
   # 'batch' and 'training_metrics_state' for update's pmapped computation.
-  update_pmapped = jax.pmap(
+  update_pmapped = utils.timed(jax.pmap(
       update_fn,
       axis_name='batch',
       in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0),
-      donate_argnums=(0, 1, 2, 8))
+      donate_argnums=(0, 1, 2, 8)))
   # During eval, we can donate the 'batch' buffer. We don't donate the
   # 'params' and 'batch_stats' buffers as we don't re-assign those values in
   # eval, we do that only in train.
   evaluate_batch_pmapped = jax.pmap(
       model.evaluate_batch, axis_name='batch', donate_argnums=(2,))
-  start_time = time.time()
-  start_step = global_step
-  prev_eval_step = start_step
-  def get_step_frequency(cur_step):
-    return float(cur_step - start_step) / (time.time() - start_time)
 
   if jax.process_index() == 0:
     trainer_utils.log_message('Starting training!', pool, xm_work_unit)
@@ -512,8 +507,17 @@ def train(
   train_iter = trainer_utils.prefetch_input_pipeline(train_iter,
                                                      hps.num_device_prefetches)
 
-  eval_start_time = start_time
-  eval_start_step = start_step
+  start_time = time.time()
+  start_step = global_step
+  def get_step_frequency(cur_step):
+    return float(cur_step - start_step) / (time.time() - start_time)
+
+  # NOTE(dsuo): record timestamps for run_time since we don't have a duration
+  # that we can increment as in the case of train_time.
+  time_at_prev_eval = start_time
+  train_time_since_prev_eval = 0
+  prev_eval_step = global_step
+
   for _ in range(start_step, num_train_steps):
     with jax.profiler.StepTraceAnnotation('train', step_num=global_step):
       # NOTE(dsuo): to properly profile each step, we must include batch
@@ -533,42 +537,23 @@ def train(
             sum_train_cost,
             max_to_keep=None)
       lr = lr_fn(global_step)
-      optimizer_state, params, batch_stats, sum_train_cost, metrics_state, grad_norm = update_pmapped(
-          optimizer_state,
-          params,
-          batch_stats,
-          metrics_state,
-          batch,
-          global_step,
-          lr,
-          rng,
-          local_device_indices,
-          sum_train_cost)
+      (optimizer_state, params, batch_stats, sum_train_cost, metrics_state,
+       grad_norm), train_time = update_pmapped(optimizer_state, params,
+                                               batch_stats, metrics_state,
+                                               batch, global_step, lr, rng,
+                                               local_device_indices,
+                                               sum_train_cost)
+      train_time_since_prev_eval += train_time
       global_step += 1
       # TODO(gdahl, gilmer): consider moving this test up.
       # NB: Since this test is after we increment global_step, having 0 in
       # eval_steps does nothing.
       if trainer_utils.should_eval(global_step, eval_frequency, eval_steps):
-        train_steps_per_sec = (global_step - eval_start_step) / (
-            time.time() - eval_start_time)
-        eval_start_step = global_step
-        eval_start_time = time.time()
         batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
         report, eval_time = eval_metrics(params, batch_stats, dataset,
                                          eval_num_batches, test_num_batches,
                                          eval_train_num_batches,
                                          evaluate_batch_pmapped)
-        mean_train_cost = sum_train_cost.mean().item() / max(
-            1, global_step - prev_eval_step)
-        report.update(learning_rate=float(lr),
-                      global_step=global_step,
-                      epoch=global_step * hps.batch_size // hps.train_size,
-                      train_steps_per_sec=train_steps_per_sec,
-                      overall_steps_per_sec=get_step_frequency(global_step),
-                      eval_time=eval_time,
-                      grad_norm=np.mean(grad_norm),
-                      preemption_count=preemption_count,
-                      train_cost=mean_train_cost)
 
         for eval_callback in eval_callbacks:
           callback_metrics = eval_callback.run_eval(params, batch_stats,
@@ -578,16 +563,7 @@ def train(
             raise ValueError('There was a collision between the callback'
                              'metrics and the standard eval metrics keys')
           report.update(callback_metrics)
-        yield report
         if jax.process_index() == 0:
-          trainer_utils.log_eta(pool, xm_work_unit, global_step,
-                                train_steps_per_sec, num_train_steps,
-                                start_time, eval_frequency, eval_steps,
-                                eval_time)
-          trainer_utils.log_epoch_report(report, metrics_logger)
-          trainer_utils.maybe_log_training_metrics(metrics_state,
-                                                   metrics_summary_fn,
-                                                   metrics_logger)
           checkpoint.save_unreplicated_checkpoint_background(
               train_dir,
               optimizer_state,
@@ -597,7 +573,40 @@ def train(
               global_step,
               preemption_count,
               sum_train_cost)
+        steps_since_last_eval = global_step - prev_eval_step
+        steps_per_sec_train_only = steps_since_last_eval / train_time_since_prev_eval
+        time_since_last_eval = time.time() - time_at_prev_eval
+        steps_per_sec = steps_since_last_eval / time_since_last_eval
+
+        mean_train_cost = sum_train_cost.mean().item() / max(
+            1, global_step - prev_eval_step)
+        report.update(learning_rate=float(lr),
+                      global_step=global_step,
+                      epoch=global_step * hps.batch_size // hps.train_size,
+                      grad_norm=np.mean(grad_norm),
+                      preemption_count=preemption_count,
+                      train_cost=mean_train_cost,
+                      overall_steps_per_sec=get_step_frequency(global_step),
+                      steps_per_sec_train_only=steps_per_sec_train_only,
+                      steps_per_sec=steps_per_sec,
+                      eval_time=eval_time,
+                      train_time=train_time_since_prev_eval,
+                      run_time=time_since_last_eval
+                      )
+        yield report
+        if jax.process_index() == 0:
+          trainer_utils.log_eta(pool, xm_work_unit, global_step,
+                                steps_per_sec_train_only, num_train_steps,
+                                start_time, eval_frequency, eval_steps,
+                                eval_time)
+          trainer_utils.log_epoch_report(report, metrics_logger)
+          trainer_utils.maybe_log_training_metrics(metrics_state,
+                                                   metrics_summary_fn,
+                                                   metrics_logger)
+
         sum_train_cost = jnp.zeros(jax.local_device_count())
+        time_at_prev_eval = time.time()
+        train_time_since_prev_eval = 0
         prev_eval_step = global_step
 
         early_stopping_condition = trainer_utils.check_for_early_stopping(
@@ -620,8 +629,6 @@ def train(
   # If we moved where in the loop body evals happen then we would not need this
   # test.
   if prev_eval_step != num_train_steps:
-    train_steps_per_sec = (global_step - eval_start_step) / (
-        time.time() - eval_start_time)
     batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
     report, eval_time = eval_metrics(params, batch_stats, dataset,
                                      eval_num_batches, test_num_batches,
@@ -631,24 +638,7 @@ def train(
     # Correct the average for the final partial epoch.
     mean_train_cost = sum_train_cost.mean().item() / max(
         1, global_step - prev_eval_step)
-    report.update(learning_rate=float(lr),
-                  global_step=global_step,
-                  epoch=global_step * hps.batch_size // hps.train_size,
-                  train_steps_per_sec=train_steps_per_sec,
-                  overall_steps_per_sec=get_step_frequency(global_step),
-                  eval_time=eval_time,
-                  grad_norm=np.mean(grad_norm),
-                  preemption_count=preemption_count,
-                  train_cost=mean_train_cost)
-    yield report
     if jax.process_index() == 0:
-      trainer_utils.log_eta(pool, xm_work_unit, global_step,
-                            train_steps_per_sec, num_train_steps, start_time,
-                            eval_frequency, eval_steps, eval_time)
-      trainer_utils.log_epoch_report(report, metrics_logger)
-      trainer_utils.maybe_log_training_metrics(metrics_state,
-                                               metrics_summary_fn,
-                                               metrics_logger)
       checkpoint.save_unreplicated_checkpoint_background(
           train_dir,
           optimizer_state,
@@ -658,5 +648,31 @@ def train(
           global_step,
           preemption_count,
           sum_train_cost)
+    steps_since_last_eval = global_step - prev_eval_step
+    steps_per_sec_train_only = steps_since_last_eval / train_time_since_prev_eval
+    time_since_last_eval = time.time() - time_at_prev_eval
+    steps_per_sec = steps_since_last_eval / time_since_last_eval
+
+    report.update(learning_rate=float(lr),
+                  global_step=global_step,
+                  epoch=global_step * hps.batch_size // hps.train_size,
+                  grad_norm=np.mean(grad_norm),
+                  preemption_count=preemption_count,
+                  train_cost=mean_train_cost,
+                  overall_steps_per_sec=get_step_frequency(global_step),
+                  steps_per_sec_train_only=steps_per_sec_train_only,
+                  steps_per_sec=steps_per_sec,
+                  eval_time=eval_time,
+                  train_time=train_time_since_prev_eval,
+                  run_time=time_since_last_eval)
+    yield report
+    if jax.process_index() == 0:
+      trainer_utils.log_eta(pool, xm_work_unit, global_step,
+                            steps_per_sec_train_only, num_train_steps,
+                            start_time, eval_frequency, eval_steps, eval_time)
+      trainer_utils.log_epoch_report(report, metrics_logger)
+      trainer_utils.maybe_log_training_metrics(metrics_state,
+                                               metrics_summary_fn,
+                                               metrics_logger)
   # To make sure the last checkpoint was correctly saved.
   checkpoint.wait_for_checkpoint_save()
