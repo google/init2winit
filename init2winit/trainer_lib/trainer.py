@@ -465,11 +465,11 @@ def train(
   #     metrics_state_update_fn)
   # Also, we can donate buffers for 'optimizer', 'batch_stats',
   # 'batch' and 'training_metrics_state' for update's pmapped computation.
-  update_pmapped = utils.timed(jax.pmap(
+  update_pmapped = jax.pmap(
       update_fn,
       axis_name='batch',
       in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0),
-      donate_argnums=(0, 1, 2, 8)))
+      donate_argnums=(0, 1, 2, 8))
   # During eval, we can donate the 'batch' buffer. We don't donate the
   # 'params' and 'batch_stats' buffers as we don't re-assign those values in
   # eval, we do that only in train.
@@ -515,7 +515,6 @@ def train(
   # NOTE(dsuo): record timestamps for run_time since we don't have a duration
   # that we can increment as in the case of train_time.
   time_at_prev_eval = start_time
-  train_time_since_prev_eval = 0
   prev_eval_step = global_step
 
   for _ in range(start_step, num_train_steps):
@@ -538,17 +537,15 @@ def train(
             max_to_keep=None)
       lr = lr_fn(global_step)
       (optimizer_state, params, batch_stats, sum_train_cost, metrics_state,
-       grad_norm), train_time = update_pmapped(optimizer_state, params,
-                                               batch_stats, metrics_state,
-                                               batch, global_step, lr, rng,
-                                               local_device_indices,
-                                               sum_train_cost)
-      train_time_since_prev_eval += train_time
+       grad_norm) = update_pmapped(optimizer_state, params, batch_stats,
+                                   metrics_state, batch, global_step, lr, rng,
+                                   local_device_indices, sum_train_cost)
       global_step += 1
       # TODO(gdahl, gilmer): consider moving this test up.
       # NB: Since this test is after we increment global_step, having 0 in
       # eval_steps does nothing.
       if trainer_utils.should_eval(global_step, eval_frequency, eval_steps):
+        train_time_since_prev_eval = time.time() - time_at_prev_eval
         batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
         report, eval_time = eval_metrics(params, batch_stats, dataset,
                                          eval_num_batches, test_num_batches,
