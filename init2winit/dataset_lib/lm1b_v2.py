@@ -48,6 +48,7 @@ METADATA = {
 
 def _batch_to_dict(batch):
   batch_np = data_utils.tf_to_numpy(batch)
+  batch_np['weights'] = np.where(batch_np['inputs'] > 0, 1.0, 0.0)
   return batch_np
 
 
