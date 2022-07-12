@@ -16,11 +16,10 @@
 """Algorithms for narrowing hyperparameter search spaces.
 
 TODO(dsuo): suport discrete hparams.
-TODO(dsuo): check parallel load trials.
 """
 import copy
 import itertools
-import re
+import json
 
 from absl import logging
 import numpy as np
@@ -36,14 +35,24 @@ def print_search_space(search_space):
 
 
 def get_top_k_random_sweep(trials, objective, min_objective, num_top_trials,
-                           num_random_seeds, **kwargs):
+                           num_random_seeds, top_mode='final', **kwargs):
   """Generate num_random trials for top k experiments."""
   del kwargs
 
   # Get the top k trials as ordered by objective
-  top_k_obj = trials[objective].apply(lambda x: x[-1]).sort_values(
-      ascending=min_objective).head(n=num_top_trials)
+  if top_mode == 'final':
+    top_k_obj = trials[objective].apply(lambda x: x[-1]).sort_values(
+        ascending=min_objective).head(n=num_top_trials)
+  elif top_mode == 'best':
+    if min_objective:
+      top_k_obj = trials[objective].apply(lambda x: x.min()).sort_values(
+          ascending=min_objective).head(n=num_top_trials)
+    else:
+      top_k_obj = trials[objective].apply(lambda x: x.max()).sort_values(
+          ascending=min_objective).head(n=num_top_trials)
   top_k = trials.loc[top_k_obj.index]
+  print(f'Generating top k trials using objective `{objective}`.')
+  print(top_k_obj)
 
   hparams = [top_k.iloc[i].hparams for i in range(num_top_trials)]
   for hparam in hparams:
