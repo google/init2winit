@@ -17,23 +17,26 @@ r"""Debugging tool for identifying problematic layers in a network.
 
 """
 
+import functools
 import os
 
 import flax
+import flax.linen as nn
 from init2winit.checkpoint import load_pytree
+from init2winit.model_lib import partition_tree
 from init2winit.utils import array_append
 from init2winit.utils import tree_norm_sql2
 import jax
+from jax import lax
 import jax.numpy as jnp
 import numpy as np
-
 from tensorflow.io import gfile
 
 exists = gfile.exists
 
 
 def qvalue(array):
-  return jnp.linalg.norm(array.reshape(-1)) ** 2 / array.size
+  return jnp.linalg.norm(array.reshape(-1))**2 / array.size
 
 
 def cvalue(activations):
@@ -65,9 +68,9 @@ def tag_residual_activations(module,
   and will store the recorded norms in the "residual_activations" collection.
 
   Args:
-    module: When tagging activations within a flax module, pass a pointer to
-      the module object itself. The resulting intermediates tree will resemble
-      the flax subtree that this is tagged in.
+    module: When tagging activations within a flax module, pass a pointer to the
+      module object itself. The resulting intermediates tree will resemble the
+      flax subtree that this is tagged in.
     identity_path: The x part of a residual connection.
     other_path: The F(x) part.
     name: Used to further specify a named key in the sown path.
@@ -186,11 +189,9 @@ def create_forward_pass_stats_fn(apply_fn,
     if 'intermediates' in forward_pass_statistics:
       # This calculation corresponds to the average q-value across the batch.
       forward_pass_statistics['intermediate_qvalue'] = jax.tree_map(
-          qvalue,
-          forward_pass_statistics['intermediates'])
+          qvalue, forward_pass_statistics['intermediates'])
       forward_pass_statistics['intermediate_cvalue'] = jax.tree_map(
-          cvalue,
-          forward_pass_statistics['intermediates'])
+          cvalue, forward_pass_statistics['intermediates'])
 
       # Don't want to store the full activations.
       forward_pass_statistics.pop('intermediates')
@@ -210,9 +211,71 @@ def _maybe_remove_tuple(x):
 
 
 def remove_leaf_tuples(tree):
-  return jax.tree_map(_maybe_remove_tuple,
-                      tree,
-                      is_leaf=_check_tuple)
+  return jax.tree_map(_maybe_remove_tuple, tree, is_leaf=_check_tuple)
+
+
+#### Utilities for the skip anlysis
+def unflatten(d):
+  return flax.core.freeze(
+      flax.traverse_util.unflatten_dict(
+          {tuple(k.split('/')): v for k, v in d.items()}))
+
+
+# Not a JAX Array Type - just an empty holder of static information:
+# The boolean in this class is what is actually toggled when we skip a layers
+# backward pass.
+@flax.struct.dataclass
+class _Meta:
+  active: bool = flax.struct.field(pytree_node=False)
+
+
+def skip():
+  # pylint: disable=protected-access
+  self = nn.module._context.module_stack[-1]
+  # pylint: enable=protected-access
+  if self.has_variable('moduleflags', 'flag'):
+    flag = self.get_variable('moduleflags', 'flag')
+    return not flag.active
+  else:
+    return False
+
+
+# This function uses stop_gradient tricks to replace a layer's Jacobian with the
+# identity matrix. Currently the function only works for layers where
+# input_shape == output_shape, this can be generalized later.
+def skip_bwd(fn):
+  """Decorator for selectively turning off the backward pass."""
+
+  @functools.wraps(fn)
+  def shunt_backwards(self, x):
+    if skip():
+      # if shape changes we'd do:
+      #   proj(x) + lax.stop_gradient(fn(self, x) - proj(x))
+      return x + lax.stop_gradient(fn(self, x) - x)
+    else:
+      return fn(self, x)
+
+  return shunt_backwards
+
+
+def build_skip_flags(paths_to_skip):
+  """Construct the dictionary to be passed to module.apply for skipping layers.
+
+  Args:
+    paths_to_skip: '/' separated strings indicating the exact module to skip.
+      The path will be equivalent to what is given in the flattened pytree,
+      where instead of tuples as the flattened keys, we have the string of keys
+      joined via '/'.
+
+  Returns:
+    A dictionary which can be passed to the flax.module.apply to turn off the
+      specified tagged layers.
+  """
+  flat = {}
+  for p in paths_to_skip:
+    prefix = f'{p}/' if p else ''
+    flat[prefix + 'flag'] = _Meta(False)
+  return flax.core.freeze({'moduleflags': unflatten(flat)})
 
 
 # TOOD(gilmer): Currently the model debugger does not properly handle internal
@@ -227,7 +290,9 @@ class ModelDebugger:
                grad_fn=None,
                use_pmap=True,
                save_every=1,
-               metrics_logger=None):
+               metrics_logger=None,
+               skip_flags=None,
+               skip_groups=None):
     """Used to inspect a models forward and backward pass.
 
     The following keys are required in config -
@@ -239,10 +304,16 @@ class ModelDebugger:
       use_pmap: Boolean which determines whether or not computations are meant
         to be pmapped. If true, then full_eval will expect all pytrees to be
         replicated.
-      save_every: Stored metrics will be saved to disk every time
-        step % save_every == 0
+      save_every: Stored metrics will be saved to disk every time step %
+        save_every == 0
       metrics_logger: utils.MetricsLogger object. If provided then all
         calculations will be saved to disk.
+      skip_flags: A list of strings of modules to selectively turn off when
+        doing the skip analysis on the backward pass.
+      skip_groups: A list of registered functions (defined in partition_tree.py)
+        which map the model parameter tree to a subset of model layers. This can
+        be used to turn off many layers jointly e.g. "how much do all of the
+        attention layer jacobians contribute to the vanishing gradient problem"?
     """
     if metrics_logger and (metrics_logger._json_path is None):
       raise ValueError('To use the ModelDebugger with a metrics_logger, a json'
@@ -252,6 +323,8 @@ class ModelDebugger:
     self._use_pmap = use_pmap
     self.forward_pass = None
     self.grad_fn = None
+    self.skip_flags = [] if skip_flags is None else skip_flags
+    self.skip_groups = [] if skip_groups is None else skip_groups
 
     # In both the pmap case and non-pmap case, _tree_norm_fn_sql2 returns
     # unreplicated results on the host cpu.
@@ -316,6 +389,68 @@ class ModelDebugger:
   def stored_metrics(self):
     return self._stored_metrics
 
+  def run_skip_analysis(self, params, batch, rng):
+    """Runs a perturbative analysis of the model gradient.
+
+    NOTE: Currently the skip analysis only works for layers which have the same
+    input shape as output shape. Layers which change the shape will be handled
+    in an upcoming CL.
+
+    For each layer in config['skip_flags'] compute the backward pass with
+    that layer swapped to the identity function. Useful for flagging model
+    components which have large/vanishing jacobian singular values. Because
+    the skip_analysis can be configured to run on separate steps we additionally
+    supply the step here. To use the skip analysis do the following steps:
+
+    1. For the module you would like to skip, tag the module's __call__ method
+       with the @skip_bwd decorator.
+    2. Set config['skip_flags'] = ['path/to/module/to/skip'], a list of strings
+       indicating the sequence of layers to skip. The analysis will skip each
+       layer individually and return the gradient norms resulting from that
+       layer being skipped. When skipping multiple layers at once, use
+       config['skip_groups'] which is a list of keys in a registry of functions
+       defined in partition_tree.py. Each of these functions maps
+       the model parameters to a list of keys. This is most useful when skipping
+       many layers at once, for example skipping all of the post residual BN in
+       a 200L resnet (200 BN's skipped at once).
+    3. The output of the skip analysis is contained in results['skip_analysis'],
+       which is a dictionary with keys =
+       union(config['skip_flags', 'skip_groups']). Each key points to per layer
+       gradient norms resulting from calling the backward pass with the target
+       layers skipped.
+
+    For a full example of how to use the skip analysis, see the unit test in
+    test_model_debugger.py.
+
+    Args:
+      params: Pytree of model params.
+      batch: Batch of data.
+      rng: jax.random.PRNGKey
+
+    Returns:
+      A dictionary with a key for every layer specified in config['skip_flags']
+      as well as every key in config['skip_groups'].
+      Each key maps to the layerwise l2 gradient norms of the backward with
+      that layer skipped (replaced with identity).
+    """
+    grad_dict = {}
+    for flag in self.skip_flags:
+      # Here we turn off each flag individually so we pass a list of len 1.
+      flags = build_skip_flags([flag])
+      new_g = self.grad_fn(params, batch, rng, module_flags=flags)
+      grad_dict[flag] = self._tree_norm_fn_sql2(new_g)
+
+    for flag_group in self.skip_groups:
+      flags = partition_tree.get_skip_analysis_fn(flag_group)(params)
+      flags = build_skip_flags(flags)
+      new_g = self.grad_fn(params, batch, rng, module_flags=flags)
+      grad_dict[flag_group] = self._tree_norm_fn_sql2(new_g)
+
+    # Additionally store the regular gradient.
+    new_g = self.grad_fn(params, batch, rng)
+    grad_dict['unmodified_gradient'] = self._tree_norm_fn_sql2(new_g)
+    return {'skip_analysis': grad_dict}
+
   def full_eval(self,
                 step,
                 params=None,
@@ -357,7 +492,7 @@ class ModelDebugger:
       update: Optional pytree of the optimizer update.
       param_norms_sql2: Optional pytree of the square l2 param norms, this will
         be used instead of the params argument when logging the parameter norms.
-      grad_norms_sql2 : Optional pytree of the square l2 grad norms.
+      grad_norms_sql2: Optional pytree of the square l2 grad norms.
       update_norms_sql2: Optional pytree of the square l2 param norms.
       extra_scalar_metrics: A dict of any addional metrics to log.
       batch: A batch of data to use in grabbing forward pass statistics. Only
@@ -387,6 +522,9 @@ class ModelDebugger:
 
     if extra_scalar_metrics:
       all_metrics.update(extra_scalar_metrics)
+
+    if self.skip_flags or self.skip_groups:
+      all_metrics.update(self.run_skip_analysis(params, batch, rng))
 
     if self.forward_pass:
       if batch is None:

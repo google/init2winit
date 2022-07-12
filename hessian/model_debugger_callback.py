@@ -25,40 +25,44 @@ from init2winit.hessian import model_debugger
 import jax
 import jax.numpy as jnp
 
-
 DEFAULT_CONFIG = {
     'name': 'model_debugger',
 }
 
 
-def get_grad(
-    params,
-    batch,
-    rng,
-    training_cost):
+def get_grad(params,
+             batch,
+             rng,
+             batch_stats=None,
+             module_flags=None,
+             training_cost=None):
   """Single step of the training loop.
 
   Args:
-    params: the Flax param pytree.
-      batch norm statistics.
+    params: the Flax param pytree. batch norm statistics.
     batch: the per-device batch of data to process.
-    rng: the RNG used for calling the model. `step` and `local_device_index`
-      will be folded into this to produce a unique per-device, per-step RNG.
+    rng: the RNG used for calling the model. Assumes the step and device index
+      has already been folded in.
+    batch_stats: Same as in trainer.py
+    module_flags: Used in the skip analysis.
     training_cost: a function used to calculate the training objective that will
-      be differentiated to generate updates. Takes
-      (`params`, `batch_stats`, `batch`, `rng`) as inputs.
+      be differentiated to generate updates. Takes (`params`, `batch_stats`,
+      `batch`, `rng`) as inputs.
 
   Returns:
     Gradient of the given loss.
   """
-  # `jax.random.split` is very slow outside the train step, so instead we do a
-  # `jax.random.fold_in` here.
 
   def opt_cost(params):
-    return training_cost(params, batch, None, rng)
+    return training_cost(
+        params,
+        batch,
+        batch_stats=batch_stats,
+        dropout_rng=rng,
+        module_flags=module_flags)
 
   grad_fn = jax.value_and_grad(opt_cost, has_aux=True)
-  (_, _), grad = grad_fn(params)
+  _, grad = grad_fn(params)
 
   grad = jax.lax.pmean(grad, axis_name='batch')
   return grad
@@ -72,7 +76,6 @@ class ModelDebugCallback:
                rng):
     del hps
     del optimizer
-    del batch_stats
     del optimizer_state
     del optimizer_update_fn
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
@@ -86,13 +89,19 @@ class ModelDebugCallback:
         model.apply_on_batch,
         capture_activation_norms=True,
         sown_collection_names=callback_config.get('sown_collection_names'))
+    batch_stats = jax.tree_map(lambda x: x[:][0], batch_stats)
     grad_fn = functools.partial(
         get_grad,
+        batch_stats=batch_stats,
         training_cost=model.training_cost,
     )
     debugger = model_debugger.ModelDebugger(
-        use_pmap=True, forward_pass=get_act_stats_fn, metrics_logger=logger,
-        grad_fn=grad_fn)
+        use_pmap=True,
+        forward_pass=get_act_stats_fn,
+        metrics_logger=logger,
+        grad_fn=grad_fn,
+        skip_flags=callback_config.get('skip_flags'),
+        skip_groups=callback_config.get('skip_groups'))
     # pmap functions for the training loop
     # in_axes = (optimizer = 0, batch_stats = 0, batch = 0, step = None,
     # lr = None, rng = None, local_device_index = 0, training_metrics_grabber=0,

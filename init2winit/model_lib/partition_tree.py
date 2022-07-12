@@ -62,3 +62,18 @@ registry = {
 def get_param_partition_fn(name):
   return registry[name]
 
+
+# Used in test_model_debugger.py
+def get_test_group(params):
+  del params
+  return ['B_0/C_0', 'C_0']
+
+
+skip_analysis_registry = {
+    'test_group': get_test_group,
+}
+
+
+def get_skip_analysis_fn(name):
+  return skip_analysis_registry[name]
+
