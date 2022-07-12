@@ -39,6 +39,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     valid_size=7135,
     num_valid_h5_files=199,
     val_dir='knee_singlecoil_val',
+    eval_seed=0,
 ))
 
 
@@ -223,11 +224,13 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
   ds = ds.cache()
 
   def process_example(example_index, example):
-    process_rng = tf.cast(jax.random.fold_in(shuffle_rng, 0), tf.int64)
     if split == 'train':
-      # NOTE(dsuo): we use fixed randomness for eval.
+      process_rng = tf.cast(jax.random.fold_in(shuffle_rng, 0), tf.int64)
       process_rng = tf.random.experimental.stateless_fold_in(
           process_rng, example_index)
+    else:
+      # NOTE(dsuo): we use fixed randomness for eval.
+      process_rng = tf.cast(jax.random.PRNGKey(hps.eval_seed), tf.int64)
     return _process_example(*example, process_rng)
 
   ds = ds.enumerate().map(
