@@ -692,7 +692,7 @@ def train(train_dir,
       # NB: Since this test is after we increment global_step, having 0 in
       # eval_steps does nothing.
       if trainer_utils.should_eval(global_step, eval_frequency, eval_steps):
-        train_steps_per_sec = (global_step - eval_start_step) / (
+        steps_per_sec_train_only = (global_step - eval_start_step) / (
             time.time() - eval_start_time)
         eval_start_step = global_step
         eval_start_time = time.time()
@@ -717,7 +717,7 @@ def train(train_dir,
         report.update(learning_rate=float(lr),
                       global_step=global_step,
                       epoch=global_step * hps.batch_size // hps.train_size,
-                      train_steps_per_sec=train_steps_per_sec,
+                      steps_per_sec_train_only=steps_per_sec_train_only,
                       overall_steps_per_sec=get_step_frequency(global_step),
                       eval_time=eval_time,
                       grad_norm=np.mean(grad_norm),
@@ -736,7 +736,7 @@ def train(train_dir,
         yield report
         if jax.process_index() == 0:
           trainer_utils.log_eta(pool, xm_work_unit, global_step,
-                                train_steps_per_sec, num_train_steps,
+                                steps_per_sec_train_only, num_train_steps,
                                 start_time, eval_frequency, eval_steps,
                                 eval_time)
           trainer_utils.log_epoch_report(report, metrics_logger)
@@ -775,7 +775,7 @@ def train(train_dir,
   # If we moved where in the loop body evals happen then we would not need this
   # test.
   if prev_eval_step != num_train_steps:
-    train_steps_per_sec = (global_step - eval_start_step) / (
+    steps_per_sec_train_only = (global_step - eval_start_step) / (
         time.time() - eval_start_time)
     batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
     report, eval_time = eval_metrics(params,
@@ -799,7 +799,7 @@ def train(train_dir,
     report.update(learning_rate=float(lr),
                   global_step=global_step,
                   epoch=global_step * hps.batch_size // hps.train_size,
-                  train_steps_per_sec=train_steps_per_sec,
+                  steps_per_sec_train_only=steps_per_sec_train_only,
                   overall_steps_per_sec=get_step_frequency(global_step),
                   eval_time=eval_time,
                   grad_norm=np.mean(grad_norm),
@@ -808,8 +808,8 @@ def train(train_dir,
     yield report
     if jax.process_index() == 0:
       trainer_utils.log_eta(pool, xm_work_unit, global_step,
-                            train_steps_per_sec, num_train_steps, start_time,
-                            eval_frequency, eval_steps, eval_time)
+                            steps_per_sec_train_only, num_train_steps,
+                            start_time, eval_frequency, eval_steps, eval_time)
       trainer_utils.log_epoch_report(report, metrics_logger)
       trainer_utils.maybe_log_training_metrics(metrics_state,
                                                metrics_summary_fn,

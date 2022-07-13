@@ -41,14 +41,14 @@ def log_message(msg, pool=None, work_unit=None):
   logging.info('%s', msg)
 
 
-def log_eta(pool, work_unit, global_step, train_steps_per_sec, num_train_steps,
-            start_time, eval_frequency, eval_steps, eval_time):
+def log_eta(pool, work_unit, global_step, steps_per_sec_train_only,
+            num_train_steps, start_time, eval_frequency, eval_steps, eval_time):
   """Construct and ETA / total time entry."""
   msg = f'Steps: {global_step} / {num_train_steps} '
   msg += f'[{global_step / num_train_steps:.1%}] '
 
   # Time remaining from training
-  train_eta = (num_train_steps - global_step) / train_steps_per_sec
+  train_eta = (num_train_steps - global_step) / steps_per_sec_train_only
 
   # Time remaining from eval
   if eval_steps:
