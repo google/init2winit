@@ -25,7 +25,6 @@ from init2winit.optimizer_lib.hessian_free import hessian_free
 import jax
 import optax
 
-
 distributed_shampoo = None
 try:
   from optax_shampoo import distributed_shampoo  # pylint: disable=g-import-not-at-top
