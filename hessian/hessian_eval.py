@@ -189,14 +189,16 @@ def _tree_sum(tree_left, tree_right):
   """Computes tree_left + tree_right."""
   def f(x, y):
     return x + y
-  return jax.tree_util.tree_multimap(f, tree_left, tree_right)
+
+  return jax.tree_util.tree_map(f, tree_left, tree_right)
 
 
 def _tree_sub(tree_left, tree_right):
   """Computes tree_left - tree_right."""
   def f(x, y):
     return x - y
-  return jax.tree_util.tree_multimap(f, tree_left, tree_right)
+
+  return jax.tree_util.tree_map(f, tree_left, tree_right)
 
 
 def _tree_zeros_like(tree):
@@ -209,7 +211,8 @@ def _additive_update(params, update):
   """Computes an updated model for interpolation studies."""
   def f(x, y):
     return x + y
-  new_params = jax.tree_util.tree_multimap(f, params, update)
+
+  new_params = jax.tree_util.tree_map(f, params, update)
   return new_params
 
 

@@ -23,7 +23,7 @@ import jax.numpy as jnp
 
 def pytree_equal(tree1, tree2):
   try:
-    equal_tree = jax.tree_util.tree_multimap(jnp.array_equal, tree1, tree2)
+    equal_tree = jax.tree_util.tree_map(jnp.array_equal, tree1, tree2)
     return jax.tree_util.tree_reduce(lambda x, y: x and y, equal_tree)
   # The tree_utils will raise TypeErrors if structures don't match.
   except TypeError:
@@ -33,7 +33,7 @@ def pytree_equal(tree1, tree2):
 def pytree_allclose(tree1, tree2, rtol=1e-5):
   try:
     allclose = functools.partial(jnp.allclose, rtol=rtol)
-    equal_tree = jax.tree_util.tree_multimap(allclose, tree1, tree2)
+    equal_tree = jax.tree_util.tree_map(allclose, tree1, tree2)
     return jax.tree_util.tree_reduce(lambda x, y: x and y, equal_tree)
   # The tree_utils will raise TypeErrors if structures don't match.
   except TypeError:

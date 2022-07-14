@@ -54,7 +54,7 @@ def _count_params(tree):
 
 
 def scale_params(params, scalars):
-  return jax.tree_multimap(lambda w, scale: w * scale, params, scalars)
+  return jax.tree_map(lambda w, scale: w * scale, params, scalars)
 
 
 def meta_loss(params_to_loss, scalars, normalized_params, epsilon):
@@ -96,8 +96,8 @@ def meta_loss(params_to_loss, scalars, normalized_params, epsilon):
     ratio = (g-hgp) / (g + epsilon * jax.lax.stop_gradient(2*(g >= 0) - 1))
     return jnp.sum(jnp.abs(ratio - 1))
 
-  return jax.tree_util.tree_reduce(
-      operator.add, jax.tree_multimap(meta_term, g, hgp)) / nparams
+  return jax.tree_util.tree_reduce(operator.add, jax.tree_map(
+      meta_term, g, hgp)) / nparams
 
 
 def normalize(node):

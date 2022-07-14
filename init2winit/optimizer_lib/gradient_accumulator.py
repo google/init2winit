@@ -125,8 +125,8 @@ def accumulate_gradients(
           accumulations=updated_accumulations)
       return zeros_params, updated_state
 
-    updated_accumulations = jax.tree_multimap(
-        lambda g, acc: g + acc, updates, state.accumulations)
+    updated_accumulations = jax.tree_map(lambda g, acc: g + acc, updates,
+                                         state.accumulations)
     updates, state = jax.lax.cond(
         state.num_per_step_batches == steps_per_update - 1,
         total_batch_update,

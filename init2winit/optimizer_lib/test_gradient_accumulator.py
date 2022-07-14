@@ -229,10 +229,8 @@ class GradientAccumulatorTest(absltest.TestCase):
         opt_init=sgd_opt_init,
         opt_update=sgd_opt_update)
 
-    diffs_params = jax.tree_multimap(
-        lambda a, b: jnp.mean(jnp.abs(a - b)),
-        grad_acc_params,
-        params)
+    diffs_params = jax.tree_map(lambda a, b: jnp.mean(jnp.abs(a - b)),
+                                grad_acc_params, params)
 
     def batch_stats_reduce(a, b):
       if len(a.shape) > 0:  # pylint: disable=g-explicit-length-test
@@ -240,10 +238,9 @@ class GradientAccumulatorTest(absltest.TestCase):
             jnp.abs(jnp.mean(a, axis=0) - jnp.mean(b, axis=0)))
       # The gradient accumulator counters are scalars.
       return a - b
-    diffs_batch_stats = jax.tree_multimap(
-        batch_stats_reduce,
-        grad_acc_batch_stats,
-        batch_stats)
+
+    diffs_batch_stats = jax.tree_map(batch_stats_reduce, grad_acc_batch_stats,
+                                     batch_stats)
     # We sometimes get small floating point errors in the gradients, so we
     # cannot test for the values being exactly the same.
     acceptable_params_diff = 1e-4

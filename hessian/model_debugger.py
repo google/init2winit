@@ -137,8 +137,7 @@ def append_pytree_leaves(full_pytree, to_append):
   if not full_pytree:
     return jax.tree_map(lambda x: np.expand_dims(x, axis=0), to_append)
 
-  return jax.tree_multimap(lambda x, y: array_append(y, x), to_append,
-                           full_pytree)
+  return jax.tree_map(lambda x, y: array_append(y, x), to_append, full_pytree)
 
 
 def create_forward_pass_stats_fn(apply_fn,
