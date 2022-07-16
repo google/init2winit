@@ -318,7 +318,7 @@ def load_split(
 
   if split not in ['train', 'eval_train', 'valid']:
     raise ValueError('Unrecognized split {}'.format(split))
-  if split in ['train']:
+  if split in ['train', 'eval_train']:
     split_size = hps.train_size // jax.process_count()
   else:
     split_size = hps.valid_size // jax.process_count()
