@@ -173,10 +173,11 @@ class BLEUEvaluator(object):
   def build_predictor(self):
     decoder = functools.partial(
         decode.decode_step,
+        flax_module=self.flax_module,
         eos_id=self.eos_id,
         beam_size=self.beam_size)
     self.pmapped_predictor = jax.pmap(
-        decoder, axis_name='batch', static_broadcasted_argnums=(1, 4))
+        decoder, axis_name='batch', static_broadcasted_argnums=(3,))
 
   def translate_and_calculate_bleu(self):
     """Iterate over all checkpoints and calculate BLEU."""
@@ -200,8 +201,9 @@ class BLEUEvaluator(object):
       for batch in self.get_ds_iter():
         pred_batch = common_utils.shard(batch)
         cache = self.pmapped_init_cache(pred_batch['inputs'])
-        model_predictions = self.pmapped_predictor(pred_batch, self.flax_module,
-                                                   params_replicated, cache,
+        model_predictions = self.pmapped_predictor(pred_batch,
+                                                   params_replicated,
+                                                   cache,
                                                    self.max_length)
         predicted = tohost(model_predictions)
         inputs = tohost(pred_batch['inputs'])

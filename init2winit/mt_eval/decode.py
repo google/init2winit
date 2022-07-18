@@ -372,10 +372,10 @@ def beam_search(inputs,
 
 
 def decode_step(batch,
-                flax_module,
                 params,
                 cache,
                 max_decode_len,
+                flax_module,
                 eos_id=EOS_ID,
                 beam_size=4):
   """Predict translation with fast decoding beam search on a batch."""
