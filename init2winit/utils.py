@@ -211,12 +211,17 @@ class MetricLogger(object):
       metrics: a Dict of metric names to scalar values. 'global_step' is the
         only required key.
     """
-    if exists(self._csv_path):
+    try:
       with gfile.GFile(self._csv_path) as csv_file:
         measurements = pd.read_csv(csv_file)
-      measurements = measurements.append([metrics])
-    else:
+        measurements = measurements.append([metrics])
+    except (pd.errors.EmptyDataError, gfile.FileError) as e:
       measurements = pd.DataFrame([metrics], columns=sorted(metrics.keys()))
+      if isinstance(e, pd.errors.EmptyDataError):
+        # TODO(ankugarg): Identify root cause for the corrupted file.
+        # Most likely it's preemptions or file-write error.
+        logging.info('Measurements file is empty. Create a new one, starting '
+                     'with metrics from this step.')
     # TODO(gdahl,gilmer): Should this be an atomic file?
     with gfile.GFile(self._csv_path, 'w') as csv_file:
       measurements.to_csv(csv_file, index=False)
