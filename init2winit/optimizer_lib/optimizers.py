@@ -16,6 +16,7 @@
 """Getter function for selecting optimizers."""
 
 from absl import logging
+import flax
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import samuel

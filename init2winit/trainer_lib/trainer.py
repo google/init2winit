@@ -112,6 +112,9 @@ def _inject_learning_rate(optimizer_state, lr):
   elif isinstance(
       optimizer_state, gradient_accumulator.GradientAccumulatorState):
     _inject_learning_rate(optimizer_state.base_state, lr)
+  elif isinstance(optimizer_state, optax.MultiTransformState):
+    for v in optimizer_state.inner_states.values():
+      _inject_learning_rate(v.inner_state, lr)
   else:
     raise ValueError(
         'Unsupported optimizer_state type given when trying to inject the '
