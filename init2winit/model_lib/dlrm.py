@@ -45,7 +45,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         opt_hparams={
             'beta1': 0.9,
             'beta2': 0.999,
-            'epsilon': 1e-5,
+            'epsilon': 1e-8,
         },
         l2_decay_factor=1e-5,
         l2_decay_rank_threshold=2,
