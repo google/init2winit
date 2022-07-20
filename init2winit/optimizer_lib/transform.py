@@ -21,10 +21,33 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from optax._src import utils  # pylint:disable=protected-access
-
 # pylint:disable=invalid-name
 # pylint:disable=no-value-for-parameter
+
+
+def _safe_int32_increment(count: chex.Numeric) -> chex.Numeric:
+  """Increments int32 counter by one.
+
+  Normally `max_int + 1` would overflow to `min_int`. This functions ensures
+  that when `max_int` is reached the counter stays at `max_int`.
+
+  Args:
+    count: a counter to be incremented.
+
+  Returns:
+    A counter incremented by 1, or max_int if the maximum precision is reached.
+  """
+  chex.assert_type(count, jnp.int32)
+  max_int32_value = jnp.iinfo(jnp.int32).max
+  one = jnp.array(1, dtype=jnp.int32)
+  return jnp.where(count < max_int32_value, count + one, max_int32_value)
+
+
+def _canonicalize_dtype(dtype):
+  """Canonicalise a dtype, skip if None."""
+  if dtype is not None:
+    return jax.dtypes.canonicalize_dtype(dtype)
+  return dtype
 
 
 def _update_moment(updates, moments, decay, order):
@@ -299,7 +322,7 @@ def bias_correction(
     An (init_fn, update_fn) tuple.
   """
 
-  accumulator_dtype = utils.canonicalize_dtype(accumulator_dtype)
+  accumulator_dtype = _canonicalize_dtype(accumulator_dtype)
 
   def init_fn(params):
     del params
@@ -307,7 +330,7 @@ def bias_correction(
 
   def update_fn(updates, state, params=None):
     del params
-    count_inc = utils.safe_int32_increment(state.count)
+    count_inc = _safe_int32_increment(state.count)
     new_vals = _bias_correction(updates, decay, count_inc)
     return new_vals, BiasCorrectionState(count=count_inc)
 

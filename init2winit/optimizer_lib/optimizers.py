@@ -57,10 +57,7 @@ def sgd(learning_rate, weight_decay, momentum=None, nesterov=False):
   return optax.chain(
       optax.add_decayed_weights(weight_decay),
       optax.sgd(
-          learning_rate=learning_rate,
-          momentum=momentum,
-          nesterov=nesterov)
-  )
+          learning_rate=learning_rate, momentum=momentum, nesterov=nesterov))
 
 
 def get_optimizer(hps, model=None):
@@ -77,6 +74,7 @@ def get_optimizer(hps, model=None):
   Args:
     hps: the experiment hyperparameters, as a ConfigDict.
     model: the model to be trained.
+
   Returns:
     A tuple of the initialization and update functions returned by optax.
   """
@@ -153,6 +151,20 @@ def get_optimizer(hps, model=None):
         init_damping=hps.opt_hparams['init_damping'],
         damping_ub=hps.opt_hparams['damping_ub'],
         damping_lb=hps.opt_hparams['damping_lb'])
+  elif hps.optimizer == 'nadam':
+    opt_init, opt_update = utils.static_inject_hyperparams(optax.nadam)(
+        learning_rate=0.0,
+        b1=hps.opt_hparams['beta1'],
+        b2=hps.opt_hparams['beta2'],
+        eps=hps.opt_hparams['epsilon'],
+        eps_root=hps.opt_hparams['epsilon_root'],
+        debias=hps.opt_hparams['debias'],
+        weight_decay=hps.opt_hparams['weight_decay'],
+        # NOTE(dsuo): we provide this wiring, but specifying a weight decay
+        # mask in a config file / serializing properly is not completely
+        # straightforward.
+        weight_decay_mask=hps.opt_hparams['weight_decay_mask'],
+    )
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = kitchen_sink.from_hparams(hps.opt_hparams)
   elif hps.optimizer == 'samuel':
@@ -184,9 +196,11 @@ def _wrap_update_fn(opt_name, opt_update):
   Args:
     opt_name: the optimizer name.
     opt_update: the optimizer update function.
+
   Returns:
     A wrapped optimizer update function.
   """
+
   def update_fn(grads, optimizer_state, params, batch=None, batch_stats=None):
     if opt_name == 'hessian_free':
       variables = {'params': params}
@@ -194,4 +208,5 @@ def _wrap_update_fn(opt_name, opt_update):
         variables['batch_stats'] = batch_stats
       return opt_update(grads, optimizer_state, params=(variables, batch))
     return opt_update(grads, optimizer_state, params=params)
+
   return update_fn
