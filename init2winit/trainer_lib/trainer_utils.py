@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Utility functions related to training."""
+import functools
 import time
 
 from absl import logging
@@ -22,6 +23,82 @@ from flax import jax_utils
 from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
 import jax
+
+
+class Timer:
+  """TODO(dsuo): add documentation."""
+
+  def __init__(self, name):
+    self.name = name
+    self.reset()
+
+  def reset(self):
+    self.splits = []
+    self.duration = 0
+    self.running = False
+
+  def start(self):
+    self._start_time = time.time()
+    self.running = True
+
+  def stop(self):
+    if not self.running:
+      raise ValueError(f'Timer {self.name} has not been started yet.')
+    curr_duration = time.time() - self._start_time
+    self.duration += curr_duration
+    self.splits.append(curr_duration)
+    self.running = False
+
+  def set(self, duration):
+    if self.running:
+      raise ValueError(f'Cannot set timer {self.name} while it is running.')
+    self.duration = duration
+
+  def __enter__(self):
+    self.start()
+
+  def __exit__(self, exc_type, exc_value, exc_tb):
+    self.stop()
+
+  def __str__(self):
+    return f'name: {self.name}, duration: {self.duration}, running: {self.running}'
+
+  def __repr__(self):
+    return f'Timer<{self.__str__()}>'
+
+
+class TimerCollection:
+  """TODO(dsuo): add documentation."""
+
+  def __new__(cls):
+    if not hasattr(cls, 'instance'):
+      cls.instance = super(TimerCollection, cls).__new__(cls)
+      cls._timers = {}
+    return cls.instance
+
+  def items(self):
+    return self._timers.items()
+
+  def timed(self, func, name=None):
+    """Throwaway."""
+    name = name or func.__name__
+    if name in self._timers:
+      name = f'{func.__module__}.{name}'
+    timer = self.__call__(name)
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+      timer.start()
+      retval = func(*args, **kwargs)
+      timer.stop()
+      return retval
+
+    return wrapper
+
+  def __call__(self, name):
+    if name not in self._timers:
+      self._timers[name] = Timer(name)
+    return self._timers[name]
 
 
 def format_time(s):
