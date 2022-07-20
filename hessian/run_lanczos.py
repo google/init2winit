@@ -26,7 +26,6 @@ from init2winit.hessian import hessian_eval
 from init2winit.init_lib import init_utils
 from init2winit.init_lib import initializers
 from init2winit.optimizer_lib import optimizers
-from init2winit.trainer_lib import trainer
 from init2winit.trainer_lib import trainer_utils
 import jax
 import optax
@@ -190,9 +189,10 @@ def eval_checkpoints(
     # pylint: disable=protected-access
     batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
     # pylint: enable=protected-access
-    report, _ = trainer.eval_metrics(params, batch_stats, dataset,
-                                     eval_num_batches, test_num_batches,
-                                     eval_num_batches, evaluate_batch_pmapped)
+    report, _ = trainer_utils.eval_metrics(
+        params, batch_stats, dataset,
+        eval_num_batches, test_num_batches,
+        eval_num_batches, evaluate_batch_pmapped)
     if jax.process_index() == 0:
       logging.info('Global Step: %d', step)
       logging.info(report)

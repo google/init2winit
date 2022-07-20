@@ -38,6 +38,7 @@ from init2winit.model_lib import base_model
 from init2winit.model_lib import metrics
 from init2winit.model_lib import models
 from init2winit.trainer_lib import trainer
+from init2winit.trainer_lib import trainer_utils
 import jax.numpy as jnp
 import jax.random
 import jraph
@@ -361,10 +362,11 @@ class TrainerTest(parameterized.TestCase):
         apply_one_hot_in_loss=True)
     evaluate_batch_pmapped = jax.pmap(eval_fn, axis_name='batch')
     # pylint: enable=protected-access
-    evaluated_metrics = trainer.evaluate(params,
-                                         batch_stats,
-                                         fake_batches_gen(),
-                                         evaluate_batch_pmapped)
+    evaluated_metrics = trainer_utils.evaluate(
+        params,
+        batch_stats,
+        fake_batches_gen(),
+        evaluate_batch_pmapped)
 
     def batch_ce_loss(logits, targets):
       one_hot_targets = np.eye(4)[targets]
@@ -906,7 +908,7 @@ class TrainerTest(parameterized.TestCase):
         'weights': ws
     } for ls, ts, ws in zip(logits, targets, weights)]
 
-    result = trainer.evaluate(
+    result = trainer_utils.evaluate(
         params=None,
         batch_stats=None,
         batch_iter=batch_iter,

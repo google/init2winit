@@ -26,10 +26,8 @@ from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import schedules
 from init2winit import utils
-from init2winit.dataset_lib import data_utils
 from init2winit.init_lib import init_utils
 from init2winit.model_lib import model_utils
-from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
 from init2winit.training_metrics_grabber import make_training_metrics
@@ -154,79 +152,6 @@ def evaluate_batch(model, params, batch_stats, batch):
       axis_index_groups=_get_axis_index_groups()).reduce()
 
 
-def evaluate(params, batch_stats, batch_iter, evaluate_batch_pmapped):
-  """Compute aggregated metrics on the given data iterator.
-
-  WARNING: The caller is responsible for synchronizing the batch norm statistics
-  before calling this function!
-
-  Assumed API of evaluate_batch_pmapped:
-  metrics = evaluate_batch_pmapped(params, batch_stats, batch)
-  where batch is yielded by the batch iterator, and metrics is a dictionary
-  mapping metric name to a vector of per example measurements. The metrics are
-  merged using the CLU metrics logic for that metric type. See
-  classification_metrics.py for a definition of evaluate_batch.
-
-  Args:
-    params: a dict of trainable model parameters. Passed as {'params': params}
-      into flax_module.apply().
-    batch_stats: a dict of non-trainable model state. Passed as
-      {'batch_stats': batch_stats} into flax_module.apply().
-    batch_iter: Generator which yields batches. Must support the API
-      for b in batch_iter:
-    evaluate_batch_pmapped: A function with API
-       evaluate_batch_pmapped(params, batch_stats, batch). Returns a dictionary
-       mapping keys to the metric values across the sharded batch.
-
-  Returns:
-    A dictionary of aggregated metrics. The keys will match the keys returned by
-    evaluate_batch_pmapped.
-  """
-  metrics = None
-  for batch in batch_iter:
-    batch = data_utils.shard(batch)
-    # Returns a clu.metrics.Collection object. We assume that
-    # `evaluate_batch_pmpapped` calls CLU's `gather_from_model_outputs`,
-    # which includes an `all_gather` to replicate the values on all devices.
-    # We need to `unreplicate` before merging the results across batches to
-    # accommodate CollectingMetric, which concatenates the values across the
-    # leading dimension, so we need to remove the leading shard dimension first.
-    computed_metrics = evaluate_batch_pmapped(
-        params=params, batch_stats=batch_stats, batch=batch).unreplicate()
-    if metrics is None:
-      metrics = computed_metrics
-    else:
-      # `merge` aggregates the metrics across batches.
-      metrics = metrics.merge(computed_metrics)
-
-  # For data splits with no data (e.g. Imagenet no test set) no values
-  # will appear for that split.
-  if metrics is not None:
-    # `compute` aggregates the metrics across batches into a single value.
-    metrics = metrics.compute()
-    for key, val in metrics.items():
-      if np.isnan(val):
-        raise utils.TrainingDivergedError('NaN detected in {}'.format(key))
-  return metrics
-
-
-def _inject_learning_rate(optimizer_state, lr):
-  """Inject the given LR into any optimizer state that will accept it."""
-  # The optimizer state should always be an InjectHyperparamsState, and we
-  # inject the learning rate into all states that will accept it. We need to do
-  # this to allow arbitrary (non-jittable) LR schedules.
-  if isinstance(optimizer_state, optax.InjectHyperparamsState):
-    if 'learning_rate' in optimizer_state.hyperparams:
-      optimizer_state.hyperparams['learning_rate'] = lr
-  elif isinstance(
-      optimizer_state, gradient_accumulator.GradientAccumulatorState):
-    _inject_learning_rate(optimizer_state.base_state, lr)
-  else:
-    raise ValueError(
-        'Unsupported optimizer_state type given when trying to inject the '
-        'learning rate:\n\n{}.'.format(optimizer_state))
-
-
 def update(
     optimizer_state,
     params,
@@ -282,7 +207,7 @@ def update(
   rng = jax.random.fold_in(rng, step)
   rng = jax.random.fold_in(rng, local_device_index)
 
-  _inject_learning_rate(optimizer_state, lr)
+  trainer_utils.inject_learning_rate(optimizer_state, lr)
 
   def opt_cost(params):
     return training_cost(
@@ -324,57 +249,6 @@ def update(
 
   return (new_optimizer_state, new_params, new_batch_stats,
           running_train_cost + cost_value, new_metrics_state, grad_norm)
-
-
-def _merge_and_apply_prefix(d1, d2, prefix):
-  d1 = d1.copy()
-  for key in d2:
-    d1[prefix+key] = d2[key]
-  return d1
-
-
-@utils.timed
-def eval_metrics(params, batch_stats, dataset, eval_num_batches,
-                 eval_train_num_batches, evaluate_batch_pmapped):
-  """Evaluates the given network on the train, validation, and test sets.
-
-  WARNING: we assume that `batch_stats` has already been synchronized across
-  devices before being passed to this function! See
-  `trainer_utils.maybe_sync_batchnorm_stats`.
-
-  The metric names will be of the form split/measurement for split in the set
-  {train, valid, test} and measurement in the set {loss, error_rate}.
-
-  Args:
-    params: a dict of trainable model parameters. Passed as {'params': params}
-      into flax_module.apply().
-    batch_stats: a dict of non-trainable model state. Passed as
-      {'batch_stats': batch_stats} into flax_module.apply().
-    dataset: Dataset returned from datasets.get_dataset. train, validation, and
-      test sets.
-    eval_num_batches: (int) The batch size used for evaluating on validation,
-      and test sets. Set to None to evaluate on the whole test set.
-    eval_train_num_batches: (int) The batch size used for evaluating on train
-      set. Set to None to evaluate on the whole training set.
-    evaluate_batch_pmapped: Computes the metrics on a sharded batch.
-
-  Returns:
-    A dictionary of all computed metrics.
-  """
-  train_iter = dataset.eval_train_epoch(eval_train_num_batches)
-  valid_iter = dataset.valid_epoch(eval_num_batches)
-  test_iter = dataset.test_epoch(eval_num_batches)
-
-  metrics = {}
-  for split_iter, split_name in zip([train_iter, valid_iter, test_iter],
-                                    ['train', 'valid', 'test']):
-    split_metrics = evaluate(params, batch_stats, split_iter,
-                             evaluate_batch_pmapped)
-    # Metrics are None if the dataset doesn't have that split
-    if split_metrics is not None:
-      metrics = _merge_and_apply_prefix(
-          metrics, split_metrics, (split_name + '/'))
-  return metrics
 
 
 def train(train_dir,
@@ -698,10 +572,14 @@ def train(train_dir,
         eval_start_time = time.time()
         # NOTE(dsuo): sync batch stats across devices for each host.
         batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
-        report, eval_time = eval_metrics(params, batch_stats, dataset,
-                                         eval_num_batches,
-                                         eval_train_num_batches,
-                                         evaluate_batch_pmapped)
+        report, eval_time = trainer_utils.eval_metrics(
+            params,
+            batch_stats,
+            dataset,
+            eval_num_batches,
+            eval_num_batches,
+            eval_train_num_batches,
+            evaluate_batch_pmapped)
         # NOTE(dsuo): grab reports from all experts. For some reason, we can
         # only log metrics from one host.
         if hps.optimizer == 'samuel':
@@ -778,12 +656,14 @@ def train(train_dir,
     steps_per_sec_train_only = (global_step - eval_start_step) / (
         time.time() - eval_start_time)
     batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
-    report, eval_time = eval_metrics(params,
-                                     batch_stats,
-                                     dataset,
-                                     eval_num_batches,
-                                     eval_train_num_batches,
-                                     evaluate_batch_pmapped)
+    report, eval_time = trainer_utils.eval_metrics(
+        params,
+        batch_stats,
+        dataset,
+        eval_num_batches,
+        eval_num_batches,
+        eval_train_num_batches,
+        evaluate_batch_pmapped)
     if hps.optimizer == 'samuel':
       report = gather_multihost_report(
           report, optimizer_state.inner_state.current_expert[0])
