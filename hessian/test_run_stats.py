@@ -272,7 +272,7 @@ class TrainerTest(absltest.TestCase):
     eval_every = 10
     checkpoint_steps = [40]
     _ = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -285,7 +285,7 @@ class TrainerTest(absltest.TestCase):
             test_num_batches=test_num_batches,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=eval_every,
-            checkpoint_steps=checkpoint_steps))
+            checkpoint_steps=checkpoint_steps).train())
 
     checkpoint_dir = os.path.join(self.test_dir, 'checkpoints')
     rng = jax.random.PRNGKey(0)
