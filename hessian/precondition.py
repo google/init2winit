@@ -46,7 +46,9 @@ def make_diag_preconditioner(optimizer, opt_hparams,
 
   Given an optimizer and its state, return that optimizer's preconditioner.
   Note that in our nomenclature, the preconditioner is a diagonal approximation
-  to the Hessian, not the inverse Hessian.
+  to the Hessian, not the inverse Hessian.  In other words, we return a pytree
+  P, the same shape as the model parameters, with the property that the
+  optimizer update (without momentum) is diag(P)^{-1} g.
 
   The current config options are
     bias_correction: (bool) If set to true, and if the optimizer employs
@@ -65,10 +67,27 @@ def make_diag_preconditioner(optimizer, opt_hparams,
   if isinstance(optimizer_state, gradient_accumulator.GradientAccumulatorState):
     optimizer_state = optimizer_state.base_state
 
+  # unwrap the InjectHyperparamsState
+  optimizer_state = optimizer_state.inner_state[0]
+
   if optimizer == 'adam':
-    eps = opt_hparams.epsilon
-    beta2 = opt_hparams.beta2
-    nu = optimizer_state.inner_state[0].nu
-    count = optimizer_state.inner_state[0].count
     bias_correction = precondition_config.get('bias_correction', default=True)
-    return _make_adam_preconditioner(nu, count, eps, beta2, bias_correction)
+    return _make_adam_preconditioner(optimizer_state.nu, optimizer_state.count,
+                                     opt_hparams.epsilon, opt_hparams.beta2,
+                                     bias_correction)
+  if (optimizer == 'kitchen_sink' and '0' in opt_hparams and
+      len(opt_hparams.keys()) == 1):
+    element = opt_hparams['0']['element']
+    hps = opt_hparams['0']['hps']
+    if element == 'scale_by_adam':
+      scale_by_adam_state = optimizer_state[0][0][0]
+      return _make_adam_preconditioner(scale_by_adam_state.nu,
+                                       scale_by_adam_state.count, hps['eps'],
+                                       hps['b2'], hps['debias'])
+    elif element == 'scale_by_nadam':
+      scale_by_adam_state = optimizer_state[0][0][0]
+      return _make_adam_preconditioner(scale_by_adam_state.nu,
+                                       scale_by_adam_state.count, hps['eps'],
+                                       hps['b2'], hps['debias'])
+
+  raise ValueError("Don't know how to precondition this optimizer")

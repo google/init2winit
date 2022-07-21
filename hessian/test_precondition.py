@@ -107,6 +107,58 @@ class RunPreconditionTest(absltest.TestCase):
 
     self.assertTrue(pytree_allclose(expected_preconditioner, preconditioner))
 
+  def test_adam_ks(self):
+    """Test kitchen sink preconditioning with scale_by_adam."""
+    lr = 1e-3
+    beta1 = 0.9
+    beta2 = 0.999
+    epsilon = 1e-7
+
+    optimizer = 'kitchen_sink'
+    opt_hparams = FrozenConfigDict({
+        '0': {
+            'element': 'scale_by_adam',
+            'hps': {
+                'b1': beta1,
+                'b2': beta2,
+                'eps': epsilon,
+                'debias': True
+            }
+        }
+    })
+
+    hparams = FrozenConfigDict({
+        'optimizer': optimizer,
+        'opt_hparams': opt_hparams,
+        'l2_decay_factor': 0.0,
+        'batch_size': 50,
+        'total_accumulated_batch_size': 50,
+    })
+
+    init_fn, update_fn = optimizers.get_optimizer(hparams)
+
+    params = {'foo': 1.0, 'bar': {'baz': 3.0}}
+    gradients = [{'foo': 0.5, 'bar': {'baz': 0.1}},
+                 {'foo': 0.2, 'bar': {'baz': 0.6}}]
+
+    optimizer_state = init_fn(params)
+    optimizer_state.base_state.hyperparams['learning_rate'] = lr
+
+    for gradient in gradients:
+      updates, optimizer_state = update_fn(gradient,
+                                           optimizer_state,
+                                           params)
+      params = optax.apply_updates(params, updates)
+
+    expected_preconditioner = _calculate_adam_preconditioner(
+        gradients, beta2, epsilon, bias_correct=True)
+
+    preconditioner = make_diag_preconditioner(
+        optimizer, opt_hparams, optimizer_state,
+        FrozenConfigDict(dict()))
+
+    self.assertTrue(pytree_allclose(
+        expected_preconditioner, preconditioner))
 
 if __name__ == '__main__':
   absltest.main()
