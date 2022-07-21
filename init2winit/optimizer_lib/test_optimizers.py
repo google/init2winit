@@ -110,7 +110,7 @@ class OptimizersTest(absltest.TestCase):
 
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     _ = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -125,7 +125,7 @@ class OptimizersTest(absltest.TestCase):
             eval_frequency=10,
             checkpoint_steps=[],
             metrics_logger=metrics_logger,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
 
     with tf.io.gfile.GFile(os.path.join(self.test_dir,
                                         'measurements.csv')) as f:
