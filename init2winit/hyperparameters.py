@@ -97,13 +97,17 @@ def build_hparams(model_name,
 
     # If the user is changing the learning rate schedule or optimizer. We must
     # wipe all of the keys from the old dictionary.
-    if 'lr_hparams.schedule' in hparam_overrides and merged[
-        'lr_hparams'].get('schedule') != hparam_overrides[
-            'lr_hparams.schedule']:
+    merged_schedule = None
+    if merged.get('lr_hparams'):
+      merged_schedule = merged['lr_hparams'].get('schedule')
+    overrides_schedule = None
+    if hparam_overrides.get('lr_hparams'):
+      overrides_schedule = hparam_overrides['lr_hparams'].get('schedule')
+    if overrides_schedule and merged_schedule != overrides_schedule:
       merged['lr_hparams'] = {}
-    if 'optimizer' in hparam_overrides and merged[
-        'optimizer'] != hparam_overrides['optimizer']:
+    if ('optimizer' in hparam_overrides and
+        merged['optimizer'] != hparam_overrides['optimizer']):
       merged['opt_hparams'] = {}
-    merged.update_from_flattened_dict(hparam_overrides)
+    merged.update(hparam_overrides)
 
   return merged

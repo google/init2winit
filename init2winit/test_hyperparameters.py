@@ -26,11 +26,45 @@ class HyperParameterTest(absltest.TestCase):
   def test_override(self):
     """Test polynomial schedule works correctly."""
     hps_overrides = {
-        'lr_hparams.schedule': 'polynomial',
-        'lr_hparams.power': 2.0,
-        'lr_hparams.base_lr': .1,
-        'lr_hparams.end_factor': .01,
-        'lr_hparams.decay_steps_factor': 0.5,
+        'lr_hparams': {
+            'schedule': 'polynomial',
+            'power': 2.0,
+            'base_lr': .1,
+            'end_factor': .01,
+            'decay_steps_factor': 0.5,
+        },
+    }
+
+    merged_hps = hyperparameters.build_hparams(
+        model_name='transformer',
+        initializer_name='noop',
+        dataset_name='lm1b_v2',
+        hparam_file=None,
+        hparam_overrides=hps_overrides)
+
+    self.assertEqual(merged_hps.lr_hparams['schedule'],
+                     'polynomial')
+    self.assertEqual(
+        set(merged_hps.lr_hparams.keys()),
+        set([
+            'schedule', 'power', 'base_lr',
+            'end_factor', 'decay_steps_factor'
+        ]))
+
+  def test_optimizer_override(self):
+    """Test polynomial schedule works correctly."""
+    hps_overrides = {
+        'optimizer': 'nesterov',
+        'opt_hparams': {
+            'momentum': 0.42,
+        },
+        'lr_hparams': {
+            'schedule': 'polynomial',
+            'power': 2.0,
+            'base_lr': .1,
+            'end_factor': .01,
+            'decay_steps_factor': 0.5,
+        },
     }
 
     merged_hps = hyperparameters.build_hparams(
