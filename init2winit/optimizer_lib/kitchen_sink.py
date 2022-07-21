@@ -161,12 +161,12 @@ def kitchen_sink(chains: List[optax.GradientTransformation],
   ]
 
   def init_fn(params):
-    return [chain.init(params) for chain in chains]
+    return tuple([chain.init(params) for chain in chains])
 
   def update_fn(updates, state, params=None):
     result = [chain.update(updates, chain_state, params)
               for chain, chain_state in zip(chains, state)]
-    new_updates, new_state = list(zip(*result))
+    new_updates, new_state = zip(*result)
     return combinator(*new_updates, **combinator_args), new_state
 
   transform = optax.GradientTransformation(init_fn, update_fn)

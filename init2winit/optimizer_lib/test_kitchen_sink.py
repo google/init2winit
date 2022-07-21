@@ -117,6 +117,15 @@ class FromHParamsTest(chex.TestCase):
   def test_empty_hps(self):
     from_hparams(ml_collections.ConfigDict({'0': {'element': 'nesterov'}}))
 
+  def test_equal_structs(self):
+    """Test that initial and updated states have the same tree structure."""
+    tx = from_hparams(ml_collections.ConfigDict({'0': {'element': 'nesterov'}}))
+    params = {'a': 1.}
+    gradients = {'a': 2.}
+    state = tx.init(params)
+    _, new_state = tx.update(gradients, state)
+    chex.assert_tree_all_equal_structs(state, new_state)
+
   def test_empty_mask(self):
     from_hparams(
         ml_collections.ConfigDict(
