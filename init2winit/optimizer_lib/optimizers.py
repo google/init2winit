@@ -153,18 +153,18 @@ def get_optimizer(hps, model=None):
         damping_ub=hps.opt_hparams['damping_ub'],
         damping_lb=hps.opt_hparams['damping_lb'])
   elif hps.optimizer == 'nadam':
-    opt_init, opt_update = utils.static_inject_hyperparams(alias.nadam)(
+    opt_init, opt_update = utils.static_inject_hyperparams(alias.nadamw)(
         learning_rate=0.0,
         b1=hps.opt_hparams['beta1'],
         b2=hps.opt_hparams['beta2'],
         eps=hps.opt_hparams['epsilon'],
-        eps_root=hps.opt_hparams['epsilon_root'],
-        debias=hps.opt_hparams['debias'],
-        weight_decay=hps.opt_hparams['weight_decay'],
+        eps_root=hps.opt_hparams.get('epsilon_root', 0.0),
+        debias=hps.opt_hparams.get('debias', True),
+        weight_decay=weight_decay,
         # NOTE(dsuo): we provide this wiring, but specifying a weight decay
         # mask in a config file / serializing properly is not completely
         # straightforward.
-        weight_decay_mask=hps.opt_hparams['weight_decay_mask'],
+        weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
     )
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = kitchen_sink.from_hparams(hps.opt_hparams)

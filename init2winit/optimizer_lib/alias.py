@@ -65,5 +65,5 @@ def nadamw(
   """
   return optax.chain(
       transform.scale_by_nadam(b1, b2, eps, eps_root, debias),
-      transform.add_decayed_weights(weight_decay, weight_decay_mask),
+      optax.add_decayed_weights(weight_decay, weight_decay_mask),
       transform.scale_by_learning_rate(learning_rate))
