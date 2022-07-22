@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Standard trainer for the init2winit project."""
+"""Trainer for self-tuning algorithms in the init2winit project."""
 import functools
 import itertools
 import multiprocessing
@@ -21,7 +21,6 @@ import os
 import time
 
 from absl import logging
-from flax import jax_utils
 from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import schedules
@@ -33,123 +32,11 @@ from init2winit.trainer_lib import trainer_utils
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
 from jax import lax
-from jax.experimental import multihost_utils
 import jax.numpy as jnp
 import numpy as np
 import optax
 
 _GRAD_CLIP_EPS = 1e-6
-
-
-def gather_multihost_report(report, current_expert):
-  """Gathers eval metrics from all hosts.
-
-  Args:
-    report: report generated from `eval_metrics`.
-    current_expert: expert to use for primary metrics.
-
-  Returns:
-    report: report gathered from all hosts and arranged as a dict of scalars.
-  """
-  all_reports = multihost_utils.process_allgather(report)
-
-  for metric in report.keys():
-    metric_reports = {
-        f'{metric}-{i}': x.item() for i, x in enumerate(all_reports[metric])
-    }
-    all_reports.update(metric_reports)
-    all_reports[metric] = all_reports[f'{metric}-{current_expert}']
-
-  return all_reports
-
-
-def add_expert_probs(report, expert_weights):
-  probs = expert_weights.sum(axis=0) / expert_weights.sum()
-  probs = {f'expert_prob-{i}': p for i, p in enumerate(probs)}
-  report.update(probs)
-  return report
-
-
-def _sync_batchnorm_stats(batch_stats):
-  return jax.lax.pmean(
-      batch_stats,
-      axis_name='batch',
-      axis_index_groups=_get_axis_index_groups())
-
-
-def _maybe_sync_batchnorm_stats(batch_stats):
-  if batch_stats:
-    batch_stats = jax.pmap(
-        _sync_batchnorm_stats, axis_name='batch')(
-            batch_stats)
-  return batch_stats
-
-
-def _get_axis_index_groups():
-  """Generate axis_index_groups for collective operations.
-
-  Ensures that each host independently aggregates over its local devices.
-
-  Returns:
-    axis_index_groups
-
-  """
-  # Example: suppose num_d=8, num_p=4
-  # - ``groups`` will be [[0,...,7],...,[24,...,31]].
-  # - The first 8 devices (i.e., associated with process 0) will aggregate for
-  # process 0.
-  # - The second 8 devices (i.e., associated with process 1) will aggregate for
-  # process 1.
-  # - etc.
-  num_d, num_p = jax.local_device_count(), jax.process_count()
-  return [list(range(i * num_d, i * num_d + num_d)) for i in range(num_p)]
-
-
-def evaluate_batch(model, params, batch_stats, batch):
-  """Evaluates metrics on the given batch.
-
-  Merge per host, not across all hosts.
-
-  NOTE(dsuo): this does not work for models that do not use the default
-  _evaluate_batch function in `base_model.py`.
-
-  We use the CLU metrics library to evaluate the metrics, and we require that
-  each metric_fn in metrics_bundle has the API:
-    metric_fn(logits, targets, weights), including the argument names.
-
-  Args:
-    model: init2winit model.
-    params: A dict of trainable model parameters. Passed as {'params': params}
-      into flax_module.apply().
-    batch_stats: A dict of non-trainable model state. Passed as
-      {'batch_stats': batch_stats} into flax_module.apply().
-    batch: A dictionary with keys 'inputs', 'targets', 'weights'.
-
-  Returns:
-    A dictionary with the same keys as metrics, but mapping to the summed metric
-    across the sharded batch_dim.
-  """
-  variables = {'params': params, 'batch_stats': batch_stats}
-  logits = model.flax_module.apply(
-      variables, batch['inputs'], mutable=False, train=False)
-  targets = batch['targets']
-
-  if model.dataset_meta_data['apply_one_hot_in_loss']:
-    targets = jax.nn.one_hot(batch['targets'], logits.shape[-1])
-
-  # map the dict values (which are functions) to function(targets, logits)
-  weights = batch.get('weights')  # Weights might not be defined.
-  eval_batch_size = targets.shape[0]
-  if weights is None:
-    weights = jnp.ones(eval_batch_size)
-
-  # We don't use CLU's `mask` argument here, we handle it ourselves through
-  # `weights`.
-  return jax.lax.all_gather(
-      model.metrics_bundle._from_model_output(  # pylint: disable=protected-access
-          logits=logits, targets=targets, weights=weights),
-      axis_name='batch',
-      axis_index_groups=_get_axis_index_groups()).reduce()
 
 
 def update(
@@ -217,9 +104,7 @@ def update(
   (cost_value, new_batch_stats), grad = grad_fn(params)
   new_batch_stats = new_batch_stats.get('batch_stats', None)
 
-  cost_value, grad = lax.pmean((cost_value, grad),
-                               axis_name='batch',
-                               axis_index_groups=_get_axis_index_groups())
+  cost_value, grad = lax.pmean((cost_value, grad), axis_name='batch')
 
   grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
   # TODO(znado): move to inside optax gradient clipping.
@@ -228,11 +113,6 @@ def update(
         lambda x: x / (grad_norm + _GRAD_CLIP_EPS) * grad_clip, grad)
     grad = jax.lax.cond(grad_norm > grad_clip, lambda _: scaled_grad,
                         lambda _: grad, None)
-
-  if 'train_loss' in optimizer_state.hyperparams:
-    # Inject train_loss into optimizer state.
-    optimizer_state.hyperparams['train_loss'] = cost_value
-
   model_updates, new_optimizer_state = optimizer_update_fn(
       grad,
       optimizer_state,
@@ -243,35 +123,36 @@ def update(
 
   new_metrics_state = None
   if metrics_state is not None:
-    new_metrics_state = metrics_update_fn(metrics_state, step, cost_value,
-                                          grad, params, new_params,
-                                          optimizer_state)
+    new_metrics_state = metrics_update_fn(metrics_state, step, cost_value, grad,
+                                          params, new_params, optimizer_state)
 
   return (new_optimizer_state, new_params, new_batch_stats,
           running_train_cost + cost_value, new_metrics_state, grad_norm)
 
 
-def train(train_dir,
-          model,
-          dataset_builder,
-          initializer,
-          num_train_steps,
-          hps,
-          rng,
-          eval_batch_size,
-          eval_num_batches,
-          eval_train_num_batches,
-          eval_frequency,
-          checkpoint_steps,
-          early_stopping_target_name=None,
-          early_stopping_target_value=None,
-          early_stopping_mode=None,
-          eval_steps=None,
-          metrics_logger=None,
-          init_logger=None,
-          training_metrics_config=None,
-          callback_configs=None,
-          external_checkpoint_path=None):
+def train(
+    train_dir,
+    model,
+    dataset_builder,
+    initializer,
+    num_train_steps,
+    hps,
+    rng,
+    eval_batch_size,
+    eval_num_batches,
+    test_num_batches,
+    eval_train_num_batches,
+    eval_frequency,
+    checkpoint_steps,
+    early_stopping_target_name=None,
+    early_stopping_target_value=None,
+    early_stopping_mode=None,
+    eval_steps=None,
+    metrics_logger=None,
+    init_logger=None,
+    training_metrics_config=None,
+    callback_configs=None,
+    external_checkpoint_path=None):
   """Main training loop.
 
   Trains the given network on the specified dataset for the given number of
@@ -288,7 +169,9 @@ def train(train_dir,
       shuffling.
     eval_batch_size: the evaluation batch size. If None, use hps.batch_size.
     eval_num_batches: (int) The number of batches used for evaluating on
-      validation and test sets. Set to None to evaluate on the whole train set.
+      validation sets. Set to None to evaluate on the whole eval set.
+    test_num_batches: (int) The number of batches used for evaluating on
+      test sets. Set to None to evaluate on the whole test set.
     eval_train_num_batches: (int) The number of batches for evaluating on train.
       Set to None to evaluate on the whole training set.
     eval_frequency: (int) Evaluate every k steps.
@@ -330,11 +213,8 @@ def train(train_dir,
   # TODO(znado,gilmer,gdahl): implement replicating the same initialization
   # across hosts.
   rng, init_rng = jax.random.split(rng)
-
-  # NOTE(dsuo): fixing data_rng per host for running expert parallelism across
-  # hosts.
-  rng, data_rng = jax.random.split(rng)
   rng = jax.random.fold_in(rng, jax.process_index())
+  rng, data_rng = jax.random.split(rng)
 
   # only used if checkpoints_steps is non-empty.
   checkpoint_dir = os.path.join(train_dir, 'checkpoints')
@@ -384,13 +264,12 @@ def train(train_dir,
 
   optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps, model)
   unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
-  checkpointed_expert = unreplicated_optimizer_state.inner_state.current_expert
 
   (unreplicated_metrics_state, metrics_update_fn, metrics_summary_fn
    ) = None, None, None
   if training_metrics_config is not None:
     (metrics_init_fn, metrics_update_fn, metrics_summary_fn
-     ) = make_training_metrics(**training_metrics_config)
+     ) = make_training_metrics(num_train_steps, **training_metrics_config)
     unreplicated_metrics_state = metrics_init_fn(unreplicated_params)
 
   (optimizer_state, params, batch_stats, metrics_state,
@@ -404,8 +283,6 @@ def train(train_dir,
        external_checkpoint_path=external_checkpoint_path)
 
   if is_restored:
-    # TODO(dsuo): optimizer state is not checkpointed correctly, but will need
-    # more thought how to properly checkpoint / integrate with init2winit.
     preemption_count += 1
     # Fold the restored step into the dataset RNG so that we will get a
     # different shuffle each time we restore, so that we do not repeat a
@@ -453,18 +330,18 @@ def train(train_dir,
   #     grad_clip,
   #     optimizer_update_fn,
   #     metrics_state_update_fn)
-  update_pmapped = jax.pmap(
+  # Also, we can donate buffers for 'optimizer', 'batch_stats',
+  # 'batch' and 'training_metrics_state' for update's pmapped computation.
+  update_pmapped = utils.timed(jax.pmap(
       update_fn,
       axis_name='batch',
-      in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0))
+      in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0),
+      donate_argnums=(0, 1, 2, 8)))
+  # During eval, we can donate the 'batch' buffer. We don't donate the
+  # 'params' and 'batch_stats' buffers as we don't re-assign those values in
+  # eval, we do that only in train.
   evaluate_batch_pmapped = jax.pmap(
-      functools.partial(evaluate_batch, model),
-      axis_name='batch')
-  start_time = time.time()
-  start_step = global_step
-  prev_eval_step = start_step
-  def get_step_frequency(cur_step):
-    return float(cur_step - start_step) / (time.time() - start_time)
+      model.evaluate_batch, axis_name='batch', donate_argnums=(2,))
 
   if jax.process_index() == 0:
     trainer_utils.log_message('Starting training!', pool, xm_work_unit)
@@ -488,17 +365,26 @@ def train(train_dir,
   rng, callback_rng = jax.random.split(rng)
   callback_rngs = jax.random.split(callback_rng, len(callback_configs))
   for callback_rng, config in zip(callback_rngs, callback_configs):
-    eval_callback = callbacks.get_callback(
-        config['callback_name'])(model, params, batch_stats, optimizer_state,
-                                 dataset, hps, config, train_dir, callback_rng)
+    eval_callback = callbacks.get_callback(config['callback_name'])(
+        model, params, batch_stats, optimizer_state, optimizer_update_fn,
+        dataset, hps, config, train_dir, callback_rng)
     eval_callbacks.append(eval_callback)
 
 
   train_iter = trainer_utils.prefetch_input_pipeline(train_iter,
                                                      hps.num_device_prefetches)
 
-  eval_start_time = start_time
-  eval_start_step = start_step
+  start_time = time.time()
+  start_step = global_step
+  def get_step_frequency(cur_step):
+    return float(cur_step - start_step) / (time.time() - start_time)
+
+  # NOTE(dsuo): record timestamps for run_time since we don't have a duration
+  # that we can increment as in the case of train_time.
+  time_at_prev_eval = start_time
+  train_time_since_prev_eval = 0
+  prev_eval_step = global_step
+
   for _ in range(start_step, num_train_steps):
     with jax.profiler.StepTraceAnnotation('train', step_num=global_step):
       # NOTE(dsuo): to properly profile each step, we must include batch
@@ -517,100 +403,67 @@ def train(train_dir,
             preemption_count,
             sum_train_cost,
             max_to_keep=None)
-      lr = hps.get(
-          'opt_hparams.optimizers.' +
-          f'{optimizer_state.inner_state.current_expert[0]}.hps.learning_rate',
-          lr_fn(global_step))
-      optimizer_state, params, batch_stats, sum_train_cost, metrics_state, grad_norm = update_pmapped(
-          optimizer_state,
-          params,
-          batch_stats,
-          metrics_state,
-          batch,
-          global_step,
-          lr,
-          rng,
-          local_device_indices,
-          sum_train_cost)
-
-      # TODO(dsuo): would be nice if this logic can live inside samuel.
-      # However, need to find a way to pass back params to the trainer.
-      if global_step in hps.get('opt_hparams.reinit_steps', []):
-        logging.info('Syncing at step %d to expert %d', global_step,
-                     optimizer_state.inner_state.current_expert[0])
-        current_expert = optimizer_state.inner_state.current_expert[0]
-        checkpointed_expert = current_expert
-        source = jax.process_index() == current_expert
-
-        # Unreplicate so we can broadcast a single instance of params.
-        params = jax_utils.unreplicate(params)
-
-        # multihost_utils.broadcast_one_to_all will broadcast a
-        # ShardedDeviceArray but will unshard, giving an extra leading device
-        # dimension.
-        params = multihost_utils.broadcast_one_to_all(params, source)
-
-        optimizer_state = optimizer_init_fn(params)
-
-        optimizer_state = optimizer_state._replace(
-            inner_state=optimizer_state.inner_state._replace(
-                current_expert=current_expert))
-
-        # Replicate params and optimizer state so each device can use.
-        params = jax_utils.replicate(params)
-        optimizer_state = jax_utils.replicate(optimizer_state)
-
-      # Calling float is needed since cost_val is a shape (1,) DeviceArray.
+      lr = lr_fn(global_step)
+      (optimizer_state, params, batch_stats, sum_train_cost, metrics_state,
+       grad_norm), train_time = update_pmapped(optimizer_state, params,
+                                               batch_stats, metrics_state,
+                                               batch, global_step, lr, rng,
+                                               local_device_indices,
+                                               sum_train_cost)
+      train_time_since_prev_eval += train_time
       global_step += 1
       # TODO(gdahl, gilmer): consider moving this test up.
       # NB: Since this test is after we increment global_step, having 0 in
       # eval_steps does nothing.
       if trainer_utils.should_eval(global_step, eval_frequency, eval_steps):
-        steps_per_sec_train_only = (global_step - eval_start_step) / (
-            time.time() - eval_start_time)
-        eval_start_step = global_step
-        eval_start_time = time.time()
-        # NOTE(dsuo): sync batch stats across devices for each host.
-        batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
+        batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
         report, eval_time = trainer_utils.eval_metrics(
             params,
             batch_stats,
             dataset,
             eval_num_batches,
-            eval_num_batches,
+            test_num_batches,
             eval_train_num_batches,
             evaluate_batch_pmapped)
-        # NOTE(dsuo): grab reports from all experts. For some reason, we can
-        # only log metrics from one host.
-        if hps.optimizer == 'samuel':
-          report = gather_multihost_report(
-              report, optimizer_state.inner_state.current_expert[0])
-          report = add_expert_probs(
-              report, optimizer_state.inner_state.expert_weights[0])
-          report.update(
-              current_expert=optimizer_state.inner_state.current_expert[0],
-              checkpointed_expert=checkpointed_expert)
-        mean_train_cost = sum_train_cost.mean().item() / max(
-            1, global_step - prev_eval_step)
-        report.update(learning_rate=float(lr),
-                      global_step=global_step,
-                      epoch=global_step * hps.batch_size // hps.train_size,
-                      steps_per_sec_train_only=steps_per_sec_train_only,
-                      overall_steps_per_sec=get_step_frequency(global_step),
-                      eval_time=eval_time,
-                      grad_norm=np.mean(grad_norm),
-                      preemption_count=preemption_count,
-                      train_cost=mean_train_cost)
 
         for eval_callback in eval_callbacks:
           callback_metrics = eval_callback.run_eval(params, batch_stats,
                                                     optimizer_state,
                                                     global_step)
           if set(callback_metrics.keys()).intersection(set(report.keys())):
-            raise ValueError(
-                'There was a collision between the callback metrics'
-                'and the standard eval metrics keys')
+            raise ValueError('There was a collision between the callback'
+                             'metrics and the standard eval metrics keys')
           report.update(callback_metrics)
+        if jax.process_index() == 0:
+          checkpoint.save_unreplicated_checkpoint_background(
+              train_dir,
+              optimizer_state,
+              params,
+              batch_stats,
+              metrics_state,
+              global_step,
+              preemption_count,
+              sum_train_cost)
+        steps_since_last_eval = global_step - prev_eval_step
+        steps_per_sec_train_only = steps_since_last_eval / train_time_since_prev_eval
+        time_since_last_eval = time.time() - time_at_prev_eval
+        steps_per_sec = steps_since_last_eval / time_since_last_eval
+
+        mean_train_cost = sum_train_cost.mean().item() / max(
+            1, global_step - prev_eval_step)
+        report.update(learning_rate=float(lr),
+                      global_step=global_step,
+                      epoch=global_step * hps.batch_size // hps.train_size,
+                      grad_norm=np.mean(grad_norm),
+                      preemption_count=preemption_count,
+                      train_cost=mean_train_cost,
+                      overall_steps_per_sec=get_step_frequency(global_step),
+                      steps_per_sec_train_only=steps_per_sec_train_only,
+                      steps_per_sec=steps_per_sec,
+                      eval_time=eval_time,
+                      train_time=train_time_since_prev_eval,
+                      run_time=time_since_last_eval
+                      )
         yield report
         if jax.process_index() == 0:
           trainer_utils.log_eta(pool, xm_work_unit, global_step,
@@ -621,16 +474,10 @@ def train(train_dir,
           trainer_utils.maybe_log_training_metrics(metrics_state,
                                                    metrics_summary_fn,
                                                    metrics_logger)
-          checkpoint.save_unreplicated_checkpoint_background(
-              train_dir,
-              optimizer_state,
-              params,
-              batch_stats,
-              metrics_state,
-              global_step,
-              preemption_count,
-              sum_train_cost)
+
         sum_train_cost = jnp.zeros(jax.local_device_count())
+        time_at_prev_eval = time.time()
+        train_time_since_prev_eval = 0
         prev_eval_step = global_step
 
         early_stopping_condition = trainer_utils.check_for_early_stopping(
@@ -653,47 +500,20 @@ def train(train_dir,
   # If we moved where in the loop body evals happen then we would not need this
   # test.
   if prev_eval_step != num_train_steps:
-    steps_per_sec_train_only = (global_step - eval_start_step) / (
-        time.time() - eval_start_time)
-    batch_stats = _maybe_sync_batchnorm_stats(batch_stats)
+    batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
     report, eval_time = trainer_utils.eval_metrics(
         params,
         batch_stats,
         dataset,
         eval_num_batches,
-        eval_num_batches,
+        test_num_batches,
         eval_train_num_batches,
         evaluate_batch_pmapped)
-    if hps.optimizer == 'samuel':
-      report = gather_multihost_report(
-          report, optimizer_state.inner_state.current_expert[0])
-      report = add_expert_probs(report,
-                                optimizer_state.inner_state.expert_weights[0])
-      report.update(
-          current_expert=optimizer_state.inner_state.current_expert[0],
-          checkpointed_expert=checkpointed_expert)
     lr = lr_fn(global_step)
     # Correct the average for the final partial epoch.
-    mean_train_cost = sum_train_cost / max(
+    mean_train_cost = sum_train_cost.mean().item() / max(
         1, global_step - prev_eval_step)
-    report.update(learning_rate=float(lr),
-                  global_step=global_step,
-                  epoch=global_step * hps.batch_size // hps.train_size,
-                  steps_per_sec_train_only=steps_per_sec_train_only,
-                  overall_steps_per_sec=get_step_frequency(global_step),
-                  eval_time=eval_time,
-                  grad_norm=np.mean(grad_norm),
-                  preemption_count=preemption_count,
-                  train_cost=mean_train_cost)
-    yield report
     if jax.process_index() == 0:
-      trainer_utils.log_eta(pool, xm_work_unit, global_step,
-                            steps_per_sec_train_only, num_train_steps,
-                            start_time, eval_frequency, eval_steps, eval_time)
-      trainer_utils.log_epoch_report(report, metrics_logger)
-      trainer_utils.maybe_log_training_metrics(metrics_state,
-                                               metrics_summary_fn,
-                                               metrics_logger)
       checkpoint.save_unreplicated_checkpoint_background(
           train_dir,
           optimizer_state,
@@ -703,5 +523,31 @@ def train(train_dir,
           global_step,
           preemption_count,
           sum_train_cost)
+    steps_since_last_eval = global_step - prev_eval_step
+    steps_per_sec_train_only = steps_since_last_eval / train_time_since_prev_eval
+    time_since_last_eval = time.time() - time_at_prev_eval
+    steps_per_sec = steps_since_last_eval / time_since_last_eval
+
+    report.update(learning_rate=float(lr),
+                  global_step=global_step,
+                  epoch=global_step * hps.batch_size // hps.train_size,
+                  grad_norm=np.mean(grad_norm),
+                  preemption_count=preemption_count,
+                  train_cost=mean_train_cost,
+                  overall_steps_per_sec=get_step_frequency(global_step),
+                  steps_per_sec_train_only=steps_per_sec_train_only,
+                  steps_per_sec=steps_per_sec,
+                  eval_time=eval_time,
+                  train_time=train_time_since_prev_eval,
+                  run_time=time_since_last_eval)
+    yield report
+    if jax.process_index() == 0:
+      trainer_utils.log_eta(pool, xm_work_unit, global_step,
+                            steps_per_sec_train_only, num_train_steps,
+                            start_time, eval_frequency, eval_steps, eval_time)
+      trainer_utils.log_epoch_report(report, metrics_logger)
+      trainer_utils.maybe_log_training_metrics(metrics_state,
+                                               metrics_summary_fn,
+                                               metrics_logger)
   # To make sure the last checkpoint was correctly saved.
   checkpoint.wait_for_checkpoint_save()
