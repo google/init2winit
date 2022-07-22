@@ -256,8 +256,8 @@ def from_hparams(opt_hparams):
       learning_rate=-1.0, chains=chains, combinator=combinator)
 
 
-def transform_chain_from_hparams(opt_hparams):
-  """Create transform_chain optimizer from init2winit config."""
+def parse_hparams(opt_hparams):
+  """Parse hparams from init2winit config."""
   elements = []
   hps = []
   masks = []
@@ -289,4 +289,10 @@ def transform_chain_from_hparams(opt_hparams):
     masks.append(mask)
     index += 1
 
+  return elements, hps, masks
+
+
+def transform_chain_from_hparams(opt_hparams):
+  """Create transform_chain optimizer from init2winit config."""
+  elements, hps, masks = parse_hparams(opt_hparams)
   return transform_chain(elements, hps, masks)
