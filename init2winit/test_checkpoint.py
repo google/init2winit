@@ -155,11 +155,13 @@ class CheckpointTest(parameterized.TestCase):
                    training_metrics_grabber=saved_training_metrics),
         max_to_keep=1)
 
-    (ret_state, ret_params, ret_batch_stats, ret_training_metrics,
+    (ret_train_state,
      ret_global_step, ret_sum_train_cost, ret_preemption_count, ret_is_restored,
      ) = checkpoint.replicate_and_maybe_restore_checkpoint(
          initial_optimizer_state, initial_params, initial_batch_stats,
          initial_training_metrics, fresh_train_dir)
+    (ret_state, ret_params, ret_batch_stats,
+     ret_training_metrics) = ret_train_state.astuple()
 
     assert pytree_equal(
         jax.device_get(jax_utils.unreplicate(ret_state)),
@@ -224,10 +226,13 @@ class CheckpointTest(parameterized.TestCase):
     def maybe_restore_checkpoint(params, train_dir, external_checkpoint_path):
       """Helper function to replicate_and_maybe_restore a checkpoint."""
 
-      (_, ret_params, _, _,
-       ret_global_step, ret_sum_train_cost, ret_preemption_count,
+      (ret_train_state,
+       ret_global_step,
+       ret_sum_train_cost,
+       ret_preemption_count,
        ret_is_restored) = checkpoint.replicate_and_maybe_restore_checkpoint(
            {}, params, {}, {}, train_dir, external_checkpoint_path)
+      ret_params = ret_train_state.params
 
       ret_params_unrep = jax.device_get(jax_utils.unreplicate(ret_params))
 

@@ -14,11 +14,12 @@
 # limitations under the License.
 
 """Utility functions related to training."""
+
 import time
 
 from absl import logging
-
 from flax import jax_utils
+from init2winit import callbacks
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
@@ -284,3 +285,36 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
       metrics = _merge_and_apply_prefix(metrics, split_metrics,
                                         (split_name + '/'))
   return metrics
+
+
+# TODO(gdahl): Change callback api to use the same argument order as
+# TrainStepState
+def setup_eval_callbacks(callback_configs, callback_rng, model, train_state,
+                         optimizer_update_fn, dataset, hps, train_dir):
+  """Return and initialize the list of eval callbacks."""
+  eval_callbacks = []
+  callback_rngs = jax.random.split(callback_rng, len(callback_configs))
+  for rng, config in zip(callback_rngs, callback_configs):
+    eval_callback = callbacks.get_callback(config['callback_name'])(
+        model,
+        train_state.params,
+        train_state.batch_stats,
+        train_state.optimizer_state,
+        optimizer_update_fn,
+        dataset, hps, config, train_dir, rng)
+    eval_callbacks.append(eval_callback)
+  return eval_callbacks
+
+
+def run_eval_callbacks(report, eval_callbacks, train_state, global_step):
+  """Update the report dict based on the results of running each callback."""
+  for eval_callback in eval_callbacks:
+    callback_metrics = eval_callback.run_eval(
+        train_state.params,
+        train_state.batch_stats,
+        train_state.optimizer_state,
+        global_step)
+    if set(callback_metrics.keys()).intersection(set(report.keys())):
+      raise ValueError('There was a collision between the callback'
+                       'metrics and the standard eval metrics keys')
+    report.update(callback_metrics)
