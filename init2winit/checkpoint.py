@@ -28,6 +28,7 @@ from absl import flags
 from absl import logging
 from flax import jax_utils
 from flax.training import checkpoints as flax_checkpoints
+from init2winit.trainer_lib import train_step_state
 import jax
 import jax.numpy as jnp
 
@@ -110,10 +111,7 @@ def replicate_and_maybe_restore_checkpoint(
     the external checkpoint stored there.
 
   Returns:
-    replicated_optimizer_state
-    replicated_params
-    replicated_batch_stats
-    replicated_training_metrics_state
+    (replicated) TrainStepState
     global_step (int)
     sum_train_cost (float)
     preemption_count (int)
@@ -152,11 +150,13 @@ def replicate_and_maybe_restore_checkpoint(
                                      target=unreplicated_checkpoint_state)
     is_restored = False  # We don't want trainer to increment preemption_count.
   else:  # Else, don't restore from any checkpoint.
-    return (
+    train_state = train_step_state.TrainStepState(
         jax_utils.replicate(unreplicated_optimizer_state),
         jax_utils.replicate(unreplicated_params),
         jax_utils.replicate(unreplicated_batch_stats),
-        jax_utils.replicate(unreplicated_training_metrics_state),
+        jax_utils.replicate(unreplicated_training_metrics_state))
+    return (
+        train_state,
         0,  # global_step
         jnp.zeros(jax.local_device_count()),  # sum_train_cost
         0,  # preemption_count
@@ -170,11 +170,13 @@ def replicate_and_maybe_restore_checkpoint(
           'batch_stats',
           'training_metrics_grabber',
       ])
-  return (
+  train_state = train_step_state.TrainStepState(
       pytree_dict['optimizer_state'],
       pytree_dict['params'],
       pytree_dict['batch_stats'],
-      pytree_dict['training_metrics_grabber'],
+      pytree_dict['training_metrics_grabber'])
+  return (
+      train_state,
       extra_state['global_step'],
       extra_state['sum_train_cost'],
       extra_state['preemption_count'],

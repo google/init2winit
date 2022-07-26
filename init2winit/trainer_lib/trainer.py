@@ -21,7 +21,6 @@ import os
 import time
 
 from absl import logging
-from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import schedules
 from init2winit import utils
@@ -86,8 +85,8 @@ def update(
     metrics_update_fn: the training metrics update function.
 
   Returns:
-    A tuple of the new optimizer, the new batch stats, the scalar training cost,
-    the new training metrics state, and the gradient norm.
+    A tuple of TrainStepState (optimizer, params, batch stats, metrics state),
+    the scalar training cost, and the gradient norm.
   """
   # `jax.random.split` is very slow outside the train step, so instead we do a
   # `jax.random.fold_in` here.
@@ -126,8 +125,9 @@ def update(
     new_metrics_state = metrics_update_fn(metrics_state, step, cost_value, grad,
                                           params, new_params, optimizer_state)
 
-  return (new_optimizer_state, new_params, new_batch_stats,
-          running_train_cost + cost_value, new_metrics_state, grad_norm)
+  new_train_state = trainer_utils.TrainStepState(
+      new_optimizer_state, new_params, new_batch_stats, new_metrics_state)
+  return (new_train_state, running_train_cost + cost_value, grad_norm)
 
 
 def train(
@@ -272,8 +272,8 @@ def train(
      ) = make_training_metrics(num_train_steps, **training_metrics_config)
     unreplicated_metrics_state = metrics_init_fn(unreplicated_params)
 
-  (optimizer_state, params, batch_stats, metrics_state,
-   global_step, sum_train_cost, preemption_count, is_restored
+  # train_state = optimizer_state, params, batch_stats, metrics_state
+  (train_state, global_step, sum_train_cost, preemption_count, is_restored
    ) = checkpoint.replicate_and_maybe_restore_checkpoint(
        unreplicated_optimizer_state,
        unreplicated_params,
@@ -361,14 +361,12 @@ def train(
   train_iter = itertools.islice(
       dataset.train_iterator_fn(), global_step, num_train_steps)
 
-  eval_callbacks = []
   rng, callback_rng = jax.random.split(rng)
-  callback_rngs = jax.random.split(callback_rng, len(callback_configs))
-  for callback_rng, config in zip(callback_rngs, callback_configs):
-    eval_callback = callbacks.get_callback(config['callback_name'])(
-        model, params, batch_stats, optimizer_state, optimizer_update_fn,
-        dataset, hps, config, train_dir, callback_rng)
-    eval_callbacks.append(eval_callback)
+  eval_callbacks = trainer_utils.setup_eval_callbacks(callback_configs,
+                                                      callback_rng, model,
+                                                      train_state,
+                                                      optimizer_update_fn,
+                                                      dataset, hps, train_dir)
 
 
   train_iter = trainer_utils.prefetch_input_pipeline(train_iter,
@@ -395,52 +393,42 @@ def train(
       if global_step in checkpoint_steps and jax.process_index() == 0:
         checkpoint.save_unreplicated_checkpoint_background(
             checkpoint_dir,
-            optimizer_state,
-            params,
-            batch_stats,
-            metrics_state,
+            *train_state.astuple(),
             global_step,
             preemption_count,
             sum_train_cost,
             max_to_keep=None)
       lr = lr_fn(global_step)
-      (optimizer_state, params, batch_stats, sum_train_cost, metrics_state,
-       grad_norm), train_time = update_pmapped(optimizer_state, params,
-                                               batch_stats, metrics_state,
-                                               batch, global_step, lr, rng,
-                                               local_device_indices,
-                                               sum_train_cost)
+      (train_state, sum_train_cost, grad_norm), train_time = update_pmapped(
+          *train_state.astuple(),
+          batch,
+          global_step,
+          lr,
+          rng,
+          local_device_indices,
+          sum_train_cost)
       train_time_since_prev_eval += train_time
       global_step += 1
       # TODO(gdahl, gilmer): consider moving this test up.
       # NB: Since this test is after we increment global_step, having 0 in
       # eval_steps does nothing.
       if trainer_utils.should_eval(global_step, eval_frequency, eval_steps):
-        batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
+        train_state.batch_stats = trainer_utils.maybe_sync_batchnorm_stats(
+            train_state.batch_stats)
         report, eval_time = trainer_utils.eval_metrics(
-            params,
-            batch_stats,
+            train_state.params,
+            train_state.batch_stats,
             dataset,
             eval_num_batches,
             test_num_batches,
             eval_train_num_batches,
             evaluate_batch_pmapped)
-
-        for eval_callback in eval_callbacks:
-          callback_metrics = eval_callback.run_eval(params, batch_stats,
-                                                    optimizer_state,
-                                                    global_step)
-          if set(callback_metrics.keys()).intersection(set(report.keys())):
-            raise ValueError('There was a collision between the callback'
-                             'metrics and the standard eval metrics keys')
-          report.update(callback_metrics)
+        trainer_utils.run_eval_callbacks(
+            report, eval_callbacks, train_state, global_step)
         if jax.process_index() == 0:
           checkpoint.save_unreplicated_checkpoint_background(
               train_dir,
-              optimizer_state,
-              params,
-              batch_stats,
-              metrics_state,
+              *train_state.astuple(),
               global_step,
               preemption_count,
               sum_train_cost)
@@ -471,7 +459,7 @@ def train(
                                 start_time, eval_frequency, eval_steps,
                                 eval_time)
           trainer_utils.log_epoch_report(report, metrics_logger)
-          trainer_utils.maybe_log_training_metrics(metrics_state,
+          trainer_utils.maybe_log_training_metrics(train_state.metrics_state,
                                                    metrics_summary_fn,
                                                    metrics_logger)
 
@@ -500,10 +488,11 @@ def train(
   # If we moved where in the loop body evals happen then we would not need this
   # test.
   if prev_eval_step != num_train_steps:
-    batch_stats = trainer_utils.maybe_sync_batchnorm_stats(batch_stats)
+    train_state.batch_stats = trainer_utils.maybe_sync_batchnorm_stats(
+        train_state.batch_stats)
     report, eval_time = trainer_utils.eval_metrics(
-        params,
-        batch_stats,
+        train_state.params,
+        train_state.batch_stats,
         dataset,
         eval_num_batches,
         test_num_batches,
@@ -516,10 +505,7 @@ def train(
     if jax.process_index() == 0:
       checkpoint.save_unreplicated_checkpoint_background(
           train_dir,
-          optimizer_state,
-          params,
-          batch_stats,
-          metrics_state,
+          *train_state.astuple(),
           global_step,
           preemption_count,
           sum_train_cost)
@@ -546,7 +532,7 @@ def train(
                             steps_per_sec_train_only, num_train_steps,
                             start_time, eval_frequency, eval_steps, eval_time)
       trainer_utils.log_epoch_report(report, metrics_logger)
-      trainer_utils.maybe_log_training_metrics(metrics_state,
+      trainer_utils.maybe_log_training_metrics(train_state.metrics_state,
                                                metrics_summary_fn,
                                                metrics_logger)
   # To make sure the last checkpoint was correctly saved.
