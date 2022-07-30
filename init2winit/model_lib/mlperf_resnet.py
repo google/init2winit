@@ -55,6 +55,7 @@ FAKE_MODEL_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     model_dtype='float32',
     virtual_batch_size=64,
     data_format='NHWC',
+    final_filters=None,
 ))
 
 
@@ -85,6 +86,7 @@ MLPERF_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     virtual_batch_size=64,
     total_accumulated_batch_size=None,
     data_format='NHWC',
+    final_filters=None,
 ))
 
 
@@ -160,6 +162,7 @@ class ResNet(nn.Module):
   virtual_batch_size: Optional[int] = None
   total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
+  final_filters: Optional[int] = None
 
   @nn.compact
   def __call__(self, x, train):
@@ -185,8 +188,13 @@ class ResNet(nn.Module):
     for i, block_size in enumerate(block_sizes):
       for j in range(block_size):
         strides = (2, 2) if i > 0 and j == 0 else (1, 1)
+        if self.final_filters and i == (len(block_sizes) -
+                                        1) and j == (block_size - 1):
+          filters = self.final_filters
+        else:
+          filters = self.num_filters * 2 ** i
         x = ResidualBlock(
-            self.num_filters * 2 ** i,
+            filters=filters,
             strides=strides,
             axis_name=self.axis_name,
             axis_index_groups=self.axis_index_groups,
@@ -253,7 +261,9 @@ class ResnetModelMLPerf(base_model.BaseModel):
         batch_size=self.hps.batch_size,
         virtual_batch_size=self.hps.virtual_batch_size,
         total_batch_size=self.hps.total_accumulated_batch_size,
-        data_format=self.hps.data_format)
+        data_format=self.hps.data_format,
+        final_filters=self.hps.final_filters,
+        )
 
 
 class FakeModel(base_model.BaseModel):
