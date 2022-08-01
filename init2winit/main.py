@@ -42,8 +42,6 @@ import numpy as np
 import tensorflow as tf
 
 gfile = tf.io.gfile
-# Don't let TF see the GPU, because all we use it for is tf.data loading.
-tf.config.experimental.set_visible_devices([], 'GPU')
 
 # For internal compatibility reasons, we need to pull this function out.
 makedirs = tf.io.gfile.makedirs
@@ -277,6 +275,8 @@ def _run(
 
 
 def main(unused_argv):
+  # Don't let TF see the GPU, because all we use it for is tf.data loading.
+  tf.config.experimental.set_visible_devices([], 'GPU')
 
   # TODO(gdahl) Figure out a better way to handle passing more complicated
   # flags to the binary.
