@@ -254,13 +254,18 @@ def train(
   # calculations, not model updates, and in post processing one must divide
   # global_step by grad_accum_step_multiplier to get the number of updates.
   #
-  # If using gradient accumulation, stretch the learning rate schedule by the
-  # number of gradient calculations per weight update.
+  # The learning rate schedules are all defined in number of model updates. In
+  # order to make it clearer in the logging that the LR does not change across
+  # gradient calculations (only when updates are applied), we stretch the
+  # learning rate schedule by the number of gradient calculations per weight
+  # update.
   stretch_factor = 1
   if hps.get('total_accumulated_batch_size') is not None:
     stretch_factor = hps.total_accumulated_batch_size // hps.batch_size
   lr_fn = schedules.get_schedule_fn(
-      hps.lr_hparams, num_train_steps, stretch_factor=stretch_factor)
+      hps.lr_hparams,
+      max_training_updates=num_train_steps // stretch_factor,
+      stretch_factor=stretch_factor)
 
   optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps, model)
   unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)

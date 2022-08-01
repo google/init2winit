@@ -25,39 +25,39 @@ def _check_schedule_hparams(schedule_hparams, expected_keys):
         .format(sorted(schedule_hparams.keys()), sorted(expected_keys)))
 
 
-def constant_schedule(schedule_hparams, max_training_steps):
-  del max_training_steps
+def constant_schedule(schedule_hparams, max_training_updates):
+  del max_training_updates
   _check_schedule_hparams(schedule_hparams,
                           ['schedule', 'base_lr'])
   return lambda t: schedule_hparams['base_lr']
 
 
-def cosine_schedule(schedule_hparams, max_training_steps):
+def cosine_schedule(schedule_hparams, max_training_updates):
   _check_schedule_hparams(schedule_hparams,
                           ['schedule', 'base_lr'])
 
   def lr_fn(t):
-    decay_factor = (1 + np.cos(t / max_training_steps * np.pi)) * 0.5
+    decay_factor = (1 + np.cos(t / max_training_updates * np.pi)) * 0.5
     return schedule_hparams['base_lr'] * decay_factor
   return lr_fn
 
 
 # code based on
 # https://github.com/tensorflow/lingvo/blob/master/lingvo/core/schedule.py#L305
-def transformer_schedule(schedule_hparams, max_training_steps):
+def transformer_schedule(schedule_hparams, max_training_updates):
   """Computes a reverse sqrt style decay schedule scaled by sqrt of model's encoder dimension.
 
   lr = base_lr * min((step + 1) / sqrt(warmup_steps**3) , 1/sqrt(step + 1)) *
   (1/sqrt(enocder_dim))
   Args:
     schedule_hparams: Relevant hparams are base_lr, encoder_dim, warmup_steps.
-    max_training_steps: This is ignored (needed to match API of other lr
+    max_training_updates: This is ignored (needed to match API of other lr
       functions).
 
   Returns:
     lr_fn: A function mapping global_step to lr.
   """
-  del max_training_steps
+  del max_training_updates
   _check_schedule_hparams(
       schedule_hparams, ['schedule', 'warmup_steps', 'base_lr', 'encoder_dim'])
 
@@ -72,20 +72,20 @@ def transformer_schedule(schedule_hparams, max_training_steps):
   return lr_fn
 
 
-def rsqrt_normalized_decay(schedule_hparams, max_training_steps):
+def rsqrt_normalized_decay(schedule_hparams, max_training_updates):
   """Computes a "squashed" reverse sqrt decay schedule.
 
   lr = base_lr * sqrt(squash_steps) / sqrt(step + squash_steps)
 
   Args:
     schedule_hparams: Relevant hparams are base_lr, squash_steps.
-    max_training_steps: This is ignored (needed to match API of other lr
+    max_training_updates: This is ignored (needed to match API of other lr
       functions).
 
   Returns:
     lr_fn: A function mapping global_step to lr.
   """
-  del max_training_steps
+  del max_training_updates
   _check_schedule_hparams(schedule_hparams,
                           ['schedule', 'base_lr', 'squash_steps'])
 
@@ -97,7 +97,7 @@ def rsqrt_normalized_decay(schedule_hparams, max_training_steps):
   return lr_fn
 
 
-def t2t_rsqrt_normalized_decay(schedule_hparams, max_training_steps):
+def t2t_rsqrt_normalized_decay(schedule_hparams, max_training_updates):
   """Computes rsqrt_normalized_decay according to T2T implementation.
 
   It's an implemetation of T2T learning_rate_schedule function
@@ -111,13 +111,13 @@ def t2t_rsqrt_normalized_decay(schedule_hparams, max_training_steps):
 
   Args:
     schedule_hparams: Relevant hparams are base_lr, defer_steps.
-    max_training_steps: This is ignored (needed to match API of other lr
+    max_training_updates: This is ignored (needed to match API of other lr
       functions).
 
   Returns:
     lr_fn: A function mapping global_step to lr.
   """
-  del max_training_steps
+  del max_training_updates
   _check_schedule_hparams(schedule_hparams,
                           ['schedule', 'base_lr', 'defer_steps'])
 
@@ -130,7 +130,7 @@ def t2t_rsqrt_normalized_decay(schedule_hparams, max_training_steps):
   return lr_fn
 
 
-def polynomial_schedule(schedule_hparams, max_training_steps):
+def polynomial_schedule(schedule_hparams, max_training_updates):
   """Same behavior as tf.train.polynomial_decay.
 
   Supports either decay_steps or decay_steps_factor, but providing both is an
@@ -140,7 +140,7 @@ def polynomial_schedule(schedule_hparams, max_training_steps):
     schedule_hparams: Relevant hparams are schedule,
       base_lr, end_factor, power, and one of decay_steps or
       decay_steps_factor.
-    max_training_steps: Only used when decay_steps_factor is provided.
+    max_training_updates: Only used when decay_steps_factor is provided.
 
   Returns:
     lr_fn: A function mapping global_step to lr.
@@ -152,7 +152,7 @@ def polynomial_schedule(schedule_hparams, max_training_steps):
   else:
     expected_keys.append('decay_steps_factor')
     decay_steps = int(
-        max_training_steps * schedule_hparams['decay_steps_factor'])
+        max_training_updates * schedule_hparams['decay_steps_factor'])
   _check_schedule_hparams(schedule_hparams, expected_keys)
 
   end_learning_rate = schedule_hparams['base_lr'] * schedule_hparams[
@@ -167,7 +167,7 @@ def polynomial_schedule(schedule_hparams, max_training_steps):
   return lr_fn
 
 
-def piecewise_constant_schedule(schedule_hparams, max_training_steps):
+def piecewise_constant_schedule(schedule_hparams, max_training_updates):
   """Computes a piecewise constant decay schedule.
 
   Note that each element of decay_factors is absolute (not relative). For
@@ -179,13 +179,13 @@ def piecewise_constant_schedule(schedule_hparams, max_training_steps):
   Args:
     schedule_hparams: Relevant hparams are base_lr, decay_events
       decay_factors.
-    max_training_steps: This is ignored (needed to match API of other lr
+    max_training_updates: This is ignored (needed to match API of other lr
       functions).
 
   Returns:
     lr_fn: A function mapping global_step to lr.
   """
-  del max_training_steps
+  del max_training_updates
   _check_schedule_hparams(schedule_hparams, [
       'schedule', 'base_lr', 'decay_events',
       'decay_factors'
@@ -199,7 +199,7 @@ def piecewise_constant_schedule(schedule_hparams, max_training_steps):
   return lr_fn
 
 
-def piecewise_linear_schedule(schedule_hparams, max_training_steps):
+def piecewise_linear_schedule(schedule_hparams, max_training_updates):
   """Computes a piecewise linear decay schedule.
 
   Note that each element of decay_factors is absolute (not relative). For
@@ -211,13 +211,13 @@ def piecewise_linear_schedule(schedule_hparams, max_training_steps):
   Args:
     schedule_hparams: Relevant hparams are base_lr, decay_events
       decay_factors.
-    max_training_steps: This is ignored (needed to match API of other lr
+    max_training_updates: This is ignored (needed to match API of other lr
       functions).
 
   Returns:
     lr_fn: A function mapping global_step to lr.
   """
-  del max_training_steps
+  del max_training_updates
   _check_schedule_hparams(schedule_hparams, [
       'schedule', 'base_lr', 'decay_events',
       'decay_factors'
@@ -237,7 +237,7 @@ def piecewise_linear_schedule(schedule_hparams, max_training_steps):
 
 
 # TODO(gilmer) Change the code path before open source.
-def mlperf_polynomial_schedule(schedule_hparams, max_training_steps):
+def mlperf_polynomial_schedule(schedule_hparams, max_training_updates):
   """Polynomial learning rate schedule for LARS optimizer.
 
   This function is copied from
@@ -246,7 +246,7 @@ def mlperf_polynomial_schedule(schedule_hparams, max_training_steps):
 
   Args:
     schedule_hparams: Relevant hparams are base_lr, warmup_steps.
-    max_training_steps: Used to calculate the number of decay steps.
+    max_training_updates: Used to calculate the number of decay steps.
 
   Returns:
     lr_fn: A function mapping global_step to lr.
@@ -255,7 +255,7 @@ def mlperf_polynomial_schedule(schedule_hparams, max_training_steps):
       schedule_hparams,
       ['schedule', 'base_lr', 'warmup_steps', 'power', 'start_lr', 'end_lr',
        'decay_end', 'warmup_power'])
-  decay_steps = max_training_steps - schedule_hparams.warmup_steps + 1
+  decay_steps = max_training_updates - schedule_hparams.warmup_steps + 1
   end_lr = schedule_hparams['end_lr']
   def step_fn(step):
     decay_end = schedule_hparams['decay_end']
@@ -272,7 +272,7 @@ def mlperf_polynomial_schedule(schedule_hparams, max_training_steps):
   return step_fn
 
 
-def compound_schedule(schedule_hparams, max_training_steps):
+def compound_schedule(schedule_hparams, max_training_updates):
   """Creates a learning rate schedule.
 
   Interprets factors in the factors string which can consist of:
@@ -287,14 +287,14 @@ def compound_schedule(schedule_hparams, max_training_steps):
       steps to warm up for in the warmup schedule. decay_factor - The amount to
       decay the learning rate by. steps_per_decay - How often to decay the
       learning rate. steps_per_cycle - Steps per cycle when using cosine decay.
-    max_training_steps: This is ignored (needed to match API of other lr
+    max_training_updates: This is ignored (needed to match API of other lr
       functions).
 
   Returns:
     a function learning_rate(step): float -> {'learning_rate': float}, the
     step-dependent lr.
   """
-  del max_training_steps
+  del max_training_updates
   factors = [n.strip() for n in schedule_hparams['factors'].split('*')]
   expected_keys = ['schedule', 'factors']
   if 'constant' in factors:
@@ -320,7 +320,7 @@ def compound_schedule(schedule_hparams, max_training_steps):
   return lr_fn
 
 
-def prepend_linear_warmup(schedule_hparams, max_training_steps,
+def prepend_linear_warmup(schedule_hparams, max_training_updates,
                           base_lr_schedule):
   """Models the base_lr_schedule to include a warmup phase.
 
@@ -343,10 +343,10 @@ def prepend_linear_warmup(schedule_hparams, max_training_steps,
     schedule_hparams: Must include all required hparams needed in
       base_lr_schedule. Additionally we require warmup_steps, warmup_power to
       be added.
-    max_training_steps: Full number of steps to be used in training.
+    max_training_updates: Full number of model updates to be used in training.
     base_lr_schedule: One of the schedule functions defined in this module.
       Must satisfy the API of -
-      base_lr_schedule(schedule_hparams, max_training_steps) -> returns lr_fn.
+      base_lr_schedule(schedule_hparams, max_training_updates) -> returns lr_fn.
 
   Returns:
     A function mapping global_step to learning rate.
@@ -359,7 +359,7 @@ def prepend_linear_warmup(schedule_hparams, max_training_steps,
   base_lr = schedule_hparams['base_lr']
 
   base_lr_fn = base_lr_schedule(schedule_hparams,
-                                max_training_steps - warmup_steps)
+                                max_training_updates - warmup_steps)
 
   def lr_fn(t):
     if t < warmup_steps:
@@ -371,8 +371,8 @@ def prepend_linear_warmup(schedule_hparams, max_training_steps,
 
 
 def warmup_then_piecewise_constant_schedule(schedule_hparams,
-                                            max_training_steps):
-  return prepend_linear_warmup(schedule_hparams, max_training_steps,
+                                            max_training_updates):
+  return prepend_linear_warmup(schedule_hparams, max_training_updates,
                                piecewise_constant_schedule)
 
 
@@ -402,15 +402,17 @@ def schedule_stretcher(schedule_fn, stretch_factor):
   return _schedule
 
 
-def get_schedule_fn(schedule_hparams, max_training_steps, stretch_factor=1):
+# Note that everything inside schedules.py should be in terms of number of model
+# updates, not gradient calculations.
+def get_schedule_fn(schedule_hparams, max_training_updates, stretch_factor=1):
   """Retrieve a schedule function."""
   warmup_suffix = '_warmup'
   if schedule_hparams['schedule'][-len(warmup_suffix):] == warmup_suffix:
     base_name = schedule_hparams['schedule'][:-len(warmup_suffix)]
     base_lr_schedule = lr_fn_dict[base_name]
     schedule_fn = prepend_linear_warmup(
-        schedule_hparams, max_training_steps, base_lr_schedule)
+        schedule_hparams, max_training_updates, base_lr_schedule)
   else:
     schedule_fn = lr_fn_dict[schedule_hparams['schedule']](
-        schedule_hparams, max_training_steps)
+        schedule_hparams, max_training_updates)
   return schedule_stretcher(schedule_fn, stretch_factor)
