@@ -216,6 +216,7 @@ class ModelsTest(parameterized.TestCase):
             'base_lr': 0.005,
             'schedule': 'constant'
         },
+        'vocab_size': vocab_size,
         'output_shape': (vocab_size,),
         'model_dtype': 'float32',
         # Training HParams.

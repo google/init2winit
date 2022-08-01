@@ -942,8 +942,8 @@ class TransformerTranslate(base_model.BaseModel):
     use_bfloat16 = self.hps.model_dtype == 'bfloat16'
 
     return Transformer(
-        vocab_size=self.hps['output_shape'][-1],
-        output_vocab_size=self.hps['output_shape'][-1],
+        vocab_size=self.hps.vocab_size,
+        output_vocab_size=self.hps.vocab_size,
         share_embeddings=self.hps.share_embeddings,
         logits_via_embedding=self.hps.logits_via_embedding,
         use_bfloat16=use_bfloat16,
