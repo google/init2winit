@@ -15,13 +15,15 @@
 
 """Trainers for init2winit."""
 
+from init2winit.trainer_lib import quantization_trainer
 from init2winit.trainer_lib import self_tuning_trainer
 from init2winit.trainer_lib import trainer
 
 
 _ALL_TRAINERS = {
     'standard': trainer,
-    'self_tuning': self_tuning_trainer
+    'self_tuning': self_tuning_trainer,
+    'quantization': quantization_trainer,
 }
 
 
