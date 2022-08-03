@@ -80,7 +80,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         input_dropout_rate=0.1,
         enable_decoder_pre_layer_norm=True,
         enable_conformer_post_layer_norm=True,
-        use_lingvo_attention=False))
+        use_lingvo_attention=False,
+        total_accumulated_batch_size=None,))
 
 
 @struct.dataclass

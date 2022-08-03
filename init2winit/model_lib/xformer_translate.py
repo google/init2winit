@@ -69,6 +69,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         dec_self_attn_kernel_init='xavier_uniform',
         dec_cross_attn_kernel_init='xavier_uniform',
         decode=False,
+        total_accumulated_batch_size=None,
     ))
 
 

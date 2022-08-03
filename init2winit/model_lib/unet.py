@@ -88,7 +88,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         batch_size=batch_size,
         rng_seed=-1,
         model_dtype='float32',
-        grad_clip=None
+        grad_clip=None,
+        total_accumulated_batch_size=None,
     ))
 
 

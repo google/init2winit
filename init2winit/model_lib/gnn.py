@@ -59,6 +59,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         num_message_passing_steps=5,
         normalizer='layer_norm',
         dropout_rate=0.1,
+        total_accumulated_batch_size=None,
     ))
 
 

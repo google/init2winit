@@ -71,7 +71,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         feed_forward_dropout_rate=0.1,
         enable_residual_connections=False,
         enable_decoder_layer_norm=False,
-        bidirectional=True))
+        bidirectional=True,
+        total_accumulated_batch_size=None,))
 
 
 @struct.dataclass
