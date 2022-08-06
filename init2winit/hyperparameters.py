@@ -14,8 +14,8 @@
 # limitations under the License.
 
 """Hyperparameter management logic."""
-
 import json
+from typing import Any, Dict
 
 from absl import logging
 from init2winit.dataset_lib import datasets
@@ -23,6 +23,77 @@ from init2winit.init_lib import initializers
 from init2winit.model_lib import models
 from ml_collections.config_dict import config_dict
 from tensorflow.io import gfile
+
+
+def _get_prefix_violations(trie):
+  """Find all internal nodes in the trie that have a count > 0."""
+  bad_keys = []
+  for key, value in trie.items():
+    count, child = value
+    # If we have any keys that have children underneath them, error.
+    if child and count > 0:
+      bad_keys.append((key, child))
+    bad_keys.extend(_get_prefix_violations(child))
+  return bad_keys
+
+
+def _add_to_trie(trie, key_pieces):
+  curr_p = key_pieces[0]
+  if curr_p not in trie:
+    trie[curr_p] = (0, {})
+  if len(key_pieces) == 1:
+    trie[curr_p] = (trie[curr_p][0] + 1, trie[curr_p][1])
+  else:
+    _add_to_trie(trie[curr_p][1], key_pieces[1:])
+
+
+def _assert_prefix_free_keys(d: Dict[str, Any]):
+  """Check for keys that are dot-subsets of each other ('a.b', 'a.b.c'.)."""
+  # We build a trie and assert there are only elements that terminate at a leaf
+  # in the tree.
+  trie = {}
+  for key in d.keys():
+    _add_to_trie(trie, key.split('.'))
+  offending_keys = _get_prefix_violations(trie)
+  if offending_keys:
+    error_msgs = []
+    for key, child in offending_keys:
+      children = ', '.join(child.keys())
+      error_msgs.append(
+          f'Key {key} has dot children that would be overriden: {children}')
+    raise ValueError('\n'.join(error_msgs))
+
+
+def expand_dot_keys(
+    d: Dict[str, Any], assert_prefix_free_keys: bool = True) -> Dict[str, Any]:
+  """Expand keys with '.', {'a.b': 1} -> {'a': {'b': 1}}.
+
+  Note that we assert there are no keys with dots that would override each
+  other, such as 'a.b' and 'a.b.c'.
+
+  Args:
+    d: input dict.
+    assert_prefix_free_keys: whether or not to call _assert_prefix_free_keys on
+      the input dict d.
+
+  Returns:
+    A dict with the keys expanded on dots.
+  """
+  if assert_prefix_free_keys:
+    _assert_prefix_free_keys(d)
+  new_dict = {}
+  for key, value in d.items():
+    if '.' in key:
+      new_key, rest = key.split('.', 1)
+      new_dict.setdefault(new_key, {})[rest] = value
+    else:
+      new_dict[key] = value
+  # In cases like {'a.b.c': 1}, we will have a dict like {'a': {'b.c': 1}}, so
+  # we need to recursively try to expand all sub-dicts.
+  for key, value in new_dict.items():
+    if isinstance(value, dict):
+      new_dict[key] = expand_dot_keys(value, assert_prefix_free_keys=False)
+  return new_dict
 
 
 def build_hparams(model_name,
@@ -108,6 +179,7 @@ def build_hparams(model_name,
     if ('optimizer' in hparam_overrides and
         merged['optimizer'] != hparam_overrides['optimizer']):
       merged['opt_hparams'] = {}
+    hparam_overrides = expand_dot_keys(hparam_overrides)
     merged.update(hparam_overrides)
 
   return merged

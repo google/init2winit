@@ -83,6 +83,58 @@ class HyperParameterTest(absltest.TestCase):
             'end_factor', 'decay_steps_factor'
         ]))
 
+  def test_expand_dot_keys(self):
+    """Test expanding keys with dots in them into sub-dicts."""
+    d = {
+        'a.b.c': 1,
+        'a.b.d': 2,
+        'e.a.b.c': 3,
+        'e.a.b.d': 4,
+        'e.b.d': 6,
+        'j': 5,
+    }
+    expanded = hyperparameters.expand_dot_keys(d)
+    print(expanded)
+    expected = {
+        'a': {
+            'b': {
+                'c': 1,
+                'd': 2,
+            },
+        },
+        'e': {
+            'a': {
+                'b': {
+                    'c': 3,
+                    'd': 4,
+                },
+            },
+            'b': {
+                'd': 6,
+            },
+        },
+        'j': 5,
+    }
+    self.assertEqual(expanded, expected)
+
+  def test_unsafe_expand_dot_keys(self):
+    """Test that we will raise an error when unsafe keys are present."""
+    d = {
+        'a': 0,
+        'a.b.c': 1,
+        'a.b': 2,
+        'e.f.g': 3,
+        'e.f.g.h': 4,
+        'k': 5,
+    }
+    expected_msg = (
+        'Key a has dot children that would be overriden: b\nKey b has dot '
+        'children that would be overriden: c\nKey g has dot children that '
+        'would be overriden: h')
+    with self.assertRaisesWithLiteralMatch(ValueError, expected_msg):
+      hyperparameters.expand_dot_keys(d)
+
+
 if __name__ == '__main__':
   tf.enable_v2_behavior()
   absltest.main()
