@@ -36,6 +36,7 @@ from init2winit.model_lib import unet
 from init2winit.model_lib import vit
 from init2winit.model_lib import wide_resnet
 from init2winit.model_lib import xformer_translate
+from init2winit.model_lib import xformer_translate_binary
 
 _ALL_MODELS = {
     'fully_connected':
@@ -69,6 +70,8 @@ _ALL_MODELS = {
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
     'xformer_translate': (xformer_translate.TransformerTranslate,
                           xformer_translate.DEFAULT_HPARAMS),
+    'xformer_translate_binary': (xformer_translate_binary.TransformerTranslate,
+                                 xformer_translate_binary.DEFAULT_HPARAMS),
     'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS),
     'dlrm': (dlrm.DLRMModel, dlrm.DEFAULT_HPARAMS),
     'vit': (vit.ViTModel, vit.DEFAULT_HPARAMS),

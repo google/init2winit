@@ -48,7 +48,7 @@ OUTPUT_SHAPE = {
 # Automatically test all defined models.
 autoencoder_models = ['autoencoder', 'convolutional_autoencoder']
 text_models = ['transformer', 'performer']
-seq2seq_models = ['xformer_translate']
+seq2seq_models = ['xformer_translate', 'xformer_translate_binary']
 
 autoencoder_keys = [('test_{}'.format(m), m) for m in autoencoder_models]
 excluded_classification_models = text_models + autoencoder_models + seq2seq_models + [
