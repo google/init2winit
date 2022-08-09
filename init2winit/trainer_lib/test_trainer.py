@@ -843,7 +843,7 @@ class TrainerTest(parameterized.TestCase):
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
           weights=np.array([0., 1., 1., 0., 1., 1.,]),
           test_metric_names=['ce_loss', 'average_precision', 'auc_roc'],
-          test_metric_vals=[1.448154, 0.0, 0.0]),
+          test_metric_vals=[1.448154, 0.5, 0.5]),
       dict(
           testcase_name='binary_autoencoder_2d_weights',
           metrics_name='binary_autoencoder_metrics',

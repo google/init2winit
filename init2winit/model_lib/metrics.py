@@ -188,7 +188,8 @@ class BinaryMeanAveragePrecision(
     if np.any(np.isnan(logits)):
       raise utils.TrainingDivergedError('NaN detected in logits')
 
-    valid_targets = targets[weights > 0]
+    # TODO(mbadura): The np.array call should not be needed after numpy upgrade.
+    valid_targets = targets[np.array(weights > 0)]
     targets_sum = np.sum(valid_targets)
     # Do not compute AUC if positives only have one class.
     if targets_sum == 0 or targets_sum == len(valid_targets):
@@ -213,7 +214,8 @@ class BinaryAUCROC(
         values['logits'],
         values['weights'],
         'BinaryAUCROC')
-    valid_targets = targets[weights > 0]
+    # TODO(mbadura): The np.array call should not be needed after numpy upgrade.
+    valid_targets = targets[np.array(weights > 0)]
     targets_sum = np.sum(valid_targets)
     # Do not compute AUC if all labels are the same.
     if targets_sum == 0 or targets_sum == len(valid_targets):
