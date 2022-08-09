@@ -39,7 +39,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     output_shape=(1000,),
     train_size=1281167,
     valid_size=50000,
-    use_inception_crop=False,
+    crop='random',  # options are: {"random", "inception", "center"}
+    random_flip=True,
     use_mixup=False,
     mixup={'alpha': 0.5},
     use_randaug=False,
@@ -228,29 +229,35 @@ def normalize_image(image):
   return image
 
 
-def preprocess_for_train(image_bytes,
+def preprocess_for_train(hps,
+                         image_bytes,
                          key,
                          dtype=tf.float32,
-                         image_size=224,
-                         hps=None):
+                         image_size=224):
   """Preprocesses the given image for training.
 
   Args:
+    hps: ConfigDict of options.
     image_bytes: `Tensor` representing an image binary of arbitrary size.
     key: tf random key.
     dtype: data type of the image.
     image_size: image size.
-    hps: ConfigDict of options.
 
   Returns:
     A preprocessed image `Tensor`.
   """
-  if hps.get('use_inception_crop'):
-    image = _decode_and_inception_crop(image_bytes, image_size)
-  else:
+  if hps.crop == 'random':
     image = _decode_and_random_crop(image_bytes, image_size)
+  elif hps.crop == 'inception':
+    image = _decode_and_inception_crop(image_bytes, image_size)
+  elif hps.crop == 'center':
+    image = _decode_and_center_crop(image_bytes, image_size)
+  else:
+    raise ValueError(f'{hps.crop} is not a valid crop strategy')
+
   image = tf.reshape(image, [image_size, image_size, 3])
-  image = tf.image.random_flip_left_right(image)
+  if hps['random_flip']:
+    image = tf.image.random_flip_left_right(image)
 
   if hps.get('use_randaug'):
     # NOTE(dsuo): autoaugment code expects uint8 image; not sure why we use
@@ -343,8 +350,8 @@ def load_split(
       # preprocess_rng is different for each example.
       preprocess_rng = tf.random.experimental.stateless_fold_in(
           tf.cast(shuffle_rng, tf.int64), example_index)
-      image = preprocess_for_train(example['image'], preprocess_rng, dtype,
-                                   image_size, hps)
+      image = preprocess_for_train(hps, example['image'], preprocess_rng, dtype,
+                                   image_size)
 
     else:
       image = preprocess_for_eval(example['image'], dtype, image_size)
