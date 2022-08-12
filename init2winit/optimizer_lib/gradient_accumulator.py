@@ -38,6 +38,9 @@ calculated on the total batch size.
 
 Note that this computes the *average* accumulated gradient, because we take the
 mean across the batch dimension in our loss functions.
+
+Note that we only sync gradients when we are about to update the model, in
+order to avoid unnecessary cross replica communications.
 """
 from typing import NamedTuple, Optional
 
@@ -58,9 +61,13 @@ def accumulate_gradients(
     total_batch_size: int,
     virtual_batch_size: Optional[int],
     base_opt_init_fn: optax.TransformInitFn,
-    base_opt_update_fn: optax.TransformUpdateFn
+    base_opt_update_fn: optax.TransformUpdateFn,
+    batch_axis_name: Optional[str] = None,
 ) -> optax.GradientTransformation:
   """Accumulate gradients.
+
+  Note that we only sync gradients when we are about to update the model, in
+  order to avoid unnecessary cross replica communications.
 
   Args:
     per_step_batch_size: The batch sized used for each individual
@@ -71,6 +78,8 @@ def accumulate_gradients(
       generate updates given the total gradient.
     base_opt_update_fn: The update function for the base optimizer used to
       generate updates given the total gradient.
+    batch_axis_name: the name of the axis to pmap over. Used to run a pmean
+      before applying the optimizer update.
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -110,6 +119,12 @@ def accumulate_gradients(
       # batches.
       total_gradients = jax.tree_map(
           lambda x: x / steps_per_update, total_gradients)
+      if batch_axis_name:
+        # We only sync gradients when we are about to update the model, in order
+        # to avoid unnecessary cross replica communications.
+        total_gradients = jax.lax.pmean(
+            total_gradients, axis_name=batch_axis_name)
+
       updates, updated_base_state = base_opt_update_fn(
           total_gradients, state.base_state, params=params)
       reset_state = GradientAccumulatorState(

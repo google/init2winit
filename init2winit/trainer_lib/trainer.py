@@ -27,6 +27,7 @@ from init2winit import schedules
 from init2winit import utils
 from init2winit.init_lib import init_utils
 from init2winit.model_lib import model_utils
+from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
 from init2winit.training_metrics_grabber import make_training_metrics
@@ -104,7 +105,12 @@ def update(
   (cost_value, new_batch_stats), grad = grad_fn(params)
   new_batch_stats = new_batch_stats.get('batch_stats', None)
 
-  cost_value, grad = lax.pmean((cost_value, grad), axis_name='batch')
+  # If we are accumulating gradients, we handle gradient synchronization inside
+  # the optimizer so that we can only sync when actually updating the model.
+  if isinstance(optimizer_state, gradient_accumulator.GradientAccumulatorState):
+    cost_value = lax.pmean(cost_value, axis_name='batch')
+  else:
+    cost_value, grad = lax.pmean((cost_value, grad), axis_name='batch')
 
   grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
   # TODO(znado): move to inside optax gradient clipping.
@@ -267,7 +273,8 @@ def train(
       max_training_updates=num_train_steps // stretch_factor,
       stretch_factor=stretch_factor)
 
-  optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps, model)
+  optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(
+      hps, model, batch_axis_name='batch')
   unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
 
   (unreplicated_metrics_state, metrics_update_fn, metrics_summary_fn

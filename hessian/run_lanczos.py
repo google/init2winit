@@ -127,7 +127,8 @@ def eval_checkpoints(
       with gfile.GFile(config_fname, 'w') as f:
         f.write(json.dumps(hessian_eval_config))
 
-  optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps)
+  optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(
+      hps, batch_axis_name='batch')
   unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
   # Note that we do not use the learning rate.
   # The optimizer state is a list of all the optax transformation states, and

@@ -262,7 +262,8 @@ def train(
   lr_fn = schedules.get_schedule_fn(
       hps.lr_hparams, num_train_steps, stretch_factor=stretch_factor)
 
-  optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(hps, model)
+  optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(
+      hps, model, batch_axis_name='batch')
   unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
 
   (unreplicated_metrics_state, metrics_update_fn, metrics_summary_fn

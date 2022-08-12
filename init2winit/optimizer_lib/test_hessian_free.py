@@ -95,7 +95,7 @@ def _load_conjgrad_inputs():
   return test_matmul_fn, b, x0, n, obj_fn, variables
 
 
-def _load_autoencoder_model():
+def _load_autoencoder_model(batch_axis_name=None):
   """Loads a test autoencoder model."""
   model_str = 'autoencoder'
   model_cls = models.get_model(model_str)
@@ -122,7 +122,8 @@ def _load_autoencoder_model():
   })
 
   model = model_cls(hps, {'apply_one_hot_in_loss': False}, loss, metrics)
-  init_fn, update_fn = optimizers.get_optimizer(hps, model)
+  init_fn, update_fn = optimizers.get_optimizer(
+      hps, model, batch_axis_name=batch_axis_name)
   params = {
       'Dense_0': {
           'kernel': np.array([[-1., 2.], [2., 0.], [-1., 3.], [-2., 2.]]),
@@ -411,7 +412,8 @@ class HessianFreeTest(absltest.TestCase):
   def test_hessian_free_optimizer(self):
     """Tests the Hessian-free optimizer."""
 
-    model, update_fn, state, variables = _load_autoencoder_model()
+    model, update_fn, state, variables = _load_autoencoder_model(
+        batch_axis_name='batch')
     batch = _load_autoencoder_data()
 
     def forward_fn(variables, inputs):

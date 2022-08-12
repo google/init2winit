@@ -61,7 +61,7 @@ def sgd(learning_rate, weight_decay, momentum=None, nesterov=False):
           learning_rate=learning_rate, momentum=momentum, nesterov=nesterov))
 
 
-def get_optimizer(hps, model=None):
+def get_optimizer(hps, model=None, batch_axis_name=None):
   """Constructs the optax optimizer from the given HParams.
 
   We use optax.inject_hyperparams to wrap the optimizer transformations that
@@ -75,6 +75,7 @@ def get_optimizer(hps, model=None):
   Args:
     hps: the experiment hyperparameters, as a ConfigDict.
     model: the model to be trained.
+    batch_axis_name: the axis to pmap over.
 
   Returns:
     A tuple of the initialization and update functions returned by optax.
@@ -115,7 +116,7 @@ def get_optimizer(hps, model=None):
             best_effort_shape_interpretation=hps.opt_hparams['best_effort_shape_interpretation'],
             nesterov=hps.opt_hparams['nesterov'],
             exponent_override=hps.opt_hparams['exponent_override'],
-            batch_axis_name='batch',
+            batch_axis_name=batch_axis_name,
             graft_type=hps.opt_hparams['graft_type'],
             num_devices_for_pjit=hps.opt_hparams['num_devices_for_pjit'],
             shard_optimizer_states=hps.opt_hparams['shard_optimizer_states'],
@@ -183,7 +184,8 @@ def get_optimizer(hps, model=None):
         total_batch_size=hps.total_accumulated_batch_size,
         virtual_batch_size=virtual_batch_size,
         base_opt_init_fn=opt_init,
-        base_opt_update_fn=opt_update)
+        base_opt_update_fn=opt_update,
+        batch_axis_name=batch_axis_name)
 
   if opt_init is None or opt_update is None:
     raise NotImplementedError('Optimizer {} not implemented'.format(

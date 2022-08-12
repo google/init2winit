@@ -490,11 +490,11 @@ class CurvatureEvaluator:
     """
     gdirs = []
     udirs = []
-    compiled_tree_sum = jax.pmap(_tree_sum)
-    compiled_tree_zeros_like = jax.pmap(_tree_zeros_like)
+    compiled_tree_sum = jax.pmap(_tree_sum, axis_name='batch')
+    compiled_tree_zeros_like = jax.pmap(_tree_zeros_like, axis_name='batch')
     update_fn = functools.partial(
         _compute_update, optimizer_update_fn=optimizer_update_fn)
-    compiled_update = jax.pmap(update_fn)
+    compiled_update = jax.pmap(update_fn, axis_name='batch')
     count = 0.0
     full_grad = compiled_tree_zeros_like(params)
     for batch in self.batches_gen():
