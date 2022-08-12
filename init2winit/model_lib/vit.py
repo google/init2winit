@@ -31,7 +31,12 @@ import numpy as np
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         num_classes=1000,
-        variant='B/32',
+        variant=None,
+        width=384,
+        depth=12,
+        mlp_dim=1536,
+        num_heads=6,
+        patch_size=16,
         rep_size=True,
         pool_type='gap',
         posemb='sincos2d',
@@ -262,17 +267,21 @@ class ViT(nn.Module):
 
 
 class ViTModel(base_model.BaseModel):
+  """ViT model."""
 
   def build_flax_module(self):
     """Vision transformer."""
-    return ViT(
-        num_classes=self.hps.num_classes,
-        rep_size=self.hps.rep_size,
-        pool_type=self.hps.pool_type,
-        posemb=self.hps.posemb,
-        **{
-            **decode_variant(self.hps.variant),
-        })
+
+    keys = [
+        'num_classes', 'rep_size', 'pool_type', 'posemb', 'width', 'depth',
+        'mlp_dim', 'num_heads', 'patch_size'
+    ]
+
+    args = {k: self.hps[k] for k in keys}
+
+    if self.hps.variant is not None:
+      args.update(decode_variant(self.hps.variant))
+    return ViT(**args)
 
 
 def decode_variant(variant):
