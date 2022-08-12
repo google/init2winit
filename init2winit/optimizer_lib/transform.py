@@ -349,7 +349,8 @@ def scale_by_adam(b1: float = 0.9,
                   b2: float = 0.999,
                   eps: float = 1e-8,
                   eps_root: float = 0.0,
-                  debias: bool = True) -> optax.GradientTransformation:
+                  debias: bool = True,
+                  power: float = 0.5) -> optax.GradientTransformation:
   """Rescale updates according to the Adam algorithm.
 
   Args:
@@ -359,10 +360,12 @@ def scale_by_adam(b1: float = 0.9,
     eps_root: term added to the denominator inside the square-root to improve
       numerical stability when backpropagating gradients through the rescaling.
     debias: whether to use moment bias correction.
+    power: the power to use in the preconditioner (0.5 in default adam).
 
   Returns:
     An (init_fn, update_fn) tuple.
   """
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
     mu = jax.tree_map(jnp.zeros_like, params)  # First moment
@@ -377,8 +380,8 @@ def scale_by_adam(b1: float = 0.9,
     count = state.count + jnp.array(1, dtype=jnp.int32)
     mu_hat = mu if not debias else _bias_correction(mu, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
-                           mu_hat, nu_hat)
+    updates = jax.tree_map(
+        lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -475,7 +478,8 @@ def scale_by_nadam(b1: float = 0.9,
                    b2: float = 0.999,
                    eps: float = 1e-8,
                    eps_root: float = 0.0,
-                   debias: bool = True) -> optax.GradientTransformation:
+                   debias: bool = True,
+                   power: float = 0.5) -> optax.GradientTransformation:
   """Rescale updates according to the NAdam algorithm.
 
   References:
@@ -494,10 +498,12 @@ def scale_by_nadam(b1: float = 0.9,
     eps_root: term added to the denominator inside the square-root to improve
       numerical stability when backpropagating gradients through the rescaling.
     debias: whether to use bias correction.
+    power: the power to use in the preconditioner (0.5 in default adam).
 
   Returns:
     An (init_fn, update_fn) tuple.
   """
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
     mu = jax.tree_map(jnp.zeros_like, params)  # First moment
@@ -512,8 +518,8 @@ def scale_by_nadam(b1: float = 0.9,
     mu_hat = _update_moment(updates, mu, b1, 1)
     mu_hat = mu_hat if not debias else _bias_correction(mu_hat, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
-                           mu_hat, nu_hat)
+    updates = jax.tree_map(
+        lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
 
   return optax.GradientTransformation(init_fn, update_fn)
