@@ -162,7 +162,7 @@ def _create_synchronized_rng_seed():
 
 
 def _run(
-    train_fn,
+    trainer_cls,
     dataset_name,
     eval_batch_size,
     eval_num_batches,
@@ -240,7 +240,7 @@ def _run(
     init_logger = None
   try:
     epoch_reports = list(
-        train_fn(
+        trainer_cls(
             trial_dir,
             model,
             dataset_builder,
@@ -262,7 +262,7 @@ def _run(
             init_logger,
             training_metrics_config=training_metrics_config,
             callback_configs=callback_configs,
-            external_checkpoint_path=external_checkpoint_path))
+            external_checkpoint_path=external_checkpoint_path).train())
     logging.info(epoch_reports)
     meta_data['status'] = 'done'
   except utils.TrainingDivergedError as err:
@@ -303,9 +303,9 @@ def main(unused_argv):
       logging.info('checkpoint_steps: %r', checkpoint_steps)
       logging.info('eval_steps: %r', eval_steps)
 
-    train_fn = trainers.get_train_fn(FLAGS.trainer)
+    trainer_cls = trainers.get_trainer_cls(FLAGS.trainer)
     _run(
-        train_fn=train_fn,
+        trainer_cls=trainer_cls,
         dataset_name=FLAGS.dataset,
         eval_batch_size=FLAGS.eval_batch_size,
         eval_num_batches=FLAGS.eval_num_batches,

@@ -122,7 +122,7 @@ class RunLanczosTest(absltest.TestCase):
     checkpoint_steps = [10, 30, 40]
     metrics_logger, init_logger = None, None
     _ = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -137,7 +137,7 @@ class RunLanczosTest(absltest.TestCase):
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
             metrics_logger=metrics_logger,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
 
     checkpoint_dir = os.path.join(self.test_dir, 'checkpoints')
     rng = jax.random.PRNGKey(0)
@@ -243,7 +243,7 @@ class RunLanczosTest(absltest.TestCase):
     checkpoint_steps = [10, 20, 30, 40]
     metrics_logger, init_logger = None, None
     _ = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -259,7 +259,7 @@ class RunLanczosTest(absltest.TestCase):
             checkpoint_steps=checkpoint_steps,
             metrics_logger=metrics_logger,
             callback_configs=callback_configs,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
 
     checkpoint_dir = os.path.join(self.test_dir, 'checkpoints')
     # Load the saved file.
@@ -269,7 +269,7 @@ class RunLanczosTest(absltest.TestCase):
     # Test that the logged steps are correct.
     pytree_list = [pytree_list[str(i)] for i in range(len(pytree_list))]
     saved_steps = [int(row['step']) for row in pytree_list]
-    self.assertEqual(saved_steps, checkpoint_steps)
+    self.assertEqual(saved_steps, checkpoint_steps + [41])
 
     # Check the dict keys.
     expected_keys = [

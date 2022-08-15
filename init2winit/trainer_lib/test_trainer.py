@@ -418,7 +418,7 @@ class TrainerTest(parameterized.TestCase):
 
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     _ = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -437,7 +437,7 @@ class TrainerTest(parameterized.TestCase):
             eval_frequency=2,
             checkpoint_steps=[],
             metrics_logger=metrics_logger,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
 
     with tf.io.gfile.GFile(os.path.join(self.test_dir,
                                         'measurements.csv')) as f:
@@ -481,7 +481,7 @@ class TrainerTest(parameterized.TestCase):
 
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     _ = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -496,7 +496,7 @@ class TrainerTest(parameterized.TestCase):
             eval_frequency=2,
             checkpoint_steps=[],
             metrics_logger=metrics_logger,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
 
     with tf.io.gfile.GFile(os.path.join(self.test_dir,
                                         'measurements.csv')) as f:
@@ -562,7 +562,7 @@ class TrainerTest(parameterized.TestCase):
 
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     _ = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -577,7 +577,7 @@ class TrainerTest(parameterized.TestCase):
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
             metrics_logger=metrics_logger,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
 
     with tf.io.gfile.GFile(
         os.path.join(self.test_dir, 'measurements.csv')) as f:
@@ -592,7 +592,7 @@ class TrainerTest(parameterized.TestCase):
     # Test reload from the checkpoint by increasing num_train_steps.
     num_train_steps_reload = _TEXT_TRAIN_SIZE // _TEXT_BATCH_SIZE * 6
     _ = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -607,7 +607,7 @@ class TrainerTest(parameterized.TestCase):
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
             metrics_logger=metrics_logger,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
     with tf.io.gfile.GFile(
         os.path.join(self.test_dir, 'measurements.csv')) as f:
       df = pandas.read_csv(f)
@@ -703,7 +703,7 @@ class TrainerTest(parameterized.TestCase):
     checkpoint_steps = [1, 3, 15]
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     epoch_reports = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -718,7 +718,7 @@ class TrainerTest(parameterized.TestCase):
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
             metrics_logger=metrics_logger,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
 
     # check that the additional checkpoints are saved.
     checkpoint_dir = os.path.join(self.test_dir, 'checkpoints')
@@ -745,7 +745,7 @@ class TrainerTest(parameterized.TestCase):
     # Test reload from the checkpoint by increasing num_train_steps.
     num_train_steps_reload = 100
     epoch_reports = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -760,7 +760,7 @@ class TrainerTest(parameterized.TestCase):
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
             metrics_logger=metrics_logger,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
     self.assertLen(
         epoch_reports, (num_train_steps_reload - num_train_steps) / eval_every)
     with tf.io.gfile.GFile(
@@ -995,7 +995,7 @@ class TrainerTest(parameterized.TestCase):
     checkpoint_steps = [1, 3, 15]
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     epoch_reports = list(
-        trainer.train(
+        trainer.Trainer(
             train_dir=self.test_dir,
             model=model,
             dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
@@ -1013,7 +1013,7 @@ class TrainerTest(parameterized.TestCase):
             early_stopping_target_value=early_stopping_target_value,
             early_stopping_mode=early_stopping_mode,
             metrics_logger=metrics_logger,
-            init_logger=init_logger))
+            init_logger=init_logger).train())
     self.assertLen(epoch_reports, 3)
     self.assertGreater(
         epoch_reports[-2][early_stopping_target_name],
