@@ -85,6 +85,8 @@ def maybe_log_training_metrics(metrics_state,
     unreplicated_metrics_state = jax_utils.unreplicate(metrics_state)
     summary_tree = metrics_summary_fn(unreplicated_metrics_state)
     metrics_logger.append_pytree(summary_tree)
+    metrics_logger.write_pytree(unreplicated_metrics_state,
+                                prefix='metrics_state')
 
 
 def maybe_sync_batchnorm_stats(batch_stats):

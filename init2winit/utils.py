@@ -240,21 +240,23 @@ class MetricLogger(object):
       # size 512. We could only flush at the end of training to optimize this.
       self._tb_metric_writer.flush()
 
-  def write_pytree(self, pytree):
+  def write_pytree(self, pytree, prefix='training_metrics'):
     """Record a serializable pytree to disk, overwriting any previous state.
 
     Args:
-      pytree: Any serializable pytree.
+      pytree: Any serializable pytree
+      prefix: The prefix for the checkpoint.  Save path is
+        self._pytree_path/prefix
     """
     state = dict(pytree=pytree)
     checkpoint.save_checkpoint(
         self._pytree_path,
         step='',
         state=state,
-        prefix='training_metrics',
+        prefix=prefix,
         max_to_keep=None)
 
-  def append_pytree(self, pytree):
+  def append_pytree(self, pytree, prefix='training_metrics'):
     """Append and record a serializable pytree to disk.
 
     The pytree will be saved to disk as a list of pytree objects. Everytime
@@ -263,11 +265,12 @@ class MetricLogger(object):
 
     Args:
       pytree: Any serializable pytree.
+      prefix: The prefix for the checkpoint.
     """
     # Read the latest (and only) checkpoint, then append the new state to it
     # before saving back to disk.
     old_state = flax_checkpoints.restore_checkpoint(
-        self._pytree_path, target=None, prefix='training_metrics')
+        self._pytree_path, target=None, prefix=prefix)
     # Because we pass target=None, checkpointing will return the raw state
     # dict, where 'pytree' is a dict with keys ['0', '1', ...] instead of a
     # list.
