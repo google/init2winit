@@ -117,6 +117,10 @@ class RunPreconditionTest(absltest.TestCase):
     optimizer = 'kitchen_sink'
     opt_hparams = FrozenConfigDict({
         '0': {
+            'element': 'sanitize_values',
+            'hps': {}
+        },
+        '1': {
             'element': 'scale_by_adam',
             'hps': {
                 'b1': beta1,
@@ -124,7 +128,13 @@ class RunPreconditionTest(absltest.TestCase):
                 'eps': epsilon,
                 'debias': True
             }
-        }
+        },
+        '2': {
+            'element': 'clip_updates',
+            'hps': {
+                'clip_threshold': 1000.0
+            }
+        },
     })
 
     hparams = FrozenConfigDict({

@@ -40,6 +40,26 @@ def _make_adam_preconditioner(nu, count, eps, beta2, bias_correction):
   return jax.tree_map(lambda v: jnp.sqrt(v) + eps, nu)
 
 
+# KS transforms for which preconditioning is implemented.
+SUPPORTED_KS_TRANSFORMS = ['scale_by_adam', 'scale_by_nadam']
+
+
+def _make_ks_preconditioner(element, state, hps):
+  """Construct the diagonal preconditioner for a KS transform.
+
+  Args:
+   element: (str) the KS element
+   state: (pytree) the KS state for this transform
+   hps: (pytree) the KS opt hparams for this transform
+
+  Returns:
+   (pytree) diagonal preconditioner
+  """
+  if element == 'scale_by_adam' or element == 'scale_by_nadam':
+    return _make_adam_preconditioner(state.nu, state.count, hps['eps'],
+                                     hps['b2'], hps['debias'])
+
+
 def make_diag_preconditioner(optimizer, opt_hparams,
                              optimizer_state, precondition_config):
   """Construct a diagonal preconditioner.
@@ -75,19 +95,21 @@ def make_diag_preconditioner(optimizer, opt_hparams,
     return _make_adam_preconditioner(optimizer_state.nu, optimizer_state.count,
                                      opt_hparams.epsilon, opt_hparams.beta2,
                                      bias_correction)
-  if (optimizer == 'kitchen_sink' and '0' in opt_hparams and
-      len(opt_hparams.keys()) == 1):
-    element = opt_hparams['0']['element']
-    hps = opt_hparams['0']['hps']
-    if element == 'scale_by_adam':
-      scale_by_adam_state = optimizer_state[0][0][0]
-      return _make_adam_preconditioner(scale_by_adam_state.nu,
-                                       scale_by_adam_state.count, hps['eps'],
-                                       hps['b2'], hps['debias'])
-    elif element == 'scale_by_nadam':
-      scale_by_adam_state = optimizer_state[0][0][0]
-      return _make_adam_preconditioner(scale_by_adam_state.nu,
-                                       scale_by_adam_state.count, hps['eps'],
-                                       hps['b2'], hps['debias'])
+
+  # The following preconditioning logic covers the case where there is
+  # a single KS transform chain, and a single preconditioner in that chain.
+  if optimizer == 'kitchen_sink' and '0' in opt_hparams:
+    precondition_steps = [
+        step for step in opt_hparams.keys()
+        if opt_hparams[step]['element'] in SUPPORTED_KS_TRANSFORMS
+    ]
+    if len(precondition_steps) != 1:
+      raise ValueError("Don't know how to precondition this optimizer")
+
+    step = precondition_steps[0]
+    element = opt_hparams[step]['element']
+    hps = opt_hparams[step]['hps']
+    state = optimizer_state[0][0][int(step)]
+    return _make_ks_preconditioner(element, state, hps)
 
   raise ValueError("Don't know how to precondition this optimizer")
