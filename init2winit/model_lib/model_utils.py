@@ -48,11 +48,20 @@ lecun_normal = functools.partial(
     mode='fan_in',
     distribution='truncated_normal')
 
+# This trick is used in fairseq's multihead attention.
+# https://github.com/facebookresearch/fairseq/blob/0.12.2-release/fairseq/modules/multihead_attention.py#L171  # pylint: disable=line-too-long
+xavier_uniform_over_sqrt2 = functools.partial(
+    initializers.variance_scaling,
+    scale=1./2,
+    mode='fan_avg',
+    distribution='uniform')
+
 INITIALIZERS = {
     'delta_orthogonal': initializers.delta_orthogonal,
     'orthogonal': initializers.orthogonal,
     'lecun_normal': lecun_normal,
     'xavier_uniform': initializers.xavier_uniform,
+    'xavier_uniform_over_sqrt2': xavier_uniform_over_sqrt2,
 }
 
 
