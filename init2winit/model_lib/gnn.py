@@ -71,7 +71,7 @@ def _make_embed(latent_dim):
   return make_fn
 
 
-def _make_mlp(hidden_dims, maybe_normalize_fn, dropout):
+def _make_mlp(hidden_dims, maybe_normalize_fn, dropout, activation=nn.relu):
   """Creates a MLP with specified dimensions."""
 
   @jraph.concatenated_args
@@ -80,7 +80,7 @@ def _make_mlp(hidden_dims, maybe_normalize_fn, dropout):
     for dim in hidden_dims:
       x = nn.Dense(features=dim)(x)
       x = maybe_normalize_fn()(x)
-      x = nn.relu(x)
+      x = activation(x)
       x = dropout(x)
     return x
 
@@ -99,11 +99,13 @@ class GNN(nn.Module):
   normalizer: str
   dropout_rate: float
   num_message_passing_steps: int
+  activation_function: str
 
   @nn.compact
   def __call__(self, graph, train):
     maybe_normalize_fn = model_utils.get_normalizer(self.normalizer, train)
     dropout = nn.Dropout(rate=self.dropout_rate, deterministic=not train)
+    activation = model_utils.ACTIVATIONS[self.activation_function]
 
     graph = graph._replace(
         globals=jnp.zeros([graph.n_node.shape[0], self.num_outputs]))
@@ -118,15 +120,18 @@ class GNN(nn.Module):
           update_edge_fn=_make_mlp(
               self.hidden_dims,
               maybe_normalize_fn=maybe_normalize_fn,
-              dropout=dropout),
+              dropout=dropout,
+              activation=activation),
           update_node_fn=_make_mlp(
               self.hidden_dims,
               maybe_normalize_fn=maybe_normalize_fn,
-              dropout=dropout),
+              dropout=dropout,
+              activation=activation),
           update_global_fn=_make_mlp(
               self.hidden_dims,
               maybe_normalize_fn=maybe_normalize_fn,
-              dropout=dropout))
+              dropout=dropout,
+              activation=activation))
 
       graph = net(graph)
 
@@ -161,4 +166,5 @@ class GNNModel(base_model.BaseModel):
         hidden_dims=self.hps['hidden_dims'],
         normalizer=self.hps['normalizer'],
         dropout_rate=self.hps['dropout_rate'],
-        num_message_passing_steps=self.hps['num_message_passing_steps'])
+        num_message_passing_steps=self.hps['num_message_passing_steps'],
+        activation_function=self.hps['activation_function'],)
