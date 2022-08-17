@@ -262,7 +262,10 @@ def _run(
             init_logger,
             training_metrics_config=training_metrics_config,
             callback_configs=callback_configs,
-            external_checkpoint_path=external_checkpoint_path).train())
+            external_checkpoint_path=external_checkpoint_path,
+            dataset_meta_data=dataset_meta_data,
+            loss_name=loss_name,
+            metrics_name=metrics_name).train())
     logging.info(epoch_reports)
     meta_data['status'] = 'done'
   except utils.TrainingDivergedError as err:
