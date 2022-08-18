@@ -57,6 +57,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     use_shallue_label_smoothing=False,
     model_dtype='float32',
     grad_clip=None,
+    total_accumulated_batch_size=None,
 ))
 
 
