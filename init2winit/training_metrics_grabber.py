@@ -17,6 +17,7 @@
 
 import operator
 
+from init2winit.hessian.precondition import make_diag_preconditioner
 from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import utils as optimizer_utils
 from init2winit.utils import total_tree_norm_l2
@@ -36,13 +37,15 @@ DEFAULT_CONFIG = ConfigDict({
     'enable_gradient_norm': False,
     'enable_update_norm': False,
     'enable_update_norms': False,
+    'enable_preconditioner_normsq': False,
+    'enable_semip_grad_normsq': False,
     'enable_ema': False,
     'optstate_sumsq_fields': [],
     'optstate_sum_fields': [],
 })
 
 
-def make_training_metrics(num_train_steps, **config_overrides):
+def make_training_metrics(num_train_steps, hps, **config_overrides):
   """Creates functions for managing training metrics.
 
   Training metrics are handled in a functional, "jax-onic" way, similar to
@@ -96,10 +99,21 @@ def make_training_metrics(num_train_steps, **config_overrides):
         field name in optstate_sum_fields, and each value is a jnp array
         of length num_time_steps containing the time series of the sum
         of this optstate field.
+    - enable_preconditioner_normsq (bool): if true, the metrics state will have
+        a field "preconditioner_normsq" which is a jnp array of length
+        num_train_steps containing a time series of the squared L2 norm of the
+        preconditioner.  Adaptive optimizers only.  See the function
+        make_diag_preconditioner() in hessian/precondition.py for more
+        info on which optimizers are supported.
+    - enable_semip_grad_normsq (bool): if true, the metrics state will have
+        a field "semip_grad_normsq" which is a jnp array of length
+        num_train_steps containing a time series of the squared L2 norm of the
+        "semi-preconditioned" gradient.  Adaptive optimizers only.
 
   Args:
     num_train_steps: (int) the number of steps of training.  We use this to
       determine the shape of the arrays that store per-step time series.
+    hps (ConfigDict): the init2winit hps.
     **config_overrides: optional overrides for the training_metrics configs.
       Config keys which are not overridden will retain their default values.
 
@@ -154,6 +168,10 @@ def make_training_metrics(num_train_steps, **config_overrides):
           field_name: jnp.zeros(num_train_steps)
           for field_name in config['optstate_sum_fields']
       }
+    if config['enable_preconditioner_normsq']:
+      metrics_state['preconditioner_normsq'] = jnp.zeros(num_train_steps)
+    if config['enable_semip_grad_normsq']:
+      metrics_state['semip_grad_normsq'] = jnp.zeros(num_train_steps)
     return metrics_state
 
   def update_fn(metrics_state, step, train_cost, grad, old_params, new_params,
@@ -175,7 +193,6 @@ def make_training_metrics(num_train_steps, **config_overrides):
       next_metrics_state: (pytree) The next training metrics state.
     """
     param_norm = jax.tree_map(_compute_leaf_norms, old_params)
-
     if (config['enable_update_norm'] or config['enable_update_norms'] or
         config['enable_ema']):
       update = jax.tree_map(lambda x, y: x - y, old_params, new_params)
@@ -228,6 +245,23 @@ def make_training_metrics(num_train_steps, **config_overrides):
         field_normsq = total_tree_sum(field)
         next_metrics_state['optstate_sum'][field_name] = metrics_state[
             'optstate_sum'][field_name].at[step].set(field_normsq)
+    if (config['enable_preconditioner_normsq'] or
+        config['enable_semip_grad_normsq']):
+      preconditioner = make_diag_preconditioner(hps['optimizer'],
+                                                hps['opt_hparams'],
+                                                optimizer_state,
+                                                ConfigDict({}))
+      if config['enable_preconditioner_normsq']:
+        normsq = total_tree_norm_sql2(preconditioner)
+        next_metrics_state['preconditioner_normsq'] = metrics_state[
+            'preconditioner_normsq'].at[step].set(normsq)
+      if config['enable_semip_grad_normsq']:
+        semip_grad = jax.tree_map(lambda g, p: g / (p**0.5),
+                                  grad, preconditioner)
+        semip_grad_normsq = total_tree_norm_sql2(semip_grad)
+        next_metrics_state['semip_grad_normsq'] = metrics_state[
+            'semip_grad_normsq'].at[step].set(semip_grad_normsq)
+
     return next_metrics_state
 
   def summarize_fn(metrics_state):

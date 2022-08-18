@@ -19,6 +19,7 @@
 
 from absl import flags
 from absl.testing import absltest
+from init2winit.hessian.precondition import make_diag_preconditioner
 from init2winit.shared_test_utilities import pytree_equal
 from init2winit.training_metrics_grabber import make_training_metrics
 from init2winit.utils import total_tree_norm_l2
@@ -26,6 +27,8 @@ from init2winit.utils import total_tree_norm_sql2
 from init2winit.utils import total_tree_sum
 import jax
 import jax.numpy as jnp
+from ml_collections import ConfigDict
+from optax import InjectHyperparamsState
 from optax import ScaleByAdamState
 
 
@@ -44,8 +47,15 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     self.mock_nu0 = {'foo': 2*jnp.ones(5), 'bar': {'baz': 3*jnp.ones(10)}}
     self.mock_nu1 = {'foo': 3*jnp.ones(5), 'bar': {'baz': 4*jnp.ones(10)}}
 
-    self.mock_optimizer_state0 = ScaleByAdamState(0, None, self.mock_nu0)
-    self.mock_optimizer_state1 = ScaleByAdamState(1, None, self.mock_nu1)
+    self.mock_optimizer_state0 = InjectHyperparamsState(
+        0,
+        None,
+        (ScaleByAdamState(0, None, self.mock_nu0),))
+
+    self.mock_optimizer_state1 = InjectHyperparamsState(
+        0,
+        None,
+        (ScaleByAdamState(1, None, self.mock_nu1),))
 
     self.mock_cost0 = 1.0
     self.mock_cost1 = 0.5
@@ -74,7 +84,8 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
         lambda x: jnp.zeros(self.num_train_steps), self.mock_params0)
 
     # Test init with everything disabled.
-    init_fn, _, _ = make_training_metrics(self.num_train_steps)
+    init_fn, _, _ = make_training_metrics(self.num_train_steps,
+                                          ConfigDict({}))
     initial_metrics_state = init_fn(self.mock_params0)
     self.assertTrue(
         pytree_equal({'param_norm': zeros_scalar_like_params},
@@ -82,6 +93,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
 
     # Test init with enable_ema = True and enable_train_cost=True.
     init_fn, _, _ = make_training_metrics(self.num_train_steps,
+                                          ConfigDict({}),
                                           enable_ema=True,
                                           enable_train_cost=True,
                                           enable_param_norms=True,
@@ -105,6 +117,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
   def test_train_cost(self):
     """Ensure that the train cost is logged correctly."""
     init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
+                                                  ConfigDict({}),
                                                   enable_train_cost=True)
     initial_metrics_state = init_fn(self.mock_params0)
     updated_metrics_state = update_fn(initial_metrics_state,
@@ -130,7 +143,8 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
   def test_update_param_norm(self):
     """Ensure that the training metrics updater updates param norm correctly."""
 
-    init_fn, update_fn, _ = make_training_metrics(self.num_train_steps)
+    init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
+                                                  ConfigDict({}),)
     initial_metrics_state = init_fn(self.mock_params0)
     updated_metrics_state = update_fn(initial_metrics_state, 0, self.mock_cost0,
                                       self.mock_grad1, self.mock_params0,
@@ -157,6 +171,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     """Ensure that we update param norms correctly."""
 
     init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
+                                                  ConfigDict({}),
                                                   enable_param_norms=True)
     initial_metrics_state = init_fn(self.mock_params0)
     updated_metrics_state = update_fn(initial_metrics_state,
@@ -195,6 +210,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
   def test_update_update_norms(self):
     """Ensure that we update gradient and update norms correctly."""
     init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
+                                                  ConfigDict({}),
                                                   enable_gradient_norm=True,
                                                   enable_update_norm=True,
                                                   enable_update_norms=True)
@@ -248,6 +264,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     """Ensure that the training metrics updater updates grad ema correctly."""
 
     init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
+                                                  ConfigDict({}),
                                                   enable_ema=True,
                                                   ema_beta=0.5)
     initial_metrics_state = init_fn(self.mock_params0)
@@ -276,6 +293,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     """Test that optstate sumsq and sumsq are computed correctly."""
     init_fn, update_fn, _ = make_training_metrics(
         self.num_train_steps,
+        ConfigDict({}),
         optstate_sumsq_fields=['nu'],
         optstate_sum_fields=['nu'])
     initial_metrics_state = init_fn(self.mock_params0)
@@ -314,9 +332,59 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     self.assertEqual(updated_metrics_state['optstate_sum']['nu'][1],
                      total_tree_sum(self.mock_nu1))
 
+  def test_update_precondition(self):
+    """Test that precondition metrics are computed correctly."""
+    optimizer = 'adam'
+    opt_hparams = ConfigDict({'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8})
+
+    init_fn, update_fn, _ = make_training_metrics(
+        self.num_train_steps,
+        ConfigDict({
+            'optimizer': optimizer,
+            'opt_hparams': opt_hparams
+        }),
+        enable_preconditioner_normsq=True,
+        enable_semip_grad_normsq=True)
+    initial_metrics_state = init_fn(self.mock_params0)
+    updated_metrics_state = update_fn(initial_metrics_state,
+                                      0,
+                                      self.mock_cost0,
+                                      self.mock_grad1,
+                                      self.mock_params0,
+                                      self.mock_params1,
+                                      self.mock_optimizer_state0)
+    updated_metrics_state = update_fn(updated_metrics_state,
+                                      1,
+                                      self.mock_cost1,
+                                      self.mock_grad2,
+                                      self.mock_params1,
+                                      self.mock_params2,
+                                      self.mock_optimizer_state1)
+
+    pre0 = make_diag_preconditioner(optimizer, opt_hparams,
+                                    self.mock_optimizer_state0, ConfigDict({}))
+    semip_grad_0 = jax.tree_map(lambda g, p: g / (p**0.5), self.mock_grad1,
+                                pre0)
+
+    pre1 = make_diag_preconditioner(optimizer, opt_hparams,
+                                    self.mock_optimizer_state1, ConfigDict({}))
+    semip_grad_1 = jax.tree_map(lambda g, p: g / (p**0.5), self.mock_grad2,
+                                pre1)
+
+    self.assertEqual(updated_metrics_state['preconditioner_normsq'][0],
+                     total_tree_norm_sql2(pre0))
+    self.assertEqual(updated_metrics_state['preconditioner_normsq'][1],
+                     total_tree_norm_sql2(pre1))
+
+    self.assertEqual(updated_metrics_state['semip_grad_normsq'][0],
+                     total_tree_norm_sql2(semip_grad_0))
+    self.assertEqual(updated_metrics_state['semip_grad_normsq'][1],
+                     total_tree_norm_sql2(semip_grad_1))
+
   def test_summarize(self):
     """Test the training metrics summarizer."""
     _, _, summarize_fn = make_training_metrics(self.num_train_steps,
+                                               ConfigDict({}),
                                                enable_train_cost=True,
                                                enable_ema=True)
     metrics_state = {
