@@ -19,6 +19,7 @@
 
 from absl import flags
 from absl.testing import absltest
+from flax.core import freeze
 from init2winit.hessian.precondition import make_diag_preconditioner
 from init2winit.shared_test_utilities import pytree_equal
 from init2winit.training_metrics_grabber import make_training_metrics
@@ -40,12 +41,17 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
 
   def setUp(self):
     super(TrainingMetricsGrabberTest, self).setUp()
-    self.mock_params0 = {'foo': jnp.zeros(5), 'bar': {'baz': jnp.ones(10)}}
-    self.mock_grad1 = {'foo': -jnp.ones(5), 'bar': {'baz': -jnp.ones(10)}}
-    self.mock_grad2 = {'foo': -2*jnp.ones(5), 'bar': {'baz': -2*jnp.ones(10)}}
+    self.mock_params0 = freeze({'foo': jnp.zeros(5),
+                                'bar': {'baz': jnp.ones(10)}})
+    self.mock_grad1 = freeze({'foo': -jnp.ones(5),
+                              'bar': {'baz': -jnp.ones(10)}})
+    self.mock_grad2 = freeze({'foo': -2*jnp.ones(5),
+                              'bar': {'baz': -2*jnp.ones(10)}})
 
-    self.mock_nu0 = {'foo': 2*jnp.ones(5), 'bar': {'baz': 3*jnp.ones(10)}}
-    self.mock_nu1 = {'foo': 3*jnp.ones(5), 'bar': {'baz': 4*jnp.ones(10)}}
+    self.mock_nu0 = freeze({'foo': 2*jnp.ones(5),
+                            'bar': {'baz': 3*jnp.ones(10)}})
+    self.mock_nu1 = freeze({'foo': 3*jnp.ones(5),
+                            'bar': {'baz': 4*jnp.ones(10)}})
 
     self.mock_optimizer_state0 = InjectHyperparamsState(
         0,
@@ -72,7 +78,8 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                      self.mock_params1,
                                      self.mock_grad2)
 
-    self.mock_zeros = {'foo': jnp.zeros(5), 'bar': {'baz': jnp.zeros(10)}}
+    self.mock_zeros = freeze({'foo': jnp.zeros(5),
+                              'bar': {'baz': jnp.zeros(10)}})
 
   def test_init(self):
     """Test the training metrics initializer."""
@@ -151,10 +158,10 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_params1,
                                       self.mock_optimizer_state0)
     self.assertTrue(
-        pytree_equal(updated_metrics_state['param_norm'], {
+        pytree_equal(updated_metrics_state['param_norm'], freeze({
             'foo': jnp.linalg.norm(self.mock_params0['foo']),
             'bar': {'baz': jnp.linalg.norm(self.mock_params0['bar']['baz'])}
-        }))
+        })))
 
     updated_metrics_state = update_fn(initial_metrics_state, 1, self.mock_cost1,
                                       self.mock_grad2, self.mock_params1,
@@ -162,10 +169,10 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_optimizer_state1)
 
     self.assertTrue(
-        pytree_equal(updated_metrics_state['param_norm'], {
+        pytree_equal(updated_metrics_state['param_norm'], freeze({
             'foo': jnp.linalg.norm(self.mock_params1['foo']),
             'bar': {'baz': jnp.linalg.norm(self.mock_params1['bar']['baz'])}
-        }))
+        })))
 
   def test_update_param_norms(self):
     """Ensure that we update param norms correctly."""
@@ -190,7 +197,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_optimizer_state1)
     self.assertTrue(
         pytree_equal(
-            updated_metrics_state['param_norms'], {
+            updated_metrics_state['param_norms'], freeze({
                 'foo':
                     jnp.array([
                         jnp.linalg.norm(self.mock_params0['foo']),
@@ -205,7 +212,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                             0.0, 0.0, 0.0
                         ])
                 }
-            }))
+            })))
 
   def test_update_update_norms(self):
     """Ensure that we update gradient and update norms correctly."""
@@ -231,7 +238,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_optimizer_state1)
     self.assertTrue(
         pytree_equal(
-            updated_metrics_state['update_norms'], {
+            updated_metrics_state['update_norms'], freeze({
                 'foo':
                     jnp.array([
                         self.step_size*jnp.linalg.norm(self.mock_grad1['foo']),
@@ -248,7 +255,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                             0.0, 0.0, 0.0
                         ])
                 }
-            }))
+            })))
 
     self.assertEqual(updated_metrics_state['update_norm'][0],
                      total_tree_norm_l2(self.mock_grad1))

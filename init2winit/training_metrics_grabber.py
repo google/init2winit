@@ -17,6 +17,7 @@
 
 import operator
 
+from flax.core import freeze
 from init2winit.hessian.precondition import make_diag_preconditioner
 from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import utils as optimizer_utils
@@ -247,10 +248,9 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
             'optstate_sum'][field_name].at[step].set(field_normsq)
     if (config['enable_preconditioner_normsq'] or
         config['enable_semip_grad_normsq']):
-      preconditioner = make_diag_preconditioner(hps['optimizer'],
-                                                hps['opt_hparams'],
-                                                optimizer_state,
-                                                ConfigDict({}))
+      preconditioner = freeze(
+          make_diag_preconditioner(hps['optimizer'], hps['opt_hparams'],
+                                   optimizer_state, ConfigDict({})))
       if config['enable_preconditioner_normsq']:
         normsq = total_tree_norm_sql2(preconditioner)
         next_metrics_state['preconditioner_normsq'] = metrics_state[
