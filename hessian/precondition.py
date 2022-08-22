@@ -20,28 +20,46 @@ import jax
 import jax.numpy as jnp
 
 
-def _make_adam_preconditioner(nu, count, eps, beta2, bias_correction):
-  """Construct the diagonal preconditioner for Adam.
+def _maybe_bias_correct(ema, decay, count, debias):
+  """Apply bias correction to an EMA.
 
   Args:
-    nu: (pytree) The second moment EMA of the gradients.
-    count: (int) The number of steps so far.
-    eps: (float) The Adam epsilon parameter.
-    beta2: (float) The Adam beta2 parameter.
-    bias_correction: (bool): If true, incorporate bias correction into the
-      preconditioner.
+    ema: (pytree) The EMA before bias correction.
+    decay: (float) The decay rate, e.g. Adam's beta2 parameter.
+    count: (int) The number of EMA updates so far.
+    debias: (bool) Whether to apply bias correction.
 
   Returns:
-    (pytree) Adam's diagonal preconditioner, as a pytree.
+    bias-corrected EMA
   """
-  if bias_correction:
-    bias_correction_factor = 1 - beta2**count
-    nu = jax.tree_map(lambda x: x / bias_correction_factor, nu)
-  return jax.tree_map(lambda v: jnp.sqrt(v) + eps, nu)
+  if debias:
+    bias_correction_factor = 1 - decay**count
+    return jax.tree_map(lambda x: x / bias_correction_factor, ema)
+  else:
+    return ema
+
+
+def _make_inv_power_preconditioner(diag, eps, eps_root=0.0, power=0.5):
+  """Construct an inverse power preconditioner (e.g. Adam, Adagrad).
+
+  Args:
+    diag: (pytree) The values on the diagonal (e.g. Adam's nu).
+    eps: (float) Added outside the inv power for numerical stability.
+    eps_root: (float) Added inside the inv power for numerical stability.
+    power: (float) The power to which diag is raised.
+
+  Returns:
+    (pytree) The preconditioner, as a pytree.
+  """
+  return jax.tree_map(lambda v: jnp.power(v + eps_root, power) + eps, diag)
 
 
 # KS transforms for which preconditioning is implemented.
-SUPPORTED_KS_TRANSFORMS = ['scale_by_adam', 'scale_by_nadam']
+SUPPORTED_KS_TRANSFORMS = ['scale_by_adam',
+                           'scale_by_nadam',
+                           'scale_by_amsgrad',
+                           'precondition_by_rms',
+                           'precondition_by_rss']
 
 
 def _make_ks_preconditioner(element, state, hps):
@@ -55,9 +73,29 @@ def _make_ks_preconditioner(element, state, hps):
   Returns:
    (pytree) diagonal preconditioner
   """
+  err_msg = 'all KS hps must be set in order to compute preconditioned Hessian'
   if element == 'scale_by_adam' or element == 'scale_by_nadam':
-    return _make_adam_preconditioner(state.nu, state.count, hps['eps'],
-                                     hps['b2'], hps['debias'])
+    if not ('b2' in hps and 'debias' in hps
+            and 'eps' in hps and 'eps_root' in hps):
+      raise ValueError(err_msg)
+    nu = _maybe_bias_correct(state.nu, hps['b2'], state.count, hps['debias'])
+    return _make_inv_power_preconditioner(nu, hps['eps'], hps['eps_root'],
+                                          hps.get('power', 0.5))
+  elif element == 'scale_by_amsgrad':
+    if not ('eps' in hps and 'eps_root' in hps):
+      raise ValueError(err_msg)
+    return _make_inv_power_preconditioner(state.nu, hps['eps'], hps['eps_root'])
+  elif element == 'precondition_by_rms':
+    if not ('decay' in hps and 'debias' in hps
+            and 'eps' in hps and 'eps_root' in hps):
+      raise ValueError(err_msg)
+    nu = _maybe_bias_correct(state.nu, hps['decay'], state.count, hps['debias'])
+    return _make_inv_power_preconditioner(nu, hps['eps'], hps['eps_root'])
+  elif element == 'precondition_by_rss':
+    if 'eps' not in hps:
+      raise ValueError(err_msg)
+    return _make_inv_power_preconditioner(state.sum_of_squares,
+                                          hps['eps'], 0.0)
 
 
 def make_diag_preconditioner(optimizer, opt_hparams,
@@ -91,10 +129,10 @@ def make_diag_preconditioner(optimizer, opt_hparams,
   optimizer_state = optimizer_state.inner_state[0]
 
   if optimizer == 'adam':
-    bias_correction = precondition_config.get('bias_correction', default=True)
-    return _make_adam_preconditioner(optimizer_state.nu, optimizer_state.count,
-                                     opt_hparams.epsilon, opt_hparams.beta2,
-                                     bias_correction)
+    bias_correct = precondition_config.get('bias_correction', default=True)
+    nu, count = optimizer_state.nu, optimizer_state.count
+    nu = _maybe_bias_correct(nu, opt_hparams.beta2, count, bias_correct)
+    return _make_inv_power_preconditioner(nu, opt_hparams.epsilon)
 
   # The following preconditioning logic covers the case where there is
   # a single KS transform chain, and a single preconditioner in that chain.

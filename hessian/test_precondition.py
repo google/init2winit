@@ -126,6 +126,7 @@ class RunPreconditionTest(absltest.TestCase):
                 'b1': beta1,
                 'b2': beta2,
                 'eps': epsilon,
+                'eps_root': 0.0,
                 'debias': True
             }
         },
