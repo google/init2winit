@@ -17,6 +17,10 @@ r"""Deepspeech.
 
 This model uses a deepspeech2 network to convert speech to text.
 paper : https://arxiv.org/abs/1512.02595
+
+# BiLSTM code contributed by bastings@
+# github : https://github.com/bastings
+# webpage : https://bastings.github.io/
 """
 
 import functools
