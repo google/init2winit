@@ -324,6 +324,11 @@ class CurvatureEvaluator:
   covariance matrix. Depending on the provided config file, Hessian spectrum,
   gradient covariance spectrum, or both are computed.
 
+  Setting config['matrix'] to 'gauss_newton' will cause the Gauss-Newton,
+  rather than Hessian, to be computed.  In this case, the user must also set
+  config['loss'] to one of the supported loss functions for Gauss-Newton
+  computation -- see spectral_density/hessian_computation.
+
   The exact output is toggled from the provided eval_config with following keys:
     num_eval_draws: The number of mini-batch updates studied (int > 0).
     num_points: The number of points used for linear interpolation of the loss.
@@ -338,7 +343,9 @@ class CurvatureEvaluator:
                eval_config,
                loss,
                dataset=None,
-               batches_gen=None):
+               batches_gen=None,
+               output_fn=None,
+               weights_fn=None):
     """Creates the CurvatureEvaluator object.
 
     Args:
@@ -351,6 +358,21 @@ class CurvatureEvaluator:
         Optional if dataset is supplied. API must satisfy
         for batch in batches_gen():
            batch_loss = loss(params, batch)
+      output_fn: Optionally, a function with API output_fn(params, batch) which
+        returns a rank-2 tensor of shape (batch_size, output_dim).  The caller
+        is responsible for ensuring that the output of output_fn is rank-2; for
+        networks like translation transformers whose output is rank-3 (e.g.
+        batch_size x sequence_length x vocab_size), the caller is responsible
+        for converting the network's output into a rank-2 tensor.  This
+        argument is only used when computing the Gauss-Newton matrix.
+      weights_fn: Optionally, a function with API weights_fn(batch) which
+        returns a rank-1 tensor of shape (batch_size,) used for weighting
+        the different examples.  This argument is only used when computing
+        the Gauss-Newton matrix. (For the Hessian, example weighting is
+        subsumed into the loss function).  If this argument is provided,
+        when computing the GN matrix, the batch's examples are weighted by the
+        normalized version of these weights.  If this argument is not provided,
+        then the code defaults to a weight of 1 for each example.
     """
     if batches_gen is None and dataset is None:
       raise ValueError('Either a dataset or a batches generator must be given'
@@ -379,8 +401,21 @@ class CurvatureEvaluator:
     self.avg_loss = functools.partial(avg_loss, loss_fn=loss)
     self.p_avg_loss = jax.pmap(
         functools.partial(avg_loss, loss_fn=loss), axis_name='batch')
-    self.hvp_fn, self.unravel, self.n_params = hessian_computation.get_hvp_fn(
-        loss, params, self.batches_gen, use_pmap=True)
+
+    which_matrix = eval_config.get('matrix', 'hessian')
+    if which_matrix == 'hessian':
+      self.hvp_fn, self.unravel, self.n_params = hessian_computation.get_hvp_fn(
+          loss, params, self.batches_gen, use_pmap=True)
+    elif which_matrix == 'gauss_newton':
+      if 'loss' not in eval_config:
+        raise ValueError('for GN computation, need to specify loss')
+      if output_fn is None:
+        raise ValueError('for GN computation, need to specify output_fn')
+      (self.hvp_fn, self.unravel,
+       self.n_params) = hessian_computation.get_gnvp_fn(
+           output_fn, params, self.batches_gen, eval_config['loss'],
+           use_pmap=True, weights_fn=weights_fn)
+
     self.update_model = jax.pmap(_additive_update)
     self.gvp_fn, _, n_params = hessian_computation.get_gradient_covariance_vp_fn(
         loss,

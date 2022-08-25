@@ -23,6 +23,7 @@ from init2winit import utils
 from init2winit.hessian import hessian_eval
 from init2winit.hessian import precondition
 import jax
+import jax.numpy as jnp
 from ml_collections import FrozenConfigDict
 
 
@@ -40,10 +41,27 @@ def set_up_hessian_eval(model, flax_module, batch_stats, dataset,
     return model.training_cost(
         module, batch, batch_stats=batch_stats, dropout_rng=rng)[0]
 
+  def batch_output(module, batch_rng):
+    batch, rng = batch_rng
+    out = model.apply_on_batch(module, batch_stats, batch,
+                               mutable=['batch_stats'], train=True,
+                               rngs={'dropout': rng})[0]
+    # If the rank is greater than 2, treat all but the last dimension
+    # as distinct examples.
+    return out.reshape(-1, out.shape[-1])
+
+  def batch_weights(batch_rng):
+    batch = batch_rng[0]
+    if 'weights' not in batch:
+      return jnp.ones(len(batch['inputs']))
+    else:
+      return batch['weights'].reshape(-1)
+
   pytree_path = os.path.join(checkpoint_dir, hessian_eval_config['name'])
   logger = utils.MetricLogger(pytree_path=pytree_path)
   hessian_evaluator = hessian_eval.CurvatureEvaluator(
-      flax_module, hessian_eval_config, dataset=dataset, loss=batch_loss)
+      flax_module, hessian_eval_config, dataset=dataset,
+      loss=batch_loss, output_fn=batch_output, weights_fn=batch_weights)
   return hessian_evaluator, logger
 
 
