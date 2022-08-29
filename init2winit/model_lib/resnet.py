@@ -58,6 +58,11 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     grad_clip=None,
     activation_function='relu',
     extra_norm_on_residual=False,
+    # set stride_bug=True to change the bottom resnet block strides from (2,2)
+    # to (1,1). This results in an unstable model when trained with momentum
+    # w/o warmup, and is an example of a resnet variant where Adam does better
+    # than momentum.
+    final_filters=None,
 ))
 
 
@@ -209,6 +214,7 @@ class ResNet(nn.Module):
   dropout_rate: float = 0.0
   activation_function: str = 'relu'
   extra_norm_on_residual: bool = False
+  final_filters: int = None
 
   @nn.compact
   def __call__(self, x, train):
@@ -241,9 +247,14 @@ class ResNet(nn.Module):
     for i, block_size in enumerate(block_sizes):
       for j in range(block_size):
         strides = (2, 2) if i > 0 and j == 0 else (1, 1)
+        if self.final_filters and i == (len(block_sizes) -
+                                        1) and j == (block_size - 1):
+          filters = self.final_filters
+        else:
+          filters = self.num_filters * 2 ** i
         index += 1
         x = residual_block(
-            self.num_filters * 2 ** i,
+            filters=filters,
             strides=strides,
             dtype=self.dtype,
             batch_norm_momentum=self.batch_norm_momentum,
@@ -298,4 +309,5 @@ class ResnetModel(base_model.BaseModel):
         use_bn=self.hps.use_bn,
         dropout_rate=self.hps.dropout_rate,
         activation_function=self.hps.activation_function,
-        extra_norm_on_residual=self.hps.extra_norm_on_residual)
+        extra_norm_on_residual=self.hps.extra_norm_on_residual,
+        final_filters=self.hps.final_filters)
