@@ -38,15 +38,9 @@ from ml_collections import config_dict
 # whereas the reference code epsilon outside.
 opt_hparams = {
     'weight_decay': 0.0,
-    '0': {
-        'element': 'precondition_by_rms',
-        'hps': {
-            'decay': 0.99,
-            'eps': 1e-8,
-            'eps_root': 0.0,
-            'debias': False,
-        }
-    }
+    'beta1': 0.9,
+    'beta2': 0.999,
+    'epsilon': 1e-8,
 }
 
 # NOTE(dsuo): This lives here because decay_events / decay_factors is too large
@@ -81,7 +75,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         chans=32,
         num_pool_layers=4,
         drop_prob=0.0,
-        optimizer='kitchen_sink',
+        optimizer='adam',
         opt_hparams=opt_hparams,
         lr_hparams=lr_hparams,
         l2_decay_factor=None,
