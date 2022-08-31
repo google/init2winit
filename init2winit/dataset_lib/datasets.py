@@ -26,8 +26,6 @@ from init2winit.dataset_lib import lm1b_v2
 from init2winit.dataset_lib import mlperf_imagenet_dataset
 from init2winit.dataset_lib import nqm_noise
 from init2winit.dataset_lib import ogbg_molpcba
-from init2winit.dataset_lib import per_host_imagenet_dataset
-from init2winit.dataset_lib import per_host_small_image_datasets
 from init2winit.dataset_lib import proteins
 from init2winit.dataset_lib import small_image_datasets
 from init2winit.dataset_lib import translate_wmt
@@ -69,14 +67,6 @@ _ALL_DATASETS = {
     'imagenet':
         _Dataset(imagenet_dataset.get_imagenet,
                  imagenet_dataset.DEFAULT_HPARAMS, imagenet_dataset.METADATA),
-    'per_host_imagenet':
-        _Dataset(per_host_imagenet_dataset.get_imagenet,
-                 per_host_imagenet_dataset.DEFAULT_HPARAMS,
-                 per_host_imagenet_dataset.METADATA),
-    'per_host_cifar10':
-        _Dataset(per_host_small_image_datasets.get_cifar10,
-                 per_host_small_image_datasets.CIFAR10_DEFAULT_HPARAMS,
-                 per_host_small_image_datasets.CIFAR10_METADATA),
     'translate_wmt':
         _Dataset(translate_wmt.get_translate_wmt, translate_wmt.DEFAULT_HPARAMS,
                  translate_wmt.METADATA),
