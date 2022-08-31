@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable
 
 from absl import logging
 from flax import linen as nn
-from flax import optim
+from flax import traverse_util
 from flax.core import FrozenDict
 from init2winit.model_lib import normalization
 import jax
@@ -240,7 +240,7 @@ def flatten_dict(nested_dict, sep='/'):
 
   For example, if the dictionary is {'outer1': {'inner1': 1, 'inner2': 2}}.
   This will return {'/outer1/inner1': 1, '/outer1/inner2': 2}. With sep='/' this
-  will match how flax optim.ParamTreeTraversal flattens the keys, to allow for
+  will match how flax.traverse_util.ParamTreeTraversal flattens the keys, to allow for
   easy filtering when using traversals. Requires the nested dictionaries
   contain no cycles.
 
@@ -282,8 +282,9 @@ def rescale_layers(params, layer_rescale_factors):
   for key in all_keys:
     logging.info(key)
 
+  # pylint: disable=cell-var-from-loop
   for key in layer_rescale_factors:
     logging.info('Rescaling %s by factor %f', key, layer_rescale_factors[key])
-    traversal = optim.ModelParamTraversal(lambda path, _: path == key)
+    traversal = traverse_util.ModelParamTraversal(lambda path, _: path == key)
     params = traversal.update(lambda x: x * layer_rescale_factors[key], params)
   return params
