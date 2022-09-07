@@ -440,7 +440,7 @@ class Trainer(base_trainer.BaseTrainer):
         self._lr_fn = schedules.get_schedule_fn(
             lr_hparams, (end_step - init_step) // stretch_factor,
             stretch_factor=stretch_factor)
-        lr = self._lr_fn(self._global_step)
+        lr = self._lr_fn(self._global_step - init_step)
         # It looks like we are reusing an rng key, but we aren't.
         # TODO(gdahl): Make it more obvious that passing rng is safe.
         # TODO(gdahl,gilmer,znado): investigate possibly merging the member
