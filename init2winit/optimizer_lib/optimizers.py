@@ -20,6 +20,7 @@ import flax
 from init2winit.optimizer_lib import alias
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
+from init2winit.optimizer_lib import natural_gradient
 from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib import utils
 from init2winit.optimizer_lib.hessian_free import CGIterationTrackingMethod
@@ -93,6 +94,37 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
     opt_init, opt_update = utils.static_inject_hyperparams(sgd)(
         learning_rate=0.0,  # Manually injected on each train step.
         weight_decay=weight_decay)
+  elif hps.optimizer == 'nice_function_optimizer':
+    hps_network = hps.opt_hparams['hps_network']
+    hps_last_layer = hps.opt_hparams['hps_last_layer']
+
+    # l2_decay_factor is checked, but we
+    # want it to be None for the suboptimizers.
+    hps_network['l2_decay_factor'] = None
+    hps_last_layer['l2_decay_factor'] = None
+
+    network_optimizer = optax.GradientTransformation(
+        *get_optimizer(hps_network))
+    last_layer_optimizer = optax.GradientTransformation(
+        *get_optimizer(hps_last_layer))
+
+    opt_init, opt_update = natural_gradient.nice_function_optimizer(
+        last_layer_name=hps.opt_hparams['last_layer_name'],
+        network_optimizer=network_optimizer,
+        last_layer_optimizer=last_layer_optimizer,
+        last_layer_base_lr=hps.opt_hparams['last_layer_base_lr'],
+        base_lr=hps.lr_hparams['base_lr'])
+  elif hps.optimizer == 'online_newton_step':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        natural_gradient.online_newton_step)(
+            learning_rate=0.0,  # Manually injected on each train step.
+            alpha=hps.opt_hparams['alpha'],
+            weight_decay=weight_decay)
+  elif hps.optimizer == 'online_diag_newton_step':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        natural_gradient.online_diag_newton_step)(
+            learning_rate=0.0,  # Manually injected on each train step.
+            weight_decay=weight_decay)
   elif hps.optimizer == 'momentum' or hps.optimizer == 'nesterov':
     opt_init, opt_update = utils.static_inject_hyperparams(sgd)(
         learning_rate=0.0,  # Manually injected on each train step.
