@@ -20,7 +20,6 @@ from typing import Callable
 from typing import Iterable
 from typing import Union
 
-import flax
 import optax
 
 
@@ -59,35 +58,9 @@ def static_inject_hyperparams(
     bound_arguments.apply_defaults()
     static_args = set(bound_arguments.arguments.keys()) - injectable_args
 
-    return optax.inject_hyperparams(inner_factory,
-                                    static_args)(*args, **kwargs)
+    return optax.inject_hyperparams(inner_factory, static_args)(*args, **kwargs)
 
   return wrapped_transform
-
-
-def create_mask(fn):
-  """Creates a mask that maps fn over the leaves of a dict.
-
-  Args:
-    fn: function to apply taking
-      - k: Tuple containing nodes (strings) in path to the leaf
-      - v: The leaf
-
-  Returns:
-    mask: function that takes dict and returns mapped dict
-  """
-
-  def mask(data):
-    flattened_dict = flax.traverse_util.flatten_dict(data)
-    return flax.traverse_util.unflatten_dict(
-        {k: fn(k, v) for k, v in flattened_dict.items()})
-
-  return mask
-
-
-def create_weight_decay_mask():
-  return create_mask(
-      lambda p, _: 'bias' not in p and not p[-2].startswith('BatchNorm'))
 
 
 def extract_field(state, field_name):

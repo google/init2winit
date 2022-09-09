@@ -147,7 +147,7 @@ def make_diag_preconditioner(optimizer, opt_hparams,
     step = precondition_steps[0]
     element = opt_hparams[step]['element']
     hps = opt_hparams[step]['hps']
-    state = optimizer_state[0][0][int(step)]
+    state = optimizer_state[int(step)]
     return _make_ks_preconditioner(element, state, hps)
 
   raise ValueError("Don't know how to precondition this optimizer")

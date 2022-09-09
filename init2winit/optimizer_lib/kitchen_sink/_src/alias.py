@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Aliases for popular optimisers."""
+"""Aliases for optimizers not found in optax."""
 from typing import Any, Callable, Optional, Union
-from init2winit.optimizer_lib import transform
+from init2winit.optimizer_lib.kitchen_sink._src import transform
 import optax
 
 

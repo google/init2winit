@@ -17,7 +17,6 @@
 
 from absl import logging
 import flax
-from init2winit.optimizer_lib import alias
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import samuel
@@ -154,7 +153,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         damping_ub=hps.opt_hparams['damping_ub'],
         damping_lb=hps.opt_hparams['damping_lb'])
   elif hps.optimizer == 'nadam':
-    opt_init, opt_update = utils.static_inject_hyperparams(alias.nadamw)(
+    opt_init, opt_update = utils.static_inject_hyperparams(kitchen_sink.nadamw)(
         learning_rate=0.0,
         b1=hps.opt_hparams['beta1'],
         b2=hps.opt_hparams['beta2'],
@@ -168,7 +167,9 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
     )
   elif hps.optimizer == 'kitchen_sink':
-    opt_init, opt_update = kitchen_sink.from_hparams(hps.opt_hparams)
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        kitchen_sink.kitchen_sink)(
+            learning_rate=0.0, config=hps.opt_hparams)
   elif hps.optimizer == 'samuel':
     opt_init, opt_update = samuel.from_hparams(hps.opt_hparams)
 

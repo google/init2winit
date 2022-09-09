@@ -652,3 +652,41 @@ def polyak_averaging(decay: float = 0.999) -> optax.GradientTransformation:
     return updates, Polyak_AveragingState(ema=new_ema)
 
   return optax.GradientTransformation(init_fn, update_fn)
+
+# scale_by_rms exists only for backward compatability
+_composites = {
+    'scale_by_adam': scale_by_adam,
+    'scale_by_yogi': optax.scale_by_yogi,
+    'scale_by_amsgrad': scale_by_amsgrad,
+    'scale_by_nadam': scale_by_nadam,
+    'scale_by_rms': precondition_by_rms,
+    'sgd': optax.sgd,
+}
+
+_first_moment_accumulators = {
+    'nesterov': nesterov,
+    'polyak_hb': polyak_hb,
+    'first_moment_ema': first_moment_ema,
+}
+
+_preconditioners = {
+    'precondition_by_rms': precondition_by_rms,
+    'precondition_by_yogi': precondition_by_yogi,
+    'precondition_by_rss': optax.scale_by_rss,
+    'precondition_by_amsgrad': precondition_by_amsgrad,
+    'precondition_by_layered_adaptive_rms': precondition_by_layered_adaptive_rms
+}
+
+_miscellaneous = {
+    'scale_by_learning_rate': scale_by_learning_rate,
+    'add_decayed_weights': optax.add_decayed_weights,
+    'polyak_averaging': polyak_averaging,
+    'clip_updates': clip_updates,
+    'sanitize_values': sanitize_values
+}
+
+transformation_registry = {}
+transformation_registry.update(_composites)
+transformation_registry.update(_preconditioners)
+transformation_registry.update(_first_moment_accumulators)
+transformation_registry.update(_miscellaneous)

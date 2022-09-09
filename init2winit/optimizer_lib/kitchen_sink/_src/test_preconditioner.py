@@ -18,8 +18,8 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 import chex
-from init2winit.optimizer_lib import preconditioner
-from init2winit.optimizer_lib import transform
+from init2winit.optimizer_lib.kitchen_sink._src import preconditioner
+from init2winit.optimizer_lib.kitchen_sink._src import transform
 import jax
 import jax.numpy as jnp
 import optax

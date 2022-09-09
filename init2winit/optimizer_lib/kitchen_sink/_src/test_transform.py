@@ -20,8 +20,8 @@ from typing import NamedTuple
 from absl.testing import absltest
 from absl.testing import parameterized
 import chex
-from init2winit.optimizer_lib import transform
-from init2winit.optimizer_lib.kitchen_sink import transform_chain
+from init2winit.optimizer_lib.kitchen_sink._src import transform
+from init2winit.optimizer_lib.kitchen_sink._src.core import kitchen_sink
 import jax
 import jax.numpy as jnp
 import optax
@@ -90,10 +90,14 @@ class NesterovTest(chex.TestCase):
             'w': jnp.array([0.43924114, 0.32708937])
         },
     ]
-    optimizer = transform_chain(['nesterov'], [{
-        'decay': 0.7
-    }],
-                                learning_rate=0.01)
+    optimizer = kitchen_sink(
+        {'0': {
+            'element': 'nesterov',
+            'hps': {
+                'decay': 0.7
+            }
+        }},
+        learning_rate=0.01)
     results = _optimizer_loop(optimizer)
     for target, result in zip(target_solution, results):
       chex.assert_trees_all_close(target, result)
@@ -122,10 +126,14 @@ class PolyakHBTest(chex.TestCase):
             'w': jnp.array([0.38620475, 0.2634457])
         },
     ]
-    optimizer = transform_chain(['polyak_hb'], [{
-        'decay': 0.7
-    }],
-                                learning_rate=0.01)
+    optimizer = kitchen_sink(
+        {'0': {
+            'element': 'polyak_hb',
+            'hps': {
+                'decay': 0.7
+            }
+        }},
+        learning_rate=0.01)
     results = _optimizer_loop(optimizer)
     for target, result in zip(target_solution, results):
       chex.assert_trees_all_close(target, result)
@@ -158,11 +166,17 @@ class FirstMomentEMATest(chex.TestCase):
     decay = 0.7
     learning_rate = 0.01
     true_ema = optax.chain(ema(decay), optax.scale(-1. * learning_rate))
-    ks_ema = transform_chain(['first_moment_ema'], [{
-        'decay': decay,
-        'debias': True,
-    }],
-                             learning_rate=learning_rate)
+    ks_ema = kitchen_sink(
+        {
+            '0': {
+                'element': 'first_moment_ema',
+                'hps': {
+                    'decay': decay,
+                    'debias': True
+                }
+            }
+        },
+        learning_rate=learning_rate)
     targets = _optimizer_loop(true_ema)
     results = _optimizer_loop(ks_ema)
 
@@ -175,12 +189,17 @@ class PreconditionByRMSTest(chex.TestCase):
 
   def test_debias_false(self):
     rms_prop = optax.scale_by_rms()
-    precondition_by_rms = transform_chain(['precondition_by_rms'], [{
-        'eps': 0,
-        'eps_root': 1e-8,
-        'decay': 0.9,
-        'debias': False
-    }])
+    precondition_by_rms = kitchen_sink({
+        '0': {
+            'element': 'precondition_by_rms',
+            'hps': {
+                'decay': 0.9,
+                'debias': False,
+                'eps': 0,
+                'eps_root': 1e-8
+            }
+        }
+    })
     targets = _optimizer_loop(rms_prop)
     results = _optimizer_loop(precondition_by_rms)
 
@@ -188,10 +207,21 @@ class PreconditionByRMSTest(chex.TestCase):
       chex.assert_trees_all_close(target, result)
 
   def test_debias_true(self):
-    adam = transform_chain(['scale_by_adam'], [{'b1': 0.0}])
-    precondition_by_rms = transform_chain(['precondition_by_rms'], [{
-        'debias': True
-    }])
+    adam = kitchen_sink(
+        {'0': {
+            'element': 'scale_by_adam',
+            'hps': {
+                'b1': 0.0
+            },
+        }})
+
+    precondition_by_rms = kitchen_sink(
+        {'0': {
+            'element': 'precondition_by_rms',
+            'hps': {
+                'debias': True
+            }
+        }})
     targets = _optimizer_loop(adam)
     results = _optimizer_loop(precondition_by_rms)
 
@@ -204,13 +234,19 @@ class PreconditionByYogiTest(chex.TestCase):
 
   def test_with_0_momentum_yogi(self):
     optax_yogi = optax.yogi(learning_rate=1.0, b1=0.0, b2=0.9, eps=1e-8)
-    precondition_by_yogi = transform_chain(['precondition_by_yogi'], [{
-        'eps': 1e-8,
-        'eps_root': 1e-6,
-        'b2': 0.9,
-        'debias': True
-    }],
-                                           learning_rate=1.0)
+    precondition_by_yogi = kitchen_sink(
+        {
+            '0': {
+                'element': 'precondition_by_yogi',
+                'hps': {
+                    'b2': 0.9,
+                    'debias': True,
+                    'eps': 1e-8,
+                    'eps_root': 1e-6
+                }
+            }
+        },
+        learning_rate=1.0)
     targets = _optimizer_loop(optax_yogi)
     results = _optimizer_loop(precondition_by_yogi)
 
@@ -265,19 +301,24 @@ class TwistedAdamTest(chex.TestCase):
       return optax.GradientTransformation(init_fn, update_fn)
 
     true_twisted_adam = twisted_adam()
-    ks_twisted_adam = transform_chain(
-        ['precondition_by_rms', 'first_moment_ema'], [
-            {
+    ks_twisted_adam = kitchen_sink({
+        '0': {
+            'element': 'precondition_by_rms',
+            'hps': {
                 'decay': rms_decay,
                 'eps': eps,
                 'eps_root': eps_root,
                 'debias': True
-            },
-            {
+            }
+        },
+        '1': {
+            'element': 'first_moment_ema',
+            'hps': {
                 'decay': moment_decay,
                 'debias': True
-            },
-        ])
+            }
+        }
+    })
 
     targets = _optimizer_loop(true_twisted_adam)
     results = _optimizer_loop(ks_twisted_adam)
@@ -312,7 +353,10 @@ class AMSGradTest(chex.TestCase):
       return optax.GradientTransformation(init_fn, update_fn)
 
     true_amsgrad = amsgrad()
-    ks_amsgrad = transform_chain(['scale_by_amsgrad'])
+    ks_amsgrad = kitchen_sink(
+        {'0': {
+            'element': 'scale_by_amsgrad'
+        }})
 
     targets = _optimizer_loop(true_amsgrad)
     results = _optimizer_loop(ks_amsgrad)
@@ -326,12 +370,22 @@ class EquivalenceTest(chex.TestCase):
 
   def test_adagrad(self):
     true_adagrad = optax.adagrad(0.7, initial_accumulator_value=0.3)
-    ks_adagrad = transform_chain(['precondition_by_rss', 'first_moment_ema'], [{
-        'initial_accumulator_value': 0.3
-    }, {
-        'decay': 0.0
-    }],
-                                 learning_rate=0.7)
+    ks_adagrad = kitchen_sink(
+        {
+            '0': {
+                'element': 'precondition_by_rss',
+                'hps': {
+                    'initial_accumulator_value': 0.3,
+                }
+            },
+            '1': {
+                'element': 'first_moment_ema',
+                'hps': {
+                    'decay': 0.0,
+                }
+            }
+        },
+        learning_rate=0.7)
 
     targets = _optimizer_loop(true_adagrad)
     results = _optimizer_loop(ks_adagrad)
@@ -344,23 +398,49 @@ class EqEMAHBTest(chex.TestCase):
   """Tests the equivalence of EMA vs HB. Both LR and WD need to scale."""
 
   def test_equivalence(self):
-    hb = transform_chain(
-        ['precondition_by_rms', 'polyak_hb', 'add_decayed_weights'], [{
-            'decay': 0.3
-        }, {
-            'decay': 0.5
-        }, {
-            'weight_decay': 0.1
-        }],
+    hb = kitchen_sink(
+        {
+            '0': {
+                'element': 'precondition_by_rms',
+                'hps': {
+                    'decay': 0.3
+                }
+            },
+            '1': {
+                'element': 'polyak_hb',
+                'hps': {
+                    'decay': 0.5
+                }
+            },
+            '2': {
+                'element': 'add_decayed_weights',
+                'hps': {
+                    'weight_decay': 0.1
+                }
+            }
+        },
         learning_rate=1.0)
-    ema = transform_chain(
-        ['precondition_by_rms', 'first_moment_ema', 'add_decayed_weights'], [{
-            'decay': 0.3
-        }, {
-            'decay': 0.5
-        }, {
-            'weight_decay': 0.05
-        }],
+    ema = kitchen_sink(
+        {
+            '0': {
+                'element': 'precondition_by_rms',
+                'hps': {
+                    'decay': 0.3
+                }
+            },
+            '1': {
+                'element': 'first_moment_ema',
+                'hps': {
+                    'decay': 0.5
+                }
+            },
+            '2': {
+                'element': 'add_decayed_weights',
+                'hps': {
+                    'weight_decay': 0.05
+                }
+            }
+        },
         learning_rate=2.0)
 
     targets = _optimizer_loop(hb)
@@ -377,13 +457,19 @@ class LayeredBetaTest(chex.TestCase):
     decays = [0.19, 0.75, 1.0]
     scales = [0.9, 0.5, 1.0]
     decay_distribution = [0.34, 0.34, 0.32]
-    ks_opt = transform_chain(['precondition_by_layered_adaptive_rms'], [{
-        'decays': decays,
-        'scales': scales,
-        'decay_distribution': decay_distribution,
-        'eps_root': 0.0
-    }],
-                             learning_rate=1.0)
+    ks_opt = kitchen_sink(
+        {
+            '0': {
+                'element': 'precondition_by_layered_adaptive_rms',
+                'hps': {
+                    'decays': decays,
+                    'scales': scales,
+                    'decay_distribution': decay_distribution,
+                    'eps_root': 0.0
+                }
+            },
+        },
+        learning_rate=1.0)
     scales = jnp.array([0.9, 0.5, 1.0, 1.0])
     betas = jnp.array([0.19, 0.75, 1.0, 1.0])
     one_minus_betas = jnp.array([0.81, 0.25, 1.0, 1.0])
