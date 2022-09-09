@@ -15,6 +15,7 @@
 
 """Classes specifying different protein domains."""
 import collections
+from collections import abc
 import copy
 
 import numpy as np
@@ -77,7 +78,7 @@ class Vocabulary(object):
       disallow_sep_token: If True, disallow `|` appearing in the vocabulary,
       which is used as separator token when serializing to csv.
     """
-    if not isinstance(tokens, collections.Iterable):
+    if not isinstance(tokens, abc.Iterable):
       tokens = range(tokens)
     tokens = [str(token) for token in tokens]
     if include_bos:
