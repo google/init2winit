@@ -387,6 +387,45 @@ def scale_by_adam(b1: float = 0.9,
   return optax.GradientTransformation(init_fn, update_fn)
 
 
+class PreconditionByRssState(NamedTuple):
+  """State holding the sum of gradient squares to date."""
+  sum_of_squares: optax.Updates
+
+
+def precondition_by_rss(
+    initial_accumulator_value: float = 0.1,
+    eps: float = 1e-7,
+    power: float = 0.5
+) -> optax.GradientTransformation:
+  """Rescale updates by the powers of the sum of all squared gradients to date.
+
+  Args:
+    initial_accumulator_value: starting value for accumulators, must be >= 0.
+    eps: a small floating point value to avoid zero denominator.
+    power: the power to use when scaling (default is 0.5 to scale by root sum
+    of squares).
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
+
+  def init_fn(params):
+    sum_of_squares = jax.tree_map(
+        lambda t: jnp.full_like(t, initial_accumulator_value), params)
+    return PreconditionByRssState(sum_of_squares=sum_of_squares)
+
+  def update_fn(updates, state, params=None):
+    del params
+    sum_of_squares = jax.tree_map(
+        lambda g, t: jnp.square(g) + t, updates, state.sum_of_squares)
+    updates = jax.tree_map(lambda scale, g: g / raise_power(scale + eps),
+                           sum_of_squares, updates)
+    return updates, PreconditionByRssState(sum_of_squares=sum_of_squares)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 def _sanitize_values(array, replacement=0.0):
   """Sanitizes NaN and Infinity values."""
   return jnp.nan_to_num(
@@ -672,7 +711,7 @@ _first_moment_accumulators = {
 _preconditioners = {
     'precondition_by_rms': precondition_by_rms,
     'precondition_by_yogi': precondition_by_yogi,
-    'precondition_by_rss': optax.scale_by_rss,
+    'precondition_by_rss': precondition_by_rss,
     'precondition_by_amsgrad': precondition_by_amsgrad,
     'precondition_by_layered_adaptive_rms': precondition_by_layered_adaptive_rms
 }
