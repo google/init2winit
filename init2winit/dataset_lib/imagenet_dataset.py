@@ -39,6 +39,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     output_shape=(1000,),
     train_size=1281167,
     valid_size=50000,
+    test_size=10000,  # ImageNet-v2.
+    use_imagenetv2_test=True,
     crop='random',  # options are: {"random", "inception", "center"}
     random_flip=True,
     use_mixup=False,
@@ -299,7 +301,8 @@ def load_split(
     hps,
     dtype=tf.float32,
     image_size=224,
-    shuffle_rng=None):
+    shuffle_rng=None,
+    tfds_dataset_name='imagenet2012:5.*.*'):
   """Creates a split from the ImageNet dataset using TensorFlow Datasets.
 
   The dataset returned by this function will repeat forever if split == 'train',
@@ -318,17 +321,21 @@ def load_split(
     image_size: The target size of the images.
     shuffle_rng: The RNG used to shuffle the split. Only used if
       `split == 'train'`.
+    tfds_dataset_name: The name of the dataset to load from TFDS. Used to reuse
+      this same logic for imagenet-v2.
   Returns:
     A `tf.data.Dataset`.
   """
   num_classes = 1000
 
-  if split not in ['train', 'eval_train', 'valid']:
+  if split not in ['train', 'eval_train', 'valid', 'test']:
     raise ValueError('Unrecognized split {}'.format(split))
   if split in ['train', 'eval_train']:
     split_size = hps.train_size // jax.process_count()
-  else:
+  elif split == 'valid':
     split_size = hps.valid_size // jax.process_count()
+  else:
+    split_size = hps.test_size // jax.process_count()
   start = jax.process_index() * split_size
   end = start + split_size
   # In order to properly load the full dataset, it is important that we load
@@ -339,9 +346,12 @@ def load_split(
 
   logging.info('Loaded data [%d: %d] from %s', start, end, split)
   if split in ['train', 'eval_train']:
-    tfds_split = 'train[{}:{}]'.format(start, end)
-  else:  # split == 'valid':
-    tfds_split = 'validation[{}:{}]'.format(start, end)
+    tfds_split = 'train'
+  elif split == 'valid':
+    tfds_split = 'validation'
+  else:
+    tfds_split = 'test'
+  tfds_split += '[{}:{}]'.format(start, end)
 
   def decode_example(example_index, example):
     # TODO(znado): make pre-processing deterministic.
@@ -352,7 +362,6 @@ def load_split(
           tf.cast(shuffle_rng, tf.int64), example_index)
       image = preprocess_for_train(hps, example['image'], preprocess_rng, dtype,
                                    image_size)
-
     else:
       image = preprocess_for_eval(example['image'], dtype, image_size)
 
@@ -370,7 +379,7 @@ def load_split(
 
   read_config = tfds.ReadConfig(add_tfds_id=True)
   ds = tfds.load(
-      'imagenet2012:5.*.*',
+      tfds_dataset_name,
       split=tfds_split,
       read_config=read_config,
       decoders={
@@ -415,7 +424,6 @@ def load_split(
   if split != 'train':
     ds = ds.cache()
   ds = ds.prefetch(hps.num_tf_data_prefetches)
-
   return ds
 
 
@@ -443,9 +451,19 @@ def get_imagenet(shuffle_rng,
       per_host_eval_batch_size, 'eval_train', hps=hps, image_size=image_size)
   eval_train_ds = tfds.as_numpy(eval_train_ds)
   logging.info('Loading eval split')
-  eval_ds = load_split(
+  validation_ds = load_split(
       per_host_eval_batch_size, 'valid', hps=hps, image_size=image_size)
-  eval_ds = tfds.as_numpy(eval_ds)
+  validation_ds = tfds.as_numpy(validation_ds)
+
+  test_ds = None
+  if hps.use_imagenetv2_test:
+    test_ds = load_split(
+        per_host_eval_batch_size,
+        'test',
+        hps=hps,
+        image_size=image_size,
+        tfds_dataset_name='imagenet_v2/matched-frequency')
+    test_ds = tfds.as_numpy(test_ds)
 
   def train_iterator_fn():
     return train_ds
@@ -456,16 +474,18 @@ def get_imagenet(shuffle_rng,
       yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
   def valid_epoch(num_batches=None):
-    for batch in itertools.islice(eval_ds, num_batches):
+    for batch in itertools.islice(validation_ds, num_batches):
       yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
-  # pylint: disable=unreachable
-  def test_epoch(*args, **kwargs):
-    del args
-    del kwargs
-    return
-    yield  # This yield is needed to make this a valid (null) iterator.
-  # pylint: enable=unreachable
+  def test_epoch(num_batches=None):
+    if test_ds:
+      for batch in itertools.islice(test_ds, num_batches):
+        yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
+    else:
+      # pylint: disable=unreachable
+      return
+      yield  # This yield is needed to make this a valid (null) iterator.
+      # pylint: enable=unreachable
 
   return data_utils.Dataset(
       train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)

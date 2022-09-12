@@ -18,6 +18,7 @@
 import itertools
 
 from init2winit.dataset_lib import data_utils
+from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import mlperf_input_pipeline
 import jax
 from ml_collections.config_dict import config_dict
@@ -31,7 +32,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     input_shape=(224, 224, 3),
     output_shape=(NUM_CLASSES,),
     train_size=1281167,
-    valid_size=50000))
+    valid_size=50000,
+    test_size=10000,  # ImageNet-v2.
+    use_imagenetv2_test=True))
 
 METADATA = {
     'apply_one_hot_in_loss': False,
@@ -113,6 +116,18 @@ def get_mlperf_imagenet(rng,
       shuffle_size=shuffle_buffer_size,
       preprocess_fn=_preprocess_fn)
 
+  # We do not have TFRecords of ImageNet-v2 in the same format as the
+  # train/validation splits above, so we reuse the same test split from the
+  # non-MLPerf pipeline.
+  test_ds = None
+  if hps.use_imagenetv2_test:
+    test_ds = imagenet_dataset.load_split(
+        eval_host_batch_size,
+        'test',
+        hps=hps,
+        image_size=224,
+        tfds_dataset_name='imagenet_v2/matched-frequency')
+
   # We cannot use tfds.as_numpy because this calls tensor.numpy() which does an
   # additional copy of the tensor, instead we call tensor._numpy() below.
   def train_iterator_fn():
@@ -136,13 +151,18 @@ def get_mlperf_imagenet(rng,
     for batch in np_iter:
       yield data_utils.maybe_pad_batch(batch, eval_host_batch_size)
 
-  # pylint: disable=unreachable
-  def test_epoch(*args, **kwargs):
-    del args
-    del kwargs
-    return
-    yield  # This yield is needed to make this a valid (null) iterator.
-  # pylint: enable=unreachable
+  def test_epoch(num_batches=None):
+    if test_ds:
+      test_iter = iter(test_ds)
+      np_iter = data_utils.iterator_as_numpy(
+          itertools.islice(test_iter, num_batches))
+      for batch in np_iter:
+        yield data_utils.maybe_pad_batch(batch, eval_host_batch_size)
+    else:
+      # pylint: disable=unreachable
+      return
+      yield  # This yield is needed to make this a valid (null) iterator.
+      # pylint: enable=unreachable
 
   return data_utils.Dataset(
       train_iterator_fn,
