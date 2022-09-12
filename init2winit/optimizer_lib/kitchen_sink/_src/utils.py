@@ -67,7 +67,8 @@ def apply_and_maybe_scale_by_learning_rate(config, learning_rate):
 
   def update_leaf(x):
     if is_scale_by_lr(x):
-      x['hps'] = x.get('hps', {}).update({'learning_rate': learning_rate})
+      x['hps'] = x.get('hps', {})
+      x['hps'].update({'learning_rate': learning_rate})
       return x
     return x
 
@@ -87,7 +88,7 @@ def apply_and_maybe_scale_by_learning_rate(config, learning_rate):
         }
     }
   elif num_scaled == 1:
-    return jax.tree_map(update_leaf, config)
+    return map_element(update_leaf, config)
   else:
     raise ValueError('Kitchen Sink configuration cannot have more than one '
                      'scale_by_learning_rate.')

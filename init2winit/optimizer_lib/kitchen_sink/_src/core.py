@@ -19,14 +19,17 @@ This project seeks to take ideas in optimization (e.g., scale decay,
 momentum) and understand when, how, and some insight into why they are
 effective.
 """
-from typing import Any
-from typing import Dict
+
+from typing import Any, Dict
 
 from init2winit.optimizer_lib.kitchen_sink._src import utils
 from init2winit.optimizer_lib.kitchen_sink._src.combine import join
 from init2winit.optimizer_lib.kitchen_sink._src.mask import mask_registry
 from init2winit.optimizer_lib.kitchen_sink._src.transform import transformation_registry
+import ml_collections
 import optax
+
+
 # TODO(dsuo): document config syntax.
 
 
@@ -91,7 +94,12 @@ def kitchen_sink(config: Dict[str, Any],
     optax.GradientTransform
   """
   # Cast to dict in case we have an ml_collections.ConfigDict.
-  config = dict(config)
+
+  if isinstance(config, ml_collections.ConfigDict):
+    config = config.to_dict()
+  elif not isinstance(config, dict):
+    raise ValueError(
+        'Kitchen Sink configuration needs to be a config dict or a python dict')
 
   # Syntactic sugar. If we have an implied chain, make it explicitly a chain.
   if all([str(i) in config for i in range(len(config))]):
