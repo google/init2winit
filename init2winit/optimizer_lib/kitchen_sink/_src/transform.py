@@ -132,6 +132,7 @@ def precondition_by_rms(
     eps: float = 1e-8,
     eps_root: float = 0.0,
     debias: bool = False,
+    power: float = 0.5,
 ) -> optax.GradientTransformation:
   """Preconditions updates according to the RMS Preconditioner from Adam.
 
@@ -145,12 +146,15 @@ def precondition_by_rms(
     eps_root: term added to the denominator inside the square-root to improve
       numerical stability when backpropagating gradients through the rescaling.
     debias: whether to use bias correction or not
+    power: the power to which the second moment is raised to
   Gotcha: Note that the usage of epsilon and defaults are different from optax's
     scale_by_rms. This matches optax's adam template.
 
   Returns:
     An (init_fn, update_fn) tuple.
   """
+
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
     return PreconditionBySecondMomentCoordinateWiseState(
@@ -161,7 +165,7 @@ def precondition_by_rms(
     nu = _update_moment(updates, state.nu, decay, 2)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     nu_hat = nu if not debias else _bias_correction(nu, decay, count)
-    updates = jax.tree_map(lambda u, v: u / (jnp.sqrt(v + eps_root) + eps),
+    updates = jax.tree_map(lambda u, v: u / (raise_power(v + eps_root) + eps),
                            updates, nu_hat)
     return updates, PreconditionBySecondMomentCoordinateWiseState(
         count=count, nu=nu)
