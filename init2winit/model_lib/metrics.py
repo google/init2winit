@@ -469,20 +469,55 @@ def average_ctc_loss():
   return _Metric
 
 
-def compute_wer(decoded, decoded_paddings, targets, target_paddings, tokenizer):
+def compute_wer(decoded,
+                decoded_paddings,
+                targets,
+                target_paddings,
+                tokenizer,
+                tokenizer_type='SPM'):
   """Computes word error rate."""
   word_errors = 0.0
   num_words = 0.0
 
-  decoded_sentences = tokenizer.ids_to_strings(decoded, decoded_paddings)
-  target_sentences = tokenizer.ids_to_strings(targets, target_paddings)
+  if tokenizer_type == 'WPM':
+    decoded_sentences = tokenizer.ids_to_strings(decoded, decoded_paddings)
+    target_sentences = tokenizer.ids_to_strings(targets, target_paddings)
 
-  for decoded_sentence, target_sentence in zip(decoded_sentences,
-                                               target_sentences):
-    target_num_words = len(target_sentence.split())
+    if len(decoded_sentences) != len(target_sentences):
+      raise ValueError('WER computation failed due to unequal lengths of'
+                       ' decoded and target sentences : {} vs {}'.format(
+                           len(decoded_sentences), len(target_sentences)))
 
-    word_errors += utils.edit_distance(decoded_sentence, target_sentence)
-    num_words += target_num_words
+    for decoded_sentence, target_sentence in zip(decoded_sentences,
+                                                 target_sentences):
+      target_num_words = len(target_sentence.split())
+
+      word_errors += utils.edit_distance(decoded_sentence, target_sentence)
+      num_words += target_num_words
+
+  elif tokenizer_type == 'SPM':
+    decoded_lengths = np.sum(decoded_paddings == 0.0, axis=-1)
+    target_lengths = np.sum(target_paddings == 0.0, axis=-1)
+
+    batch_size = targets.shape[0]
+
+    for i in range(batch_size):
+      decoded_length = decoded_lengths[i]
+      target_length = target_lengths[i]
+
+      decoded_i = decoded[i][:decoded_length]
+      target_i = targets[i][:target_length]
+
+      decoded_i = str(tokenizer.detokenize(decoded_i.astype(np.int32)))
+      target_i = str(tokenizer.detokenize(target_i.astype(np.int32)))
+
+      target_i = ' '.join(target_i.split())
+      target_num_words = len(target_i.split(' '))
+
+      word_errors += utils.edit_distance(decoded_i, target_i)
+      num_words += target_num_words
+  else:
+    raise ValueError('unsupported tokenizer type passed to compute WER.')
 
   return word_errors, num_words
 
@@ -519,7 +554,8 @@ def wer(hps):
       word_errors, num_words = compute_wer(values['hyps'],
                                            values['hyp_paddings'],
                                            values['targets'],
-                                           values['target_paddings'], tokenizer)
+                                           values['target_paddings'],
+                                           tokenizer, hps.tokenizer_type)
       return word_errors / num_words
 
   return WER

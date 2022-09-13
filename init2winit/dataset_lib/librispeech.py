@@ -39,7 +39,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         output_shape=(-1, VOCAB_SIZE),
         train_size=281241,
         tokenizer_vocab_path='',
-        tokenizer_type='WPM'))
+        tokenizer_type='SPM'))
 
 METADATA = {'apply_one_hot_in_loss': False}
 
