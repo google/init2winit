@@ -17,11 +17,13 @@
 
 from init2winit.optimizer_lib.kitchen_sink._src.alias import nadamw
 from init2winit.optimizer_lib.kitchen_sink._src.core import kitchen_sink
+from init2winit.optimizer_lib.kitchen_sink._src.transform import add_decayed_weights
 from init2winit.optimizer_lib.kitchen_sink._src.transform import bias_correction
 from init2winit.optimizer_lib.kitchen_sink._src.transform import BiasCorrectionState
 from init2winit.optimizer_lib.kitchen_sink._src.transform import clip_updates
 from init2winit.optimizer_lib.kitchen_sink._src.transform import first_moment_ema
 from init2winit.optimizer_lib.kitchen_sink._src.transform import nesterov
+from init2winit.optimizer_lib.kitchen_sink._src.transform import nesterovpp
 from init2winit.optimizer_lib.kitchen_sink._src.transform import polyak_averaging
 from init2winit.optimizer_lib.kitchen_sink._src.transform import Polyak_AveragingState
 from init2winit.optimizer_lib.kitchen_sink._src.transform import polyak_hb
@@ -41,6 +43,7 @@ from init2winit.optimizer_lib.kitchen_sink._src.transform import scale_by_nadam
 from init2winit.optimizer_lib.kitchen_sink._src.transform import ScaleByAdamState
 from init2winit.optimizer_lib.kitchen_sink._src.transform import ScaleByAMSGradState
 
+
 __version__ = '0.0.1'
 
 __all__ = (
@@ -51,6 +54,8 @@ __all__ = (
     'clip_updates',
     'first_moment_ema',
     'nesterov',
+    'nesterovpp',
+    'add_decayed_weights',
     'polyak_averaging',
     'Polyak_AveragingState',
     'polyak_hb',

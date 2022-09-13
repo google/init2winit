@@ -121,6 +121,34 @@ def first_moment_ema(
       decay=decay, debias=debias, accumulator_dtype=accumulator_dtype)
 
 
+def nesterovpp(
+    moment_decay: float,
+    update_decay: float,
+) -> optax.GradientTransformation:
+  """Decouples the betas of the two Nesterov steps.
+
+  Args:
+    moment_decay: the decay rate used for the first moment.
+    update_decay: the decay rate used for the update step.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  def init_fn(params):
+    return optax.TraceState(trace=jax.tree_map(jnp.zeros_like, params))
+
+  def update_fn(updates, state, params=None):
+    del params
+    f_moment = lambda g, t: g + moment_decay * t
+    f_update = lambda g, t: g + update_decay * t
+    new_trace = jax.tree_map(f_moment, updates, state.trace)
+    updates = jax.tree_map(f_update, updates, new_trace)
+    return updates, optax.TraceState(trace=new_trace)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 class PreconditionBySecondMomentCoordinateWiseState(NamedTuple):
   """State for the Adam preconditioner."""
   count: chex.Array
@@ -696,6 +724,45 @@ def polyak_averaging(decay: float = 0.999) -> optax.GradientTransformation:
 
   return optax.GradientTransformation(init_fn, update_fn)
 
+AddDecayedWeightsState = optax.EmptyState
+
+
+def add_decayed_weights(
+    weight_decay: float = 0.0,
+    learning_rate: float = 1.0,
+    flip_sign: float = False,
+) -> optax.GradientTransformation:
+  """Add parameter scaled by `weight_decay`.
+
+  Args:
+    weight_decay: A scalar weight decay rate.
+    learning_rate: An optional learning rate parameter to multiplied with the
+      weight decay
+    flip_sign: flips the sign of the weight decay operation. Default is False
+      under which weight decay is added mirroring the default behavior in optax
+      add_decayed_weights. True is to be used when there is no eventual
+      scale_by_learning_rate in the chain which flips the sign.
+
+  Returns:
+    A `GradientTransformation` object.
+  """
+  m = -1 if flip_sign else 1
+
+  def init_fn(params):
+    del params
+    return AddDecayedWeightsState()
+
+  def update_fn(updates, state, params):
+    if params is None:
+      raise ValueError(optax.NO_PARAMS_MSG)
+    updates = jax.tree_util.tree_map(
+        lambda g, p: g + m * learning_rate * weight_decay * p,
+        updates, params)
+    return updates, state
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 # scale_by_rms exists only for backward compatability
 _composites = {
     'scale_by_adam': scale_by_adam,
@@ -710,6 +777,7 @@ _first_moment_accumulators = {
     'nesterov': nesterov,
     'polyak_hb': polyak_hb,
     'first_moment_ema': first_moment_ema,
+    'nesterovpp': nesterovpp,
 }
 
 _preconditioners = {
@@ -722,7 +790,7 @@ _preconditioners = {
 
 _miscellaneous = {
     'scale_by_learning_rate': scale_by_learning_rate,
-    'add_decayed_weights': optax.add_decayed_weights,
+    'add_decayed_weights': add_decayed_weights,
     'polyak_averaging': polyak_averaging,
     'clip_updates': clip_updates,
     'sanitize_values': sanitize_values
