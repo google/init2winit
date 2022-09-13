@@ -14,8 +14,10 @@
 # limitations under the License.
 
 """Optimizer utilities."""
+
 import copy
 
+from absl import logging
 import flax
 import jax
 import optax
@@ -65,10 +67,13 @@ def apply_and_maybe_scale_by_learning_rate(config, learning_rate):
   def is_scale_by_lr(x):
     return not isinstance(x, str) and x['element'] == 'scale_by_learning_rate'
 
+  def contains_lr_as_param(x):
+    return not isinstance(x, str) and x.get(
+        'hps', None) and 'learning_rate' in x['hps']
+
   def update_leaf(x):
-    if is_scale_by_lr(x):
-      x['hps'] = x.get('hps', {})
-      x['hps'].update({'learning_rate': learning_rate})
+    if contains_lr_as_param(x):
+      x['hps']['learning_rate'] = learning_rate
       return x
     return x
 
@@ -90,5 +95,5 @@ def apply_and_maybe_scale_by_learning_rate(config, learning_rate):
   elif num_scaled == 1:
     return map_element(update_leaf, config)
   else:
-    raise ValueError('Kitchen Sink configuration cannot have more than one '
-                     'scale_by_learning_rate.')
+    logging.warning('Kitchen Sink configuration has more than one '
+                    'scale_by_learning_rate. Please double check config')
