@@ -58,8 +58,7 @@ class NumExamples(metrics.Metric):
 # https://github.com/google/flax/blob/main/examples/ogbg_molpcba/train.py
 @flax.struct.dataclass
 class OGBGMeanAveragePrecision(
-    metrics.CollectingMetric.from_outputs(
-        ('logits', 'targets', 'weights'))):
+    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))):
   """Computes the mean average precision (mAP) over different tasks on CPU.
 
   This implements the uncommon feature of allowing both per-example and
@@ -106,7 +105,7 @@ class OGBGMeanAveragePrecision(
     for task in range(num_tasks):
       # AP is only defined when there is at least one negative data
       # and at least one positive data.
-      if np.sum(targets[:, task] == 0) > 0 and (
+      if (np.sum(targets[:, task] == 0) > 0 and
           np.sum(targets[:, task] == 1) > 0):
         is_labeled = weights[:, task]
         average_precisions[task] = sklearn.metrics.average_precision_score(
@@ -171,8 +170,7 @@ def _binary_auc_shape_fix(targets, logits, weights, metric_name):
 
 @flax.struct.dataclass
 class BinaryMeanAveragePrecision(
-    metrics.CollectingMetric.from_outputs(
-        ('logits', 'targets', 'weights'))):
+    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))):
   """Computes the mean average precision for a binary classifier on CPU."""
 
   def compute(self):
@@ -180,9 +178,7 @@ class BinaryMeanAveragePrecision(
     # Ensure the arrays are numpy and not jax.numpy.
     values = {k: np.array(v) for k, v in values.items()}
     targets, logits, weights = _binary_auc_shape_fix(
-        values['targets'],
-        values['logits'],
-        values['weights'],
+        values['targets'], values['logits'], values['weights'],
         'BinaryMeanAveragePrecision')
 
     if np.any(np.isnan(logits)):
@@ -201,19 +197,17 @@ class BinaryMeanAveragePrecision(
 
 @flax.struct.dataclass
 class BinaryAUCROC(
-    metrics.CollectingMetric.from_outputs(
-        ('targets', 'logits', 'weights'))):
+    metrics.CollectingMetric.from_outputs(('targets', 'logits', 'weights'))):
   """Compute the AUC-ROC for binary classification on the CPU."""
 
   def compute(self):
     values = super().compute()
     # Ensure the arrays are numpy and not jax.numpy.
     values = {k: np.array(v) for k, v in values.items()}
-    targets, logits, weights = _binary_auc_shape_fix(
-        values['targets'],
-        values['logits'],
-        values['weights'],
-        'BinaryAUCROC')
+    targets, logits, weights = _binary_auc_shape_fix(values['targets'],
+                                                     values['logits'],
+                                                     values['weights'],
+                                                     'BinaryAUCROC')
     # TODO(mbadura): The np.array call should not be needed after numpy upgrade.
     valid_targets = targets[np.array(weights > 0)]
     targets_sum = np.sum(valid_targets)
@@ -268,6 +262,32 @@ def weighted_average_metric(fun):
   return _Metric
 
 
+def perplexity_fun():
+  """Returns function for calculating perplexity where PPL(x) = e^(CE(x)).
+
+  This is done exponentiating the CE calculated over potentially multiple
+  batches.
+
+  Returns:
+    Perplexity subclass of _Metric:
+      logits: [batch, length, num_classes] float array.
+      targets: one hot vector of shape [batch, ..., num_classes].
+      weights: None or array of shape [batch x ...] (rank of one_hot_targets
+      -1).
+      computed per example, shape [batch, ...].
+  """
+  _ParentMetricClass = weighted_average_metric(
+      losses.weighted_unnormalized_cross_entropy)
+
+  @flax.struct.dataclass
+  class _PerplexityMetricClass(_ParentMetricClass):
+
+    def compute(self):
+      return jnp.exp(self.total / self.weight)
+
+  return _PerplexityMetricClass
+
+
 # TODO(gilmer): Consider revising this to support categorical targets.
 def weighted_misclassifications(logits, targets, weights=None):
   """Compute weighted error rate over the given batch.
@@ -300,7 +320,8 @@ def weighted_misclassifications(logits, targets, weights=None):
   return loss
 
 
-def uniform_filter(im, size=7):
+def uniform_filter(im, size=7):  # pylint: disable=missing-docstring
+
   def conv(im):
     return jnp.convolve(
         jnp.pad(im, pad_width=size // 2, mode='symmetric'),
@@ -324,12 +345,12 @@ def structural_similarity(im1,
   Args:
     im1: ndarray Images. Any dimensionality with same shape.
     im2: ndarray Images. Any dimensionality with same shape.
-    data_range: float. The data range of the input image (distance
-      between minimum and maximum possible values). By default, this is
-    win_size: int or None. The side-length of the sliding window used
-      in comparison. Must be an odd value. If `gaussian_weights` is True, this
-      is ignored and the window size will depend on `sigma`.
-      estimated from the image data-type.
+    data_range: float. The data range of the input image (distance between
+      minimum and maximum possible values). By default, this is
+    win_size: int or None. The side-length of the sliding window used in
+      comparison. Must be an odd value. If `gaussian_weights` is True, this is
+      ignored and the window size will depend on `sigma`. estimated from the
+      image data-type.
     k1: float. Algorithm parameter K1 (see [1]).
     k2: float. Algorithm parameter K2 (see [2]).
 
@@ -347,7 +368,7 @@ def structural_similarity(im1,
   """
   filter_func = functools.partial(uniform_filter, size=win_size)
 
-  num_points = win_size ** len(im1.shape)
+  num_points = win_size**len(im1.shape)
 
   # filter has already normalized by num_points
   cov_norm = num_points / (num_points - 1)  # sample covariance
@@ -364,12 +385,12 @@ def structural_similarity(im1,
   vy = cov_norm * (uyy - uy * uy)
   vxy = cov_norm * (uxy - ux * uy)
 
-  c1 = (k1 * data_range) ** 2
-  c2 = (k2 * data_range) ** 2
+  c1 = (k1 * data_range)**2
+  c2 = (k2 * data_range)**2
 
   a1 = 2 * ux * uy + c1
   a2 = 2 * vxy + c2
-  b1 = ux ** 2 + uy ** 2 + c1
+  b1 = ux**2 + uy**2 + c1
   b2 = vx + vy + c2
 
   d = b1 * b2
@@ -395,7 +416,7 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
    mean: (batch,) mean of original images.
    std: (batch,) std of original images.
    volume_max: (batch,) of the volume max for the volumes each example came
-    from.
+     from.
 
   Returns:
     Structural similarity computed per example, shape [batch, ...].
@@ -426,8 +447,7 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
 
 
 def average_ctc_loss():
-  """Returns a clu.Metric that computes average CTC loss taking padding into account.
-  """
+  """Returns a clu.Metric that computes average CTC loss taking padding into account."""
 
   @flax.struct.dataclass
   class _Metric(metrics.Metric):
@@ -504,11 +524,19 @@ def wer(hps):
 
   return WER
 
+
 # All metrics used here must take three arguments named `logits`, `targets`,
 # `weights`. We don't use CLU's `mask` argument, the metric gets
 # that information from `weights`. The total weight for calculating the average
 # is `weights.sum()`.
 _METRICS = {
+    'autoregressive_language_model_metrics':
+        metrics.Collection.create(
+            error_rate=weighted_average_metric(weighted_misclassifications),
+            ce_loss=weighted_average_metric(
+                losses.weighted_unnormalized_cross_entropy),
+            perplexity=perplexity_fun(),
+            num_examples=NumExamples),
     'binary_autoencoder_metrics':
         metrics.Collection.create(
             sigmoid_binary_cross_entropy=weighted_average_metric(
@@ -540,7 +568,7 @@ _METRICS = {
             ce_loss=weighted_average_metric(
                 losses.unnormalized_sigmoid_binary_cross_entropy),
             num_examples=NumExamples,
-            ),
+        ),
     'image_reconstruction_metrics':
         metrics.Collection.create(
             l1_loss=weighted_average_metric(
