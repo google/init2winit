@@ -30,7 +30,7 @@ TEST_BATCH_SIZE = 16
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        sequence_length=35,
+        sequence_length=34,
         max_target_length=34,
         max_eval_target_length=34,
         input_shape=(32,),

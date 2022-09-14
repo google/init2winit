@@ -101,20 +101,21 @@ def get_wikitext2_dataset(
   valid_dataset_tokenized = tokenizer.tokenize(valid_text_dataset)
   test_dataset_tokenized = tokenizer.tokenize(test_text_dataset)
 
-  # Divide data in sequences.
+  # Divide data in sequences of length sequence_length + 1, to contain inputs
+  # and corresponding targets
   train_dataset_sequences = batch_with_padding(
       train_dataset_tokenized,
-      hps.sequence_length,
+      hps.sequence_length + 1,
       padded_shapes=hps.sequence_length,
   )
   valid_dataset_sequences = batch_with_padding(
       valid_dataset_tokenized,
-      hps.sequence_length,
+      hps.sequence_length + 1,
       padded_shapes=hps.sequence_length,
   )
   test_dataset_sequences = batch_with_padding(
       test_dataset_tokenized,
-      hps.sequence_length,
+      hps.sequence_length + 1,
       padded_shapes=hps.sequence_length,
   )
 
