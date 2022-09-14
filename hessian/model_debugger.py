@@ -455,6 +455,7 @@ class ModelDebugger:
                 params=None,
                 grad=None,
                 update=None,
+                fwd_pass_summaries=None,
                 param_norms_sql2=None,
                 grad_norms_sql2=None,
                 update_norms_sql2=None,
@@ -489,6 +490,11 @@ class ModelDebugger:
       params: Optional pytree of the model parameters.
       grad: Optional pytree of the loss gradient.
       update: Optional pytree of the optimizer update.
+      fwd_pass_summaries: Optional pytree of any statistics computed from the
+        foward pass. Note, everything will be logged to disk, so be careful
+        about tree with large leaves (e.g. if fwd_pass_summaries is the tree
+        directly return from capture_intermediates=True, then we would save to
+        disk the full activation tensors).
       param_norms_sql2: Optional pytree of the square l2 param norms, this will
         be used instead of the params argument when logging the parameter norms.
       grad_norms_sql2: Optional pytree of the square l2 grad norms.
@@ -525,12 +531,15 @@ class ModelDebugger:
     if self.skip_flags or self.skip_groups:
       all_metrics.update(self.run_skip_analysis(params, batch, rng))
 
-    if self.forward_pass:
+    if self.forward_pass and not fwd_pass_summaries:
       if batch is None:
         raise ValueError(
             'Must supply a batch when computing forward pass stats.')
-      forward_stats = self.forward_pass(params, batch, rng)
-      all_metrics.update(forward_stats)
+
+      fwd_pass_summaries = self.forward_pass(params, batch, rng)
+
+    if fwd_pass_summaries:
+      all_metrics.update(fwd_pass_summaries)
 
     # When using metrics_logger.append_pytree(pytree, append=True), what is
     # saved is a list of pytrees with scalar leaves, one leaf per layer norm
