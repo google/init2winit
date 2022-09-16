@@ -13,7 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Data loader for pre-processed Criteo data."""
+"""Data loader for pre-processed Criteo data.
+
+Similar to how the NVIDIA example works, we split data from the last day into a
+validation and test split (taking the first half for test and second half for
+validation). See here for the NVIDIA example:
+https://github.com/NVIDIA/DeepLearningExamples/blob/4e764dcd78732ebfe105fc05ea3dc359a54f6d5e/PyTorch/Recommendation/DLRM/preproc/run_spark_cpu.sh#L119.
+"""
 import functools
 import math
 import os
@@ -33,7 +39,12 @@ CRITEO1TB_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     train_file_path=os.path.join(CRITEO1TB_FILE_PATH, 'train/train*'),
     eval_file_path=os.path.join(CRITEO1TB_FILE_PATH, 'eval/eval*'),
     train_size=4_195_197_692,
-    valid_size=89_137_318,
+    # This will be exactly double if use_half_last_criteo_day_as_test=False.
+    valid_size=89_137_318 // 2,
+    test_size=89_137_318 // 2,
+    # Set to False if the entire final day is used as a validation set (and no
+    # test set is used).
+    use_half_last_criteo_day_as_test=True,
 ))
 CRITEO1TB_METADATA = {
     'apply_one_hot_in_loss': True,
@@ -70,11 +81,12 @@ def _parse_example_fn(num_dense_features, vocab_sizes, example):
 
 
 def _criteo_tsv_reader(
-    file_path=None,
-    num_dense_features=None,
-    vocab_sizes=None,
-    batch_size=None,
-    is_training=True):
+    split,
+    file_path,
+    num_dense_features,
+    vocab_sizes,
+    batch_size,
+    use_half_last_criteo_day_as_test=True):
   """Input reader fn for pre-processed Criteo data.
 
   Raw Criteo data is assumed to be preprocessed in the following way:
@@ -84,19 +96,33 @@ def _criteo_tsv_reader(
   4. Categorical data is bucketized and are hence tf.int32.
 
   Args:
+    split: a text string indicating which split, one of
+      {'train', 'eval_train', 'validation', 'test'}.
     file_path: filepath to the criteo dataset.
     num_dense_features: number of dense features.
     vocab_sizes: vocabulary size.
     batch_size: batch size.
-    is_training: whether or not this split is the one trained on.
+    use_half_last_criteo_day_as_test: whether or not to split the first half of
+      the last day of data into a test set, using the rest for validation.
   Returns:
     A tf.data.Dataset object.
   """
+  if split not in ['train', 'eval_train', 'validation', 'test']:
+    raise ValueError(f'Invalid split name {split}.')
   ds = tf.data.Dataset.list_files(file_path, shuffle=False)
+  if split == 'test':
+    if use_half_last_criteo_day_as_test:
+      ds = ds.take(536)
+    else:
+      raise ValueError(
+          'Need use_half_last_criteo_day_as_test=True if using a test split.')
+  elif split == 'validation' and use_half_last_criteo_day_as_test:
+    ds = ds.skip(536)
   index = jax.process_index()
   num_hosts = jax.process_count()
 
   ds = ds.shard(num_hosts, index)
+  is_training = split == 'train'
   if is_training:
     ds = ds.repeat()
   ds = ds.interleave(
@@ -169,40 +195,58 @@ def get_criteo1tb(unused_shuffle_rng,
   per_host_eval_batch_size = eval_batch_size // process_count
   per_host_batch_size = batch_size // process_count
   train_dataset = _criteo_tsv_reader(
+      split='train',
       file_path=hps.train_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
-      batch_size=per_host_batch_size,
-      is_training=True)
+      batch_size=per_host_batch_size)
   train_iterator_fn = lambda: tfds.as_numpy(train_dataset)
   eval_train_dataset = _criteo_tsv_reader(
+      split='eval_train',
       file_path=hps.train_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
-      batch_size=per_host_eval_batch_size,
-      is_training=False)
-  eval_train_epoch = functools.partial(
+      batch_size=per_host_eval_batch_size)
+  eval_train_iterator_fn = functools.partial(
       _convert_to_numpy_iterator_fn,
       per_host_eval_batch_size=per_host_eval_batch_size,
       tf_dataset=eval_train_dataset,
       split_size=hps.train_size)
-  eval_dataset = _criteo_tsv_reader(
+  validation_dataset = _criteo_tsv_reader(
+      split='validation',
       file_path=hps.eval_file_path,
       num_dense_features=hps.num_dense_features,
       vocab_sizes=hps.vocab_sizes,
       batch_size=per_host_eval_batch_size,
-      is_training=False)
-  eval_iterator_fn = functools.partial(
+      use_half_last_criteo_day_as_test=hps.use_half_last_criteo_day_as_test)
+  validation_iterator_fn = functools.partial(
       _convert_to_numpy_iterator_fn,
       per_host_eval_batch_size=per_host_eval_batch_size,
-      tf_dataset=eval_dataset,
+      tf_dataset=validation_dataset,
       split_size=hps.valid_size)
-  # pylint: disable=unreachable
-  def test_epoch(*args, **kwargs):
-    del args
-    del kwargs
-    return
-    yield  # This yield is needed to make this a valid (null) iterator.
-  # pylint: enable=unreachable
+  if hps.use_half_last_criteo_day_as_test:
+    test_dataset = _criteo_tsv_reader(
+        split='test',
+        file_path=hps.eval_file_path,
+        num_dense_features=hps.num_dense_features,
+        vocab_sizes=hps.vocab_sizes,
+        batch_size=per_host_eval_batch_size,
+        use_half_last_criteo_day_as_test=hps.use_half_last_criteo_day_as_test)
+    test_iterator_fn = functools.partial(
+        _convert_to_numpy_iterator_fn,
+        per_host_eval_batch_size=per_host_eval_batch_size,
+        tf_dataset=test_dataset,
+        split_size=hps.valid_size)
+  else:
+    # pylint: disable=unreachable
+    def test_iterator_fn(*args, **kwargs):
+      del args
+      del kwargs
+      return
+      yield  # This yield is needed to make this a valid (null) iterator.
+    # pylint: enable=unreachable
   return data_utils.Dataset(
-      train_iterator_fn, eval_train_epoch, eval_iterator_fn, test_epoch)
+      train_iterator_fn,
+      eval_train_iterator_fn,
+      validation_iterator_fn,
+      test_iterator_fn)
