@@ -233,6 +233,18 @@ class Trainer(base_trainer.BaseTrainer):
           yield report
           if self._check_early_stopping(report):
             return
+        else:
+          if self._global_step % 10 == 0:
+            trainer_utils.log_eta(
+                self._logging_pool,
+                self._xm_work_unit,
+                self._global_step,
+                self._steps_per_sec_train_only(train_time_since_prev_eval),
+                self._num_train_steps,
+                start_time,
+                self._eval_frequency,
+                self._eval_steps,
+                self._previous_eval_time)
 
     # Always log and checkpoint on host 0 at the end of training.
     # If we moved where in the loop body evals happen then we would not need

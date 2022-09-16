@@ -163,6 +163,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._logging_pool = multiprocessing.pool.ThreadPool()
 
     self._train_time_since_prev_eval = 0
+    self._previous_eval_time = 0
     # Initialized in train() when training starts.
     self._time_at_prev_eval = None
     self._prev_eval_step = None
@@ -450,6 +451,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           self._early_stopping_target_value)
     return early_stopping_condition
 
+  def _steps_per_sec_train_only(self, train_time_since_prev_eval):
+    steps_since_last_eval = self._global_step - self._prev_eval_step
+    return steps_since_last_eval / train_time_since_prev_eval
+
   def _eval(
       self,
       lr,
@@ -478,7 +483,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     """
     self._batch_stats = trainer_utils.maybe_sync_batchnorm_stats(
         self._batch_stats)
-    report, eval_time = trainer_utils.eval_metrics(
+    report, self._previous_eval_time = trainer_utils.eval_metrics(
         self._params,
         self._batch_stats,
         self._dataset,
@@ -490,8 +495,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     if jax.process_index() == 0:
       self._save(self._train_dir)
     steps_since_last_eval = self._global_step - self._prev_eval_step
-    steps_per_sec_train_only = (
-        steps_since_last_eval / train_time_since_prev_eval)
+    steps_per_sec_train_only = self._steps_per_sec_train_only(
+        train_time_since_prev_eval)
     time_since_last_eval = time.time() - self._time_at_prev_eval
     steps_per_sec = steps_since_last_eval / time_since_last_eval
 
@@ -511,7 +516,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         overall_steps_per_sec=overall_steps_per_sec,
         steps_per_sec_train_only=steps_per_sec_train_only,
         steps_per_sec=steps_per_sec,
-        eval_time=eval_time,
+        eval_time=self._previous_eval_time,
         train_time=train_time_since_prev_eval,
         run_time=time_since_last_eval)
     if jax.process_index() == 0:
@@ -524,7 +529,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           start_time,
           self._eval_frequency,
           self._eval_steps,
-          eval_time)
+          self._previous_eval_time)
       trainer_utils.log_epoch_report(report, self._metrics_logger)
       trainer_utils.maybe_log_training_metrics(self._metrics_state,
                                                self._metrics_summary_fn,
