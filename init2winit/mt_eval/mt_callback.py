@@ -35,24 +35,67 @@ A typical callback_config would be a `list` of following-such dicts.
 
 }
 """
+
 from absl import logging
 from init2winit import base_callback
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import datasets
+from init2winit.model_lib import models
+
+from init2winit.mt_eval import bleu_evaluator
 import jax
 from ml_collections.config_dict import config_dict
 import numpy as np
 
+
 _REQUIRED_KEYS = [
-    'dataset_name', 'tfds_dataset_key', 'tfds_eval_dataset_key',
+    'dataset_name', 'model_name', 'tfds_dataset_key', 'tfds_eval_dataset_key',
     'tfds_predict_dataset_key', 'reverse_translation', 'eval_batch_size',
-    'eval_train_num_batches', 'eval_num_batches', 'eval_splits']
+    'eval_train_num_batches', 'eval_num_batches', 'eval_splits',
+    'max_predict_length', 'tl_code', 'beam_size']
 _SPLITS = ['train', 'valid', 'test']
 
 
 class MTEvaluationCallback(base_callback.BaseCallBack):
   """Runs evals on MT models with datasets/params different than in training."""
+
+  def __init__(self,
+               model,
+               params,
+               batch_stats,
+               optimizer_state,
+               optimizer_update_fn,
+               dataset,
+               hps,
+               callback_config,
+               train_dir,
+               rng):
+    del optimizer_state
+    del optimizer_update_fn
+    del train_dir
+    del dataset
+    del params
+
+    self.callback_config = callback_config
+
+    self._validate_callback_config()
+    self.evaluate_batch_pmapped = jax.pmap(
+        model.evaluate_batch, axis_name='batch')
+    self.batch_stats = batch_stats
+
+    dataset, dataset_metadata = self._get_dataset(hps, rng)
+    self.dataset = dataset
+    model_class = models.get_model(callback_config['model_name'])
+
+    self.bleu_evaluator = bleu_evaluator.BLEUEvaluator(
+        model_class,
+        dataset,
+        dataset_metadata,
+        hps,
+        rng,
+        callback_config,
+        mode='online')
 
   def _validate_callback_config(self):
     assert all(key in self.callback_config for key in _REQUIRED_KEYS), (
@@ -72,16 +115,19 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     hparams_dict = hps.to_dict()
     hparams_dict.update(self.callback_config)
     hparams = config_dict.ConfigDict(hparams_dict)
+
     dataset_builder = datasets.get_dataset(self.callback_config['dataset_name'])
+    dataset_metadata = datasets.get_dataset_meta_data(
+        self.callback_config['dataset_name'])
     dataset = dataset_builder(
         rng,
         hparams.batch_size,
         eval_batch_size=self.callback_config['eval_batch_size'],
         hps=hparams)
-    return dataset
+    return dataset, dataset_metadata
 
   def _evaluate(self,
-                flax_module,
+                params,
                 batch_stats,
                 batch_iter,
                 evaluate_batch_pmapped):
@@ -91,7 +137,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     TODO(ankugarg@): Refactor this function somewhere into eval_commons.py
 
     Args:
-      flax_module: A flax module.
+      params: model params.
       batch_stats: A dict of batch_stats.
       batch_iter: Generator which yields batches. Must support the API
         for b in batch_iter:
@@ -107,7 +153,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     for batch in batch_iter:
       batch = data_utils.shard(batch)
       computed_metrics = evaluate_batch_pmapped(
-          params=flax_module, batch_stats=batch_stats, batch=batch)
+          params=params, batch_stats=batch_stats, batch=batch)
       if metrics is None:
         metrics = computed_metrics
       else:
@@ -138,26 +184,11 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       d1[prefix+key] = d2[key]
     return d1
 
-  def __init__(self, model, flax_module, batch_stats, optimizer_state,
-               optimizer_update_fn, dataset, hps, callback_config, train_dir,
-               rng):
-    del flax_module
-    del batch_stats
-    del optimizer_state
-    del optimizer_update_fn
-    del train_dir
-    del dataset
-    self.callback_config = callback_config
-    self._validate_callback_config()
-    self.evaluate_batch_pmapped = jax.pmap(
-        model.evaluate_batch, axis_name='batch', donate_argnums=(2,))
-    self.dataset = self._get_dataset(hps, rng)
-
-  def run_eval(self, flax_module, batch_stats, optimizer_state, global_step):
+  def run_eval(self, params, batch_stats, optimizer_state, global_step):
     """Runs the MT models to evals specified by MT model.
 
     Args:
-      flax_module: Replicated flax module.
+      params: Replicated model params.
       batch_stats: Replicated batch_stats from the trainer.
       optimizer_state: Replicated optimizer state from the trainer.
       global_step: Current training step.
@@ -184,12 +215,16 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
             self.callback_config['eval_num_batches'])
 
     metrics = {}
+
+    # Eval metrics evaluation.
     for split_name, split_iter in ds_splits_dict.items():
       try:
-        split_metrics = self._evaluate(flax_module,
-                                       batch_stats,
-                                       split_iter,
+        _, _, _, bleu_score = self.bleu_evaluator.translate_and_calculate_bleu_single_model(
+            params, split_name)
+        split_metrics = self._evaluate(params, batch_stats, split_iter,
                                        self.evaluate_batch_pmapped)
+        split_metrics['bleu_score'] = bleu_score
+
         metrics = self._merge_and_apply_prefix(
             metrics, split_metrics, 'callback/' +
             self.callback_config['tfds_dataset_key'] + '/' + split_name + '/')

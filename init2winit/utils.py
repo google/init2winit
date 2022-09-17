@@ -369,3 +369,22 @@ def edit_distance(source, target):
             distance[i - 1][j - 1])  # Replace
 
   return distance[num_source_words][num_target_words]
+
+
+def data_gather(data, axis_name):
+  """Helper function to retrieve data across hosts, return first replica."""
+  p_gather = jax.pmap(
+      lambda d: jax.lax.all_gather(d, axis_name),
+      axis_name=axis_name)
+
+  return p_gather(data)[0]
+
+
+def combine_gathered(x):
+  if len(x.shape) != 3:
+    raise ValueError('Expected 3-d input array to combine_gathered.')
+
+  n_device, n_batch, length = x.shape
+  flattened = x.reshape(n_device * n_batch, length)
+
+  return flattened

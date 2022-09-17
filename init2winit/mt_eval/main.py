@@ -133,7 +133,8 @@ def main(unused_argv):
                                            rng,
                                            model_class, dataset_builder,
                                            dataset_meta_data,
-                                           mt_eval_config)
+                                           mt_eval_config,
+                                           mode='offline')
   evaluator.translate_and_calculate_bleu()
 
 
