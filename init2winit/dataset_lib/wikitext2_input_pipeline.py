@@ -106,17 +106,17 @@ def get_wikitext2_dataset(
   train_dataset_sequences = batch_with_padding(
       train_dataset_tokenized,
       hps.sequence_length + 1,
-      padded_shapes=hps.sequence_length,
+      padded_shapes=hps.sequence_length + 1,
   )
   valid_dataset_sequences = batch_with_padding(
       valid_dataset_tokenized,
       hps.sequence_length + 1,
-      padded_shapes=hps.sequence_length,
+      padded_shapes=hps.sequence_length + 1,
   )
   test_dataset_sequences = batch_with_padding(
       test_dataset_tokenized,
       hps.sequence_length + 1,
-      padded_shapes=hps.sequence_length,
+      padded_shapes=hps.sequence_length + 1,
   )
 
   # Split the sequences into inputs and targets.
