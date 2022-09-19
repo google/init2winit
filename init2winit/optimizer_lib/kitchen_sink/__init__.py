@@ -42,6 +42,7 @@ from init2winit.optimizer_lib.kitchen_sink._src.transform import scale_by_learni
 from init2winit.optimizer_lib.kitchen_sink._src.transform import scale_by_nadam
 from init2winit.optimizer_lib.kitchen_sink._src.transform import ScaleByAdamState
 from init2winit.optimizer_lib.kitchen_sink._src.transform import ScaleByAMSGradState
+from init2winit.optimizer_lib.kitchen_sink._src.utils import unfreeze_wrapper
 
 
 __version__ = '0.0.1'
@@ -74,4 +75,5 @@ __all__ = (
     'scale_by_nadam',
     'ScaleByAdamState',
     'ScaleByAMSGradState',
+    'unfreeze_wrapper',
 )
