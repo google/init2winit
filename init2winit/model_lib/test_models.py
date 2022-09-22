@@ -47,7 +47,7 @@ OUTPUT_SHAPE = {
 
 # Automatically test all defined models.
 autoencoder_models = ['autoencoder', 'convolutional_autoencoder']
-text_models = ['transformer', 'performer']
+text_models = ['transformer', 'performer', 'lstm']
 seq2seq_models = ['xformer_translate', 'xformer_translate_binary']
 
 autoencoder_keys = [('test_{}'.format(m), m) for m in autoencoder_models]
@@ -140,6 +140,9 @@ class ModelsTest(parameterized.TestCase):
         # Training HParams.
         'l2_decay_factor': 1e-4,
         'decode': False,
+        'vocab_size': vocab_size,
+        'hidden_size': 32,
+        'bidirectional': False,
     })
 
     text_input_shape = (32, 64)  # batch_size, max_target_length

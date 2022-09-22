@@ -26,6 +26,7 @@ from init2winit.model_lib import dlrm
 from init2winit.model_lib import fully_connected
 from init2winit.model_lib import gnn
 from init2winit.model_lib import local_attention_transformer
+from init2winit.model_lib import lstm_lm
 from init2winit.model_lib import max_pooling_cnn
 from init2winit.model_lib import mlperf_resnet
 from init2winit.model_lib import nqm
@@ -76,6 +77,7 @@ _ALL_MODELS = {
     'dlrm': (dlrm.DLRMModel, dlrm.DEFAULT_HPARAMS),
     'vit': (vit.ViTModel, vit.DEFAULT_HPARAMS),
     'unet': (unet.UNetModel, unet.DEFAULT_HPARAMS),
+    'lstm': (lstm_lm.LSTMModel, lstm_lm.DEFAULT_HPARAMS),
 }
 
 
