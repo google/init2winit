@@ -73,6 +73,8 @@ def dtype_from_str(dtype_string):
   # We use strings to avoid having to import jnp into the config files.
   if dtype_string == 'float32':
     return jnp.float32
+  elif dtype_string == 'float64':
+    return jnp.float64
   elif dtype_string == 'bfloat16':
     return jnp.bfloat16
   else:

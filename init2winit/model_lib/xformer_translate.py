@@ -20,6 +20,7 @@ Adapted from third_party/py/language/google/generation/tsukuyomi/models.py
 from typing import Any, Optional
 
 from flax import linen as nn
+from init2winit import utils
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax import lax
@@ -73,14 +74,6 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     ))
 
 
-def _get_dtype(use_bfloat16):
-  if use_bfloat16:
-    dtype = jnp.bfloat16
-  else:
-    dtype = jnp.float32
-  return dtype
-
-
 def shift_right(x, axis=1):
   """Shift the input to the right by padding on axis 1."""
   pad_widths = [(0, 0)] * len(x.shape)
@@ -104,9 +97,9 @@ def sinusoidal_init(max_len=2048, min_scale=1.0, max_scale=10000.0):
 
   def init(key, shape, dtype=np.float32):
     """Sinusoidal init."""
-    del key, dtype
+    del key
     d_feature = shape[-1]
-    pe = np.zeros((max_len, d_feature), dtype=np.float32)
+    pe = np.zeros((max_len, d_feature), dtype=dtype)
     position = np.arange(0, max_len)[:, np.newaxis]
     scale_factor = -np.log(max_scale / min_scale) / (d_feature // 2 - 1)
     div_term = min_scale * np.exp(np.arange(0, d_feature // 2) * scale_factor)
@@ -134,7 +127,8 @@ class AddPositionEmbs(nn.Module):
   def __call__(self,
                inputs,
                inputs_positions=None,
-               train=True):
+               train=True,
+               dtype=np.float32):
     """Applies AddPositionEmbs module.
 
     By default this layer uses a fixed sinusoidal embedding table. If a
@@ -145,6 +139,7 @@ class AddPositionEmbs(nn.Module):
       inputs: <float>[batch_size, sequence_length, hidden_size] Input data.
       inputs_positions: [Same as above.] Position indices for packed sequences.
       train: if it is training.
+      dtype: Dtype of the computation (default: float32).
 
     Returns:
       output: `(bs, timesteps, in_dim)`
@@ -157,11 +152,11 @@ class AddPositionEmbs(nn.Module):
     pos_emb_shape = (1, self.max_len, inputs.shape[-1])
     if self.posemb_init is None:
       # Use a fixed (non-learned) sinusoidal position embedding.
-      pos_embedding = sinusoidal_init(max_len=self.max_len)(
-          None, pos_emb_shape, None)
+      pos_embedding = sinusoidal_init(max_len=self.max_len)(None, pos_emb_shape,
+                                                            dtype)
     else:
       pos_embedding = self.param(
-          'pos_embedding', pos_emb_shape, self.posemb_init)
+          'pos_embedding', self.posemb_init, pos_emb_shape, dtype)
     pe = pos_embedding[:, :length, :]
     if self.decode:
       is_initialized = self.has_variable('cache', 'cache_index')
@@ -196,15 +191,19 @@ class MlpBlock(nn.Module):
     x = nn.Dense(
         self.mlp_dim,
         dtype=self.dtype,
+        param_dtype=self.dtype,
         kernel_init=self.kernel_init,
-        bias_init=self.bias_init)(inputs)
+        bias_init=self.bias_init)(
+            inputs)
     x = nn.relu(x)
     x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
     output = nn.Dense(
         actual_out_dim,
         dtype=self.dtype,
+        param_dtype=self.dtype,
         kernel_init=self.kernel_init,
-        bias_init=self.bias_init)(x)
+        bias_init=self.bias_init)(
+            x)
     output = nn.Dropout(
         rate=self.dropout_rate, deterministic=not train)(output)
     return output
@@ -265,10 +264,11 @@ class Encoder1DBlock(nn.Module):
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
-    x = maybe_pre_normalize()(inputs)
+    x = maybe_pre_normalize(param_dtype=self.dtype)(inputs)
     x = nn.SelfAttention(
         num_heads=self.num_heads,
         dtype=self.dtype,
+        param_dtype=self.dtype,
         qkv_features=self.qkv_dim,
         kernel_init=self.enc_self_attn_kernel_init_fn,
         bias_init=nn.initializers.normal(stddev=1e-6),
@@ -281,9 +281,9 @@ class Encoder1DBlock(nn.Module):
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
     x = x + inputs
 
-    x = maybe_post_normalize()(x)
+    x = maybe_post_normalize(param_dtype=self.dtype)(x)
     # MLP block.
-    y = maybe_pre_normalize()(x)
+    y = maybe_pre_normalize(param_dtype=self.dtype)(x)
     y = MlpBlock(
         mlp_dim=self.mlp_dim,
         dtype=self.dtype,
@@ -291,7 +291,7 @@ class Encoder1DBlock(nn.Module):
         name='MLPBlock')(y, train=train)
 
     res = x + y
-    return maybe_post_normalize()(res)
+    return maybe_post_normalize(param_dtype=self.dtype)(res)
 
 
 class EncoderDecoder1DBlock(nn.Module):
@@ -358,10 +358,11 @@ class EncoderDecoder1DBlock(nn.Module):
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
-    x = maybe_pre_normalize()(targets)
+    x = maybe_pre_normalize(param_dtype=self.dtype)(targets)
     x = nn.SelfAttention(
         num_heads=self.num_heads,
         dtype=self.dtype,
+        param_dtype=self.dtype,
         qkv_features=self.qkv_dim,
         kernel_init=self.dec_self_attn_kernel_init_fn,
         bias_init=nn.initializers.normal(stddev=1e-6),
@@ -369,16 +370,18 @@ class EncoderDecoder1DBlock(nn.Module):
         broadcast_dropout=False,
         dropout_rate=self.attention_dropout_rate,
         decode=self.decode,
-        name='DecoderSelfAttention')(x, decoder_mask, deterministic=not train)
+        name='DecoderSelfAttention')(
+            x, decoder_mask, deterministic=not train)
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
     x = x + targets
 
-    x = maybe_post_normalize()(x)
+    x = maybe_post_normalize(param_dtype=self.dtype)(x)
     # Encoder-Decoder block.
-    y = maybe_pre_normalize()(x)
+    y = maybe_pre_normalize(param_dtype=self.dtype)(x)
     y = nn.MultiHeadDotProductAttention(
         num_heads=self.num_heads,
         dtype=self.dtype,
+        param_dtype=self.dtype,
         qkv_features=self.qkv_dim,
         kernel_init=self.dec_cross_attn_kernel_init_fn,
         bias_init=nn.initializers.normal(stddev=1e-6),
@@ -391,9 +394,9 @@ class EncoderDecoder1DBlock(nn.Module):
         y, deterministic=not train)
     y = y + x
 
-    y = maybe_post_normalize()(y)
+    y = maybe_post_normalize(param_dtype=self.dtype)(y)
     # MLP block.
-    z = maybe_pre_normalize()(y)
+    z = maybe_pre_normalize(param_dtype=self.dtype)(y)
     z = MlpBlock(
         mlp_dim=self.mlp_dim,
         dtype=self.dtype,
@@ -401,7 +404,7 @@ class EncoderDecoder1DBlock(nn.Module):
         name='MLPBlock')(z, train=train)
 
     res = y + z
-    return maybe_post_normalize()(res)
+    return maybe_post_normalize(param_dtype=self.dtype)(res)
 
 
 class Encoder(nn.Module):
@@ -409,7 +412,7 @@ class Encoder(nn.Module):
 
     vocab_size: size of the vocabulary
     shared_embedding: a shared embedding layer to use.
-    use_bfloat16: bool: whether use bfloat16.
+    dtype: the jnp.dtype for the model parameters.
     emb_dim: dimension of embedding
     num_heads: number of heads
     enc_num_layers: number of layers
@@ -424,7 +427,7 @@ class Encoder(nn.Module):
   """
   vocab_size: int
   shared_embedding: Any = None
-  use_bfloat16: bool = False
+  dtype: jnp.dtype = jnp.float32
   emb_dim: int = 512
   num_heads: int = 8
   enc_num_layers: int = 6
@@ -459,6 +462,8 @@ class Encoder(nn.Module):
     if self.shared_embedding is None:
       input_embed = nn.Embed(
           num_embeddings=self.vocab_size,
+          dtype=self.dtype,
+          param_dtype=self.dtype,
           features=self.emb_dim,
           embedding_init=nn.initializers.normal(stddev=1.0),
           name='input_vocab_embeddings')
@@ -467,17 +472,9 @@ class Encoder(nn.Module):
     x = inputs.astype('int32')
     x = input_embed(x)
     x = AddPositionEmbs(
-        max_len=self.max_len,
-        decode=False,
-        name='posembed_input')(
-            x, inputs_positions=inputs_positions, train=train)
+        max_len=self.max_len, decode=False, name='posembed_input')(
+            x, inputs_positions=inputs_positions, train=train, dtype=self.dtype)
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
-
-    if self.use_bfloat16:
-      x = x.astype(jnp.bfloat16)
-      dtype = jnp.bfloat16
-    else:
-      dtype = jnp.float32
 
     # Input encoder.
     for lyr in range(self.enc_num_layers):
@@ -485,19 +482,17 @@ class Encoder(nn.Module):
           qkv_dim=self.qkv_dim,
           mlp_dim=self.mlp_dim,
           num_heads=self.num_heads,
-          dtype=dtype,
+          dtype=self.dtype,
           dropout_rate=self.dropout_rate,
           attention_dropout_rate=self.attention_dropout_rate,
           normalizer=self.normalizer,
           enc_self_attn_kernel_init_fn=self.enc_self_attn_kernel_init_fn,
           name=f'encoderblock_{lyr}')(
-              x,
-              encoder_mask=encoder_mask,
-              train=train)
+              x, encoder_mask=encoder_mask, train=train)
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
       maybe_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=dtype)
-      x = maybe_normalize()(x)
+          self.normalizer, train, dtype=self.dtype)
+      x = maybe_normalize(param_dtype=self.dtype)(x)
     return x
 
 
@@ -508,7 +503,7 @@ class Decoder(nn.Module):
     shared_embedding: a shared embedding layer to use.
     logits_via_embedding: bool: whether final logit transform shares embedding
       weights.
-    use_bfloat16: bool: whether use bfloat16.
+    dtype: the jnp.dtype for the model parameters.
     emb_dim: dimension of embedding.
     num_heads: number of heads.
     dec_num_layers: number of layers.
@@ -528,7 +523,7 @@ class Decoder(nn.Module):
   output_vocab_size: int
   shared_embedding: Any = None
   logits_via_embedding: bool = False
-  use_bfloat16: bool = False
+  dtype: jnp.dtype = jnp.float32
   emb_dim: int = 512
   num_heads: int = 8
   dec_num_layers: int = 6
@@ -566,13 +561,14 @@ class Decoder(nn.Module):
     """
     assert encoded.ndim == 3  # (batch, len, depth)
     assert targets.ndim == 2  # (batch, len)
-    dtype = _get_dtype(self.use_bfloat16)
 
     # Target Embedding
     if self.shared_embedding is None:
       output_embed = nn.Embed(
           num_embeddings=self.output_vocab_size,
           features=self.emb_dim,
+          dtype=self.dtype,
+          param_dtype=self.dtype,
           embedding_init=nn.initializers.normal(stddev=1.0),
           name='output_vocab_embeddings')
     else:
@@ -583,14 +579,12 @@ class Decoder(nn.Module):
       y = shift_right(y)
     y = output_embed(y)
     y = AddPositionEmbs(
-        max_len=self.max_len,
-        decode=self.decode,
-        name='posembed_output')(
-            y, inputs_positions=targets_positions, train=train)
+        max_len=self.max_len, decode=self.decode, name='posembed_output')(
+            y,
+            inputs_positions=targets_positions,
+            train=train,
+            dtype=self.dtype)
     y = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(y)
-
-    if self.use_bfloat16:
-      y = y.astype(jnp.bfloat16)
 
     # Target-Input Decoder
     for lyr in range(self.dec_num_layers):
@@ -598,7 +592,7 @@ class Decoder(nn.Module):
           qkv_dim=self.qkv_dim,
           mlp_dim=self.mlp_dim,
           num_heads=self.num_heads,
-          dtype=dtype,
+          dtype=self.dtype,
           dropout_rate=self.dropout_rate,
           attention_dropout_rate=self.attention_dropout_rate,
           normalizer=self.normalizer,
@@ -613,23 +607,25 @@ class Decoder(nn.Module):
               train=train)
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
       maybe_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=dtype)
-      y = maybe_normalize()(y)
+          self.normalizer, train, dtype=self.dtype)
+      y = maybe_normalize(param_dtype=self.dtype)(y)
 
     # Decoded Logits
     if self.logits_via_embedding:
       # Use the transpose of embedding matrix for logit transform.
-      logits = output_embed.attend(y.astype(jnp.float32))
+      logits = output_embed.attend(y)
       # Correctly normalize pre-softmax logits for this shared case.
       logits = logits / jnp.sqrt(y.shape[-1])
 
     else:
       logits = nn.Dense(
           self.output_vocab_size,
-          dtype=dtype,
+          dtype=self.dtype,
+          param_dtype=self.dtype,
           kernel_init=nn.initializers.xavier_uniform(),
           bias_init=nn.initializers.normal(stddev=1e-6),
-          name='logitdense')(y)
+          name='logitdense')(
+              y)
     return logits
 
 
@@ -648,7 +644,7 @@ class Transformer(nn.Module):
     share_embeddings: bool: share embedding layer for inputs and targets.
     logits_via_embedding: bool: whether final logit transform shares embedding
       weights.
-    use_bfloat16: bool: whether use bfloat16.
+    dtype: the jnp.dtype for the model parameters.
     emb_dim: dimension of embedding.
     num_heads: number of heads.
     enc_num_layers: number of encoder layers.
@@ -671,7 +667,7 @@ class Transformer(nn.Module):
   output_vocab_size: Optional[int] = None
   share_embeddings: bool = False
   logits_via_embedding: bool = False
-  use_bfloat16: bool = False
+  dtype: jnp.dtype = jnp.float32
   emb_dim: int = 512
   num_heads: int = 8
   enc_num_layers: int = 6
@@ -695,6 +691,8 @@ class Transformer(nn.Module):
       self.shared_embedding = nn.Embed(
           num_embeddings=self.vocab_size,
           features=self.emb_dim,
+          dtype=self.dtype,
+          param_dtype=self.dtype,
           embedding_init=nn.initializers.normal(stddev=1.0),
           name='VocabEmbeddings')
     else:
@@ -703,7 +701,7 @@ class Transformer(nn.Module):
     self.encoder = Encoder(
         vocab_size=self.vocab_size,
         shared_embedding=self.shared_embedding,
-        use_bfloat16=self.use_bfloat16,
+        dtype=self.dtype,
         emb_dim=self.emb_dim,
         num_heads=self.num_heads,
         enc_num_layers=self.enc_num_layers,
@@ -719,7 +717,7 @@ class Transformer(nn.Module):
         output_vocab_size=self.output_vocab_size,
         shared_embedding=self.shared_embedding,
         logits_via_embedding=self.logits_via_embedding,
-        use_bfloat16=self.use_bfloat16,
+        dtype=self.dtype,
         emb_dim=self.emb_dim,
         num_heads=self.num_heads,
         dec_num_layers=self.dec_num_layers,
@@ -769,7 +767,7 @@ class Transformer(nn.Module):
                          inputs_segmentation=inputs_segmentation,
                          targets_segmentation=targets_segmentation,
                          train=train)
-    return logits.astype(jnp.float32) if self.use_bfloat16 else logits
+    return logits
 
   # The following two methods allow us to run the trained Transformer in
   # two parts during fast decoding.  First, we call the encoder branch to
@@ -783,7 +781,7 @@ class Transformer(nn.Module):
              inputs_segmentation=None,
              train=False):
     # Make padding attention mask.
-    dtype = jnp.bfloat16 if self.use_bfloat16 else jnp.float32
+    dtype = self.dtype
     encoder_mask = nn.make_attention_mask(
         inputs > 0, inputs > 0, dtype=dtype)
     # Add segmentation block-diagonal attention mask if using segmented data.
@@ -811,7 +809,7 @@ class Transformer(nn.Module):
              targets_segmentation=None,
              train=False):
     # Make padding attention masks.
-    dtype = jnp.bfloat16 if self.use_bfloat16 else jnp.float32
+    dtype = self.dtype
     if self.should_decode:
       # For fast autoregressive decoding, only a special encoder-decoder mask is
       # used.
@@ -940,14 +938,14 @@ class TransformerTranslate(base_model.BaseModel):
         self.hps.dec_self_attn_kernel_init]()
     dec_cross_attn_kernel_init_fn = model_utils.INITIALIZERS[
         self.hps.dec_cross_attn_kernel_init]()
-    use_bfloat16 = self.hps.model_dtype == 'bfloat16'
+    dtype = utils.dtype_from_str(self.hps.model_dtype)
 
     return Transformer(
         vocab_size=self.hps.vocab_size,
         output_vocab_size=self.hps.vocab_size,
         share_embeddings=self.hps.share_embeddings,
         logits_via_embedding=self.hps.logits_via_embedding,
-        use_bfloat16=use_bfloat16,
+        dtype=dtype,
         emb_dim=self.hps.emb_dim,
         num_heads=self.hps.num_heads,
         enc_num_layers=self.hps.enc_num_layers,

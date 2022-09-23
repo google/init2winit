@@ -49,6 +49,7 @@ OUTPUT_SHAPE = {
 autoencoder_models = ['autoencoder', 'convolutional_autoencoder']
 text_models = ['transformer', 'performer', 'lstm']
 seq2seq_models = ['xformer_translate', 'xformer_translate_binary']
+dtypes = ['bfloat16', 'float32']
 
 autoencoder_keys = [('test_{}'.format(m), m) for m in autoencoder_models]
 excluded_classification_models = text_models + autoencoder_models + seq2seq_models + [
@@ -61,6 +62,7 @@ classification_keys = [
     if m not in excluded_classification_models
 ]
 text_keys = [('test_{}'.format(m), m) for m in text_models]
+dtype_keys = [('test_{}'.format(t), t) for t in dtypes]
 
 
 class ModelsTest(parameterized.TestCase):
@@ -193,7 +195,8 @@ class ModelsTest(parameterized.TestCase):
     self.assertEqual(outputs.shape,
                      (text_input_shape[0], text_input_shape[1], vocab_size))
 
-  def test_translate_model(self):
+  @parameterized.named_parameters(*dtype_keys)
+  def test_translate_model(self, dtype_str):
     """Test forward pass of the translate model."""
     vocab_size = 16
     small_hps = config_dict.ConfigDict({
@@ -221,7 +224,7 @@ class ModelsTest(parameterized.TestCase):
         },
         'vocab_size': vocab_size,
         'output_shape': (vocab_size,),
-        'model_dtype': 'float32',
+        'model_dtype': dtype_str,
         # Training HParams.
         'l2_decay_factor': 1e-4,
         'enc_self_attn_kernel_init': 'xavier_uniform',
@@ -240,32 +243,47 @@ class ModelsTest(parameterized.TestCase):
         'causal': True
     }, loss, metrics)
     xs = jnp.array(
-        np.random.randint(size=text_src_input_shape, low=1, high=vocab_size))
+        np.random.randint(size=text_src_input_shape, low=1,
+                          high=vocab_size))
     ys = jnp.array(
-        np.random.randint(size=text_tgt_input_shape, low=1, high=vocab_size))
+        np.random.randint(size=text_tgt_input_shape, low=1,
+                          high=vocab_size))
     dropout_rng, params_rng = jax.random.split(rng)
     model_init_fn = jax.jit(
         functools.partial(model.flax_module.init, train=False))
     init_dict = model_init_fn({'params': params_rng}, xs, ys)
     params = init_dict['params']
 
+    param_type_matches_model_type = jax.tree_util.tree_map(
+        lambda x: x.dtype == small_hps.model_dtype, params)
+    self.assertTrue(
+        jax.tree_util.tree_reduce(lambda x, y: x and y,
+                                  param_type_matches_model_type))
+
     # Test forward pass.
     @jax.jit
     def forward_pass(params, xs, ys, dropout_rng):
-      outputs = model.flax_module.apply(
+      outputs, intermediates = model.flax_module.apply(
           {'params': params},
           xs,
           ys,
           rngs={'dropout': dropout_rng},
+          capture_intermediates=True,
           train=True)
-      return outputs
+      return outputs, intermediates
 
-    logits = forward_pass(params, xs, ys, dropout_rng)
+    logits, intermediates = forward_pass(params, xs, ys, dropout_rng)
     # Testing only train mode
     # TODO(ankugarg): Add tests for individual encoder/decoder (inference mode).
     self.assertEqual(
         logits.shape,
         (text_tgt_input_shape[0], text_tgt_input_shape[1], vocab_size))
+
+    intermediates_type_matches_model_type = jax.tree_util.tree_map(
+        lambda x: x.dtype == small_hps.model_dtype, intermediates)
+    self.assertTrue(
+        jax.tree_util.tree_reduce(lambda x, y: x and y,
+                                  intermediates_type_matches_model_type))
 
   def test_nqm(self):
     """Test the noisy quadratic model."""
