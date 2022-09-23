@@ -155,8 +155,12 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._training_metrics_config = training_metrics_config
     self._xprof_steps = None
     self._xm_work_unit = None
-    self._callback_configs = (
-        [] if callback_configs is None else callback_configs)
+    if callback_configs is None:
+      self._callback_configs = []
+    elif isinstance(callback_configs, dict):
+      self._callback_configs = [callback_configs]
+    else:
+      self._callback_configs = callback_configs
     self._external_checkpoint_path = external_checkpoint_path
 
     # For logging / processing off the main thread
