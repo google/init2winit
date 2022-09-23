@@ -82,7 +82,7 @@ def dtype_from_str(dtype_string):
 
 
 def timed(f):
-  """Decorator to time the execution of a function."""
+  """Decorator to time a function. Not correct on async-dispatch JAX code."""
 
   @functools.wraps(f)
   def wrapper(*args, **kwargs):
