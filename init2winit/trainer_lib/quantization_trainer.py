@@ -293,6 +293,11 @@ class Trainer(base_trainer.BaseTrainer):
     self.dataset_meta_data = dataset_meta_data
     self.loss_name = loss_name
     self.metrics_name = metrics_name
+    self._additional_eval_steps = range(
+        self._num_train_steps,
+        self._num_train_steps + self._hps.num_additional_train_steps,
+        self._hps.additional_eval_frequency)
+    self._num_train_steps += self._hps.num_additional_train_steps
 
   def train(self):
     """All training logic.
@@ -406,6 +411,9 @@ class Trainer(base_trainer.BaseTrainer):
     train_time_since_prev_eval = 0
     self._prev_eval_step = self._global_step
 
+    configured_train_steps = (
+        self._num_train_steps - self._hps.num_additional_train_steps)
+
     for _ in range(start_step, self._num_train_steps):
       with jax.profiler.StepTraceAnnotation('train',
                                             step_num=self._global_step):
@@ -418,12 +426,18 @@ class Trainer(base_trainer.BaseTrainer):
             and jax.process_index() == 0):
           self._save(self._checkpoint_dir, max_to_keep=None)
 
-        # overwrite self._lr_fn with multi-step lr fn
-        # calculate num_train_steps depending on the lr_restart_steps
-        init_step = max(
-            [x for x in self._hps.lr_restart_steps if x <= self._global_step])
-        end_step = min(
-            [x for x in self._hps.lr_restart_steps if x > self._global_step])
+        # if global step exceeds actual number of configured train steps,
+        # init and end step is initialized with 'last' stage of training.
+        if self._global_step >= configured_train_steps:
+          init_step = self._hps.lr_restart_steps[-2]
+          end_step = self._hps.lr_restart_steps[-1]
+        else:
+          # overwrite self._lr_fn with multi-step lr fn
+          # calculate num_train_steps depending on the lr_restart_steps
+          init_step = max(
+              [x for x in self._hps.lr_restart_steps if x <= self._global_step])
+          end_step = min(
+              [x for x in self._hps.lr_restart_steps if x > self._global_step])
         if self._hps.restart_base_lr is None:
           # use vanilla lr_hparams if restart_base_lr is not specified
           lr_hparams = self._hps.lr_hparams
@@ -440,7 +454,12 @@ class Trainer(base_trainer.BaseTrainer):
         self._lr_fn = schedules.get_schedule_fn(
             lr_hparams, (end_step - init_step) // stretch_factor,
             stretch_factor=stretch_factor)
-        lr = self._lr_fn(self._global_step - init_step)
+        # global step exceeds configured_train_steps
+        if self._global_step >= configured_train_steps:
+          # use last learning rate value from the schedule.
+          lr = self._lr_fn(configured_train_steps - 1 - init_step)
+        else:
+          lr = self._lr_fn(self._global_step - init_step)
         # It looks like we are reusing an rng key, but we aren't.
         # TODO(gdahl): Make it more obvious that passing rng is safe.
         # TODO(gdahl,gilmer,znado): investigate possibly merging the member
@@ -477,7 +496,9 @@ class Trainer(base_trainer.BaseTrainer):
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.
         if trainer_utils.should_eval(
-            self._global_step, self._eval_frequency, self._eval_steps):
+            self._global_step, self._eval_frequency,
+            self._eval_steps) or (self._global_step
+                                  in self._additional_eval_steps):
           report = self._eval(lr, start_step, start_time,
                               train_time_since_prev_eval, dynamic_context)
           train_time_since_prev_eval = 0

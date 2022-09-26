@@ -85,6 +85,14 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
             'att_out_acts': 90e3,
             'att_kqv_acts': 90e3,
         },
+        # In binary models literature, large amount of training happens in the
+        # very end, when the learning rate is very small.
+        # So train the binary model for 1000 steps more in the end. Use the
+        # last learning rate value for these additonal 1000 steps.
+        num_additional_train_steps=1000,
+        # when the model is in 'additional' stages of training in the end,
+        # evaluate every 'additional_eval_frequency'.
+        additional_eval_frequency=20,
         lr_restart_steps=[0, 88339],  # by default [0, num_training_steps]
         restart_base_lr=None,  # the base_lr used when a new lr cycle starts
         teacher_model_name=None,  # by default not using distillation
