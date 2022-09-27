@@ -17,6 +17,7 @@
 
 from absl import logging
 import flax
+from init2winit.optimizer_lib import adan
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import online_newton_step
@@ -199,6 +200,21 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         # mask in a config file / serializing properly is not completely
         # straightforward.
         weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
+    )
+  elif hps.optimizer == 'adan':
+    opt_init, opt_update = utils.static_inject_hyperparams(adan.adan)(
+        learning_rate=0.0,
+        b1=hps.opt_hparams['beta1'],
+        b2=hps.opt_hparams['beta2'],
+        b3=hps.opt_hparams['beta3'],
+        eps=hps.opt_hparams['epsilon'],
+        eps_root=hps.opt_hparams.get('epsilon_root', 0.0),
+        weight_decay=weight_decay,
+        # NOTE(dsuo): we provide this wiring, but specifying a weight decay
+        # mask in a config file / serializing properly is not completely
+        # straightforward.
+        weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
+        use_adan_wd=hps.opt_hparams.get('use_adan_wd', False),
     )
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
