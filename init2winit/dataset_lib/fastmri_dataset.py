@@ -276,6 +276,8 @@ def get_fastmri(shuffle_rng, batch_size, eval_batch_size, hps):
   eval_train_ds = tfds.as_numpy(eval_train_ds)
   eval_ds = load_split(per_host_eval_batch_size, 'val', hps, shuffle_rng)
   eval_ds = tfds.as_numpy(eval_ds)
+  test_ds = load_split(per_host_eval_batch_size, 'test_v2', hps, shuffle_rng)
+  test_ds = tfds.as_numpy(test_ds)
 
   def train_iterator_fn():
     return train_ds
@@ -288,13 +290,9 @@ def get_fastmri(shuffle_rng, batch_size, eval_batch_size, hps):
     for batch in itertools.islice(eval_ds, num_batches):
       yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
-  # pylint: disable=unreachable
-  def test_epoch(*args, **kwargs):
-    del args
-    del kwargs
-    return
-    yield  # This yield is needed to make this a valid (null) iterator.
-  # pylint: enable=unreachable
+  def test_epoch(num_batches=None):
+    for batch in itertools.islice(test_ds, num_batches):
+      yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
   return data_utils.Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
                             test_epoch)
