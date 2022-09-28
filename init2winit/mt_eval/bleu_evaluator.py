@@ -84,7 +84,7 @@ class BLEUEvaluator(object):
     """Utility for initializing online BLEU evaluator."""
     self.hps = hps
     self.eos_id = decode.EOS_ID
-    self.max_length = mt_eval_config['max_predict_length']
+    self.max_length = mt_eval_config['max_decode_length']
     self.beam_size = mt_eval_config['beam_size']
     self.dataset = dataset
     self.encoder = self.load_tokenizer(hps.vocab_path)

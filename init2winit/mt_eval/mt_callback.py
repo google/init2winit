@@ -53,7 +53,7 @@ _REQUIRED_KEYS = [
     'dataset_name', 'model_name', 'tfds_dataset_key', 'tfds_eval_dataset_key',
     'tfds_predict_dataset_key', 'reverse_translation', 'eval_batch_size',
     'eval_train_num_batches', 'eval_num_batches', 'eval_splits',
-    'max_predict_length', 'tl_code', 'beam_size']
+    'max_decode_length', 'tl_code', 'beam_size']
 _SPLITS = ['train', 'valid', 'test']
 
 
