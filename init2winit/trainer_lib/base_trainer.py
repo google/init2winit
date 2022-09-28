@@ -166,9 +166,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # For logging / processing off the main thread
     self._logging_pool = multiprocessing.pool.ThreadPool()
 
-    self._train_time_since_prev_eval = 0
     # Initialized in train() when training starts.
-    self._time_at_prev_eval = None
+    self._time_at_prev_eval_end = None
     self._prev_eval_step = None
 
     assert hps.batch_size % (jax.device_count()) == 0
@@ -332,11 +331,11 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     #     metrics_state_update_fn)
     # Also, we can donate buffers for 'optimizer', 'batch_stats',
     # 'batch' and 'training_metrics_state' for update's pmapped computation.
-    update_pmapped = utils.timed(jax.pmap(
+    update_pmapped = jax.pmap(
         update_fn,
         axis_name='batch',
         in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0),
-        donate_argnums=(0, 1, 2, 8)))
+        donate_argnums=(0, 1, 2, 8))
     return (
         lr_fn,
         optimizer_update_fn,
@@ -458,28 +457,26 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       self,
       lr,
       start_step,
-      start_time,
-      train_time_since_prev_eval):
+      start_time):
     """Evaluate.
 
     Has the side-effects of:
       - synchronizing self._batch_stats across hosts
       - checkpointing via self._save(self._train_dir)
       - resetting self._sum_train_cost to jnp.zeros
-      - resetting self._time_at_prev_eval to the current time
+      - resetting self._time_at_prev_eval_end to the current time
       - resetting self._prev_eval_step to self._global_step
 
     Args:
       lr: the current learning rate.
       start_step: the training start step.
       start_time: the training start time.
-      train_time_since_prev_eval: the time since the last eval (as measured by
-        utils.timed).
 
     Returns:
       A Dict[str, Any] eval report, originally created in
       trainer_utils.eval_metrics.
     """
+    time_since_last_eval = time.time() - self._time_at_prev_eval_end
     self._batch_stats = trainer_utils.maybe_sync_batchnorm_stats(
         self._batch_stats)
     report, eval_time = trainer_utils.eval_metrics(
@@ -494,10 +491,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     if jax.process_index() == 0:
       self._save(self._train_dir)
     steps_since_last_eval = self._global_step - self._prev_eval_step
-    steps_per_sec_train_only = (
-        steps_since_last_eval / train_time_since_prev_eval)
-    time_since_last_eval = time.time() - self._time_at_prev_eval
-    steps_per_sec = steps_since_last_eval / time_since_last_eval
+    steps_per_sec_no_eval = steps_since_last_eval / time_since_last_eval
+    run_time = time.time() - self._time_at_prev_eval_end
+    steps_per_sec = steps_since_last_eval / run_time
 
     mean_train_cost = self._sum_train_cost.mean().item() / max(
         1, self._global_step - self._prev_eval_step)
@@ -513,17 +509,17 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         preemption_count=self._preemption_count,
         train_cost=mean_train_cost,
         overall_steps_per_sec=overall_steps_per_sec,
-        steps_per_sec_train_only=steps_per_sec_train_only,
+        steps_per_sec_no_eval=steps_per_sec_no_eval,
         steps_per_sec=steps_per_sec,
         eval_time=eval_time,
-        train_time=train_time_since_prev_eval,
-        run_time=time_since_last_eval)
+        run_time_no_eval=time_since_last_eval,
+        run_time=run_time)
     if jax.process_index() == 0:
       trainer_utils.log_eta(
           self._logging_pool,
           self._xm_work_unit,
           self._global_step,
-          steps_per_sec_train_only,
+          steps_per_sec_no_eval,
           self._num_train_steps,
           start_time,
           self._eval_frequency,
@@ -534,7 +530,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
                                                self._metrics_summary_fn,
                                                self._metrics_logger)
 
-    self._time_at_prev_eval = time.time()
+    self._time_at_prev_eval_end = time.time()
     self._prev_eval_step = self._global_step
     return report
 

@@ -138,7 +138,7 @@ class Trainer(base_trainer.BaseTrainer):
     """All training logic.
 
     The only side-effects are:
-      - Initiailizing self._time_at_prev_eval to the current time
+      - Initiailizing self._time_at_prev_eval_end to the current time
       - Initiailizing self._prev_eval_step to the current step
 
     Yields:
@@ -187,8 +187,7 @@ class Trainer(base_trainer.BaseTrainer):
 
     # NOTE(dsuo): record timestamps for run_time since we don't have a duration
     # that we can increment as in the case of train_time.
-    self._time_at_prev_eval = start_time
-    train_time_since_prev_eval = 0
+    self._time_at_prev_eval_end = start_time
     self._prev_eval_step = self._global_step
 
     for _ in range(start_step, self._num_train_steps):
@@ -208,28 +207,18 @@ class Trainer(base_trainer.BaseTrainer):
         # TODO(gdahl,gilmer,znado): investigate possibly merging the member
         # variable inputs/outputs of this function into a named tuple.
         (self._optimizer_state, self._params, self._batch_stats,
-         self._sum_train_cost, self._metrics_state,
-         self._grad_norm), train_time = self._update_pmapped(
-             self._optimizer_state,
-             self._params,
-             self._batch_stats,
-             self._metrics_state,
-             batch,
-             self._global_step,
-             lr,
-             rng,
-             self._local_device_indices,
-             self._sum_train_cost)
-        train_time_since_prev_eval += train_time
+         self._sum_train_cost,
+         self._metrics_state, self._grad_norm) = self._update_pmapped(
+             self._optimizer_state, self._params, self._batch_stats,
+             self._metrics_state, batch, self._global_step, lr, rng,
+             self._local_device_indices, self._sum_train_cost)
         self._global_step += 1
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.
         if trainer_utils.should_eval(
             self._global_step, self._eval_frequency, self._eval_steps):
-          report = self._eval(
-              lr, start_step, start_time, train_time_since_prev_eval)
-          train_time_since_prev_eval = 0
+          report = self._eval(lr, start_step, start_time)
           yield report
           if self._check_early_stopping(report):
             return
@@ -238,8 +227,7 @@ class Trainer(base_trainer.BaseTrainer):
     # If we moved where in the loop body evals happen then we would not need
     # this test.
     if self._prev_eval_step != self._num_train_steps:
-      report = self._eval(
-          lr, start_step, start_time, train_time_since_prev_eval)
+      report = self._eval(lr, start_time, start_time)
       yield report
     # To make sure the last checkpoint was correctly saved.
     checkpoint.wait_for_checkpoint_save()

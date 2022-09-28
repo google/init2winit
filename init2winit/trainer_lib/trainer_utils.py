@@ -45,14 +45,14 @@ def log_message(msg, pool=None, work_unit=None):
   logging.info('%s', msg)
 
 
-def log_eta(pool, work_unit, global_step, steps_per_sec_train_only,
+def log_eta(pool, work_unit, global_step, steps_per_sec_no_eval,
             num_train_steps, start_time, eval_frequency, eval_steps, eval_time):
   """Construct and ETA / total time entry."""
   msg = f'Steps: {global_step} / {num_train_steps} '
   msg += f'[{global_step / num_train_steps:.1%}] '
 
   # Time remaining from training
-  train_eta = (num_train_steps - global_step) / steps_per_sec_train_only
+  train_eta = (num_train_steps - global_step) / steps_per_sec_no_eval
 
   # Time remaining from eval
   if eval_steps:
@@ -70,7 +70,7 @@ def log_eta(pool, work_unit, global_step, steps_per_sec_train_only,
 
 def log_epoch_report(report, metrics_logger):
   logging.info('Step %d, steps/second: %f, report: %r', report['global_step'],
-               report['steps_per_sec_train_only'], report)
+               report['steps_per_sec_no_eval'], report)
   if metrics_logger:
     metrics_logger.append_scalar_metrics(report)
   logging.info('Finished (estimated) epoch %d. Saving checkpoint.',
