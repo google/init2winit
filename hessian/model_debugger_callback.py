@@ -71,11 +71,11 @@ def get_grad(params,
 class ModelDebugCallback:
   """Used to run the hessian eval in the trainer binary."""
 
-  def __init__(self, model, optimizer, batch_stats, optimizer_state,
+  def __init__(self, model, params, batch_stats, optimizer_state,
                optimizer_update_fn, dataset, hps, callback_config, train_dir,
                rng):
     del hps
-    del optimizer
+    del params
     del optimizer_state
     del optimizer_update_fn
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
@@ -103,7 +103,7 @@ class ModelDebugCallback:
         skip_flags=callback_config.get('skip_flags'),
         skip_groups=callback_config.get('skip_groups'))
     # pmap functions for the training loop
-    # in_axes = (optimizer = 0, batch_stats = 0, batch = 0, step = None,
+    # in_axes = (params = 0, batch_stats = 0, batch = 0, step = None,
     # lr = None, rng = None, local_device_index = 0, training_metrics_grabber=0,
     # training_metrics_grabber, training_cost )
     # Also, we can donate buffers for 'optimizer', 'batch_stats',

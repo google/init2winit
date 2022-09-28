@@ -27,7 +27,7 @@ import jax.numpy as jnp
 from ml_collections import FrozenConfigDict
 
 
-def set_up_hessian_eval(model, flax_module, batch_stats, dataset,
+def set_up_hessian_eval(model, params, batch_stats, dataset,
                         checkpoint_dir, hessian_eval_config):
   """Builds the CurvatureEvaluator object."""
 
@@ -60,7 +60,7 @@ def set_up_hessian_eval(model, flax_module, batch_stats, dataset,
   pytree_path = os.path.join(checkpoint_dir, hessian_eval_config['name'])
   logger = utils.MetricLogger(pytree_path=pytree_path)
   hessian_evaluator = hessian_eval.CurvatureEvaluator(
-      flax_module, hessian_eval_config, dataset=dataset,
+      params, hessian_eval_config, dataset=dataset,
       loss=batch_loss, output_fn=batch_output, weights_fn=batch_weights)
   return hessian_evaluator, logger
 
@@ -68,7 +68,7 @@ def set_up_hessian_eval(model, flax_module, batch_stats, dataset,
 class HessianCallback(base_callback.BaseCallBack):
   """Used to run the hessian eval in the trainer binary."""
 
-  def __init__(self, model, flax_module, batch_stats, optimizer_state,
+  def __init__(self, model, params, batch_stats, optimizer_state,
                optimizer_update_fn, dataset, hps, callback_config, train_dir,
                rng):
     del rng
@@ -76,21 +76,21 @@ class HessianCallback(base_callback.BaseCallBack):
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
     # copy batch_stats as we close over it, and it gets modified.
     self.hessian_evaluator, self.logger = set_up_hessian_eval(
-        model, flax_module, batch_stats, dataset, checkpoint_dir,
+        model, params, batch_stats, dataset, checkpoint_dir,
         callback_config)
     self.callback_config = FrozenConfigDict(callback_config)
     self.hps = hps
     self.name = callback_config['name']
     self.optimizer_update_fn = optimizer_update_fn
 
-  def run_eval(self, flax_module, batch_stats, optimizer_state, global_step):
+  def run_eval(self, params, batch_stats, optimizer_state, global_step):
     """Computes the loss hessian and returns the max eigenvalue.
 
     Note, the full lanczos tridiagonal matrix is saved via the logger to
     train_dir/checkpoints/config['name'].
 
     Args:
-      flax_module: Replicated flax module.
+      params: Replicated param pytree.
       batch_stats: Replicated batch_stats from the trainer.
       optimizer_state: Replicated optimizer state from the trainer.
       global_step: Current training step.
@@ -108,17 +108,17 @@ class HessianCallback(base_callback.BaseCallBack):
     else:
       diag_preconditioner = None
     hessian_metrics, hvex, _ = self.hessian_evaluator.evaluate_spectrum(
-        flax_module, global_step, diag_preconditioner=diag_preconditioner)
+        params, global_step, diag_preconditioner=diag_preconditioner)
 
     if self.callback_config.get('compute_stats'):
       grads, updates = self.hessian_evaluator.compute_dirs(
-          flax_module, optimizer_state, self.optimizer_update_fn)
-      stats_row = self.hessian_evaluator.evaluate_stats(flax_module, grads,
+          params, optimizer_state, self.optimizer_update_fn)
+      stats_row = self.hessian_evaluator.evaluate_stats(params, grads,
                                                         updates, hvex, [],
                                                         global_step)
       hessian_metrics.update(stats_row)
       interps_row = self.hessian_evaluator.compute_interpolations(
-          flax_module, grads, updates, hvex, [], global_step)
+          params, grads, updates, hvex, [], global_step)
 
       hessian_metrics.update(interps_row)
     if jax.host_id() == 0:
