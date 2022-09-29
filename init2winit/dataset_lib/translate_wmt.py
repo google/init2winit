@@ -146,29 +146,29 @@ def get_fake_batch(hps):
   batch = {
       'inputs':
           np.ones((hps.batch_size, hps.max_target_length),
-                  dtype=hps.model_dtype),
+                  dtype=np.int32),
       'targets':
           np.ones((hps.batch_size, hps.max_target_length),
-                  dtype=hps.model_dtype),
+                  dtype=np.int32),
       'weights':
           np.ones((hps.batch_size, hps.max_target_length),
-                  dtype=hps.model_dtype),
+                  dtype=np.int64),
   }
 
   if hps.pack_examples:
     batch.update({
         'inputs_position':
             np.ones((hps.batch_size, hps.max_target_length),
-                    dtype=hps.model_dtype),
+                    dtype=np.int32),
         'inputs_segmentation':
             np.ones((hps.batch_size, hps.max_target_length),
-                    dtype=hps.model_dtype),
+                    dtype=np.int32),
         'targets_position':
             np.ones((hps.batch_size, hps.max_target_length),
-                    dtype=hps.model_dtype),
+                    dtype=np.int32),
         'targets_segmentation':
             np.ones((hps.batch_size, hps.max_target_length),
-                    dtype=hps.model_dtype),
+                    dtype=np.int32),
     })
 
     return batch

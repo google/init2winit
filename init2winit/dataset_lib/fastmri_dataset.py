@@ -31,7 +31,7 @@ gfile = tf.io.gfile
 listdir = tf.io.gfile.listdir
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    input_shape=(640, 640),
+    input_shape=(320, 320),
     output_shape=(320, 320),
     data_dir='',
     train_dir='knee_singlecoil_train',

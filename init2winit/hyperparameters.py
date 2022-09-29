@@ -137,7 +137,7 @@ def build_hparams(model_name,
 
   # Check that all provided have no overlap.
   if total_hps != len(merged_dict.keys()):
-    raise ValueError('There is overlap in the provided hparams.')
+    raise ValueError(f'There is overlap in the provided hparams: {hps_dicts}')
 
   # Convert to the Shallue and Lee label smoothing style.
   if merged_dict.get('use_shallue_label_smoothing', False):
