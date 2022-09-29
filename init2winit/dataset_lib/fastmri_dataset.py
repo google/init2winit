@@ -33,12 +33,19 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     input_shape=(320, 320),
     output_shape=(320, 320),
     data_dir='',
+    train_dir='knee_singlecoil_train',
     train_size=34742,
     num_train_h5_files=973,
-    train_dir='knee_singlecoil_train',
-    valid_size=7135,
-    num_valid_h5_files=199,
     val_dir='knee_singlecoil_val',
+    valid_size=3554,
+    num_valid_h5_files=100,
+    # NOTE(dsuo): ground truth is not publicly available for the test set
+    # `knee_singlecoil_test_v2`, so we split the validation set into roughly
+    # two, 100 files for validation, 99 for test. This amounts to 3,554 slices
+    # for validation, 3,581 for test.
+    test_dir='knee_singlecoil_val',
+    test_size=3581,
+    num_test_h5_files=99,
     eval_seed=0,
 ))
 
@@ -179,14 +186,14 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
 
   Args:
     per_host_batch_size: the batch size returned by the data pipeline.
-    split: One of ['train', 'eval_train', 'val'].
-    hps: The hparams the experiment is run with. Required fields are train_size
-      and valid_size.
+    split: One of ['train', 'eval_train', 'val', 'test'].
+    hps: The hparams the experiment is run with. Required fields are
+      num_train_h5_files, num_test_h5_files, and num_valid_h5_files.
     shuffle_rng: The RNG used to shuffle the split.
   Returns:
     A `tf.data.Dataset`.
   """
-  if split not in ['train', 'eval_train', 'val']:
+  if split not in ['train', 'eval_train', 'val', 'test']:
     raise ValueError('Unrecognized split {}'.format(split))
 
   # NOTE(dsuo): we split on h5 files, but each h5 file has some number of slices
@@ -194,7 +201,9 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
   # of slices, so we just split files equally among hosts.
   if split in ['train', 'eval_train']:
     split_size = hps.num_train_h5_files // jax.process_count()
-  else:
+  elif split == 'test':
+    split_size = hps.num_test_h5_files // jax.process_count()
+  else:  # split == 'val'
     split_size = hps.num_valid_h5_files // jax.process_count()
   start = jax.process_index() * split_size
   end = start + split_size
@@ -208,6 +217,11 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
 
   if split in ['train', 'eval_train']:
     data_dir = os.path.join(data_dir, hps.train_dir)
+  elif split == 'test':
+    data_dir = os.path.join(data_dir, hps.test_dir)
+    start += hps.num_valid_h5_files
+    if end > -1:
+      end += hps.num_valid_h5_files
   else:  # split == 'val'
     data_dir = os.path.join(data_dir, hps.val_dir)
 
@@ -274,8 +288,12 @@ def get_fastmri(shuffle_rng, batch_size, eval_batch_size, hps):
   eval_train_ds = load_split(per_host_eval_batch_size, 'eval_train', hps,
                              shuffle_rng)
   eval_train_ds = tfds.as_numpy(eval_train_ds)
+
   eval_ds = load_split(per_host_eval_batch_size, 'val', hps, shuffle_rng)
   eval_ds = tfds.as_numpy(eval_ds)
+
+  test_ds = load_split(per_host_eval_batch_size, 'test', hps, shuffle_rng)
+  test_ds = tfds.as_numpy(test_ds)
 
   def train_iterator_fn():
     return train_ds
@@ -288,13 +306,9 @@ def get_fastmri(shuffle_rng, batch_size, eval_batch_size, hps):
     for batch in itertools.islice(eval_ds, num_batches):
       yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
-  # pylint: disable=unreachable
-  def test_epoch(*args, **kwargs):
-    del args
-    del kwargs
-    return
-    yield  # This yield is needed to make this a valid (null) iterator.
-  # pylint: enable=unreachable
+  def test_epoch(num_batches=None):
+    for batch in itertools.islice(test_ds, num_batches):
+      yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
   return data_utils.Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
                             test_epoch)
