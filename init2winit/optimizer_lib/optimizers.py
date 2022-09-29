@@ -200,6 +200,19 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         # straightforward.
         weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
     )
+  elif hps.optimizer == 'lars':
+    opt_init, opt_update = utils.static_inject_hyperparams(optax.lars)(
+        learnsyncing_rate=0.0,
+        weight_decay=weight_decay,
+        # NOTE(dsuo): we provide this wiring, but specifying a weight decay
+        # mask in a config file / serializing properly is not completely
+        # straightforward.
+        weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
+        trust_coefficient=hps.opt_hparams['trust_coefficient'],
+        eps=hps.opt_hparams['epsilon'],
+        momentum=hps.opt_hparams['momentum'],
+        nesterov=hps.opt_hparams['nesterov'],
+    )
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
         kitchen_sink.kitchen_sink)(
