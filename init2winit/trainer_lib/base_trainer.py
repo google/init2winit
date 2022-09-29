@@ -61,6 +61,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       training_metrics_config=None,
       callback_configs=None,
       external_checkpoint_path=None,
+      external_ckpt_state_keys_to_ignore=None,
       dataset_meta_data=None,
       loss_name=None,
       metrics_name=None):
@@ -118,6 +119,11 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       external_checkpoint_path: (str) If this argument is set, we will load the
         optimizer_state, params, batch_stats, and training_metrics from the
         checkpoint at this location.
+      external_ckpt_state_keys_to_ignore: List of strings representing keys
+        to not include in the unreplicated_checkpoint_state dictionary if
+        loading from external_checkpoint_path. Values should be from {"params",
+        "optimizer_state", "batch_stats", "training_metrics_grabber",
+        "global_step", "preemption_count", "sum_train_cost"}.
       dataset_meta_data: meta_data about the dataset. It is not directly used in
         the base trainer. Users are expected to overwrite the initialization
         method in a customimzed trainer to access it.
@@ -161,7 +167,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       self._callback_configs = [callback_configs]
     else:
       self._callback_configs = callback_configs
+
     self._external_checkpoint_path = external_checkpoint_path
+    self._external_ckpt_state_keys_to_ignore = external_ckpt_state_keys_to_ignore
 
     # For logging / processing off the main thread
     self._logging_pool = multiprocessing.pool.ThreadPool()
@@ -278,7 +286,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
          unreplicated_batch_stats,
          unreplicated_metrics_state,
          train_dir=self._train_dir,
-         external_checkpoint_path=self._external_checkpoint_path)
+         external_checkpoint_path=self._external_checkpoint_path,
+         external_ckpt_state_keys_to_ignore=(
+             self._external_ckpt_state_keys_to_ignore))
     if is_restored:
       preemption_count += 1
 

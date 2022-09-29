@@ -88,12 +88,13 @@ def replicate_and_maybe_restore_checkpoint(
     unreplicated_batch_stats,
     unreplicated_training_metrics_state,
     train_dir,
-    external_checkpoint_path=None):
+    external_checkpoint_path=None,
+    external_ckpt_state_keys_to_ignore=None):
   """Replicates everything, and optionally restores from a checkpoint.
 
   The checkpoint logic is as follows: if there is a checkpoint in `train_dir`,
-  restore it.  Else, if `external_checkpoint_path` is set, restore the
-  checkpoint found there.  Else, don't restore any checkpoint, and just
+  restore it. Else, if `external_checkpoint_path` is set, restore the
+  checkpoint found there. Else, don't restore any checkpoint, and just
   return the passed-in optimizer_state, params, batch_stats, and
   metrics_grabber.
 
@@ -107,7 +108,12 @@ def replicate_and_maybe_restore_checkpoint(
     unreplicated_training_metrics_state: unreplicated metrics state
     train_dir: (str) The training directory where we will look for a checkpoint.
     external_checkpoint_path: (str) If this argument is set, then we will load
-    the external checkpoint stored there.
+      the external checkpoint stored there.
+    external_ckpt_state_keys_to_ignore: List of strings representing keys
+      to not include in the unreplicated_checkpoint_state dictionary if
+      loading from external_checkpoint_path. Values should be from {"params",
+      "optimizer_state", "batch_stats", "training_metrics_grabber",
+      "global_step", "preemption_count", "sum_train_cost"}.
 
   Returns:
     replicated_optimizer_state
@@ -143,14 +149,50 @@ def replicate_and_maybe_restore_checkpoint(
     is_restored = True  # We do want trainer to increment preemption_count.
   # Else, if external_checkpoint_path is non-null, restore from that checkpoint.
   elif external_checkpoint_path is not None:
-    # TODO(jeremycohen) This code will crash if we try to load an external
-    # checkpoint which was trained with a different num_train_steps.  The issue
-    # is that some of the fields in the training metrics state are arrays of
-    # shape [num_train_steps].  In the future we may want to handle these
-    # arrays explicitly, in order to avoid this crash.
+    if external_ckpt_state_keys_to_ignore is None:
+      external_ckpt_state_keys_to_ignore = []
+    target_checkpoint_state = {}
+    for key, value in unreplicated_checkpoint_state.items():
+      if key not in external_ckpt_state_keys_to_ignore:
+        target_checkpoint_state[key] = value
     ckpt_to_return = load_checkpoint(external_checkpoint_path,
-                                     target=unreplicated_checkpoint_state)
-    is_restored = False  # We don't want trainer to increment preemption_count.
+                                     target=target_checkpoint_state)
+
+    default_pytree_keys = ['optimizer_state', 'params',
+                           'batch_stats', 'training_metrics_grabber']
+    updated_pytree_keys = [key for key in default_pytree_keys
+                           if key not in external_ckpt_state_keys_to_ignore]
+    pytree_dict, extra_state = replicate_checkpoint(
+        ckpt_to_return, pytree_keys=updated_pytree_keys)
+
+    replicated_state = {}
+    for key, value in unreplicated_checkpoint_state.items():
+      # Restore keys that we want to restore.
+      if key in target_checkpoint_state:
+        if key in pytree_dict:
+          replicated_state[key] = pytree_dict[key]
+        else:  # key in extra_state
+          replicated_state[key] = extra_state[key]
+      # For the keys in external_ckpt_state_keys_to_ignore, either
+      # zero-initialize them, or use the passed-in values.
+      else:
+        if key == 'global_step':
+          replicated_state[key] = 0
+        elif key == 'preemption_count':
+          replicated_state[key] = 0
+        elif key == 'sum_train_cost':
+          replicated_state[key] = jnp.zeros(jax.local_device_count())
+        else:
+          replicated_state[key] = jax_utils.replicate(value)
+    return (
+        replicated_state['optimizer_state'],
+        replicated_state['params'],
+        replicated_state['batch_stats'],
+        replicated_state['training_metrics_grabber'],
+        replicated_state['global_step'],
+        replicated_state['sum_train_cost'],
+        replicated_state['preemption_count'],
+        False)  # is_restored;
   else:  # Else, don't restore from any checkpoint.
     return (
         jax_utils.replicate(unreplicated_optimizer_state),
