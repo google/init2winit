@@ -25,7 +25,6 @@ from init2winit import utils
 from init2winit.dataset_lib import mt_tokenizer
 from init2winit.mt_eval import decode
 from init2winit.mt_eval import eval_utils
-from init2winit.optimizer_lib import optimizers
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -160,13 +159,8 @@ class BLEUEvaluator(object):
     init_dict = model_init_fn(
         {'params': params_rng, 'dropout': dropout_rng}, *xs)
     params = init_dict['params']
-    batch_stats = init_dict.get('batch_stats', {})
     self.flax_module = model.flax_module
     self.params = params
-    self.batch_stats = jax_utils.replicate(batch_stats)
-    optimizer_init_fn, _ = optimizers.get_optimizer(self.hps)
-    optimizer_state = optimizer_init_fn(params)
-    self.optimizer_state = jax_utils.replicate(optimizer_state)
     self.pmapped_init_cache = jax.pmap(
         functools.partial(
             self.initialize_cache,
@@ -216,11 +210,9 @@ class BLEUEvaluator(object):
           lower_bound=step - self.ckpt_avg_window,
           upper_bound=step)
       logging.info('Current checkpoints: %s', ckpt_paths)
-      params, _, _ = eval_utils.average_checkpoints(
+      params = eval_utils.average_checkpoints(
           checkpoint_paths=ckpt_paths,
-          params=self.params,
-          optimizer_state=self.optimizer_state,
-          batch_stats=self.batch_stats)
+          params=self.params)
       params_replicated = jax_utils.replicate(params)
 
       (sources, references, predictions,

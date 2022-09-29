@@ -20,7 +20,6 @@ import pathlib
 
 from init2winit import checkpoint
 import jax
-import optax
 import sacrebleu
 from tensorflow.io import gfile
 
@@ -58,13 +57,10 @@ def save_evals(ckpt_dir, ckpt_step, eval_split, bleu_score):
     f.write(str(bleu_score))
 
 
-def _load_checkpoint(checkpoint_path, params, optimizer_state, batch_stats,
-                     replicate=True):
+def _load_checkpoint(checkpoint_path, params, replicate=True):
   """Load model (and batch stats) from checkpoint."""
   target = dict(
       params=params,
-      optimizer_state=optimizer_state,
-      batch_stats=batch_stats,
       global_step=-1,
       preemption_count=0,
       sum_train_cost=0.0)
@@ -74,48 +70,27 @@ def _load_checkpoint(checkpoint_path, params, optimizer_state, batch_stats,
   )
   results = checkpoint.replicate_checkpoint(
       ckpt,
-      pytree_keys=['params', 'optimizer_state', 'batch_stats'],
+      pytree_keys=['params'],
       replicate=replicate,
   )
   params = results[0]['params']
-  optimizer_state = results[0]['optimizer_state']
-  batch_stats = results[0]['batch_stats']
-  return params, optimizer_state, batch_stats
+  return params
 
 
-def average_checkpoints(
-    checkpoint_paths, params, optimizer_state, batch_stats):
+def average_checkpoints(checkpoint_paths, params):
   """Averages a set of checkpoints in input checkpoints."""
   assert len(checkpoint_paths) >= 1
   # Sum parameters of separate models together.
-  params, optimizer_state, batch_stats = _load_checkpoint(
-      checkpoint_paths[0], params, optimizer_state, batch_stats,
-      replicate=False)
-  optimizer_state_inner_state = optimizer_state.inner_state
+  params = _load_checkpoint(checkpoint_paths[0], params, replicate=False)
   for checkpoint_path in checkpoint_paths[1:]:
-    params_update, optimizer_state_update, _ = _load_checkpoint(
-        checkpoint_path, params, optimizer_state, batch_stats,
-        replicate=False)
+    params_update = _load_checkpoint(checkpoint_path, params, replicate=False)
     # TODO(dxin): Make this averaging process more numerically stable.
     params = jax.tree_map(
         lambda x, y: x + y, params, params_update)
-    optimizer_state_inner_state = jax.tree_map(
-        lambda x, y: x + y, optimizer_state_inner_state,
-        optimizer_state_update.inner_state)
 
   # Average checkpoints.
-  params = jax.tree_map(
-      lambda x: x / float(len(checkpoint_paths)),
-      params)
-  optimizer_state_inner_state = jax.tree_map(
-      lambda x: x / float(len(checkpoint_paths)),
-      optimizer_state_inner_state)
-
-  optimizer_state = optax.InjectHyperparamsState(
-      count=optimizer_state.count,
-      hyperparams=optimizer_state.hyperparams,
-      inner_state=optimizer_state_inner_state)
-  return (params, optimizer_state, batch_stats)
+  params = jax.tree_map(lambda x: x / float(len(checkpoint_paths)), params)
+  return params
 
 
 def get_checkpoints_in_range(checkpoint_dir, lower_bound, upper_bound):
