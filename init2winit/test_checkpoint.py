@@ -189,7 +189,12 @@ class CheckpointTest(parameterized.TestCase):
       2.  If an external checkpoint was provided but no latest checkpoint
       exists in the train_dir, then the function should return the external
       checkpoint.
-      3.  If a latest checkpoint exists in the train dir, then the function
+      3. If an external checkpoint was provided but no latest checkpoint
+      exists in the train_dir, and if external_ckpt_state_keys_to_ignore is set,
+      the state whose keys are in external_ckpt_state_keys_to_ignore will
+      contain their passed-in, or zero-initialized, state, and the rest will be
+      restored from the external checkpoint.
+      4.  If a latest checkpoint exists in the train dir, then the function
       should return that checkpoint.
 
       In the interest of conciseness, this test only checks the params,
@@ -221,13 +226,15 @@ class CheckpointTest(parameterized.TestCase):
                      training_metrics_grabber={}),
           max_to_keep=1)
 
-    def maybe_restore_checkpoint(params, train_dir, external_checkpoint_path):
+    def maybe_restore_checkpoint(params, train_dir, external_checkpoint_path,
+                                 external_ckpt_state_keys_to_ignore=None):
       """Helper function to replicate_and_maybe_restore a checkpoint."""
 
       (_, ret_params, _, _,
        ret_global_step, ret_sum_train_cost, ret_preemption_count,
        ret_is_restored) = checkpoint.replicate_and_maybe_restore_checkpoint(
-           {}, params, {}, {}, train_dir, external_checkpoint_path)
+           {}, params, {}, {}, train_dir, external_checkpoint_path,
+           external_ckpt_state_keys_to_ignore)
 
       ret_params_unrep = jax.device_get(jax_utils.unreplicate(ret_params))
 
@@ -267,6 +274,40 @@ class CheckpointTest(parameterized.TestCase):
     self.assertEqual(ret_preemption_count, 4)
     self.assertEqual(ret_global_step, 5)
     self.assertEqual(ret_sum_train_cost, 7.0)
+    self.assertFalse(ret_is_restored)
+    assert pytree_equal(ret_params, external_params)
+
+    # If no latest checkpoint exists, and an external checkpoint was provided,
+    # and if external_ckpt_state_keys_to_ignore = ["params"], the function
+    # should return the passed-in params, and the rest should be from the
+    # external checkpoint.
+
+    (ret_params, ret_global_step, ret_sum_train_cost, ret_preemption_count,
+     ret_is_restored) = maybe_restore_checkpoint(
+         initial_params, fresh_train_dir, external_checkpoint_path,
+         external_ckpt_state_keys_to_ignore=['params'])
+
+    self.assertEqual(ret_preemption_count, 4)
+    self.assertEqual(ret_global_step, 5)
+    self.assertEqual(ret_sum_train_cost, 7.0)
+    self.assertFalse(ret_is_restored)
+    assert pytree_equal(ret_params, initial_params)
+
+    # If no latest checkpoint exists, and an external checkpoint was provided,
+    # and if external_ckpt_state_keys_to_ignore= =
+    # ["global_step", "preemption_count", "sum_train_cost"], the function should
+    # return zero for those keys, and the rest should be from the external
+    # checkpoint.
+
+    (ret_params, ret_global_step, ret_sum_train_cost, ret_preemption_count,
+     ret_is_restored) = maybe_restore_checkpoint(
+         initial_params, fresh_train_dir, external_checkpoint_path,
+         external_ckpt_state_keys_to_ignore=[
+             'global_step', 'preemption_count', 'sum_train_cost'])
+
+    self.assertEqual(ret_preemption_count, 0)
+    self.assertEqual(ret_global_step, 0)
+    self.assertEqual(ret_sum_train_cost, 0.0)
     self.assertFalse(ret_is_restored)
     assert pytree_equal(ret_params, external_params)
 

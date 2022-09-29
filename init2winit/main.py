@@ -101,6 +101,12 @@ flags.DEFINE_string('external_checkpoint_path', None,
                     'If this argument is set, the trainer will initialize'
                     'the parameters, batch stats, optimizer state, and training'
                     'metrics by loading them from the checkpoint at this path.')
+flags.DEFINE_list('external_ckpt_state_keys_to_ignore', [],
+                  'List of keys to not include in the '
+                  'unreplicated_checkpoint_state dictionary if loading from '
+                  'external_checkpoint_path. Values should be from {"params", '
+                  '"optimizer_state", "batch_stats", "training_metrics_grabber"'
+                  ', "global_step", "preemption_count", "sum_train_cost"}.')
 
 flags.DEFINE_string(
     'early_stopping_target_name',
@@ -186,7 +192,8 @@ def _run(
     worker_id,
     training_metrics_config,
     callback_configs,
-    external_checkpoint_path):
+    external_checkpoint_path,
+    external_ckpt_state_keys_to_ignore):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
   initializer = initializers.get_initializer(initializer_name)
@@ -261,6 +268,7 @@ def _run(
             training_metrics_config=training_metrics_config,
             callback_configs=callback_configs,
             external_checkpoint_path=external_checkpoint_path,
+            external_ckpt_state_keys_to_ignore=external_ckpt_state_keys_to_ignore,
             dataset_meta_data=dataset_meta_data,
             loss_name=loss_name,
             metrics_name=metrics_name).train())
@@ -335,6 +343,8 @@ def main(unused_argv):
         training_metrics_config=training_metrics_config,
         callback_configs=callback_configs,
         external_checkpoint_path=FLAGS.external_checkpoint_path,
+        external_ckpt_state_keys_to_ignore=(
+            FLAGS.external_ckpt_state_keys_to_ignore)
     )
 
 
