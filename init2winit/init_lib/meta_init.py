@@ -26,8 +26,8 @@ import operator
 import time
 
 from absl import logging
+import flax
 from flax import jax_utils
-from flax import optim as optimizers
 from flax.core import unfreeze
 from init2winit.model_lib import model_utils
 import jax
@@ -173,7 +173,7 @@ def meta_optimize_scales(loss_fn,
     logging.info('MetaInit will optimize the following parameters:')
     for key in non_bias_and_scalar_keys:
       logging.info(key)
-  traversal = optimizers.ModelParamTraversal(
+  traversal = flax.traverse_util.ModelParamTraversal(
       lambda path, _: path in non_bias_and_scalar_keys)
 
   # Non-bias, non-scalar norms.
