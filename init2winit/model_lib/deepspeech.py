@@ -76,7 +76,10 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         enable_residual_connections=False,
         enable_decoder_layer_norm=False,
         bidirectional=True,
-        total_accumulated_batch_size=None,))
+        total_accumulated_batch_size=None,
+        enable_subsampling_batchnorm=False,
+        enable_synced_batchnorm=False,
+        enable_ffn_relu=False))
 
 
 @struct.dataclass
@@ -105,6 +108,9 @@ class DeepspeechConfig:
   enable_residual_connections: bool = False
   enable_decoder_layer_norm: bool = False
   bidirectional: bool = False
+  enable_subsampling_batchnorm: bool = False
+  enable_synced_batchnorm: bool = False
+  enable_ffn_relu: bool = False
 
 
 class Subsample(nn.Module):
@@ -127,7 +133,11 @@ class Subsample(nn.Module):
         batch_norm_momentum=config.batch_norm_momentum,
         batch_norm_epsilon=config.batch_norm_epsilon,
         input_channels=1,
-        output_channels=config.encoder_dim)(outputs, output_paddings, train)
+        output_channels=config.encoder_dim,
+        enable_batchnorm=config.enable_subsampling_batchnorm,
+        enable_synced_batchnorm=config.enable_synced_batchnorm)(outputs,
+                                                                output_paddings,
+                                                                train)
 
     outputs, output_paddings = Conv2dSubsampling(
         encoder_dim=config.encoder_dim,
@@ -135,7 +145,11 @@ class Subsample(nn.Module):
         batch_norm_momentum=config.batch_norm_momentum,
         batch_norm_epsilon=config.batch_norm_epsilon,
         input_channels=config.encoder_dim,
-        output_channels=config.encoder_dim)(outputs, output_paddings, train)
+        output_channels=config.encoder_dim,
+        enable_batchnorm=config.enable_subsampling_batchnorm,
+        enable_synced_batchnorm=config.enable_synced_batchnorm)(outputs,
+                                                                output_paddings,
+                                                                train)
 
     batch_size, subsampled_lengths, subsampled_dims, channels = outputs.shape
 
@@ -153,12 +167,6 @@ class Subsample(nn.Module):
     return outputs, output_paddings
 
 
-@jax.jit
-def hard_tanh(x, min_value, max_value):
-  return jnp.where(x < min_value, min_value,
-                   jnp.where(x > max_value, max_value, x))
-
-
 class Conv2dSubsampling(nn.Module):
   """Helper module used in Subsample layer.
 
@@ -174,6 +182,8 @@ class Conv2dSubsampling(nn.Module):
   dtype: Any = jnp.float32
   batch_norm_momentum: float = 0.999
   batch_norm_epsilon: float = 0.001
+  enable_batchnorm: bool = False
+  enable_synced_batchnorm: bool = False
 
   def setup(self):
     self.filter_shape = (3, 3, self.input_channels, self.output_channels)
@@ -197,10 +207,12 @@ class Conv2dSubsampling(nn.Module):
 
     outputs += jnp.reshape(self.bias, (1,) * (outputs.ndim - 1) + (-1,))
 
-    outputs = BatchNorm(self.encoder_dim, self.dtype,
-                        self.batch_norm_momentum,
-                        self.batch_norm_epsilon)(
-                            outputs, input_paddings=None, train=train)
+    if self.enable_batchnorm:
+      outputs = BatchNorm(self.encoder_dim, self.dtype,
+                          self.batch_norm_momentum, self.batch_norm_epsilon,
+                          self.enable_synced_batchnorm)(
+                              outputs, input_paddings=None, train=train)
+
     outputs = nn.relu(outputs)
 
     # Computing correct paddings post input convolution.
@@ -234,12 +246,16 @@ class FeedForwardModule(nn.Module):
     config = self.config
 
     inputs = BatchNorm(config.encoder_dim, config.dtype,
-                       config.batch_norm_momentum,
-                       config.batch_norm_epsilon)(inputs, input_paddings, train)
+                       config.batch_norm_momentum, config.batch_norm_epsilon,
+                       config.enable_synced_batchnorm)(inputs, input_paddings,
+                                                       train)
     inputs = nn.Dense(
         config.encoder_dim,
         use_bias=True,
         kernel_init=nn.initializers.xavier_uniform())(inputs)
+
+    if config.enable_ffn_relu:
+      inputs = nn.relu(inputs)
     inputs *= padding_mask
 
     inputs = nn.Dropout(rate=config.feed_forward_dropout_rate)(
@@ -293,6 +309,7 @@ class BatchNorm(nn.Module):
   dtype: Any = jnp.float32
   batch_norm_momentum: float = 0.999
   batch_norm_epsilon: float = 0.001
+  enable_synced_batchnorm: bool = False
 
   def setup(self):
     dim = self.encoder_dim
@@ -332,6 +349,10 @@ class BatchNorm(nn.Module):
       count_v = jnp.sum(
           jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=True)
 
+      if self.enable_synced_batchnorm:
+        sum_v = jax.lax.psum(sum_v, axis_name='batch')
+        count_v = jax.lax.psum(count_v, axis_name='batch')
+
       count_v = jnp.maximum(count_v, 1.0)
       mean = sum_v / count_v
 
@@ -339,6 +360,9 @@ class BatchNorm(nn.Module):
           (inputs - mean) * (inputs - mean) * mask,
           axis=reduce_over_dims,
           keepdims=True)
+
+      if self.enable_synced_batchnorm:
+        sum_vv = jax.lax.psum(sum_vv, axis_name='batch')
 
       var = sum_vv / count_v
 
@@ -683,8 +707,9 @@ class BatchRNN(nn.Module):
     config = self.config
 
     inputs = BatchNorm(config.encoder_dim, config.dtype,
-                       config.batch_norm_momentum,
-                       config.batch_norm_epsilon)(inputs, input_paddings, train)
+                       config.batch_norm_momentum, config.batch_norm_epsilon,
+                       config.enable_synced_batchnorm)(inputs, input_paddings,
+                                                       train)
     lengths = jnp.sum(1 - input_paddings, axis=-1, dtype=jnp.int32)
 
     output, _ = LSTM(
@@ -917,7 +942,10 @@ class DeepSpeechModel(base_model.BaseModel):
         feed_forward_dropout_rate=self.hps.feed_forward_dropout_rate,
         enable_residual_connections=self.hps.enable_residual_connections,
         enable_decoder_layer_norm=self.hps.enable_decoder_layer_norm,
-        bidirectional=self.hps.bidirectional)
+        bidirectional=self.hps.bidirectional,
+        enable_subsampling_batchnorm=self.hps.enable_subsampling_batchnorm,
+        enable_synced_batchnorm=self.hps.enable_synced_batchnorm,
+        enable_ffn_relu=self.hps.enable_ffn_relu)
     module = DeepSpeechEncoderDecoder(config)
 
     return module
