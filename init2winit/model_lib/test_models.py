@@ -19,6 +19,7 @@
 
 import copy
 import functools
+import itertools
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -63,6 +64,10 @@ classification_keys = [
 ]
 text_keys = [('test_{}'.format(m), m) for m in text_models]
 dtype_keys = [('test_{}'.format(t), t) for t in dtypes]
+remat_scan_keys = [('test_no_remat_scan', None), ('test_remat_scan', (2, 2))]
+dtype_and_remat_scan_keys = [('_'.join([x[0], y[0]]), x[1], y[1]) for
+                             x, y in itertools.product(dtype_keys,
+                                                       remat_scan_keys)]
 
 
 class ModelsTest(parameterized.TestCase):
@@ -195,10 +200,16 @@ class ModelsTest(parameterized.TestCase):
     self.assertEqual(outputs.shape,
                      (text_input_shape[0], text_input_shape[1], vocab_size))
 
-  @parameterized.named_parameters(*dtype_keys)
-  def test_translate_model(self, dtype_str):
+  @parameterized.named_parameters(*dtype_and_remat_scan_keys)
+  def test_translate_model(self, dtype_str, remat_scan_lengths):
     """Test forward pass of the translate model."""
     vocab_size = 16
+
+    if remat_scan_lengths:
+      num_layers = None
+    else:
+      num_layers = 2
+
     small_hps = config_dict.ConfigDict({
         # Architecture Hparams.
         'batch_size': 16,
@@ -206,8 +217,10 @@ class ModelsTest(parameterized.TestCase):
         'logits_via_embedding': False,
         'emb_dim': 32,
         'num_heads': 2,
-        'enc_num_layers': 2,
-        'dec_num_layers': 2,
+        'enc_num_layers': num_layers,
+        'dec_num_layers': num_layers,
+        'enc_remat_scan_lengths': remat_scan_lengths,
+        'dec_remat_scan_lengths': remat_scan_lengths,
         'qkv_dim': 32,
         'label_smoothing': 0.1,
         'mlp_dim': 64,

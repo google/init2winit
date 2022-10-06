@@ -16,8 +16,16 @@
 """Transformer-based machine translation model.
 
 Adapted from third_party/py/language/google/generation/tsukuyomi/models.py
+
+To allow deeper models, (e.g. 100 layers) we support usage of remat_scan
+from flax.linen. Remat_scan allows to keep memory usage bound in the
+backward pass at the expense of extra compute. On a TPUv3 for a 9 layers
+Transformer, using remat_scan with configuration (3, 3) results in a 30% time
+increase in the backward pass.
 """
-from typing import Any, Optional
+import functools
+from typing import Any, Callable, Optional, Sequence
+from absl import logging
 
 from flax import linen as nn
 from init2winit import utils
@@ -38,8 +46,10 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         logits_via_embedding=False,
         emb_dim=512,
         num_heads=8,
-        enc_num_layers=4,
-        dec_num_layers=4,
+        enc_num_layers=None,
+        dec_num_layers=None,
+        enc_remat_scan_lengths=None,
+        dec_remat_scan_lengths=None,
         qkv_dim=512,
         mlp_dim=512,
         dropout_rate=0.1,
@@ -72,6 +82,48 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         decode=False,
         total_accumulated_batch_size=None,
     ))
+
+
+class Scannable(nn.Module):
+  """Lifts a module to a scannable version.
+
+  Note that to use scan over layers we need to have input and output
+  of the layer to have the same structure. Here we assume that the
+  input to a layer is of the form x, *others where x is changed by the
+  layer and *others are extra arguments static throughout the layers.
+  """
+  build_fn: Callable[[], nn.Module]
+  train: False
+
+  def setup(self):
+    self.block = self.build_fn()
+
+  def __call__(self, x):
+    """Applies the Module to inputs.
+
+    Args:
+      x: the inputs to the module. It is assumed to be a tuple of pytrees.
+        The first element of the tuple is mapped by self.block into an output
+        of the same structure (e.g. the Decoder activations fed to the
+        Encoder-Decoder Multi-Head-Attention).
+        The other elements are static arguments used by self.block that would
+        stay the same if we apply multiple self.block's one after the other
+        (e.g. the encoder output used by the Encoder-Decoder
+        Multi-Head-Attention).
+    Returns:
+      self.block(x[0], *x[1:]), *x[1:].
+    """
+    # Split x into a part to forward and the static arguments.
+    x, *others = x
+    return self.block(x, *others, train=self.train), *others
+
+
+def _get_dtype(use_bfloat16):
+  if use_bfloat16:
+    dtype = jnp.bfloat16
+  else:
+    dtype = jnp.float32
+  return dtype
 
 
 def shift_right(x, axis=1):
@@ -415,7 +467,8 @@ class Encoder(nn.Module):
     dtype: the jnp.dtype for the model parameters.
     emb_dim: dimension of embedding
     num_heads: number of heads
-    enc_num_layers: number of layers
+    enc_num_layers: number of layers. It is ignored if enc_remat_scan_lengths
+      is not None.
     qkv_dim: dimension of the query/key/value
     mlp_dim: dimension of the mlp on top of attention block
     max_len: maximum length.
@@ -424,13 +477,16 @@ class Encoder(nn.Module):
     attention_dropout_rate: dropout rate for attention weights
     enc_self_attn_kernel_init_fn: initializer for encoder's
       self attention matrices.
+    enc_remat_scan_lengths: if not None, it is the sequence of lengths to use
+      for remat_scan. See flax.linen.remat_scan; in this case this
+      defines the total number of layers, not enc_num_layers.
   """
   vocab_size: int
   shared_embedding: Any = None
   dtype: jnp.dtype = jnp.float32
   emb_dim: int = 512
   num_heads: int = 8
-  enc_num_layers: int = 6
+  enc_num_layers: Optional[int] = 6
   qkv_dim: int = 512
   mlp_dim: int = 2048
   max_len: int = 512
@@ -438,6 +494,7 @@ class Encoder(nn.Module):
   normalizer: str = 'layer_norm'
   attention_dropout_rate: float = 0.1
   enc_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
+  enc_remat_scan_lengths: Optional[Sequence[int]] = None
 
   @nn.compact
   def __call__(self,
@@ -477,18 +534,28 @@ class Encoder(nn.Module):
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
 
     # Input encoder.
-    for lyr in range(self.enc_num_layers):
-      x = Encoder1DBlock(
-          qkv_dim=self.qkv_dim,
-          mlp_dim=self.mlp_dim,
-          num_heads=self.num_heads,
-          dtype=self.dtype,
-          dropout_rate=self.dropout_rate,
-          attention_dropout_rate=self.attention_dropout_rate,
-          normalizer=self.normalizer,
-          enc_self_attn_kernel_init_fn=self.enc_self_attn_kernel_init_fn,
-          name=f'encoderblock_{lyr}')(
-              x, encoder_mask=encoder_mask, train=train)
+    build_fn = functools.partial(
+        Encoder1DBlock,
+        qkv_dim=self.qkv_dim,
+        mlp_dim=self.mlp_dim,
+        num_heads=self.num_heads,
+        dtype=self.dtype,
+        dropout_rate=self.dropout_rate,
+        attention_dropout_rate=self.attention_dropout_rate,
+        normalizer=self.normalizer,
+        enc_self_attn_kernel_init_fn=self.enc_self_attn_kernel_init_fn)
+    if self.enc_remat_scan_lengths is None:
+      for lyr in range(self.enc_num_layers):
+        x = build_fn(name=f'encoderblock_{lyr}')(
+            x, encoder_mask=encoder_mask, train=train)
+    else:
+      logging.info('Using Remat Scan, ignoring enc_num_layers; '
+                   'number of layers=%d', np.prod(self.enc_remat_scan_lengths))
+      enc_stack = nn.remat_scan(
+          Scannable, lengths=self.enc_remat_scan_lengths)(build_fn=build_fn,
+                                                          train=train,
+                                                          name='EncoderStack')
+      x = enc_stack((x, encoder_mask))[0]
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
       maybe_normalize = model_utils.get_normalizer(
           self.normalizer, train, dtype=self.dtype)
@@ -506,7 +573,8 @@ class Decoder(nn.Module):
     dtype: the jnp.dtype for the model parameters.
     emb_dim: dimension of embedding.
     num_heads: number of heads.
-    dec_num_layers: number of layers.
+    dec_num_layers: number of layers. It is ignored if dec_remat_scan_lengths
+      is not None.
     qkv_dim: dimension of the query/key/value.
     mlp_dim: dimension of the mlp on top of attention block.
     max_len: maximum length.
@@ -519,6 +587,9 @@ class Decoder(nn.Module):
       self attention matrices.
     dec_cross_attn_kernel_init_fn: initializer for decoder's
       cross attention matrices.
+    dec_remat_scan_lengths: if not None, it is the sequence of lengths to use
+      for remat_scan. See flax.linen.remat_scan; in this case this
+      defines the total number of layers, not dec_num_layers.
   """
   output_vocab_size: int
   shared_embedding: Any = None
@@ -526,7 +597,7 @@ class Decoder(nn.Module):
   dtype: jnp.dtype = jnp.float32
   emb_dim: int = 512
   num_heads: int = 8
-  dec_num_layers: int = 6
+  dec_num_layers: Optional[int] = 6
   qkv_dim: int = 512
   mlp_dim: int = 2048
   max_len: int = 512
@@ -536,6 +607,7 @@ class Decoder(nn.Module):
   attention_dropout_rate: float = 0.1
   dec_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   dec_cross_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
+  dec_remat_scan_lengths: Optional[Sequence[int]] = None
 
   @nn.compact
   def __call__(self,
@@ -587,24 +659,36 @@ class Decoder(nn.Module):
     y = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(y)
 
     # Target-Input Decoder
-    for lyr in range(self.dec_num_layers):
-      y = EncoderDecoder1DBlock(
-          qkv_dim=self.qkv_dim,
-          mlp_dim=self.mlp_dim,
-          num_heads=self.num_heads,
-          dtype=self.dtype,
-          dropout_rate=self.dropout_rate,
-          attention_dropout_rate=self.attention_dropout_rate,
-          normalizer=self.normalizer,
-          dec_self_attn_kernel_init_fn=self.dec_self_attn_kernel_init_fn,
-          dec_cross_attn_kernel_init_fn=self.dec_cross_attn_kernel_init_fn,
-          decode=self.decode,
-          name=f'encoderdecoderblock_{lyr}')(
-              y,
-              encoded,
-              decoder_mask=decoder_mask,
-              encoder_decoder_mask=encoder_decoder_mask,
-              train=train)
+    build_fn = functools.partial(
+        EncoderDecoder1DBlock,
+        qkv_dim=self.qkv_dim,
+        mlp_dim=self.mlp_dim,
+        num_heads=self.num_heads,
+        dtype=self.dtype,
+        dropout_rate=self.dropout_rate,
+        attention_dropout_rate=self.attention_dropout_rate,
+        normalizer=self.normalizer,
+        dec_self_attn_kernel_init_fn=self.dec_self_attn_kernel_init_fn,
+        dec_cross_attn_kernel_init_fn=self.dec_cross_attn_kernel_init_fn,
+        decode=self.decode)
+
+    if self.dec_remat_scan_lengths is None:
+      for lyr in range(self.dec_num_layers):
+        y = build_fn(name=f'encoderdecoderblock_{lyr}')(
+            y,
+            encoded,
+            decoder_mask=decoder_mask,
+            encoder_decoder_mask=encoder_decoder_mask,
+            train=train)
+    else:
+      logging.info('Using Remat Scan, ignoring enc_num_layers; '
+                   'number of layers=%d', np.prod(self.dec_remat_scan_lengths))
+      dec_stack = nn.remat_scan(
+          Scannable, lengths=self.dec_remat_scan_lengths)(build_fn=build_fn,
+                                                          train=train,
+                                                          name='DecoderStack')
+      decoder_mask = decoder_mask.astype(self.dtype)
+      y = dec_stack((y, encoded, decoder_mask, encoder_decoder_mask))[0]
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
       maybe_normalize = model_utils.get_normalizer(
           self.normalizer, train, dtype=self.dtype)
@@ -648,7 +732,11 @@ class Transformer(nn.Module):
     emb_dim: dimension of embedding.
     num_heads: number of heads.
     enc_num_layers: number of encoder layers.
+    enc_remat_scan_lengths: Optional sequence of lengths to use with
+      flax.linen.remat_scan.
     dec_num_layers: number of decoder layers.
+    dec_remat_scan_lengths: Optional sequence of lengths to use with
+      flax.linen.remat_scan.
     qkv_dim: dimension of the query/key/value.
     mlp_dim: dimension of the mlp on top of attention block.
     max_len: maximum length.
@@ -670,8 +758,10 @@ class Transformer(nn.Module):
   dtype: jnp.dtype = jnp.float32
   emb_dim: int = 512
   num_heads: int = 8
-  enc_num_layers: int = 6
-  dec_num_layers: int = 6
+  enc_num_layers: Optional[int] = 6
+  enc_remat_scan_lengths: Optional[Sequence[int]] = None
+  dec_num_layers: Optional[int] = 6
+  dec_remat_scan_lengths: Optional[Sequence[int]] = None
   qkv_dim: int = 512
   mlp_dim: int = 2048
   max_len: int = 2048
@@ -684,6 +774,16 @@ class Transformer(nn.Module):
   should_decode: bool = False
 
   def setup(self):
+    if self.enc_num_layers and self.enc_remat_scan_lengths:
+      raise ValueError(f'Only one of enc_num_layers ({self.enc_num_layers})'
+                       'and enc_remat_scan_lengths'
+                       f'({self.enc_remat_scan_lengths}) can be set.')
+
+    if self.dec_num_layers and self.dec_remat_scan_lengths:
+      raise ValueError(f'Only one of dec_num_layers ({self.dec_num_layers})'
+                       'and dec_remat_scan_lengths'
+                       f'({self.dec_remat_scan_lengths}) can be set.')
+
     if self.share_embeddings:
       if self.output_vocab_size is not None:
         assert self.output_vocab_size == self.vocab_size, (
@@ -712,6 +812,7 @@ class Transformer(nn.Module):
         attention_dropout_rate=self.attention_dropout_rate,
         normalizer=self.normalizer,
         enc_self_attn_kernel_init_fn=self.enc_self_attn_kernel_init_fn,
+        enc_remat_scan_lengths=self.enc_remat_scan_lengths,
         name='encoder')
     self.decoder = Decoder(
         output_vocab_size=self.output_vocab_size,
@@ -730,6 +831,7 @@ class Transformer(nn.Module):
         dec_self_attn_kernel_init_fn=self.dec_self_attn_kernel_init_fn,
         dec_cross_attn_kernel_init_fn=self.dec_self_attn_kernel_init_fn,
         decode=self.should_decode,
+        dec_remat_scan_lengths=self.dec_remat_scan_lengths,
         name='decoder')
 
   @nn.compact
@@ -960,4 +1062,6 @@ class TransformerTranslate(base_model.BaseModel):
         dec_self_attn_kernel_init_fn=dec_self_attn_kernel_init_fn,
         dec_cross_attn_kernel_init_fn=dec_cross_attn_kernel_init_fn,
         should_decode=self.hps.decode,
+        enc_remat_scan_lengths=self.hps.enc_remat_scan_lengths,
+        dec_remat_scan_lengths=self.hps.dec_remat_scan_lengths,
     )
