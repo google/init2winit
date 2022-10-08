@@ -25,6 +25,7 @@ import time
 
 from absl import logging as absl_logging
 from clu import metric_writers
+import flax.linen as nn
 from flax.training import checkpoints as flax_checkpoints
 from init2winit import checkpoint
 import jax
@@ -323,6 +324,25 @@ def log_pytree_shape_and_statistics(pytree, json_path=None):
   total_params = jax.tree_util.tree_reduce(
       operator.add, jax.tree_map(lambda x: x.size, pytree))
   absl_logging.info('Total params: %d', total_params)
+
+
+def tabulate_model(model, hps):
+  """Logs a table of the flax module model parameters.
+
+  Args:
+    model: init2winit BaseModel
+    hps: ml_collections.config_dict.config_dict.ConfigDict
+  """
+  tabulate_fn = nn.tabulate(model.flax_module, jax.random.PRNGKey(0),
+                            console_kwargs={'force_terminal': False,
+                                            'force_jupyter': False,
+                                            'width': 120},
+                            )
+  fake_input_batch = model.get_fake_batch(hps)
+  # Currently only two models implement the get_fake_batch.
+  # Only attempt to log if we get a valid fake_input_batch.
+  if fake_input_batch:
+    absl_logging.info(tabulate_fn(*fake_input_batch, train=False,))
 
 
 def edit_distance(source, target):

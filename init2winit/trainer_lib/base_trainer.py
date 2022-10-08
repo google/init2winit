@@ -251,6 +251,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     if jax.process_index() == 0:
       utils.log_pytree_shape_and_statistics(unreplicated_params)
       logging.info('train_size: %d,', self._hps.train_size)
+      utils.tabulate_model(self._model, self._hps)
 
     optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(
         self._hps, self._model, batch_axis_name='batch')
