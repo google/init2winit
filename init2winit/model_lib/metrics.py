@@ -424,10 +424,6 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
   if volume_max is None:
     volume_max = jnp.ones(logits.shape[0])
 
-  # NOTE(dsuo): `volume_max` can be 0 if we have a padded batch, but this will
-  # lead to NaN values in `ssim`.
-  volume_max = jnp.where(volume_max == 0, jnp.ones_like(volume_max), volume_max)
-
   if mean is None:
     mean = jnp.zeros(logits.shape[0])
 
@@ -442,6 +438,15 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
 
   if weights is not None:
     ssims = ssims * weights
+
+  # NOTE(dsuo): map NaN ssims to -1.
+  ssims = jnp.where(jnp.isnan(ssims), -1, ssims)
+
+  # NOTE(dsuo): map out-of-bounds ssims to -1, the theoretical minimum value
+  # of ssim since we care about maximizing ssim.
+  ssims = jnp.where(
+      jnp.logical_or(ssims > 1, ssims < -1),
+      jnp.ones_like(ssims) * -1, ssims)
 
   return ssims
 
