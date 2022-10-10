@@ -29,6 +29,7 @@ from absl import logging
 
 from flax import linen as nn
 from init2winit import utils
+from init2winit.model_lib import attention
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax import lax
@@ -81,6 +82,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         dec_cross_attn_kernel_init='xavier_uniform',
         decode=False,
         total_accumulated_batch_size=None,
+        normalize_attention=False,
     ))
 
 
@@ -273,6 +275,8 @@ class Encoder1DBlock(nn.Module):
     attention_dropout_rate: <float> Dropout rate for attention weights.
     normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
       'pre_layer_norm', 'none'
+    normalize_attention: Apply LayerNorm to query and key before computing
+        dot_product_attention.
     enc_self_attn_kernel_init_fn: initializer for encoder's
       self attention matrices.
   """
@@ -283,6 +287,7 @@ class Encoder1DBlock(nn.Module):
   dropout_rate: float = 0.1
   attention_dropout_rate: float = 0.1
   normalizer: str = 'layer_norm'
+  normalize_attention: bool = False
   enc_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
 
   @nn.compact
@@ -317,7 +322,7 @@ class Encoder1DBlock(nn.Module):
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
     x = maybe_pre_normalize(param_dtype=self.dtype)(inputs)
-    x = nn.SelfAttention(
+    x = attention.SelfAttention(
         num_heads=self.num_heads,
         dtype=self.dtype,
         param_dtype=self.dtype,
@@ -327,6 +332,7 @@ class Encoder1DBlock(nn.Module):
         use_bias=False,
         broadcast_dropout=False,
         dropout_rate=self.attention_dropout_rate,
+        normalize_attention=self.normalize_attention,
         name='EncoderSelfAttention')(
             x, mask=encoder_mask, deterministic=not train)
 
@@ -358,6 +364,8 @@ class EncoderDecoder1DBlock(nn.Module):
     attention_dropout_rate: <float> Dropout rate for attention weights
     normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
       'pre_layer_norm', 'none'
+    normalize_attention: Apply LayerNorm to query and key before computing
+        dot_product_attention.
     dec_self_attn_kernel_init_fn: initializer for decoder's
       self attention matrices.
     dec_cross_attn_kernel_init_fn: initializer for decoder's
@@ -371,6 +379,7 @@ class EncoderDecoder1DBlock(nn.Module):
   dropout_rate: float = 0.1
   attention_dropout_rate: float = 0.1
   normalizer: str = 'layer_norm'
+  normalize_attention: bool = False
   dec_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   dec_cross_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   decode: bool = False
@@ -411,7 +420,7 @@ class EncoderDecoder1DBlock(nn.Module):
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
     x = maybe_pre_normalize(param_dtype=self.dtype)(targets)
-    x = nn.SelfAttention(
+    x = attention.SelfAttention(
         num_heads=self.num_heads,
         dtype=self.dtype,
         param_dtype=self.dtype,
@@ -422,7 +431,8 @@ class EncoderDecoder1DBlock(nn.Module):
         broadcast_dropout=False,
         dropout_rate=self.attention_dropout_rate,
         decode=self.decode,
-        name='DecoderSelfAttention')(
+        name='DecoderSelfAttention',
+        normalize_attention=self.normalize_attention)(
             x, decoder_mask, deterministic=not train)
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
     x = x + targets
@@ -430,7 +440,7 @@ class EncoderDecoder1DBlock(nn.Module):
     x = maybe_post_normalize(param_dtype=self.dtype)(x)
     # Encoder-Decoder block.
     y = maybe_pre_normalize(param_dtype=self.dtype)(x)
-    y = nn.MultiHeadDotProductAttention(
+    y = attention.MultiHeadDotProductAttention(
         num_heads=self.num_heads,
         dtype=self.dtype,
         param_dtype=self.dtype,
@@ -439,7 +449,8 @@ class EncoderDecoder1DBlock(nn.Module):
         bias_init=nn.initializers.normal(stddev=1e-6),
         use_bias=False,
         broadcast_dropout=False,
-        dropout_rate=self.attention_dropout_rate)(
+        dropout_rate=self.attention_dropout_rate,
+        normalize_attention=self.normalize_attention)(
             y, encoded, encoder_decoder_mask, deterministic=not train)
 
     y = nn.Dropout(rate=self.dropout_rate)(
@@ -474,6 +485,8 @@ class Encoder(nn.Module):
     max_len: maximum length.
     dropout_rate: dropout rate
     normalizer: One of 'batch_norm', 'layer_norm', 'none'
+    normalize_attention: Apply LayerNorm to query and key before computing
+        dot_product_attention.
     attention_dropout_rate: dropout rate for attention weights
     enc_self_attn_kernel_init_fn: initializer for encoder's
       self attention matrices.
@@ -492,6 +505,7 @@ class Encoder(nn.Module):
   max_len: int = 512
   dropout_rate: float = 0.1
   normalizer: str = 'layer_norm'
+  normalize_attention: bool = False
   attention_dropout_rate: float = 0.1
   enc_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   enc_remat_scan_lengths: Optional[Sequence[int]] = None
@@ -543,6 +557,7 @@ class Encoder(nn.Module):
         dropout_rate=self.dropout_rate,
         attention_dropout_rate=self.attention_dropout_rate,
         normalizer=self.normalizer,
+        normalize_attention=self.normalize_attention,
         enc_self_attn_kernel_init_fn=self.enc_self_attn_kernel_init_fn)
     if self.enc_remat_scan_lengths is None:
       for lyr in range(self.enc_num_layers):
@@ -582,6 +597,8 @@ class Decoder(nn.Module):
     dropout_rate: dropout rate.
     normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
       'pre_layer_norm', 'none'
+    normalize_attention: Apply LayerNorm to query and key before computing
+        dot_product_attention.
     attention_dropout_rate: dropout rate for attention weights.
     dec_self_attn_kernel_init_fn: initializer for decoder's
       self attention matrices.
@@ -605,6 +622,7 @@ class Decoder(nn.Module):
   dropout_rate: float = 0.1
   normalizer: str = 'layer_norm'
   attention_dropout_rate: float = 0.1
+  normalize_attention: bool = False
   dec_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   dec_cross_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   dec_remat_scan_lengths: Optional[Sequence[int]] = None
@@ -668,6 +686,7 @@ class Decoder(nn.Module):
         dropout_rate=self.dropout_rate,
         attention_dropout_rate=self.attention_dropout_rate,
         normalizer=self.normalizer,
+        normalize_attention=self.normalize_attention,
         dec_self_attn_kernel_init_fn=self.dec_self_attn_kernel_init_fn,
         dec_cross_attn_kernel_init_fn=self.dec_cross_attn_kernel_init_fn,
         decode=self.decode)
@@ -743,6 +762,8 @@ class Transformer(nn.Module):
     dropout_rate: dropout rate.
     attention_dropout_rate: dropout rate for attention weights.
     normalizer: One of 'batch_norm', 'layer_norm', 'none'
+    normalize_attention: Apply LayerNorm to query and key before computing
+        dot_product_attention.
     enc_self_attn_kernel_init_fn: initializer for encoder's
       self attention matrices.
     dec_self_attn_kernel_init_fn: initializer for decoder's
@@ -767,6 +788,7 @@ class Transformer(nn.Module):
   max_len: int = 2048
   dropout_rate: float = 0.3
   attention_dropout_rate: float = 0.3
+  normalize_attention: bool = False
   normalizer: str = 'layer_norm'
   enc_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   dec_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
@@ -810,6 +832,7 @@ class Transformer(nn.Module):
         max_len=self.max_len,
         dropout_rate=self.dropout_rate,
         attention_dropout_rate=self.attention_dropout_rate,
+        normalize_attention=self.normalize_attention,
         normalizer=self.normalizer,
         enc_self_attn_kernel_init_fn=self.enc_self_attn_kernel_init_fn,
         enc_remat_scan_lengths=self.enc_remat_scan_lengths,
@@ -827,6 +850,7 @@ class Transformer(nn.Module):
         max_len=self.max_len,
         dropout_rate=self.dropout_rate,
         attention_dropout_rate=self.attention_dropout_rate,
+        normalize_attention=self.normalize_attention,
         normalizer=self.normalizer,
         dec_self_attn_kernel_init_fn=self.dec_self_attn_kernel_init_fn,
         dec_cross_attn_kernel_init_fn=self.dec_self_attn_kernel_init_fn,
@@ -1058,6 +1082,7 @@ class TransformerTranslate(base_model.BaseModel):
         dropout_rate=self.hps.dropout_rate,
         normalizer=self.hps.normalizer,
         attention_dropout_rate=self.hps.attention_dropout_rate,
+        normalize_attention=self.hps.normalize_attention,
         enc_self_attn_kernel_init_fn=enc_self_attn_kernel_init_fn,
         dec_self_attn_kernel_init_fn=dec_self_attn_kernel_init_fn,
         dec_cross_attn_kernel_init_fn=dec_cross_attn_kernel_init_fn,

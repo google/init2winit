@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from flax import linen as nn
 from init2winit import utils
+from init2winit.model_lib import attention
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax
@@ -67,6 +68,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         model_dtype='float32',
         grad_clip=None,
         decode=False,
+        normalize_attention=False,
     ))
 
 
@@ -220,6 +222,7 @@ class Transformer1DBlock(nn.Module):
   attention_fn: Optional[Any] = None
   dtype: Any = jnp.float32
   decode: bool = False
+  normalize_attention: bool = False
 
   @nn.compact
   def __call__(self,
@@ -264,10 +267,10 @@ class Transformer1DBlock(nn.Module):
     x = maybe_pre_normalize()(inputs)
 
     if self.attention_fn is None:
-      attention_fn = nn.dot_product_attention
+      attention_fn = attention.dot_product_attention
     else:
       attention_fn = self.attention_fn
-    x = nn.SelfAttention(
+    x = attention.SelfAttention(
         num_heads=self.num_heads,
         qkv_features=self.qkv_dim,
         decode=self.decode,
@@ -278,6 +281,7 @@ class Transformer1DBlock(nn.Module):
         broadcast_dropout=False,
         attention_fn=attention_fn,
         dropout_rate=self.attention_dropout_rate,
+        normalize_attention=self.normalize_attention,
         deterministic=not train)(x, decoder_mask)
     x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
     x = x + inputs
@@ -329,6 +333,7 @@ class TransformerLM(nn.Module):
   shift: bool = True
   dropout_rate: float = 0.1
   attention_dropout_rate: float = 0.1
+  normalize_attention: bool = False
   normalizer: str = 'layer_norm'
   attention_fn: Optional[Any] = None
   model_dtype: str = None
@@ -406,6 +411,7 @@ class TransformerLM(nn.Module):
           num_heads=self.num_heads,
           dropout_rate=self.dropout_rate,
           attention_dropout_rate=self.attention_dropout_rate,
+          normalize_attention=self.normalize_attention,
           attention_fn=self.attention_fn,
           normalizer=self.normalizer,
           dtype=dtype)(
@@ -453,6 +459,7 @@ class TransformerLM1B(base_model.BaseModel):
         causal=self.dataset_meta_data['causal'],
         dropout_rate=self.hps.dropout_rate,
         attention_dropout_rate=self.hps.attention_dropout_rate,
+        normalize_attention=self.hps.normalize_attention,
         normalizer=self.hps.normalizer,
         decode=self.hps.decode,
         model_dtype=self.hps.model_dtype,

@@ -547,6 +547,7 @@ class TrainerTest(parameterized.TestCase):
         'model_dtype': 'float32',
         'decode': False,
         'num_device_prefetches': 0,
+        'normalize_attention': False,
     })
     initializer = initializers.get_initializer('noop')
     eval_num_batches = 5

@@ -150,6 +150,7 @@ class ModelsTest(parameterized.TestCase):
         'vocab_size': vocab_size,
         'hidden_size': 32,
         'bidirectional': False,
+        'normalize_attention': False,
     })
 
     text_input_shape = (32, 64)  # batch_size, max_target_length
@@ -244,6 +245,7 @@ class ModelsTest(parameterized.TestCase):
         'dec_self_attn_kernel_init': 'xavier_uniform',
         'dec_cross_attn_kernel_init': 'xavier_uniform',
         'decode': False,
+        'normalize_attention': False,
     })
     text_src_input_shape = (32, 64)  # batch_size, max_source_length
     text_tgt_input_shape = (32, 40)  # batch_size, max_target_length
