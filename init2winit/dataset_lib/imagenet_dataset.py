@@ -344,7 +344,7 @@ def load_split(
   if jax.process_index() == jax.process_count() - 1:
     end = ''
 
-  logging.info('Loaded data [%d: %d] from %s', start, end, split)
+  logging.info('Loaded data [%d: %s] from %s', start, str(end), split)
   if split in ['train', 'eval_train']:
     tfds_split = 'train'
   elif split == 'valid':
