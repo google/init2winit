@@ -227,7 +227,7 @@ class Trainer(base_trainer.BaseTrainer):
     # If we moved where in the loop body evals happen then we would not need
     # this test.
     if self._prev_eval_step != self._num_train_steps:
-      report = self._eval(lr, start_time, start_time)
+      report = self._eval(lr, start_step, start_time)
       yield report
     # To make sure the last checkpoint was correctly saved.
     checkpoint.wait_for_checkpoint_save()
