@@ -181,6 +181,7 @@ class DLRM(nn.Module):
 
 
 class DLRMModel(base_model.BaseModel):
+  """init2winit DLRM model."""
 
   def build_flax_module(self):
     """DLRM for ad click probability prediction."""
@@ -192,3 +193,7 @@ class DLRMModel(base_model.BaseModel):
         num_dense_features=self.hps.num_dense_features,
         embed_dim=self.hps.embed_dim,
         keep_diags=self.hps.keep_diags)
+
+  def get_fake_batch(self, hps):
+    """Build fake batch for initialization, compilation, testing, etc."""
+    return jnp.ones((hps.batch_size,) + hps.input_shape, dtype=hps.model_dtype)

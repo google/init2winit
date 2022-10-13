@@ -304,3 +304,7 @@ class UNetModel(base_model.BaseModel):
         chans=self.hps.chans,
         num_pool_layers=self.hps.num_pool_layers,
         drop_prob=self.hps.drop_prob)
+
+  def get_fake_batch(self, hps):
+    """Build fake batch for initialization, compilation, testing, etc."""
+    return jnp.ones((hps.batch_size,) + hps.input_shape, dtype=hps.model_dtype)
