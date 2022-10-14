@@ -15,8 +15,10 @@
 
 r"""BLEU evaluator container class."""
 import copy
+import dataclasses
 import functools
 import os
+from typing import Any, Sequence
 
 from absl import logging
 from flax import jax_utils
@@ -36,16 +38,29 @@ DEFAULT_EVAL_CONFIG = {
     'eval_batch_size': 16,
     'eval_split': 'test',
     'max_decode_length': 256,
-    'beam_size': 4,
     'eval_num_batches': None,
     'ckpt_to_evaluate': None,
     'min_step': None,
     'ckpt_avg_window': 0,
     'tl_code': None,
+    'decoding_type': 'beam_search',  # `beam_search` or `sampling`.
+    'beam_size': 4,
+    'sample_size': 15,
+    'temperature': 1.0,  # 1.0 means no temperature.
+    'rescale_log_probs': True
 }
 
 
-class BLEUEvaluator(object):
+@dataclasses.dataclass
+class DecodingOutput:
+  source_list: Sequence[Any] = dataclasses.field(default_factory=list)
+  reference_list: Sequence[Any] = dataclasses.field(default_factory=list)
+  translation_list: Sequence[Any] = dataclasses.field(default_factory=list)
+  bleu_score: float = 0.0
+  decoding_type: str = 'beam_search'
+
+
+class InferenceManager(object):
   """Evaluates BLEU."""
 
   def __init__(self, *args, **kwargs):
@@ -57,41 +72,47 @@ class BLEUEvaluator(object):
     else:
       self.init_online_evaluator(*args)
 
-  def init_offline_evaluator(self, checkpoint_dir, hps, rng, model_cls,
-                             dataset_builder, dataset_meta_data,
+  def init_offline_evaluator(self,
+                             checkpoint_dir,
+                             hps,
+                             rng,
+                             model_cls,
+                             dataset,
+                             dataset_meta_data,
                              mt_eval_config):
     """Utility for initializing offline BLEU evaluator."""
     self.checkpoint_dir = checkpoint_dir
     self.hps = hps
     self.eos_id = decode.EOS_ID
-    self.max_length = mt_eval_config['max_decode_length']
-    self.beam_size = mt_eval_config['beam_size']
-    self.eval_batch_size = mt_eval_config['eval_batch_size']
-    self.eval_num_batches = mt_eval_config['eval_num_batches']
-    self.eval_split = mt_eval_config['eval_split']
-    self.ckpt_to_evaluate = mt_eval_config['ckpt_to_evaluate']
-    self.ckpt_avg_window = mt_eval_config['ckpt_avg_window']
-    params_rng, dropout_rng, data_rng = jax.random.split(rng, num=3)
-    self.get_dataset(data_rng, dataset_builder)
+    self.max_length = mt_eval_config.get('max_decode_length')
+    self.eval_num_batches = mt_eval_config.get('eval_num_batches')
+    self.eval_split = mt_eval_config.get('eval_split')
+    self.ckpt_to_evaluate = mt_eval_config.get('ckpt_to_evaluate')
+    self.ckpt_avg_window = mt_eval_config.get('ckpt_avg_window')
+    self.min_step = mt_eval_config.get('min_step')
+    self.mt_eval_config = mt_eval_config
+    self.dataset = dataset
+    params_rng, dropout_rng = jax.random.split(rng, num=2)
     self.encoder = self.load_tokenizer(hps.vocab_path)
     self.initialize_model(model_cls, dataset_meta_data, dropout_rng, params_rng)
-    self.min_step = mt_eval_config['min_step']
-    self.tl_code = mt_eval_config['tl_code']
 
-  def init_online_evaluator(self, model_cls, dataset, dataset_metadata,
-                            hps, rng, mt_eval_config):
+  def init_online_evaluator(self,
+                            hps,
+                            rng,
+                            model_cls,
+                            dataset,
+                            dataset_metadata,
+                            mt_eval_config):
     """Utility for initializing online BLEU evaluator."""
     self.hps = hps
     self.eos_id = decode.EOS_ID
-    self.max_length = mt_eval_config['max_decode_length']
-    self.beam_size = mt_eval_config['beam_size']
+    self.max_length = mt_eval_config.get('max_decode_length')
+    self.eval_num_batches = mt_eval_config.get('eval_num_batches')
+    self.mt_eval_config = mt_eval_config
     self.dataset = dataset
     self.encoder = self.load_tokenizer(hps.vocab_path)
-
     params_rng, dropout_rng = jax.random.split(rng, num=2)
     self.initialize_model(model_cls, dataset_metadata, params_rng, dropout_rng)
-    self.tl_code = mt_eval_config['tl_code']
-    self.eval_num_batches = mt_eval_config['eval_num_batches']
 
   def iterate_checkpoints(self):
     """Iterates over all checkpoints."""
@@ -106,21 +127,6 @@ class BLEUEvaluator(object):
           continue
         full_path = os.path.join(self.checkpoint_dir, checkpoint_path)
         yield full_path, step
-
-  def get_dataset(self, data_rng, dataset_builder):
-    """Get dataset."""
-    eval_batch_size = self.eval_batch_size
-    if not eval_batch_size:
-      eval_batch_size = self.hps.batch_size
-      if self.hps.eval_batch_size:
-        eval_batch_size = self.hps.eval_batch_size
-    self.dataset = dataset_builder(
-        data_rng,
-        self.hps.batch_size,
-        eval_batch_size=eval_batch_size,
-        hps=self.hps)
-    self.eval_batch_size = eval_batch_size
-    logging.info('Using evaluation batch size: %s', self.eval_batch_size)
 
   def get_ds_iter(self, eval_split=None):
     """Dataset iterator."""
@@ -191,19 +197,31 @@ class BLEUEvaluator(object):
     return int(batch['weights'][:, 0].sum())
 
   def build_predictor(self):
-    decoder = functools.partial(
-        decode.decode_step,
-        flax_module=self.flax_module,
-        eos_id=self.eos_id,
-        beam_size=self.beam_size)
-    self.pmapped_predictor = jax.pmap(
-        decoder, static_broadcasted_argnums=(3,))
+    """Either build beam search decoder or sampling decoder."""
+    if self.mt_eval_config.get('decoding_type') == 'beam_search':
+      decoder = functools.partial(
+          decode.decode_step,
+          max_decode_len=self.max_length,
+          flax_module=self.flax_module,
+          eos_id=self.eos_id,
+          beam_size=self.mt_eval_config.get('beam_size'))
+    else:
+      decoder = functools.partial(
+          decode.sampling_step,
+          max_decode_len=self.max_length,
+          rng=jax.random.PRNGKey(0),
+          flax_module=self.flax_module,
+          eos_id=self.eos_id,
+          sample_size=self.mt_eval_config.get('sample_size'),
+          temperature=self.mt_eval_config.get('temperature'),
+          rescale_log_probs=self.mt_eval_config.get('rescale_log_probs'))
+    self.pmapped_predictor = jax.pmap(decoder, static_broadcasted_argnums=())
 
   def translate_and_calculate_bleu(self):
     """Iterate over all checkpoints and calculate BLEU."""
     # Output is List of (step, bleu_score, (sources, references, predictions))
     # Its a list because we evaluate multiple checkpoints.
-    bleu_output = []
+    decoding_outputs = []
     for _, step in self.iterate_checkpoints():
       ckpt_paths = eval_utils.get_checkpoints_in_range(
           checkpoint_dir=self.checkpoint_dir,
@@ -214,26 +232,23 @@ class BLEUEvaluator(object):
           checkpoint_paths=ckpt_paths,
           params=self.params)
       params_replicated = jax_utils.replicate(params)
-
-      (sources, references, predictions,
-       bleu_score) = self.translate_and_calculate_bleu_single_model(
-           params_replicated, self.eval_split)
-      logging.info('Sacre bleu score at step %d: %f', step, bleu_score)
-      bleu_output.append((step, bleu_score, (sources, references, predictions)))
-    return bleu_output
+      decoding_output = self.translate_and_calculate_bleu_single_model(
+          params_replicated, self.eval_split)
+      logging.info('Sacre bleu score at step %d: %f', step,
+                   decoding_output.bleu_score)
+      decoding_outputs.append(decoding_output)
+    return decoding_outputs
 
   def translate_and_calculate_bleu_single_model(self, params, eval_split):
-    """Iterate over all checkpoints and calculate BLEU."""
+    """Decode one model on one dataset split."""
     self.build_predictor()
-    # Output is bleu_score
-    sources, references, predictions = [], [], []
-
+    decode_output = DecodingOutput()
+    logging.info('Starting decoding..')
     for batch in self.get_ds_iter(eval_split):
       pred_batch = common_utils.shard(batch)
       cache = self.pmapped_init_cache(pred_batch['inputs'])
-      logging.info('Initialized cache.')
       predicted = utils.data_gather(
-          self.pmapped_predictor(pred_batch, params, cache, self.max_length),
+          self.pmapped_predictor(pred_batch, params, cache),
           axis_name='gather')
       inputs = utils.data_gather(pred_batch['inputs'], axis_name='gather')
       targets = utils.data_gather(pred_batch['targets'], axis_name='gather')
@@ -243,19 +258,57 @@ class BLEUEvaluator(object):
       inputs = utils.combine_gathered(np.array(inputs))
       targets = utils.combine_gathered(np.array(targets))
       weights = utils.combine_gathered(np.array(weights))
-
       current_batch_size = int(weights[:, 0].sum())
-      for i, s in enumerate(predicted[:current_batch_size]):
-        curr_source = self.decode_tokens(inputs[i])
-        curr_ref = self.decode_tokens(targets[i])
-        curr_pred = self.decode_tokens(s)
+      if self.mt_eval_config.get('decoding_type') == 'beam_search':
+        self.process_beam_search_output(inputs, targets, predicted,
+                                        current_batch_size, decode_output)
+      else:
+        self.process_sampling_output(inputs, targets, predicted,
+                                     current_batch_size, decode_output)
 
-        sources.append(curr_source)
-        references.append(curr_ref)
-        predictions.append(curr_pred)
+    logging.info('Predictions: %d References %d Sources %d.',
+                 len(decode_output.translation_list),
+                 len(decode_output.reference_list),
+                 len(decode_output.source_list))
+    if self.mt_eval_config.get('decoding_type') == 'beam_search':
+      bleu_score = eval_utils.compute_bleu_from_predictions(
+          decode_output.translation_list,
+          decode_output.reference_list,
+          self.mt_eval_config.get('tl_code'),
+          'sacrebleu')['sacrebleu']
+      decode_output.bleu_score = bleu_score
+    decode_output.decoding_type = self.mt_eval_config.get('decoding_type')
+    return decode_output
 
-    logging.info('Translation: %d predictions %d references %d sources.',
-                 len(predictions), len(references), len(sources))
-    bleu_score = eval_utils.compute_bleu_from_predictions(
-        predictions, references, self.tl_code, 'sacrebleu')['sacrebleu']
-    return sources, references, predictions, bleu_score
+  def process_beam_search_output(self,
+                                 inputs,
+                                 targets,
+                                 predicted,
+                                 batch_size,
+                                 decode_output):
+    """Process output if its beam search decoding."""
+    for i in range(batch_size):
+      curr_source = self.decode_tokens(inputs[i])
+      curr_ref = self.decode_tokens(targets[i])
+      curr_pred = self.decode_tokens(predicted[i])
+      decode_output.source_list.append(curr_source)
+      decode_output.reference_list.append(curr_ref)
+      decode_output.translation_list.append(curr_pred)
+
+  def process_sampling_output(self,
+                              inputs,
+                              targets,
+                              predicted,
+                              batch_size,
+                              decode_output):
+    """Process output if its sampling decoding."""
+    for i in range(batch_size):
+      curr_source = self.decode_tokens(inputs[i])
+      curr_ref = self.decode_tokens(targets[i])
+      samples = []
+      for j in range(int(self.mt_eval_config.get('sample_size'))):
+        curr_pred = self.decode_tokens(predicted[i][j])
+        samples.append(curr_pred)
+      decode_output.source_list.append(curr_source)
+      decode_output.reference_list.append(curr_ref)
+      decode_output.translation_list.append(samples)

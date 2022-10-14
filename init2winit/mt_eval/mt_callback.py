@@ -43,7 +43,7 @@ from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import datasets
 from init2winit.model_lib import models
 
-from init2winit.mt_eval import bleu_evaluator
+from init2winit.mt_eval import inference
 import jax
 from ml_collections.config_dict import config_dict
 import numpy as np
@@ -88,12 +88,12 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     self.dataset = dataset
     model_class = models.get_model(callback_config['model_name'])
 
-    self.bleu_evaluator = bleu_evaluator.BLEUEvaluator(
+    self.inference_manager = inference.InferenceManager(
+        hps,
+        rng,
         model_class,
         dataset,
         dataset_metadata,
-        hps,
-        rng,
         callback_config,
         mode='online')
 
@@ -219,11 +219,12 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     # Eval metrics evaluation.
     for split_name, split_iter in ds_splits_dict.items():
       try:
-        _, _, _, bleu_score = self.bleu_evaluator.translate_and_calculate_bleu_single_model(
-            params, split_name)
+        decoding_output = (
+            self.inference_manager.translate_and_calculate_bleu_single_model(
+                params, split_name))
         split_metrics = self._evaluate(params, batch_stats, split_iter,
                                        self.evaluate_batch_pmapped)
-        split_metrics['bleu_score'] = bleu_score
+        split_metrics['bleu_score'] = decoding_output.bleu_score
 
         metrics = self._merge_and_apply_prefix(
             metrics, split_metrics, 'callback/' +

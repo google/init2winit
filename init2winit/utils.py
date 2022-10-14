@@ -403,10 +403,10 @@ def data_gather(data, axis_name):
 
 
 def combine_gathered(x):
-  if len(x.shape) != 3:
-    raise ValueError('Expected 3-d input array to combine_gathered.')
+  if len(x.shape) < 3:
+    raise ValueError('Rank of input array to combine_gathered must be > 3')
 
-  n_device, n_batch, length = x.shape
-  flattened = x.reshape(n_device * n_batch, length)
+  n_device, n_batch, *lengths = x.shape
+  flattened = x.reshape(n_device * n_batch, *lengths)
 
   return flattened

@@ -27,7 +27,7 @@ from absl import logging
 from init2winit import hyperparameters
 from init2winit.dataset_lib import datasets
 from init2winit.model_lib import models
-from init2winit.mt_eval import bleu_evaluator
+from init2winit.mt_eval import inference
 import jax
 from ml_collections.config_dict import config_dict
 import tensorflow.compat.v2 as tf
@@ -82,6 +82,7 @@ def main(unused_argv):
     raise NotImplementedError('BLEU eval does not support multihost inference.')
 
   rng = jax.random.PRNGKey(FLAGS.seed)
+  _, _, data_rng = jax.random.split(rng, 3)
 
   mt_eval_config = json.loads(FLAGS.mt_eval_config)
 
@@ -129,13 +130,30 @@ def main(unused_argv):
   if jax.process_index() == 0:
     logging.info('Merged hps are: %s', json.dumps(merged_hps.to_json()))
 
-  evaluator = bleu_evaluator.BLEUEvaluator(FLAGS.checkpoint_dir, merged_hps,
-                                           rng,
-                                           model_class, dataset_builder,
-                                           dataset_meta_data,
-                                           mt_eval_config,
-                                           mode='offline')
-  evaluator.translate_and_calculate_bleu()
+  # Get dataset
+  eval_batch_size = mt_eval_config.get('eval_batch_size')
+  if not eval_batch_size:
+    eval_batch_size = (
+        merged_hps.eval_batch_size
+        if merged_hps.eval_batch_size else merged_hps.batch_size)
+  dataset = dataset_builder(
+      data_rng,
+      merged_hps.batch_size,
+      eval_batch_size=eval_batch_size,
+      hps=merged_hps)
+  logging.info('Using evaluation batch size: %s', eval_batch_size)
+
+  # Start evaluation
+  inference_manager = inference.InferenceManager(
+      FLAGS.checkpoint_dir,
+      merged_hps,
+      rng,
+      model_class,
+      dataset,
+      dataset_meta_data,
+      mt_eval_config,
+      mode='offline')
+  inference_manager.translate_and_calculate_bleu()
 
 
 if __name__ == '__main__':
