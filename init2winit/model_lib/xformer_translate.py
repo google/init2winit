@@ -1090,3 +1090,10 @@ class TransformerTranslate(base_model.BaseModel):
         enc_remat_scan_lengths=self.hps.enc_remat_scan_lengths,
         dec_remat_scan_lengths=self.hps.dec_remat_scan_lengths,
     )
+
+  def get_fake_batch(self, hps):
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *x), dtype=hps.model_dtype)
+        for x in hps.input_shape
+    ]
+    return dummy_inputs
