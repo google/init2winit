@@ -252,7 +252,7 @@ class TrainerTest(parameterized.TestCase):
     loss_name = 'cross_entropy'
     metrics_name = 'classification_metrics'
     hps = copy.copy(model_hps)
-    hps.update({'output_shape': output_shape})
+    hps.update({'output_shape': output_shape, 'input_shape': input_shape})
     rng = jax.random.PRNGKey(0)
     model = model_cls(hps, {}, loss_name, metrics_name)
     initializer = initializers.get_initializer('noop')
@@ -261,14 +261,7 @@ class TrainerTest(parameterized.TestCase):
 
     # First initialize with no rescale.
     params, _ = init_utils.initialize(
-        model.flax_module,
-        initializer,
-        model.loss_fn,
-        input_shape,
-        output_shape,
-        hps,
-        init_rng,
-        metrics_logger=None)
+        model, initializer, hps, init_rng, metrics_logger=None)
 
     utils.log_pytree_shape_and_statistics(params)
     # Now rescale a layer by 100.
@@ -278,14 +271,7 @@ class TrainerTest(parameterized.TestCase):
     }
 
     rescaled_params, _ = init_utils.initialize(
-        model.flax_module,
-        initializer,
-        model.loss_fn,
-        input_shape,
-        output_shape,
-        hps,
-        init_rng,
-        metrics_logger=None)
+        model, initializer, hps, init_rng, metrics_logger=None)
 
     # Check the right variable is rescaled
     v1 = params['Dense_1']['kernel']

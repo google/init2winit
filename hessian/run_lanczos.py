@@ -97,11 +97,7 @@ def eval_checkpoints(
 
   # Maybe run the initializer.
   unreplicated_params, unreplicated_batch_stats = init_utils.initialize(
-      model.flax_module,
-      initializer, model.loss_fn,
-      hps.input_shape,
-      hps.output_shape, hps, init_rng,
-      None)
+      model, initializer, hps, init_rng, None)
 
   # Fold in a the unreplicated batch_stats and rng into the loss used by
   # hessian eval.

@@ -343,15 +343,12 @@ class Trainer(base_trainer.BaseTrainer):
           self._hps, self.dataset_meta_data, self.loss_name, self.metrics_name)
       logging.info('Initialize the teacher model.')
       teacher_unreplicated_params, teacher_unreplicated_batch_stats = init_utils.initialize(
-          teacher_model.flax_module,
+          teacher_model,
           self._initializer,
-          teacher_model.loss_fn,
-          self._hps.input_shape,
-          self._hps.output_shape,
           self._hps,
           init_rng,
           self._init_logger,
-          teacher_model.get_fake_batch(self._hps))
+      )
       logging.info('Initialize teacher_model optimizer state.')
       optimizer_init_fn, _ = optimizers.get_optimizer(
           self._hps, self._model, batch_axis_name='batch')

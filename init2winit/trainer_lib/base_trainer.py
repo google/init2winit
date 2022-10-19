@@ -238,15 +238,11 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         stretch_factor=stretch_factor)
 
     unreplicated_params, unreplicated_batch_stats = init_utils.initialize(
-        self._model.flax_module,
+        self._model,
         self._initializer,
-        self._model.loss_fn,
-        self._hps.input_shape,
-        self._hps.output_shape,
         self._hps,
         init_rng,
-        self._init_logger,
-        self._model.get_fake_batch(self._hps))
+        self._init_logger,)
 
     if jax.process_index() == 0:
       utils.log_pytree_shape_and_statistics(unreplicated_params)
