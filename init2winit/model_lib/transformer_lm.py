@@ -103,9 +103,9 @@ def sinusoidal_init(max_len=2048):
 
   def init(key, shape, dtype=np.float32):
     """Sinusoidal init."""
-    del key, dtype
+    del key
     d_feature = shape[-1]
-    pe = np.zeros((max_len, d_feature), dtype=np.float32)
+    pe = np.zeros((max_len, d_feature), dtype=dtype)
     position = np.arange(0, max_len)[:, np.newaxis]
     div_term = np.exp(
         np.arange(0, d_feature, 2) * -(np.log(10000.0) / d_feature))
@@ -130,7 +130,7 @@ class AddPositionEmbs(nn.Module):
   decode: bool = False
 
   @nn.compact
-  def __call__(self, inputs, inputs_positions=None):
+  def __call__(self, inputs, inputs_positions=None, dtype=np.float32):
     """Applies AddPositionEmbs module.
 
     By default this layer uses a fixed sinusoidal embedding table. If a
@@ -140,6 +140,7 @@ class AddPositionEmbs(nn.Module):
     Args:
       inputs: input data.
       inputs_positions: input position indices for packed sequences.
+      dtype: the dtype used for computation.
 
     Returns:
       output: `(bs, timesteps, in_dim)`
@@ -152,10 +153,10 @@ class AddPositionEmbs(nn.Module):
     if self.posemb_init is None:
       # Use a fixed (non-learned) sinusoidal position embedding.
       pos_embedding = sinusoidal_init(max_len=self.max_len)(None, pos_emb_shape,
-                                                            None)
+                                                            dtype)
     else:
       pos_embedding = self.param('pos_embedding', self.posemb_init,
-                                 pos_emb_shape)
+                                 pos_emb_shape, dtype)
     pe = pos_embedding[:, :length, :]
 
     # We use a cache position index for tracking decoding position.
@@ -181,6 +182,7 @@ class MlpBlock(nn.Module):
   mlp_dim: int
   out_dim: Optional[int] = None
   dropout_rate: float = 0.1
+  dtype: model_utils.Dtype = np.float32
   kernel_init: model_utils.Initializer = nn.initializers.xavier_uniform()
   bias_init: model_utils.Initializer = nn.initializers.normal(stddev=1e-6)
 
@@ -189,12 +191,20 @@ class MlpBlock(nn.Module):
     """Applies Transformer MlpBlock module."""
     actual_out_dim = inputs.shape[-1] if self.out_dim is None else self.out_dim
     x = nn.Dense(
-        self.mlp_dim, kernel_init=self.kernel_init, bias_init=self.bias_init)(
+        self.mlp_dim,
+        kernel_init=self.kernel_init,
+        bias_init=self.bias_init,
+        dtype=self.dtype,
+        param_dtype=self.dtype)(
             inputs)
     x = nn.gelu(x)
     x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
     output = nn.Dense(
-        actual_out_dim, kernel_init=self.kernel_init, bias_init=self.bias_init)(
+        actual_out_dim,
+        kernel_init=self.kernel_init,
+        bias_init=self.bias_init,
+        dtype=self.dtype,
+        param_dtype=self.dtype)(
             x)
     output = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(output)
     return output
@@ -264,7 +274,7 @@ class Transformer1DBlock(nn.Module):
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
-    x = maybe_pre_normalize()(inputs)
+    x = maybe_pre_normalize(param_dtype=self.dtype)(inputs)
 
     if self.attention_fn is None:
       attention_fn = attention.dot_product_attention
@@ -275,6 +285,7 @@ class Transformer1DBlock(nn.Module):
         qkv_features=self.qkv_dim,
         decode=self.decode,
         dtype=self.dtype,
+        param_dtype=self.dtype,
         kernel_init=nn.initializers.xavier_uniform(),
         bias_init=nn.initializers.normal(stddev=1e-6),
         use_bias=False,
@@ -285,16 +296,16 @@ class Transformer1DBlock(nn.Module):
         deterministic=not train)(x, decoder_mask)
     x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
     x = x + inputs
-    x = maybe_post_normalize()(x)
+    x = maybe_post_normalize(param_dtype=self.dtype)(x)
 
     # MLP block.
-    y = maybe_pre_normalize()(x)
+    y = maybe_pre_normalize(param_dtype=self.dtype)(x)
     y = MlpBlock(
-        mlp_dim=self.mlp_dim, dropout_rate=self.dropout_rate)(
+        mlp_dim=self.mlp_dim, dropout_rate=self.dropout_rate, dtype=self.dtype)(
             y, train=train)
     res = x + y
 
-    return maybe_post_normalize()(res)
+    return maybe_post_normalize(param_dtype=self.dtype)(res)
 
 
 class TransformerLM(nn.Module):
@@ -388,6 +399,8 @@ class TransformerLM(nn.Module):
       output_embed = nn.Embed(
           num_embeddings=self.vocab_size,
           features=self.emb_dim,
+          dtype=dtype,
+          param_dtype=dtype,
           embedding_init=nn.initializers.normal(stddev=1.0))
     else:
       output_embed = self.shared_embedding
@@ -399,7 +412,7 @@ class TransformerLM(nn.Module):
         posemb_init=sinusoidal_init(max_len=self.max_len),
         decode=self.decode,
         name='posembed_output')(
-            y, inputs_positions=inputs_positions)
+            y, inputs_positions=inputs_positions, dtype=dtype)
     y = nn.Dropout(rate=self.dropout_rate)(y, deterministic=not train)
 
     y = y.astype(dtype)
@@ -424,7 +437,7 @@ class TransformerLM(nn.Module):
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
       maybe_normalize = model_utils.get_normalizer(
           self.normalizer, train, dtype=dtype)
-      y = maybe_normalize()(y)
+      y = maybe_normalize(param_dtype=dtype)(y)
 
     if self.logits_via_embedding:
       # Use the transpose of embedding matrix for logit transform.
@@ -437,6 +450,7 @@ class TransformerLM(nn.Module):
           kernel_init=nn.initializers.xavier_uniform(),
           bias_init=nn.initializers.normal(stddev=1e-6),
           dtype=dtype,
+          param_dtype=dtype,
           name='logits_dense')(
               y)
 

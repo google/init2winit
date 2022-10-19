@@ -62,7 +62,9 @@ classification_keys = [
     for m in models._ALL_MODELS.keys()  # pylint: disable=protected-access
     if m not in excluded_classification_models
 ]
-text_keys = [('test_{}'.format(m), m) for m in text_models]
+text_keys = [('test_{}_{}'.format(m, d), m, d)
+             for m, d in itertools.product(text_models, dtypes)
+             if d != 'bfloat16' or m == 'transformer']
 dtype_keys = [('test_{}'.format(t), t) for t in dtypes]
 remat_scan_keys = [('test_no_remat_scan', None), ('test_remat_scan', (2, 2))]
 dtype_and_remat_scan_keys = [('_'.join([x[0], y[0]]), x[1], y[1]) for
@@ -117,7 +119,7 @@ class ModelsTest(parameterized.TestCase):
         (INPUT_SHAPE['classification'][0], OUTPUT_SHAPE['classification'][-1]))
 
   @parameterized.named_parameters(*text_keys)
-  def test_text_models(self, model_str):
+  def test_text_models(self, model_str, dtype_str):
     """Test forward pass of the transformer model."""
 
     # TODO(gilmer): Find a clean way to handle small test hparams.
@@ -143,7 +145,7 @@ class ModelsTest(parameterized.TestCase):
             'schedule': 'constant'
         },
         'output_shape': (vocab_size,),
-        'model_dtype': 'float32',
+        'model_dtype': dtype_str,
         # Training HParams.
         'l2_decay_factor': 1e-4,
         'decode': False,
@@ -173,14 +175,24 @@ class ModelsTest(parameterized.TestCase):
     params = init_dict['params']
     batch_stats = init_dict.get('batch_stats', {})
 
+    param_type_matches_model_type = jax.tree_util.tree_map(
+        lambda x: x.dtype == small_hps.model_dtype, params)
+    self.assertTrue(
+        jax.tree_util.tree_reduce(lambda x, y: x and y,
+                                  param_type_matches_model_type))
+
     # Check that the forward pass works with mutated batch_stats.
     # Due to a bug in flax, this jit is required, otherwise the model errors.
     @jax.jit
     def forward_pass(params, xs, dropout_rng):
       outputs, new_batch_stats = model.flax_module.apply(
-          {'params': params, 'batch_stats': batch_stats},
+          {
+              'params': params,
+              'batch_stats': batch_stats
+          },
           xs,
           mutable=['batch_stats'],
+          capture_intermediates=True,
           rngs={'dropout': dropout_rng},
           train=True)
       return outputs, new_batch_stats
@@ -188,6 +200,13 @@ class ModelsTest(parameterized.TestCase):
     outputs, new_batch_stats = forward_pass(params, xs, dropout_rng)
     self.assertEqual(outputs.shape,
                      (text_input_shape[0], text_input_shape[1], vocab_size))
+
+    intermediates_type_matches_model_type = jax.tree_util.tree_map(
+        lambda x: x.dtype == small_hps.model_dtype,
+        new_batch_stats['intermediates'])
+    self.assertTrue(
+        jax.tree_util.tree_reduce(lambda x, y: x and y,
+                                  intermediates_type_matches_model_type))
 
     # If it's a batch norm model check the batch stats changed.
     if batch_stats:
