@@ -36,7 +36,7 @@ glob = gfile.glob
 
 DEFAULT_EVAL_CONFIG = {
     'eval_batch_size': 16,
-    'eval_split': 'test',
+    'eval_splits': ['test'],
     'max_decode_length': 256,
     'eval_num_batches': None,
     'ckpt_to_evaluate': None,

@@ -53,7 +53,7 @@ _REQUIRED_KEYS = [
     'dataset_name', 'model_name', 'tfds_dataset_key', 'tfds_eval_dataset_key',
     'tfds_predict_dataset_key', 'reverse_translation', 'eval_batch_size',
     'eval_train_num_batches', 'eval_num_batches', 'eval_splits',
-    'max_decode_length', 'tl_code', 'beam_size']
+    'max_decode_length', 'tl_code', 'beam_size', 'decoding_type']
 _SPLITS = ['train', 'valid', 'test']
 
 
@@ -77,7 +77,10 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     del dataset
     del params
 
-    self.callback_config = callback_config
+    merged_callback_config = inference.DEFAULT_EVAL_CONFIG
+    merged_callback_config.update(callback_config)
+
+    self.callback_config = merged_callback_config
 
     self._validate_callback_config()
     self.evaluate_batch_pmapped = jax.pmap(
@@ -94,7 +97,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
         model_class,
         dataset,
         dataset_metadata,
-        callback_config,
+        self.callback_config,
         mode='online')
 
   def _validate_callback_config(self):
