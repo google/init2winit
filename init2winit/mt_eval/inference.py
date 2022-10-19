@@ -198,14 +198,7 @@ class InferenceManager(object):
 
   def build_predictor(self):
     """Either build beam search decoder or sampling decoder."""
-    if self.mt_eval_config.get('decoding_type') == 'beam_search':
-      decoder = functools.partial(
-          decode.decode_step,
-          max_decode_len=self.max_length,
-          flax_module=self.flax_module,
-          eos_id=self.eos_id,
-          beam_size=self.mt_eval_config.get('beam_size'))
-    else:
+    if self.mt_eval_config.get('decoding_type') == 'sampling':
       decoder = functools.partial(
           decode.sampling_step,
           max_decode_len=self.max_length,
@@ -215,6 +208,13 @@ class InferenceManager(object):
           sample_size=self.mt_eval_config.get('sample_size'),
           temperature=self.mt_eval_config.get('temperature'),
           rescale_log_probs=self.mt_eval_config.get('rescale_log_probs'))
+    else:
+      decoder = functools.partial(
+          decode.decode_step,
+          max_decode_len=self.max_length,
+          flax_module=self.flax_module,
+          eos_id=self.eos_id,
+          beam_size=self.mt_eval_config.get('beam_size'))
     self.pmapped_predictor = jax.pmap(decoder, static_broadcasted_argnums=())
 
   def translate_and_calculate_bleu(self):
