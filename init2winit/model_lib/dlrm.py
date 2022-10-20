@@ -181,6 +181,7 @@ class DLRM(nn.Module):
 
 
 class DLRMModel(base_model.BaseModel):
+  """DLRMModel init2winit class."""
 
   def build_flax_module(self):
     """DLRM for ad click probability prediction."""
@@ -192,3 +193,11 @@ class DLRMModel(base_model.BaseModel):
         num_dense_features=self.hps.num_dense_features,
         embed_dim=self.hps.embed_dim,
         keep_diags=self.hps.keep_diags)
+
+  def get_fake_batch(self, hps):
+    # NOTE(dsuo): hps.input_shape for `criteo_terabyte_input_pipeline` is
+    # (39,)
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs
