@@ -279,6 +279,7 @@ _block_size_options = {
 
 
 class ResnetModel(base_model.BaseModel):
+  """ResnetModel init2winit Class."""
 
   def build_flax_module(self):
     """ResnetV1."""
@@ -299,3 +300,9 @@ class ResnetModel(base_model.BaseModel):
         dropout_rate=self.hps.dropout_rate,
         activation_function=self.hps.activation_function,
         extra_norm_on_residual=self.hps.extra_norm_on_residual)
+
+  def get_fake_batch(self, hps):
+    fake_batch = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return fake_batch
