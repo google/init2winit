@@ -949,3 +949,11 @@ class DeepSpeechModel(base_model.BaseModel):
     module = DeepSpeechEncoderDecoder(config)
 
     return module
+
+  def get_fake_batch(self, hps):
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *x), dtype=hps.model_dtype)
+        for x in hps.input_shape
+    ]
+    return dummy_inputs
+  
