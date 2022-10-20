@@ -283,6 +283,12 @@ class ViTModel(base_model.BaseModel):
       args.update(decode_variant(self.hps.variant))
     return ViT(**args)
 
+  def get_fake_batch(self, hps):
+    fake_batch = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return fake_batch
+
 
 def decode_variant(variant):
   """Converts a string like 'B/32' into a params dict.
