@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Fake image input pipeline. Returns the same batch of ones over and over."""
+import copy
 
 from init2winit.dataset_lib import data_utils
 import jax
@@ -41,8 +42,11 @@ METADATA = {
 }
 
 
-def get_fake_batch(batch_size, input_shape, num_classes):
+def get_fake_batch(hps):
   """Generate batches of images of all ones and one-hot labels."""
+  batch_size = hps.batch_size
+  input_shape = hps.input_shape
+  num_classes = hps.output_shape[0]
   train_input_shape = (batch_size, *input_shape)
   images = jnp.ones(train_input_shape, dtype=jnp.float32)
   labels = jax.nn.one_hot(
@@ -61,10 +65,15 @@ def get_fake(shuffle_rng, batch_size, eval_batch_size, hps=None):
   per_host_batch_size = batch_size // jax.process_count()
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
 
-  fake_train_batch = get_fake_batch(
-      per_host_batch_size, hps.input_shape, hps.output_shape[0])
-  fake_test_batch = get_fake_batch(
-      per_host_eval_batch_size, hps.input_shape, hps.output_shape[0])
+  train_hps = copy.copy(hps)
+  train_hps.unlock()
+  train_hps.batch_size = per_host_batch_size
+  fake_train_batch = get_fake_batch(train_hps)
+
+  test_hps = copy.copy(hps)
+  test_hps.unlock()
+  test_hps.batch_size = per_host_eval_batch_size
+  fake_test_batch = get_fake_batch(test_hps)
 
   def train_iterator_fn():
     while True:
