@@ -250,3 +250,12 @@ def get_criteo1tb(unused_shuffle_rng,
       eval_train_iterator_fn,
       validation_iterator_fn,
       test_iterator_fn)
+
+
+def get_fake_batch(hps):
+  return {
+      'inputs':
+          np.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype),
+      'targets':
+          np.zeros((hps.batch_size,), dtype=hps.model_dtype),
+  }
