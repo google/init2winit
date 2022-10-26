@@ -25,6 +25,7 @@ from init2winit.dataset_lib import image_preprocessing
 import jax
 from jax.experimental import multihost_utils
 from ml_collections.config_dict import config_dict
+import numpy as np
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
@@ -51,7 +52,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
         'num_layers': 2
     }))
 
-    # pylint:disable=raise-missing-from
+# pylint:disable=raise-missing-from
 METADATA = {
     'apply_one_hot_in_loss': False,
 }
@@ -489,3 +490,14 @@ def get_imagenet(shuffle_rng,
 
   return data_utils.Dataset(
       train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
+
+
+def get_fake_batch(hps):
+  return {
+      'inputs':
+          np.ones((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype),
+      'targets':
+          np.ones((hps.batch_size, *hps.output_shape), dtype=hps.model_dtype),
+      'weights':
+          np.ones((hps.batch_size,), dtype=hps.model_dtype),
+  }

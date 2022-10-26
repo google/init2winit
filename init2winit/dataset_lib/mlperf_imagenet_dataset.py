@@ -22,6 +22,7 @@ from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import mlperf_input_pipeline
 import jax
 from ml_collections.config_dict import config_dict
+import numpy as np
 import tensorflow.compat.v2 as tf
 
 
@@ -169,3 +170,14 @@ def get_mlperf_imagenet(rng,
       eval_train_epoch,
       valid_epoch,
       test_epoch)
+
+
+def get_fake_batch(hps):
+  return {
+      'inputs':
+          np.ones((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype),
+      'targets':
+          np.ones((hps.batch_size, *hps.output_shape), dtype=hps.model_dtype),
+      'weights':
+          np.ones((hps.batch_size,), dtype=hps.model_dtype),
+  }
