@@ -21,8 +21,8 @@ from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import librispeech_input_pipeline
 from init2winit.dataset_lib.data_utils import Dataset
 import jax
-
 from ml_collections.config_dict import config_dict
+import numpy as np
 
 MAX_INPUT_LENGTH = 320000
 MAX_TARGET_LENGTH = 256
@@ -110,3 +110,20 @@ def _get_librispeech(hps, per_host_batch_size, per_host_eval_batch_size,
 
   # pylint: enable=unreachable
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
+
+
+def get_fake_batch(hps):
+  return {
+      'inputs':
+          np.ones((hps.batch_size, hps.max_input_length),
+                  dtype=hps.model_dtype),
+      'input_paddings':
+          np.ones((hps.batch_size, hps.max_input_length),
+                  dtype=hps.model_dtype),
+      'targets':
+          np.ones((hps.batch_size, hps.max_target_length),
+                  dtype=hps.model_dtype),
+      'target_paddings':
+          np.ones((hps.batch_size, hps.max_target_length),
+                  dtype=hps.model_dtype),
+  }
