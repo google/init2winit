@@ -23,6 +23,7 @@ import h5py
 from init2winit.dataset_lib import data_utils
 import jax
 from ml_collections.config_dict import config_dict
+import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
@@ -312,3 +313,18 @@ def get_fastmri(shuffle_rng, batch_size, eval_batch_size, hps):
 
   return data_utils.Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
                             test_epoch)
+
+
+def get_fake_batch(hps):
+  return {
+      'inputs':
+          np.ones((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype),
+      'targets':
+          np.ones((hps.batch_size, *hps.output_shape), dtype=hps.model_dtype),
+      'mean':
+          np.ones((hps.batch_size,), dtype=hps.model_dtype),
+      'std':
+          np.ones((hps.batch_size,), dtype=hps.model_dtype),
+      'volume_max':
+          np.ones((hps.batch_size,), dtype=hps.model_dtype),
+  }
