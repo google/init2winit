@@ -21,8 +21,8 @@ from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import mt_pipeline
 from init2winit.dataset_lib.data_utils import Dataset
 import jax
-
 from ml_collections.config_dict import config_dict
+import numpy as np
 
 VOCAB_SIZE = 32000  # Typical vocab_size for MT models.
 
@@ -139,3 +139,36 @@ def _get_translate_wmt(per_host_batch_size,
           mask_key='targets')
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
+
+
+def get_fake_batch(hps):
+  """Build fake batch for translate_wmt."""
+  batch = {
+      'inputs':
+          np.ones((hps.batch_size, hps.max_target_length),
+                  dtype=hps.model_dtype),
+      'targets':
+          np.ones((hps.batch_size, hps.max_target_length),
+                  dtype=hps.model_dtype),
+      'weights':
+          np.ones((hps.batch_size, hps.max_target_length),
+                  dtype=hps.model_dtype),
+  }
+
+  if hps.pack_examples:
+    batch.update({
+        'inputs_position':
+            np.ones((hps.batch_size, hps.max_target_length),
+                    dtype=hps.model_dtype),
+        'inputs_segmentation':
+            np.ones((hps.batch_size, hps.max_target_length),
+                    dtype=hps.model_dtype),
+        'targets_position':
+            np.ones((hps.batch_size, hps.max_target_length),
+                    dtype=hps.model_dtype),
+        'targets_segmentation':
+            np.ones((hps.batch_size, hps.max_target_length),
+                    dtype=hps.model_dtype),
+    })
+
+    return batch
