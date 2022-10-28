@@ -402,10 +402,75 @@ def schedule_stretcher(schedule_fn, stretch_factor):
   return _schedule
 
 
+def add_decay_lr_on_plateau(schedule_fn, decay_lr_on_plateau_hparams):
+  """LR schedule for automatically reducing learning rate as necessary."""
+
+  class DecayLROnPlateau:
+    """LR schedule for automatically reducing learning rate as necessary."""
+
+    def __init__(self, schedule_fn, decay_lr_on_plateau_hparams):
+      self.schedule_fn = schedule_fn
+      self.decay_lr_on_plateau_hparams = dict(decay_lr_on_plateau_hparams)
+
+      # grab decay params
+      self.patience = self.decay_lr_on_plateau_hparams.pop('plateau_patience')
+      self.plateau_decay_factor = self.decay_lr_on_plateau_hparams.pop(
+          'plateau_decay_factor')
+      self.metric = self.decay_lr_on_plateau_hparams.pop('plateau_metric')
+      self.mode = self.decay_lr_on_plateau_hparams.pop('plateau_mode')
+
+      self.lr_factor = 1
+      self.counter = 0
+      self.best_metric_val = None
+
+    def __call__(self, step):
+      return self.lr_factor * self.schedule_fn(step)
+
+    def decay(self, metrics):
+      """Decay learning rate if validation metric has plateaued."""
+      metric_val = metrics[self.metric]
+
+      if not self.best_metric_val:
+        self.best_metric_val = metric_val
+        self.counter = 0
+        return
+
+      if (self.mode == 'lower' and metric_val < self.best_metric_val) or (
+          self.mode == 'higher' and metric_val > self.best_metric_val):
+        self.best_metric_val = metric_val
+        self.counter += 0
+      else:
+        self.counter += 1
+
+      if self.counter == self.patience:
+        self.lr_factor /= self.plateau_decay_factor
+        self.counter = 0
+
+      return
+
+  return DecayLROnPlateau(schedule_fn, decay_lr_on_plateau_hparams)
+
+
 # Note that everything inside schedules.py should be in terms of number of model
 # updates, not gradient calculations.
 def get_schedule_fn(schedule_hparams, max_training_updates, stretch_factor=1):
   """Retrieve a schedule function."""
+
+  plateau_suffix = '_decay_lr_on_plateau'
+  decay_lr_on_plateau_hparams = None
+  if schedule_hparams['schedule'][-len(plateau_suffix):] == plateau_suffix:
+    schedule_hparams['schedule'] = schedule_hparams[
+        'schedule'][:-len(plateau_suffix)]
+
+    # Each schedule expects schedule_hparams to have a specific set of keys. Pop
+    # decay_lr_on_plateau-specific hparams and pass them directly to the decay
+    # lr schedule.
+    decay_lr_on_plateau_hparams = {}
+    schedule_hparams = dict(schedule_hparams)
+    for key in list(schedule_hparams.keys()):  # pylint: disable=g-builtin-op
+      if 'plateau_' in key:
+        decay_lr_on_plateau_hparams[key] = schedule_hparams.pop(key)
+
   warmup_suffix = '_warmup'
   if schedule_hparams['schedule'][-len(warmup_suffix):] == warmup_suffix:
     base_name = schedule_hparams['schedule'][:-len(warmup_suffix)]
@@ -415,4 +480,10 @@ def get_schedule_fn(schedule_hparams, max_training_updates, stretch_factor=1):
   else:
     schedule_fn = lr_fn_dict[schedule_hparams['schedule']](
         schedule_hparams, max_training_updates)
-  return schedule_stretcher(schedule_fn, stretch_factor)
+
+  schedule_fn = schedule_stretcher(schedule_fn, stretch_factor)
+
+  if decay_lr_on_plateau_hparams:
+    return add_decay_lr_on_plateau(schedule_fn, decay_lr_on_plateau_hparams)
+  else:
+    return schedule_fn
