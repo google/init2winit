@@ -58,30 +58,32 @@ _ALL_DATASETS = {
     'criteo1tb':
         _Dataset(criteo_terabyte_input_pipeline.get_criteo1tb,
                  criteo_terabyte_input_pipeline.CRITEO1TB_DEFAULT_HPARAMS,
-                 criteo_terabyte_input_pipeline.CRITEO1TB_METADATA, None),
+                 criteo_terabyte_input_pipeline.CRITEO1TB_METADATA,
+                 criteo_terabyte_input_pipeline.get_fake_batch),
     'fake':
         _Dataset(fake_dataset.get_fake, fake_dataset.DEFAULT_HPARAMS,
-                 fake_dataset.METADATA, None),
+                 fake_dataset.METADATA, fake_dataset.get_fake_batch),
     'fastmri':
         _Dataset(fastmri_dataset.get_fastmri, fastmri_dataset.DEFAULT_HPARAMS,
-                 fastmri_dataset.METADATA, None),
+                 fastmri_dataset.METADATA, fastmri_dataset.get_fake_batch),
     'imagenet':
         _Dataset(imagenet_dataset.get_imagenet,
                  imagenet_dataset.DEFAULT_HPARAMS, imagenet_dataset.METADATA,
-                 None),
+                 imagenet_dataset.get_fake_batch),
     'translate_wmt':
         _Dataset(translate_wmt.get_translate_wmt, translate_wmt.DEFAULT_HPARAMS,
-                 translate_wmt.METADATA, None),
+                 translate_wmt.METADATA, translate_wmt.get_fake_batch),
     'librispeech':
         _Dataset(librispeech.get_librispeech, librispeech.DEFAULT_HPARAMS,
-                 librispeech.METADATA, None),
+                 librispeech.METADATA, librispeech.get_fake_batch),
     'lm1b_v2':
         _Dataset(lm1b_v2.get_lm1b, lm1b_v2.DEFAULT_HPARAMS, lm1b_v2.METADATA,
                  None),
     'mlperf_imagenet':
         _Dataset(mlperf_imagenet_dataset.get_mlperf_imagenet,
                  mlperf_imagenet_dataset.DEFAULT_HPARAMS,
-                 mlperf_imagenet_dataset.METADATA, None),
+                 mlperf_imagenet_dataset.METADATA,
+                 mlperf_imagenet_dataset.get_fake_batch),
     'svhn_no_extra':
         _Dataset(small_image_datasets.get_svhn_no_extra,
                  small_image_datasets.SVHN_NO_EXTRA_DEFAULT_HPARAMS,
@@ -91,7 +93,7 @@ _ALL_DATASETS = {
                  nqm_noise.NQM_METADATA, None),
     'ogbg_molpcba':
         _Dataset(ogbg_molpcba.get_ogbg_molpcba, ogbg_molpcba.DEFAULT_HPARAMS,
-                 ogbg_molpcba.METADATA, None),
+                 ogbg_molpcba.METADATA, ogbg_molpcba.get_fake_batch),
     'uniref50':
         _Dataset(proteins.get_uniref, proteins.DEFAULT_HPARAMS,
                  proteins.METADATA, None),
