@@ -180,7 +180,7 @@ class AddPositionEmbs(nn.Module):
   @nn.compact
   def __call__(self,
                inputs,
-               inputs_positions=None,
+               inputs_position=None,
                train=True,
                dtype=np.float32):
     """Applies AddPositionEmbs module.
@@ -191,7 +191,7 @@ class AddPositionEmbs(nn.Module):
 
     Args:
       inputs: <float>[batch_size, sequence_length, hidden_size] Input data.
-      inputs_positions: [Same as above.] Position indices for packed sequences.
+      inputs_position: [Same as above.] Position indices for packed sequences.
       train: if it is training.
       dtype: Dtype of the computation (default: float32).
 
@@ -221,12 +221,12 @@ class AddPositionEmbs(nn.Module):
         cache_index.value = i + 1
         _, _, df = pos_embedding.shape
         pe = lax.dynamic_slice(pos_embedding, jnp.array((0, i, 0)), (1, 1, df))
-    if inputs_positions is None:
+    if inputs_position is None:
       # normal unpacked case:
       return inputs + pe
     else:
       # for packed data we need to use known position indices:
-      return inputs + jnp.take(pe[0], inputs_positions, axis=0)
+      return inputs + jnp.take(pe[0], inputs_position, axis=0)
 
 
 class MlpBlock(nn.Module):
@@ -513,14 +513,14 @@ class Encoder(nn.Module):
   @nn.compact
   def __call__(self,
                inputs,
-               inputs_positions=None,
+               inputs_position=None,
                encoder_mask=None,
                train=True):
     """Applies Transformer model on the inputs.
 
     Args:
       inputs: input data
-      inputs_positions: input subsequence positions for packed examples.
+      inputs_position: input subsequence positions for packed examples.
       encoder_mask: decoder self-attention mask.
       train: if it is training.
 
@@ -544,7 +544,7 @@ class Encoder(nn.Module):
     x = input_embed(x)
     x = AddPositionEmbs(
         max_len=self.max_len, decode=False, name='posembed_input')(
-            x, inputs_positions=inputs_positions, train=train, dtype=self.dtype)
+            x, inputs_position=inputs_position, train=train, dtype=self.dtype)
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
 
     # Input encoder.
@@ -631,7 +631,7 @@ class Decoder(nn.Module):
   def __call__(self,
                encoded,
                targets,
-               targets_positions=None,
+               targets_position=None,
                decoder_mask=None,
                encoder_decoder_mask=None,
                train=True):
@@ -640,7 +640,7 @@ class Decoder(nn.Module):
     Args:
       encoded: encoded input data from encoder.
       targets: target inputs.
-      targets_positions: input subsequence positions for packed examples.
+      targets_position: input subsequence positions for packed examples.
       decoder_mask: decoder self-attention mask.
       encoder_decoder_mask: encoder-decoder attention mask.
 
@@ -671,7 +671,7 @@ class Decoder(nn.Module):
     y = AddPositionEmbs(
         max_len=self.max_len, decode=self.decode, name='posembed_output')(
             y,
-            inputs_positions=targets_positions,
+            inputs_position=targets_position,
             train=train,
             dtype=self.dtype)
     y = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(y)
@@ -862,8 +862,8 @@ class Transformer(nn.Module):
   def __call__(self,
                inputs,
                targets,
-               inputs_positions=None,
-               targets_positions=None,
+               inputs_position=None,
+               targets_position=None,
                inputs_segmentation=None,
                targets_segmentation=None,
                train=False):
@@ -872,8 +872,8 @@ class Transformer(nn.Module):
     Args:
       inputs: input data.
       targets: target data.
-      inputs_positions: input subsequence positions for packed examples.
-      targets_positions: target subsequence positions for packed examples.
+      inputs_position: input subsequence positions for packed examples.
+      targets_position: target subsequence positions for packed examples.
       inputs_segmentation: input segmentation info for packed examples.
       targets_segmentation: target segmentation info for packed examples.
       train: whether it is training.
@@ -882,14 +882,14 @@ class Transformer(nn.Module):
       Output: <float>[batch_size, target_sequence_length, qkv_dim]
     """
     encoded = self.encode(inputs,
-                          inputs_positions=inputs_positions,
+                          inputs_position=inputs_position,
                           inputs_segmentation=inputs_segmentation,
                           train=train)
 
     logits = self.decode(encoded,
                          inputs,  # only used for masks
                          targets,
-                         targets_positions=targets_positions,
+                         targets_position=targets_position,
                          inputs_segmentation=inputs_segmentation,
                          targets_segmentation=targets_segmentation,
                          train=train)
@@ -903,7 +903,7 @@ class Transformer(nn.Module):
 
   def encode(self,
              inputs,
-             inputs_positions=None,
+             inputs_position=None,
              inputs_segmentation=None,
              train=False):
     # Make padding attention mask.
@@ -920,7 +920,7 @@ class Transformer(nn.Module):
                                  dtype=dtype))
     encoded = self.encoder(
         inputs,
-        inputs_positions=inputs_positions,
+        inputs_position=inputs_position,
         encoder_mask=encoder_mask,
         train=train)
 
@@ -930,7 +930,7 @@ class Transformer(nn.Module):
              encoded,
              inputs,
              targets,
-             targets_positions=None,
+             targets_position=None,
              inputs_segmentation=None,
              targets_segmentation=None,
              train=False):
@@ -967,7 +967,7 @@ class Transformer(nn.Module):
     logits = self.decoder(
         encoded,
         targets,
-        targets_positions=targets_positions,
+        targets_position=targets_position,
         decoder_mask=decoder_mask,
         encoder_decoder_mask=encoder_decoder_mask,
         train=train)
@@ -989,15 +989,7 @@ class TransformerTranslate(base_model.BaseModel):
     """Evaluates cross_entopy on the given batch."""
 
     # TODO(ankugarg): Augment with other metrics like log-perplexity.
-    logits = self.flax_module.apply(
-        {'params': params, 'batch_stats': batch_stats},
-        batch['inputs'],
-        batch['targets'],
-        inputs_positions=batch.get('inputs_positions'),
-        targets_positions=batch.get('targets_positions'),
-        inputs_segmentation=batch.get('inputs_segmentation'),
-        targets_segmentation=batch.get('targets_segmentation'),
-        train=False)
+    logits = self.apply_on_batch(params, batch_stats, batch, train=False)
 
     weights = batch.get('weights')
     targets = batch['targets']
@@ -1008,22 +1000,33 @@ class TransformerTranslate(base_model.BaseModel):
     return self.metrics_bundle.gather_from_model_output(
         logits=logits, targets=targets, weights=weights, axis_name='batch')
 
-  def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
+  def apply_on_batch(self,
+                     params,
+                     batch_stats,
+                     batch,
+                     train=True,
+                     **apply_kwargs):
     """Wrapper around flax_module.apply."""
+    variables = {'params': params}
     if batch_stats is not None:
-      variables = {'params': params, 'batch_stats': batch_stats}
-    else:
-      variables = {'params': params}
+      variables['batch_stats'] = batch_stats
 
-    return self.flax_module.apply(
-        variables,
-        batch['inputs'],
-        batch['targets'],
-        batch.get('inputs_positions'),
-        batch.get('targets_positions'),
-        batch.get('inputs_segmentation'),
-        batch.get('targets_segmentation'),
-        **apply_kwargs)
+    kwargs = {
+        'inputs': batch['inputs'],
+        'targets': batch['targets'],
+        'train': train,
+    }
+    kwargs.update(apply_kwargs)
+
+    if self.hps.pack_examples and train:
+      kwargs.update({
+          'inputs_position': batch['inputs_position'],
+          'targets_position': batch['targets_position'],
+          'inputs_segmentation': batch['inputs_segmentation'],
+          'targets_segmentation': batch['targets_segmentation'],
+      })
+
+    return self.flax_module.apply(variables, **kwargs)
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return cross entropy loss with (optional) L2 penalty on the weights."""
