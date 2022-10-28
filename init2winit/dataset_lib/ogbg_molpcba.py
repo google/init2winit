@@ -28,6 +28,7 @@ import jax
 import jraph
 from ml_collections.config_dict import config_dict
 import numpy as np
+import tensorflow as tf
 import tensorflow_datasets as tfds
 
 AVG_NODES_PER_GRAPH = 26
@@ -291,3 +292,56 @@ def get_ogbg_molpcba(shuffle_rng, batch_size, eval_batch_size, hps=None):
         num_batches)
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
+
+
+def get_fake_batch(hps):
+  """Get fake ogbg_molpcba batch."""
+  # NOTE(dsuo): the number of edges / nodes are approximately normally
+  # distributed with the following mean and standard deviation.
+  num_nodes_mean = 25.6
+  num_nodes_std = 5.9
+  num_edges_mean = 27.6
+  num_edges_std = 6.6
+
+  def dataset_iterator():
+    """Fake raw data iterator."""
+    # NOTE(dsuo): fix the random seed locally.
+    rng = np.random.default_rng(0)
+
+    while True:
+      num_nodes = int(rng.normal(loc=num_nodes_mean, scale=num_nodes_std))
+
+      # NOTE(dsuo): we want at least as many edges as we have nodes.
+      num_edges = max(num_nodes,
+                      int(rng.normal(loc=num_edges_mean, scale=num_edges_std)))
+
+      # NOTE(dsuo): create an edge between pair of consecutive nodes to have
+      # a well-formed molecule.
+      edge_index = np.zeros((num_edges, 2), dtype=np.int32)
+      edge_index[:num_nodes, 0] = np.arange(num_nodes)
+      edge_index[:num_nodes, 1] = np.roll(np.arange(num_nodes), 1)
+
+      # NOTE(dsuo): create random edges for any remaining.
+      if num_edges > num_nodes:
+        edge_index[num_nodes:num_edges, :] = rng.choice(
+            num_nodes, (num_edges - num_nodes, 2))
+
+      yield {
+          'edge_feat': tf.ones((num_edges, 3), dtype=tf.float32),
+          'edge_index': tf.convert_to_tensor(edge_index, dtype=tf.int32),
+          'node_feat': tf.ones((num_nodes, 9), dtype=tf.float32),
+          'labels': tf.zeros((128,), dtype=tf.int32),
+          'num_edges': tf.constant([num_edges], dtype=tf.int32),
+          'num_nodes': tf.constant([num_nodes], dtype=tf.int32),
+      }
+
+  batch_iterator = _get_batch_iterator(
+      dataset_iterator(),
+      batch_size=hps.batch_size,
+      nodes_per_graph=hps.max_nodes_multiplier,
+      edges_per_graph=hps.max_edges_multiplier,
+      add_bidirectional_edges=hps.add_bidirectional_edges,
+      add_virtual_node=hps.add_virtual_node,
+      add_self_loops=hps.add_self_loops)
+
+  return next(batch_iterator)
