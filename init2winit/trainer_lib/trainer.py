@@ -125,7 +125,8 @@ def update(
   new_metrics_state = None
   if metrics_state is not None:
     new_metrics_state = metrics_update_fn(metrics_state, step, cost_value, grad,
-                                          params, new_params, optimizer_state)
+                                          params, new_params, optimizer_state,
+                                          new_batch_stats)
 
   return (new_optimizer_state, new_params, new_batch_stats,
           running_train_cost + cost_value, new_metrics_state, grad_norm)

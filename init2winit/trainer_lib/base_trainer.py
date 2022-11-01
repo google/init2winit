@@ -272,7 +272,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       (metrics_init_fn, metrics_update_fn,
        metrics_summary_fn) = make_training_metrics(
            self._num_train_steps, self._hps, **self._training_metrics_config)
-      unreplicated_metrics_state = metrics_init_fn(unreplicated_params)
+      unreplicated_metrics_state = metrics_init_fn(unreplicated_params,
+                                                   unreplicated_batch_stats)
 
     (optimizer_state,
      params,

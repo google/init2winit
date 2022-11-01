@@ -36,6 +36,9 @@ DEFAULT_CONFIG = ConfigDict({
     'enable_train_cost': False,
     'enable_param_norms': False,
     'enable_gradient_norm': False,
+    'enable_all_gradient_norms': False,
+    'enable_batch_stats_norm': False,
+    'enable_all_batch_stats_norms': False,
     'enable_update_norm': False,
     'enable_update_norms': False,
     'enable_preconditioner_normsq': False,
@@ -127,11 +130,13 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
   config = ConfigDict(DEFAULT_CONFIG)
   config.update(config_overrides)
 
-  def init_fn(params):
+  def init_fn(params, batch_stats):
     """Initialize the training metrics state.
 
     Args:
       params: (pytree) A pytree of model parameters.  Used for its shape
+        information.
+      batch_stats: (pytree) A pytree of batch stats.  Used for its shape
         information.
 
     Returns:
@@ -147,8 +152,16 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
     if config['enable_param_norms']:
       metrics_state['param_norms'] = jax.tree_map(
           lambda x: jnp.zeros(num_train_steps), params)
+    if config['enable_batch_stats_norm']:
+      metrics_state['batch_stats_norm'] = jnp.zeros(num_train_steps)
+    if config['enable_all_batch_stats_norms']:
+      metrics_state['all_batch_stats_norms'] = jax.tree_map(
+          lambda x: jnp.zeros(num_train_steps), batch_stats)
     if config['enable_gradient_norm']:
       metrics_state['gradient_norm'] = jnp.zeros(num_train_steps)
+    if config['enable_all_gradient_norms']:
+      metrics_state['all_gradient_norms'] = jax.tree_map(
+          lambda x: jnp.zeros(num_train_steps), params)
     if config['enable_update_norm']:
       metrics_state['update_norm'] = jnp.zeros(num_train_steps)
     if config['enable_update_norms']:
@@ -176,7 +189,7 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
     return metrics_state
 
   def update_fn(metrics_state, step, train_cost, grad, old_params, new_params,
-                optimizer_state):
+                optimizer_state, batch_stats):
     """Update the training metrics state.
 
     Args:
@@ -189,11 +202,14 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
       new_params: (pytree, of same shape as params): The parameters after the
         update.
       optimizer_state: the optax optimizer state.
+      batch_stats: batch stats
 
     Returns:
       next_metrics_state: (pytree) The next training metrics state.
     """
     param_norm = jax.tree_map(_compute_leaf_norms, old_params)
+    grad_norm = jax.tree_map(_compute_leaf_norms, grad)
+    batch_stats_norm = jax.tree_map(_compute_leaf_norms, batch_stats)
     if (config['enable_update_norm'] or config['enable_update_norms'] or
         config['enable_ema']):
       update = jax.tree_map(lambda x, y: x - y, old_params, new_params)
@@ -206,9 +222,19 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
     if config['enable_param_norms']:
       next_metrics_state['param_norms'] = _set_pytree_idx(
           metrics_state['param_norms'], param_norm, step)
+    if config['enable_batch_stats_norm']:
+      next_metrics_state['batch_stats_norm'] = metrics_state[
+          'batch_stats_norm'].at[step].set(
+              total_tree_norm_l2(batch_stats))
+    if config['enable_all_batch_stats_norms']:
+      next_metrics_state['all_batch_stats_norms'] = _set_pytree_idx(
+          metrics_state['all_batch_stats_norms'], batch_stats_norm, step)
     if config['enable_gradient_norm']:
       next_metrics_state['gradient_norm'] = metrics_state['gradient_norm'].at[
           step].set(total_tree_norm_l2(grad))
+    if config['enable_all_gradient_norms']:
+      next_metrics_state['all_gradient_norms'] = _set_pytree_idx(
+          metrics_state['all_gradient_norms'], grad_norm, step)
     if config['enable_update_norm']:
       next_metrics_state['update_norm'] = metrics_state['update_norm'].at[
           step].set(total_tree_norm_l2(update))

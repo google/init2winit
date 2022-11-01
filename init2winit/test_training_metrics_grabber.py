@@ -43,6 +43,8 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     super(TrainingMetricsGrabberTest, self).setUp()
     self.mock_params0 = freeze({'foo': jnp.zeros(5),
                                 'bar': {'baz': jnp.ones(10)}})
+    self.mock_batch_stats = freeze({'foo': jnp.zeros(5),
+                                    'bar': {'baz': jnp.ones(10)}})
     self.mock_grad1 = freeze({'foo': -jnp.ones(5),
                               'bar': {'baz': -jnp.ones(10)}})
     self.mock_grad2 = freeze({'foo': -2*jnp.ones(5),
@@ -93,7 +95,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     # Test init with everything disabled.
     init_fn, _, _ = make_training_metrics(self.num_train_steps,
                                           ConfigDict({}))
-    initial_metrics_state = init_fn(self.mock_params0)
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
     self.assertTrue(
         pytree_equal({'param_norm': zeros_scalar_like_params},
                      initial_metrics_state))
@@ -105,9 +107,12 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                           enable_train_cost=True,
                                           enable_param_norms=True,
                                           enable_gradient_norm=True,
+                                          enable_all_gradient_norms=True,
                                           enable_update_norm=True,
-                                          enable_update_norms=True)
-    initial_metrics_state = init_fn(self.mock_params0)
+                                          enable_update_norms=True,
+                                          enable_batch_stats_norm=True,
+                                          enable_all_batch_stats_norms=True)
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
     self.assertTrue(pytree_equal(initial_metrics_state, {
                 'train_cost': zeros_timeseries,
                 'param_norm': zeros_scalar_like_params,
@@ -117,8 +122,11 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                 'update_sq_ema': zeros_like_params,
                 'param_norms': zeros_timeseries_like_params,
                 'gradient_norm': zeros_timeseries,
+                'all_gradient_norms': zeros_timeseries_like_params,
                 'update_norm': zeros_timeseries,
-                'update_norms': zeros_timeseries_like_params
+                'update_norms': zeros_timeseries_like_params,
+                'batch_stats_norm': zeros_timeseries,
+                'all_batch_stats_norms': zeros_timeseries_like_params
     }))
 
   def test_train_cost(self):
@@ -126,21 +134,23 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
                                                   ConfigDict({}),
                                                   enable_train_cost=True)
-    initial_metrics_state = init_fn(self.mock_params0)
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
     updated_metrics_state = update_fn(initial_metrics_state,
                                       0,
                                       self.mock_cost0,
                                       self.mock_grad1,
                                       self.mock_params0,
                                       self.mock_params1,
-                                      self.mock_optimizer_state0)
+                                      self.mock_optimizer_state0,
+                                      self.mock_batch_stats)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
                                       self.mock_params2,
-                                      self.mock_optimizer_state1)
+                                      self.mock_optimizer_state1,
+                                      self.mock_batch_stats)
 
     self.assertTrue(
         pytree_equal(
@@ -152,11 +162,12 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
 
     init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
                                                   ConfigDict({}),)
-    initial_metrics_state = init_fn(self.mock_params0)
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
     updated_metrics_state = update_fn(initial_metrics_state, 0, self.mock_cost0,
                                       self.mock_grad1, self.mock_params0,
                                       self.mock_params1,
-                                      self.mock_optimizer_state0)
+                                      self.mock_optimizer_state0,
+                                      self.mock_batch_stats)
     self.assertTrue(
         pytree_equal(updated_metrics_state['param_norm'], freeze({
             'foo': jnp.linalg.norm(self.mock_params0['foo']),
@@ -166,7 +177,8 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     updated_metrics_state = update_fn(initial_metrics_state, 1, self.mock_cost1,
                                       self.mock_grad2, self.mock_params1,
                                       self.mock_params2,
-                                      self.mock_optimizer_state1)
+                                      self.mock_optimizer_state1,
+                                      self.mock_batch_stats)
 
     self.assertTrue(
         pytree_equal(updated_metrics_state['param_norm'], freeze({
@@ -180,21 +192,23 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     init_fn, update_fn, _ = make_training_metrics(self.num_train_steps,
                                                   ConfigDict({}),
                                                   enable_param_norms=True)
-    initial_metrics_state = init_fn(self.mock_params0)
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
     updated_metrics_state = update_fn(initial_metrics_state,
                                       0,
                                       self.mock_cost0,
                                       self.mock_grad1,
                                       self.mock_params0,
                                       self.mock_params1,
-                                      self.mock_optimizer_state0)
+                                      self.mock_optimizer_state0,
+                                      self.mock_batch_stats)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
                                       self.mock_params2,
-                                      self.mock_optimizer_state1)
+                                      self.mock_optimizer_state1,
+                                      self.mock_batch_stats)
     self.assertTrue(
         pytree_equal(
             updated_metrics_state['param_norms'], freeze({
@@ -221,21 +235,23 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                                   enable_gradient_norm=True,
                                                   enable_update_norm=True,
                                                   enable_update_norms=True)
-    initial_metrics_state = init_fn(self.mock_params0)
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
     updated_metrics_state = update_fn(initial_metrics_state,
                                       0,
                                       self.mock_cost0,
                                       self.mock_grad1,
                                       self.mock_params0,
                                       self.mock_params1,
-                                      self.mock_optimizer_state0)
+                                      self.mock_optimizer_state0,
+                                      self.mock_batch_stats)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
                                       self.mock_params2,
-                                      self.mock_optimizer_state1)
+                                      self.mock_optimizer_state1,
+                                      self.mock_batch_stats)
     self.assertTrue(
         pytree_equal(
             updated_metrics_state['update_norms'], freeze({
@@ -274,21 +290,23 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                                   ConfigDict({}),
                                                   enable_ema=True,
                                                   ema_beta=0.5)
-    initial_metrics_state = init_fn(self.mock_params0)
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
     updated_metrics_state = update_fn(initial_metrics_state,
                                       0,
                                       self.mock_cost0,
                                       self.mock_grad1,
                                       self.mock_params0,
                                       self.mock_params1,
-                                      self.mock_optimizer_state0)
+                                      self.mock_optimizer_state0,
+                                      self.mock_batch_stats)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
                                       self.mock_params2,
-                                      self.mock_optimizer_state1)
+                                      self.mock_optimizer_state1,
+                                      self.mock_batch_stats)
 
     self.assertTrue(
         pytree_equal(
@@ -303,7 +321,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
         ConfigDict({}),
         optstate_sumsq_fields=['nu'],
         optstate_sum_fields=['nu'])
-    initial_metrics_state = init_fn(self.mock_params0)
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
     self.assertTrue(pytree_equal(
         initial_metrics_state['optstate_sumsq'], {
             'nu': jnp.zeros(self.num_train_steps)
@@ -320,14 +338,16 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
                                       self.mock_grad1,
                                       self.mock_params0,
                                       self.mock_params1,
-                                      self.mock_optimizer_state0)
+                                      self.mock_optimizer_state0,
+                                      self.mock_batch_stats)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
                                       self.mock_params2,
-                                      self.mock_optimizer_state1)
+                                      self.mock_optimizer_state1,
+                                      self.mock_batch_stats)
 
     self.assertEqual(updated_metrics_state['optstate_sumsq']['nu'][0],
                      total_tree_norm_sql2(self.mock_nu0))
@@ -352,21 +372,23 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
         }),
         enable_preconditioner_normsq=True,
         enable_semip_grad_normsq=True)
-    initial_metrics_state = init_fn(self.mock_params0)
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
     updated_metrics_state = update_fn(initial_metrics_state,
                                       0,
                                       self.mock_cost0,
                                       self.mock_grad1,
                                       self.mock_params0,
                                       self.mock_params1,
-                                      self.mock_optimizer_state0)
+                                      self.mock_optimizer_state0,
+                                      self.mock_batch_stats)
     updated_metrics_state = update_fn(updated_metrics_state,
                                       1,
                                       self.mock_cost1,
                                       self.mock_grad2,
                                       self.mock_params1,
                                       self.mock_params2,
-                                      self.mock_optimizer_state1)
+                                      self.mock_optimizer_state1,
+                                      self.mock_batch_stats)
 
     pre0 = make_diag_preconditioner(optimizer, opt_hparams,
                                     self.mock_optimizer_state0, ConfigDict({}))
