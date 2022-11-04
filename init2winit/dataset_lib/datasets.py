@@ -181,3 +181,5 @@ def get_fake_batch(dataset_name):
           f'Fake batch getter not defined for dataset {dataset_name}') from None
   except KeyError:
     raise ValueError('Unrecognized dataset: {}'.format(dataset_name)) from None
+
+  return getter
