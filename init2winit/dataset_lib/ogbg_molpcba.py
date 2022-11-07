@@ -17,6 +17,22 @@
 
 See https://www.tensorflow.org/datasets/catalog/ogbg_molpcba and
 https://ogb.stanford.edu/docs/graphprop/ for more details.
+
+NOTE(dsuo): this dataset dynamically generates batches from example graphs that
+represent different molecules. The core batching function,
+`jraph.dynamically_batch`, takes a graph dataset iterator and batches examples
+together until whichever of the specified maximum number of nodes, edges, or
+graphs is reached first.
+
+- max_n_nodes is computed as batch_size * avg_nodes_per_graph *
+  batch_nodes_multiplier + 1.
+- max_n_edges is computed as batch_size * avg_edges_per_graph *
+  batch_edges_multiplier.
+- max_n_graphs is computed as batch_size + 1.
+
+These values may further be modified if any of `add_bidirectional_edges`,
+`add_virtual_node`, or `add_self_loops` are true as they influence one or both
+of `avg_nodes_per_graph` and `avg_edges_per_graph`.
 """
 
 import functools
@@ -31,9 +47,6 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
-AVG_NODES_PER_GRAPH = 26
-AVG_EDGES_PER_GRAPH = 56
-
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         output_shape=(128,),
@@ -42,11 +55,16 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         train_size=350343,
         valid_size=43793,
         test_size=43793,
-        # Max edges/nodes per batch will batch_size times the multiplier.
-        # We set them to the average size of the graph in the dataset,
-        # so that each batch contains batch_size graphs on average.
-        max_edges_multiplier=AVG_EDGES_PER_GRAPH,
-        max_nodes_multiplier=AVG_NODES_PER_GRAPH,
+        # NOTE(dsuo): Max edges/nodes per batch will batch_size times the
+        # multiplier times the average per graph. These max values are further
+        # modified if any of `add_bidirectional_edges`, `add_virtual_node`, or
+        # `add_self_loops` are true.
+        avg_nodes_per_graph=26,
+        avg_edges_per_graph=28,
+        batch_nodes_multiplier=1.0,
+        # NOTE(dsuo): We set this multiplier to 2.0 because it gives better
+        # performance, empirically.
+        batch_edges_multiplier=2.0,
         add_bidirectional_edges=False,
         add_virtual_node=False,
         add_self_loops=False,
@@ -262,10 +280,23 @@ def get_ogbg_molpcba(shuffle_rng, batch_size, eval_batch_size, hps=None):
   valid_ds = _load_dataset('validation')
   test_ds = _load_dataset('test')
 
+  max_nodes_multiplier = hps.batch_nodes_multiplier * hps.avg_nodes_per_graph
+  max_edges_multiplier = hps.batch_edges_multiplier * hps.avg_edges_per_graph
+
+  if hps.add_bidirectional_edges:
+    max_edges_multiplier *= 2
+
+  if hps.add_self_loops:
+    max_edges_multiplier += max_nodes_multiplier
+
+  if hps.add_virtual_node:
+    max_edges_multiplier += max_nodes_multiplier
+    max_nodes_multiplier += 1
+
   iterator_from_ds = functools.partial(
       _get_batch_iterator,
-      nodes_per_graph=hps.max_nodes_multiplier,
-      edges_per_graph=hps.max_edges_multiplier,
+      nodes_per_graph=int(max_nodes_multiplier),
+      edges_per_graph=int(max_edges_multiplier),
       add_bidirectional_edges=hps.add_bidirectional_edges,
       add_virtual_node=hps.add_virtual_node,
       add_self_loops=hps.add_self_loops)
@@ -338,8 +369,8 @@ def get_fake_batch(hps):
   batch_iterator = _get_batch_iterator(
       dataset_iterator(),
       batch_size=hps.batch_size,
-      nodes_per_graph=hps.max_nodes_multiplier,
-      edges_per_graph=hps.max_edges_multiplier,
+      nodes_per_graph=hps.batch_nodes_multiplier * hps.avg_nodes_per_graph,
+      edges_per_graph=hps.batch_edges_multiplier * hps.avg_edges_per_graph,
       add_bidirectional_edges=hps.add_bidirectional_edges,
       add_virtual_node=hps.add_virtual_node,
       add_self_loops=hps.add_self_loops)
