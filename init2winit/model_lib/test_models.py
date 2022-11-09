@@ -105,6 +105,10 @@ DATA_HPS = {
         'input_shape': (32, 32, 3),
         'output_shape': (5,),
     },
+    'fully_connected_student': {
+        'input_shape': (32, 32, 3),
+        'output_shape': (5,),
+    },
     'gnn': {
         'batch_size': 5,
         'hidden_dims': (10,),
@@ -211,6 +215,7 @@ LOSS_NAME = {
     'dlrm': 'sigmoid_binary_cross_entropy',
     'fake_resnet': 'cross_entropy',
     'fully_connected': 'cross_entropy',
+    'fully_connected_student': 'cross_entropy',
     'gnn': 'sigmoid_binary_cross_entropy',
     'local_attention_transformer': 'cross_entropy',
     'lstm': 'cross_entropy',
@@ -243,6 +248,7 @@ METRICS_NAME = {
     'dlrm': 'binary_classification_metrics_dlrm_no_auc',
     'fake_resnet': 'classification_metrics',
     'fully_connected': 'classification_metrics',
+    'fully_connected_student': 'classification_metrics',
     'gnn': 'binary_classification_metrics',
     'local_attention_transformer': 'classification_metrics',
     'lstm': 'classification_metrics',
@@ -268,8 +274,9 @@ all_models = models._ALL_MODELS.keys()  # pylint: disable=protected-access
 autoencoder_models = ['autoencoder', 'convolutional_autoencoder']
 text_models = ['transformer', 'performer', 'lstm']
 classification_models = [
-    'fully_connected', 'simple_cnn', 'max_pooling_cnn', 'wide_resnet', 'resnet',
-    'adabelief_densenet', 'adabelief_vgg', 'fake_resnet'
+    'fully_connected', 'fully_connected_student', 'simple_cnn',
+    'max_pooling_cnn', 'wide_resnet', 'resnet', 'adabelief_densenet',
+    'adabelief_vgg', 'fake_resnet'
 ]
 binary_classification_models = ['dlrm']  # TODO(kasimbeg)
 generative_models = ['unet']  # TODO(kasimbeg)

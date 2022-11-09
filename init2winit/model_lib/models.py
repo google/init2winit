@@ -24,6 +24,7 @@ from init2winit.model_lib import convolutional_autoencoder
 from init2winit.model_lib import deepspeech
 from init2winit.model_lib import dlrm
 from init2winit.model_lib import fully_connected
+from init2winit.model_lib import fully_connected_student
 from init2winit.model_lib import gnn
 from init2winit.model_lib import local_attention_transformer
 from init2winit.model_lib import lstm_lm
@@ -43,6 +44,9 @@ from init2winit.model_lib import xformer_translate_mlc_variant
 _ALL_MODELS = {
     'fully_connected':
         (fully_connected.FullyConnectedModel, fully_connected.DEFAULT_HPARAMS),
+    'fully_connected_student':
+        (fully_connected_student.FullyConnectedStudentModel,
+         fully_connected_student.DEFAULT_HPARAMS),
     'simple_cnn': (simple_cnn.SimpleCNNModel, simple_cnn.DEFAULT_HPARAMS),
     'max_pooling_cnn':
         (max_pooling_cnn.MaxPoolingCNNModel, max_pooling_cnn.DEFAULT_HPARAMS),
