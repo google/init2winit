@@ -17,6 +17,7 @@
 
 from init2winit.trainer_lib import decay_lr_on_plateau_trainer
 from init2winit.trainer_lib import distillation_trainer
+from init2winit.trainer_lib import line_search_trainer
 from init2winit.trainer_lib import quantization_trainer
 from init2winit.trainer_lib import trainer
 
@@ -26,6 +27,7 @@ _ALL_TRAINERS = {
     'quantization': quantization_trainer.Trainer,
     'decay_lr_on_plateau': decay_lr_on_plateau_trainer.DecayLROnPlateauTrainer,
     'distillation': distillation_trainer.Trainer,
+    'armijo_line_search': line_search_trainer.ArmijoLineSearchTrainer,
 }
 
 
