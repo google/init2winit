@@ -53,13 +53,17 @@ def get_grad(params,
     Gradient of the given loss.
   """
 
+  if module_flags is not None:
+    kwargs = {'module_flags': module_flags}
+  else:
+    kwargs = {}
   def opt_cost(params):
     return training_cost(
         params,
         batch,
         batch_stats=batch_stats,
         dropout_rng=rng,
-        module_flags=module_flags)
+        **kwargs)
 
   grad_fn = jax.value_and_grad(opt_cost, has_aux=True)
   _, grad = grad_fn(params)
