@@ -328,8 +328,12 @@ def load_latest_checkpoint(train_dir, target=None, prefix='ckpt_'):
     The state restored from the checkpoint. If using Flax checkpointing and
     target=None, this will return a unstructured dictionary containing the
     checkpoint data, as returned by to_state_dict in serialization.py:
-    https://github.com/google/flax/blob/master/flax/serialization.py#L67.
+    https://github.com/google/flax/blob/master/flax/serialization.py#L67. If
+    the directory doesn't exist, it will return the original target.
   """
-  restored = flax_checkpoints.restore_checkpoint(
-      train_dir, target=target, prefix=prefix)
-  return restored
+  try:
+    restored = flax_checkpoints.restore_checkpoint(
+        train_dir, target=target, prefix=prefix)
+    return restored
+  except ValueError:
+    return target

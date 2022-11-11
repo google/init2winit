@@ -270,10 +270,13 @@ class MetricLogger(object):
       pytree: Any serializable pytree.
       prefix: The prefix for the checkpoint.
     """
-    # Read the latest (and only) checkpoint, then append the new state to it
-    # before saving back to disk.
-    old_state = flax_checkpoints.restore_checkpoint(
-        self._pytree_path, target=None, prefix=prefix)
+    # Read the latest (and only) checkpoint if it exists, then append the new
+    # state to it before saving back to disk.
+    try:
+      old_state = flax_checkpoints.restore_checkpoint(
+          self._pytree_path, target=None, prefix=prefix)
+    except ValueError:
+      old_state = None
     # Because we pass target=None, checkpointing will return the raw state
     # dict, where 'pytree' is a dict with keys ['0', '1', ...] instead of a
     # list.
