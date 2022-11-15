@@ -179,13 +179,14 @@ def _normalize_feature_names(features):
 
 
 def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
-                    split: str) -> tf.data.Dataset:
+                    split: str, shuffle_seed=None) -> tf.data.Dataset:
   """Loads the raw dataset and normalizes feature keys.
 
   Args:
     dataset_builder: TFDS dataset builder that can build `split`.
     split: Split to use. This must be the full split. We shard the split across
       multiple hosts and currently don't support sharding subsplits.
+    shuffle_seed: seed used to shuffle files across splits.
 
   Returns:
     Dataset with source and target language features mapped to 'inputs' and
@@ -193,7 +194,10 @@ def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
   """
   per_host_split = tfds.split_for_jax_process(split)
 
-  ds = dataset_builder.as_dataset(split=per_host_split, shuffle_files=False)
+  ds = dataset_builder.as_dataset(
+      split=per_host_split,
+      shuffle_files=(shuffle_seed is not None),
+      read_config=tfds.ReadConfig(shuffle_seed=shuffle_seed))
   ds = ds.map(_normalize_feature_names, num_parallel_calls=AUTOTUNE)
 
   return ds
@@ -272,7 +276,8 @@ def get_librispeech_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
   """Helper method to get train, eval and test sets for librispeech data."""
   train_ds_builder = tfds.builder('librispeech')
 
-  train_data = get_raw_dataset(train_ds_builder, hps.train_split)
+  train_data = get_raw_dataset(train_ds_builder, hps.train_split,
+                               shuffle_rng[0])
   eval_data = get_raw_dataset(train_ds_builder, hps.eval_split)
   test_data = get_raw_dataset(train_ds_builder, hps.test_split)
 
@@ -281,7 +286,7 @@ def get_librispeech_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
       train=True,
       batch_size=per_host_batch_size,
       hps=hps,
-      shuffle_seed=shuffle_rng[0])
+      shuffle_seed=shuffle_rng[1])
 
   eval_ds = preprocess_data(
       eval_data,
