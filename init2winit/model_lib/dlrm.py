@@ -50,6 +50,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         l2_decay_factor=1e-5,
         l2_decay_rank_threshold=2,
         total_accumulated_batch_size=None,
+        grad_clip=None,
     ))
 
 

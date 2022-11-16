@@ -44,7 +44,6 @@ import numpy as np
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation_function='relu',
-        attention_dropout_rate=0.0,
         optimizer='adam',
         opt_hparams={
             'beta1': .9,
