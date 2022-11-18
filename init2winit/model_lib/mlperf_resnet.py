@@ -55,6 +55,7 @@ FAKE_MODEL_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     model_dtype='float32',
     virtual_batch_size=64,
     data_format='NHWC',
+    activation_function='relu',
 ))
 
 
@@ -85,6 +86,7 @@ MLPERF_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     virtual_batch_size=64,
     total_accumulated_batch_size=None,
     data_format='NHWC',
+    activation_function='relu',
 ))
 
 
@@ -109,6 +111,7 @@ class ResidualBlock(nn.Module):
   virtual_batch_size: Optional[int] = None
   total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
+  activation_function: Optional[str] = 'relu'
 
   @nn.compact
   def __call__(self, x, train):
@@ -133,15 +136,16 @@ class ResidualBlock(nn.Module):
           residual, use_running_average=not train)
     y = conv(self.filters, (1, 1), name='conv1')(x)
     y = batch_norm(name='bn1')(y, use_running_average=not train)
-    y = nn.relu(y)
+    activation_fn = model_utils.ACTIVATIONS[self.activation_function]
+    y = activation_fn(y)
     y = conv(self.filters, (3, 3), self.strides, name='conv2')(y)
     y = batch_norm(name='bn2')(y, use_running_average=not train)
-    y = nn.relu(y)
+    y = activation_fn(y)
     y = conv(self.filters * 4, (1, 1), name='conv3')(y)
     y = batch_norm(
         name='bn3', scale_init=_constant_init(self.bn_output_scale))(
             y, use_running_average=not train)
-    y = nn.relu(residual + y)
+    y = activation_fn(residual + y)
     return y
 
 
@@ -160,6 +164,7 @@ class ResNet(nn.Module):
   virtual_batch_size: Optional[int] = None
   total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
+  activation_function: Optional[str] = 'relu'
 
   @nn.compact
   def __call__(self, x, train):
@@ -180,7 +185,7 @@ class ResNet(nn.Module):
         virtual_batch_size=self.virtual_batch_size,
         total_batch_size=self.total_batch_size,
         data_format=self.data_format)(x, use_running_average=not train)
-    x = nn.relu(x)  # MLPerf-required
+    x = model_utils.ACTIVATIONS[self.activation_function](x)  # MLperf-required
     x = nn.max_pool(x, (3, 3), strides=(2, 2), padding='SAME')
     for i, block_size in enumerate(block_sizes):
       for j in range(block_size):
@@ -197,7 +202,9 @@ class ResNet(nn.Module):
             batch_size=self.batch_size,
             virtual_batch_size=self.virtual_batch_size,
             total_batch_size=self.total_batch_size,
-            data_format=self.data_format)(x, train=train)
+            data_format=self.data_format,
+            activation_function=self.activation_function,
+            )(x, train=train)
     x = jnp.mean(x, axis=(1, 2))
     x = nn.Dense(self.num_classes, kernel_init=nn.initializers.normal(),
                  dtype=self.dtype)(x)
@@ -253,7 +260,8 @@ class ResnetModelMLPerf(base_model.BaseModel):
         batch_size=self.hps.batch_size,
         virtual_batch_size=self.hps.virtual_batch_size,
         total_batch_size=self.hps.total_accumulated_batch_size,
-        data_format=self.hps.data_format)
+        data_format=self.hps.data_format,
+        activation_function=self.hps.activation_function)
 
 
 class FakeModel(base_model.BaseModel):
