@@ -47,6 +47,10 @@ class MTPipelineTest(absltest.TestCase):
     config.max_eval_target_length = _EVAL_TARGET_LENGTH
     config.max_predict_length = _PREDICT_TARGET_LENGTH
     config.pack_examples = pack_examples
+    config.tfds_dataset_keys = [
+        'wmt15_translate/de-en', 'wmt15_translate/ru-en'
+    ]
+    config.tfds_eval_dataset_key = 'wmt14_translate/de-en'
 
     vocab_path = os.path.join(tempfile.mkdtemp(), 'sentencepiece_model')
 
@@ -137,16 +141,23 @@ class MTSamplePipelineTest(absltest.TestCase):
     # Test sampling ratio.
     config = translate_wmt.DEFAULT_HPARAMS
     config.rates = rates
+    config.tfds_dataset_keys = [
+        'wmt15_translate/de-en', 'wmt15_translate/ru-en'
+    ]
+    config.tfds_eval_dataset_key = 'wmt14_translate/de-en'
 
     with tfds.testing.mock_data(num_examples=num_examples):
-      train_ds_builders = [tfds.builder(tfds_dataset_key) for
-                           tfds_dataset_key in config.tfds_dataset_keys]
+      if config.tfds_dataset_key:
+        train_ds_builders = [tfds.builder(config.tfds_dataset_key)]
+      else:
+        train_ds_builders = [tfds.builder(tfds_dataset_key) for
+                             tfds_dataset_key in config.tfds_dataset_keys]
 
       sampled_train_data = mt_pipeline.get_sampled_dataset(
           train_ds_builders, config.train_split, config.rates,
           reverse_translation=True,
           add_language_token=True,
-          loss_weights=[0.5, 0.5],
+          loss_weights=config.loss_weights,
           is_training=True,
           sample_seed=sample_seed,
           shuffle_seed=shuffle_seed)

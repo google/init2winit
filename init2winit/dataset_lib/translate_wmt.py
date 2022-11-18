@@ -28,9 +28,13 @@ VOCAB_SIZE = 32000  # Typical vocab_size for MT models.
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
+        # one of tfds_dataset_key and tfds_dataset_keys should have values.
+        # tfds_dataset_key needs to be a string: (used for bilingual settings)
         tfds_dataset_key=None,
-        tfds_dataset_keys=['wmt15_translate/de-en', 'wmt15_translate/ru-en'],
-        tfds_eval_dataset_key='wmt14_translate/de-en',
+        # tfds_dataset_keys needs to be a list of keys:
+        # (used for multilingual settings)
+        tfds_dataset_keys=[],
+        tfds_eval_dataset_key='',  # tfds_eval_dataset_key needs to be a string.
         # If 'tfds_predict_dataset_key' is None,
         # 'tfds_eval_dataset_key' is used.
         tfds_predict_dataset_key=None,
@@ -39,9 +43,11 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         # Right now, they have been generated offline and set in
         # experiments.translate dir.
         # TODO(ankugarg): Generate vocab with determinism.
-        rates=[0.5, 0.5],
-        loss_weights=None,
         # If 'rates' is None defaults to uniform.
+        # Otherwise, 'rates' is sampling rates to use when we have multiple
+        # keys, i.e. 'rates' is a list of the same size as 'tfds_dataset_keys'.
+        rates=None,
+        loss_weights=None,
         add_language_token=False,
         vocab_path=None,
         vocab_size=VOCAB_SIZE,
@@ -83,11 +89,25 @@ def get_translate_wmt(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
                             shuffle_rng)
 
 
+def validate_hparams(hps):
+  """This function checks the type-validity of different hyperparameters."""
+
+  if not hps.tfds_dataset_key:  # trains bilingual model if tfds_dataset_key
+    if hps.tfds_dataset_keys:  # trains multilingual model
+      assert len(hps.tfds_dataset_keys) >= 1
+    else:
+      raise ValueError('Either set tfds_dataset_key to train bilingual model' +
+                       'or set tfds_dataset_keys to train multilingual model')
+    if hps.rates:
+      assert len(hps.tfds_dataset_keys) == len(hps.rates)
+
+
 def _get_translate_wmt(per_host_batch_size,
                        per_host_eval_batch_size,
                        hps,
                        shuffle_rng):
   """Data generators for wmt translate task."""
+
   n_devices = jax.local_device_count()
   if per_host_batch_size % n_devices != 0:
     raise ValueError('n_devices={} must divide per_host_batch_size={}.'.format(
@@ -96,6 +116,8 @@ def _get_translate_wmt(per_host_batch_size,
     raise ValueError(
         'n_devices={} must divide per_host_eval_batch_size={}.'.format(
             n_devices, per_host_eval_batch_size))
+
+  validate_hparams(hps)
 
   vocab_path = hps.vocab_path
   train_ds, eval_ds, predict_ds = mt_pipeline.get_wmt_datasets(
