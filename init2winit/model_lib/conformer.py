@@ -881,7 +881,8 @@ class ConformerModel(base_model.BaseModel):
 
     return module
 
-  def get_fake_batch(self, hps):
+  def get_fake_inputs(self, hps):
+    """Helper method solely for purpose of initalizing the model."""
     dummy_inputs = [
         jnp.zeros((hps.batch_size, *x), dtype=hps.model_dtype)
         for x in hps.input_shape

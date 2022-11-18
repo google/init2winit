@@ -301,8 +301,9 @@ class ResnetModel(base_model.BaseModel):
         activation_function=self.hps.activation_function,
         extra_norm_on_residual=self.hps.extra_norm_on_residual)
 
-  def get_fake_batch(self, hps):
-    fake_batch = [
+  def get_fake_inputs(self, hps):
+    """Helper method solely for purpose of initializing the model."""
+    dummy_inputs = [
         jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
     ]
-    return fake_batch
+    return dummy_inputs

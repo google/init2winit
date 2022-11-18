@@ -26,7 +26,6 @@ import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import numpy as np
 
-
 # NOTE(dsuo): could be useful to have a `base_config` for models as well.
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
@@ -283,11 +282,12 @@ class ViTModel(base_model.BaseModel):
       args.update(decode_variant(self.hps.variant))
     return ViT(**args)
 
-  def get_fake_batch(self, hps):
-    fake_batch = [
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
         jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
     ]
-    return fake_batch
+    return dummy_inputs
 
 
 def decode_variant(variant):

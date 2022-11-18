@@ -35,7 +35,6 @@ from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax.numpy as jnp
-
 from ml_collections.config_dict import config_dict
 
 
@@ -224,6 +223,7 @@ _block_size_options = {
 }
 
 
+# pylint: disable=[missing-class-docstring]
 class AdaBeliefDensenetModel(base_model.BaseModel):
 
   def build_flax_module(self):
@@ -240,3 +240,10 @@ class AdaBeliefDensenetModel(base_model.BaseModel):
         normalize_classifier_input=self.hps.normalize_classifier_input,
         classification_scale_factor=self.hps.classification_scale_factor,
     )
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs

@@ -162,7 +162,7 @@ class LSTMModel(base_model.BaseModel):
         dropout_rate=self.hps.dropout_rate,
         bidirectional=self.hps.bidirectional)
 
-  def get_fake_batch(self, hps):
+  def get_fake_inputs(self, hps):
     dummy_inputs = jnp.ones((hps.batch_size, hps.sequence_length),
                             dtype='int32')
     return [dummy_inputs]

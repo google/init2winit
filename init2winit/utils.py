@@ -14,8 +14,8 @@
 # limitations under the License.
 
 """Utility functions for logging and recording training metrics."""
-
 import concurrent.futures
+import copy
 import functools
 import json
 import logging
@@ -341,11 +341,13 @@ def tabulate_model(model, hps):
                                             'force_jupyter': False,
                                             'width': 120},
                             )
-  fake_input_batch = model.get_fake_batch(hps)
+  fake_inputs_hps = copy.copy(hps)
+  fake_inputs_hps.batch_size = 2
+  fake_inputs = model.get_fake_inputs(fake_inputs_hps)
   # Currently only two models implement the get_fake_batch.
   # Only attempt to log if we get a valid fake_input_batch.
-  if fake_input_batch:
-    absl_logging.info(tabulate_fn(*fake_input_batch, train=False,))
+  if fake_inputs:
+    absl_logging.info(tabulate_fn(*fake_inputs, train=False,))
 
 
 def edit_distance(source, target):

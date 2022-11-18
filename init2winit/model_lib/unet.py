@@ -29,8 +29,8 @@ import flax.linen as nn
 from init2winit.model_lib import base_model
 import jax
 import jax.numpy as jnp
-
 from ml_collections import config_dict
+
 
 # NOTE(dsuo): We use the Kitchen Sink optimizer to match the RMSProp
 # implementation found in the reference FastMRI U-Net code. Specifically,
@@ -305,8 +305,9 @@ class UNetModel(base_model.BaseModel):
         num_pool_layers=self.hps.num_pool_layers,
         drop_prob=self.hps.drop_prob)
 
-  def get_fake_batch(self, hps):
-    fake_batch = [
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initializing the model."""
+    dummy_inputs = [
         jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
     ]
-    return fake_batch
+    return dummy_inputs

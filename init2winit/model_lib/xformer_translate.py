@@ -39,7 +39,6 @@ import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import numpy as np
 
-
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         batch_size=64,
@@ -1094,7 +1093,8 @@ class TransformerTranslate(base_model.BaseModel):
         dec_remat_scan_lengths=self.hps.dec_remat_scan_lengths,
     )
 
-  def get_fake_batch(self, hps):
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initializing the model."""
     dummy_inputs = [
         jnp.zeros((hps.batch_size, *x), dtype=hps.model_dtype)
         for x in hps.input_shape

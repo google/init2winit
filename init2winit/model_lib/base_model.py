@@ -222,7 +222,7 @@ class BaseModel(object):
 
     return objective_value
 
-  def get_fake_batch(self, hps):
+  def get_fake_inputs(self, hps):
     del hps
     return None
 

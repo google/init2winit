@@ -53,9 +53,9 @@ def initialize(model, initializer, hps, rng, metrics_logger):
   # https://github.com/google/flax/blob/44ee6f2f4130856d47159dc58981fb26ea2240f4/examples/imagenet/train.py#L70.
   fake_batch_hps = copy.copy(hps)
   fake_batch_hps.batch_size = 2
-  fake_batch = model.get_fake_batch(fake_batch_hps)
-  if fake_batch:
-    fake_input_batch = fake_batch
+  fake_inputs = model.get_fake_inputs(fake_batch_hps)
+  if fake_inputs:
+    fake_input_batch = fake_inputs
   elif isinstance(hps.input_shape, list):  # Typical case for seq2seq models
     fake_input_batch = [np.zeros((2, *x), model_dtype) for x in hps.input_shape]
   else:  # Typical case for classification models

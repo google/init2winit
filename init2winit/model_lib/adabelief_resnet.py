@@ -42,7 +42,6 @@ from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import normalization
 import jax.numpy as jnp
-
 from ml_collections.config_dict import config_dict
 
 
@@ -242,6 +241,7 @@ block_type_options = {
 }
 
 
+# pylint: disable=[missing-class-docstring]
 class AdaBeliefResnetModel(base_model.BaseModel):
 
   def build_flax_module(self):
@@ -257,3 +257,10 @@ class AdaBeliefResnetModel(base_model.BaseModel):
         virtual_batch_size=self.hps.virtual_batch_size,
         total_batch_size=self.hps.total_accumulated_batch_size,
         data_format=self.hps.data_format)
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs

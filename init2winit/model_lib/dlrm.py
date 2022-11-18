@@ -195,7 +195,8 @@ class DLRMModel(base_model.BaseModel):
         embed_dim=self.hps.embed_dim,
         keep_diags=self.hps.keep_diags)
 
-  def get_fake_batch(self, hps):
+  def get_fake_inputs(self, hps):
+    """Helper method solely for purpose of initalizing the model."""
     # NOTE(dsuo): hps.input_shape for `criteo_terabyte_input_pipeline` is
     # (39,)
     dummy_inputs = [

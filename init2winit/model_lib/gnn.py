@@ -146,7 +146,8 @@ class GNN(nn.Module):
 class GNNModel(base_model.BaseModel):
   """Defines the model for the graph network."""
 
-  def get_fake_batch(self, hps):
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initializing the model."""
     assert 'input_node_shape' in hps and 'input_edge_shape' in hps
     graph = jraph.GraphsTuple(
         n_node=jnp.asarray([1]),

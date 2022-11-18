@@ -33,7 +33,6 @@ from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax.numpy as jnp
-
 from ml_collections.config_dict import config_dict
 
 
@@ -126,8 +125,8 @@ _layer_size_options = {
 }
 
 
+# pylint: disable=[missing-class-docstring]
 class AdaBeliefVGGModel(base_model.BaseModel):
-
   def build_flax_module(self):
     """Adabelief VGG."""
     return VGG(
@@ -135,3 +134,10 @@ class AdaBeliefVGGModel(base_model.BaseModel):
         num_outputs=self.hps['output_shape'][-1],
         dtype=self.hps.model_dtype,
         normalizer=self.hps.normalizer)
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs
