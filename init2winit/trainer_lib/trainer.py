@@ -119,7 +119,8 @@ def update(
       optimizer_state,
       params=params,
       batch=batch,
-      batch_stats=new_batch_stats)
+      batch_stats=new_batch_stats,
+      grad_fn=grad_fn)
   new_params = optax.apply_updates(params, model_updates)
 
   new_metrics_state = None

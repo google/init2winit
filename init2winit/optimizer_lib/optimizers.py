@@ -222,18 +222,29 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         base_opt_update_fn=opt_update,
         batch_axis_name=batch_axis_name)
 
+  if hps.opt_hparams.get('use_sam', False):
+    opt_init, opt_update = sharpness_aware_minimization.sharpness_aware_minimization(
+        rho=hps.opt_hparams['rho'],
+        grad_clip=hps.get('grad_clip', None),
+        batch_axis_name=batch_axis_name,
+        base_opt_init_fn=opt_init,
+        base_opt_update_fn=opt_update,
+    )
+
   if opt_init is None or opt_update is None:
     raise NotImplementedError('Optimizer {} not implemented'.format(
         hps.optimizer))
-  return opt_init, _wrap_update_fn(hps.optimizer, opt_update)
+  return opt_init, _wrap_update_fn(hps.optimizer, opt_update,
+                                   hps.opt_hparams.get('use_sam', False))
 
 
-def _wrap_update_fn(opt_name, opt_update):
+def _wrap_update_fn(opt_name, opt_update, use_sam=False):
   """Wraps the optimizer update function to have the same function signiture.
 
   Args:
     opt_name: the optimizer name.
     opt_update: the optimizer update function.
+    use_sam: flag to use sharpness aware minimization updates.
 
   Returns:
     A wrapped optimizer update function.
@@ -243,12 +254,16 @@ def _wrap_update_fn(opt_name, opt_update):
                 optimizer_state,
                 params,
                 batch=None,
-                batch_stats=None):
+                batch_stats=None,
+                grad_fn=None):
     if opt_name == 'hessian_free':
       variables = {'params': params}
       if batch_stats is not None:
         variables['batch_stats'] = batch_stats
       return opt_update(grads, optimizer_state, params=(variables, batch))
+    if use_sam:
+      return opt_update(
+          grads, optimizer_state, grad_fn_params_tuple=(grad_fn, params))
     return opt_update(grads, optimizer_state, params=params)
 
   return update_fn
