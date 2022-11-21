@@ -167,32 +167,6 @@ def polynomial_schedule(schedule_hparams, max_training_updates):
   return lr_fn
 
 
-def armijo_opt_2(schedule_hparams, max_training_updates):
-  """Follows the learning rate decay schedule from the opt = 2 configuration from the armijo line search paper.
-
-  Paper: https://arxiv.org/abs/1905.09997
-
-  Args:
-    schedule_hparams: Relevant hparams are schedule, base_lr, gamma, and
-      steps_per_epoch.
-    max_training_updates: Not used.
-
-  Returns:
-    lr_fn: A function mapping global_step to lr.
-  """
-
-  del max_training_updates
-  expected_keys = ['schedule', 'base_lr', 'gamma', 'steps_per_epoch']
-  _check_schedule_hparams(schedule_hparams, expected_keys)
-
-  def lr_fn(t):
-    del t
-    return schedule_hparams['gamma']**(1.0 /
-                                       schedule_hparams['steps_per_epoch'])
-
-  return lr_fn
-
-
 def piecewise_constant_schedule(schedule_hparams, max_training_updates):
   """Computes a piecewise constant decay schedule.
 
@@ -414,7 +388,6 @@ lr_fn_dict = {
     'rsqrt_normalized_decay': rsqrt_normalized_decay,
     't2t_rsqrt_normalized_decay': t2t_rsqrt_normalized_decay,
     'transformer_schedule': transformer_schedule,
-    'armijo_opt_2': armijo_opt_2,
 }
 
 
