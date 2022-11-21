@@ -186,11 +186,8 @@ def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
 
 def _get_fake_dlrm_dataset(batch_size, eval_num_batches, hps):
   """Yields a single text batch repeatedly for train and test."""
-  cat_features = []
-  for vocab_size in hps.vocab_sizes:
-    cat_features.append(
-        np.random.randint(low=0, high=vocab_size, size=(batch_size, 1)))
-  cat_features = np.concatenate(cat_features, 1)
+  cat_features = np.random.randint(
+      low=0, high=hps.vocab_size, size=(batch_size, 26))
   int_features = np.random.normal(size=(batch_size, hps.num_dense_features))
   inputs = np.concatenate((int_features, cat_features), 1)
   targets = np.random.randint(low=0, high=2, size=(batch_size, 1))
@@ -438,11 +435,12 @@ class TrainerTest(parameterized.TestCase):
     dataset_str = 'criteo1tb'
     model_cls = models.get_model(model_str)
     model_hps = models.get_model_hparams(model_str)
+    model_hps.vocab_size = 1024
     dataset_hps = datasets.get_dataset_hparams(dataset_str)
     dataset_hps.update({
         'batch_size': model_hps.batch_size,
         'num_dense_features': model_hps.num_dense_features,
-        'vocab_sizes': model_hps.vocab_sizes,
+        'vocab_size': model_hps.vocab_size,
     })
     eval_num_batches = 5
     eval_batch_size = dataset_hps.batch_size
@@ -455,8 +453,7 @@ class TrainerTest(parameterized.TestCase):
         'train_size': 15,
         'valid_size': 10,
         'test_size': 10,
-        'input_shape':
-            (model_hps.num_dense_features + len(model_hps.vocab_sizes),),
+        'input_shape': (39,),
         'output_shape': (1,),
         'l2_decay_factor': 1e-4,
         'l2_decay_rank_threshold': 2,

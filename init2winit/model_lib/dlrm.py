@@ -15,7 +15,6 @@
 
 """A JAX implementation of DLRM."""
 
-import functools
 from typing import List
 
 import flax.linen as nn
@@ -29,7 +28,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         rng_seed=-1,
         model_dtype='float32',
-        vocab_sizes=[1024] * 26,
+        vocab_size=32 * 128 * 1024,
         mlp_bottom_dims=[128, 128],
         mlp_top_dims=[256, 128, 1],
         output_shape=(1,),
@@ -92,8 +91,7 @@ class DLRM(nn.Module):
   """Define a DLRM model.
 
   Parameters:
-    vocab_sizes: list of vocab sizes of embedding tables.
-    total_vocab_sizes: sum of embedding table sizes (for jit compilation).
+    vocab_size: the size of a single unified embedding table.
     mlp_bottom_dims: dimensions of dense layers of the bottom mlp.
     mlp_top_dims: dimensions of dense layers of the top mlp.
     num_dense_features: number of dense features as the bottom mlp input.
@@ -101,8 +99,7 @@ class DLRM(nn.Module):
     keep_diags: whether to keep the diagonal terms in x @ x.T.
   """
 
-  vocab_sizes: List[int]
-  total_vocab_sizes: int
+  vocab_size: int
   mlp_bottom_dims: List[int]
   mlp_top_dims: List[int]
   num_dense_features: int
@@ -129,32 +126,18 @@ class DLRM(nn.Module):
     feature_stack = jnp.reshape(bot_mlp_output,
                                 [batch_size, -1, self.embed_dim])
 
-    # embedding table look-up
-    vocab_sizes = jnp.asarray(self.vocab_sizes, dtype=jnp.int32)
-    idx_offsets = jnp.asarray(
-        [0] + list(jnp.cumsum(vocab_sizes[:-1])), dtype=jnp.int32)
-    idx_offsets = jnp.tile(
-        jnp.reshape(idx_offsets, [1, -1]), [batch_size, 1])
-    idx_lookup = cat_features + idx_offsets
-    # Scale the initialization to fan_in for each slice.
-    scale = 1.0 / jnp.sqrt(vocab_sizes)
-    scale = jnp.expand_dims(
-        jnp.repeat(
-            scale, vocab_sizes, total_repeat_length=self.total_vocab_sizes), -1)
+    base_init_fn = jnn.initializers.uniform(scale=1.0)
+    # Embedding table init and lookup for a single unified table.
+    idx_lookup = jnp.reshape(cat_features, [-1]) % self.vocab_size
+    def scaled_init(key, shape, dtype=jnp.float_):
+      return (base_init_fn(key, shape, dtype) /
+              jnp.sqrt(self.vocab_size))
 
-    def scaled_init(key, shape, scale, init, dtype=jnp.float_):
-      return scale * init(key, shape, dtype)
-
-    scaled_variance_scaling_init = functools.partial(
-        scaled_init,
-        scale=scale,
-        init=jnn.initializers.uniform(scale=1.0))
     embedding_table = self.param(
         'embedding_table',
-        scaled_variance_scaling_init,
-        [self.total_vocab_sizes, self.embed_dim])
+        scaled_init,
+        [self.vocab_size, self.embed_dim])
 
-    idx_lookup = jnp.reshape(idx_lookup, [-1])
     embed_features = embedding_table[idx_lookup]
     embed_features = jnp.reshape(
         embed_features, [batch_size, -1, self.embed_dim])
@@ -187,8 +170,7 @@ class DLRMModel(base_model.BaseModel):
   def build_flax_module(self):
     """DLRM for ad click probability prediction."""
     return DLRM(
-        vocab_sizes=self.hps.vocab_sizes,
-        total_vocab_sizes=sum(self.hps.vocab_sizes),
+        vocab_size=self.hps.vocab_size,
         mlp_bottom_dims=self.hps.mlp_bottom_dims,
         mlp_top_dims=self.hps.mlp_top_dims,
         num_dense_features=self.hps.num_dense_features,
