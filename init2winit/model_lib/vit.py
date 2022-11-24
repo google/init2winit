@@ -58,6 +58,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         model_dtype='float32',
         grad_clip=None,
         total_accumulated_batch_size=None,
+        dropout_rate=0.0,
     ))
 
 
@@ -192,7 +193,7 @@ class ViT(nn.Module):
   num_heads: int = 12
   posemb: str = 'sincos2d'  # Can also be "learn"
   rep_size: Union[int, bool] = False
-  dropout: float = 0.0
+  dropout_rate: float = 0.0
   pool_type: str = 'gap'  # Can also be 'map' or 'tok'
   reinit: Optional[Sequence[str]] = None
   head_zeroinit: bool = True
@@ -218,13 +219,13 @@ class ViT(nn.Module):
       x = jnp.concatenate([jnp.tile(cls, [n, 1, 1]), x], axis=1)
 
     n, l, c = x.shape  # pylint: disable=unused-variable
-    x = nn.Dropout(rate=self.dropout)(x, not train)
+    x = nn.Dropout(rate=self.dropout_rate)(x, not train)
 
     x, out['encoder'] = Encoder(
         depth=self.depth,
         mlp_dim=self.mlp_dim,
         num_heads=self.num_heads,
-        dropout=self.dropout,
+        dropout=self.dropout_rate,
         name='Transformer')(
             x, train=not train)
     encoded = out['encoded'] = x
@@ -273,7 +274,7 @@ class ViTModel(base_model.BaseModel):
 
     keys = [
         'num_classes', 'rep_size', 'pool_type', 'posemb', 'width', 'depth',
-        'mlp_dim', 'num_heads', 'patch_size'
+        'mlp_dim', 'num_heads', 'patch_size', 'dropout_rate'
     ]
 
     args = {k: self.hps[k] for k in keys}
