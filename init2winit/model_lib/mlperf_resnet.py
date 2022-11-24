@@ -53,11 +53,10 @@ FAKE_MODEL_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     label_smoothing=.1,
     use_shallue_label_smoothing=False,
     model_dtype='float32',
-    dropout_rate=0.0,
-    grad_clip=None,
     virtual_batch_size=64,
     data_format='NHWC',
     activation_function='relu',
+    grad_clip=None,
 ))
 
 
@@ -89,6 +88,7 @@ MLPERF_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     total_accumulated_batch_size=None,
     data_format='NHWC',
     activation_function='relu',
+    grad_clip=None,
 ))
 
 
