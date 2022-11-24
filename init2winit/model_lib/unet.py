@@ -74,7 +74,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         out_chans=1,
         chans=32,
         num_pool_layers=4,
-        drop_prob=0.0,
+        dropout_rate=0.0,
         optimizer='adam',
         opt_hparams=opt_hparams,
         lr_hparams=lr_hparams,
@@ -303,7 +303,7 @@ class UNetModel(base_model.BaseModel):
         out_chans=self.hps.out_chans,
         chans=self.hps.chans,
         num_pool_layers=self.hps.num_pool_layers,
-        drop_prob=self.hps.drop_prob)
+        drop_prob=self.hps.dropout_rate)
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initializing the model."""
