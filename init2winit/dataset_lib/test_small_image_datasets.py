@@ -16,10 +16,15 @@
 """Tests for init2winit.dataset_lib.small_image_datasets."""
 
 import itertools
+
+from absl import flags
 from absl.testing import absltest
 from init2winit.dataset_lib import small_image_datasets
 from jax import random
 from ml_collections.config_dict import config_dict
+
+_TFRECORD_SUFFIX = 'tfrecord'
+_ARRAY_RECORD_SUFFIX = 'array_record'
 
 
 class SmallImageDatasetsTest(absltest.TestCase):
@@ -43,18 +48,23 @@ class SmallImageDatasetsTest(absltest.TestCase):
                 output_shape=(10,))))
 
     examples = itertools.islice(dataset.valid_epoch(), 10)
-    example_keys = [example['example_key'][0] for example in examples]
+    example_keys = [
+        example['example_key'][0].decode('utf-8') for example in examples
+    ]
+    file_format = (
+        _ARRAY_RECORD_SUFFIX
+        if flags.FLAGS.array_record_default else _TFRECORD_SUFFIX)
     self.assertEqual(example_keys, [
-        b'cifar10-train.tfrecord-00000-of-00001__45000',
-        b'cifar10-train.tfrecord-00000-of-00001__45001',
-        b'cifar10-train.tfrecord-00000-of-00001__45002',
-        b'cifar10-train.tfrecord-00000-of-00001__45003',
-        b'cifar10-train.tfrecord-00000-of-00001__45004',
-        b'cifar10-train.tfrecord-00000-of-00001__45005',
-        b'cifar10-train.tfrecord-00000-of-00001__45006',
-        b'cifar10-train.tfrecord-00000-of-00001__45007',
-        b'cifar10-train.tfrecord-00000-of-00001__45008',
-        b'cifar10-train.tfrecord-00000-of-00001__45009',
+        f'cifar10-train.{file_format}-00000-of-00001__45000',
+        f'cifar10-train.{file_format}-00000-of-00001__45001',
+        f'cifar10-train.{file_format}-00000-of-00001__45002',
+        f'cifar10-train.{file_format}-00000-of-00001__45003',
+        f'cifar10-train.{file_format}-00000-of-00001__45004',
+        f'cifar10-train.{file_format}-00000-of-00001__45005',
+        f'cifar10-train.{file_format}-00000-of-00001__45006',
+        f'cifar10-train.{file_format}-00000-of-00001__45007',
+        f'cifar10-train.{file_format}-00000-of-00001__45008',
+        f'cifar10-train.{file_format}-00000-of-00001__45009',
     ])
 
 
