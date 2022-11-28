@@ -35,6 +35,8 @@ except ModuleNotFoundError:
   logging.exception('\n\nUnable to import distributed_shampoo.\n\n')
 
 
+
+
 def sgd(learning_rate, weight_decay, momentum=None, nesterov=False):
   r"""A customizable gradient descent optimizer.
 
