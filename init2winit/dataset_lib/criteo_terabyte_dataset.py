@@ -116,8 +116,9 @@ def criteo_tsv_reader(
   if split not in ['train', 'eval_train', 'validation', 'test']:
     raise ValueError(f'Invalid split name {split}.')
   is_training = split == 'train'
+  file_shuffle_seed = shuffle_rng[0] if is_training else None
   ds = tf.data.Dataset.list_files(
-      file_path, shuffle=is_training, seed=shuffle_rng[0])
+      file_path, shuffle=is_training, seed=file_shuffle_seed)
   index = jax.process_index()
   num_hosts = jax.process_count()
   ds = ds.shard(num_hosts, index)
