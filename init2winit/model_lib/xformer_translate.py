@@ -705,7 +705,8 @@ class Decoder(nn.Module):
           Scannable, lengths=self.dec_remat_scan_lengths)(build_fn=build_fn,
                                                           train=train,
                                                           name='DecoderStack')
-      decoder_mask = decoder_mask.astype(self.dtype)
+      if decoder_mask is not None:
+        decoder_mask = decoder_mask.astype(self.dtype)
       y = dec_stack((y, encoded, decoder_mask, encoder_decoder_mask))[0]
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
       maybe_normalize = model_utils.get_normalizer(

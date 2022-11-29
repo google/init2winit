@@ -34,6 +34,10 @@ A typical callback_config would be a `list` of following-such dicts.
   ## end of required keys
 
 }
+
+If your decoder uses remat_scan, e.g. an xformer_translate with
+'dec_remat_scan_lengths' equal to some tuple, then you need to specify
+'scan_over_layers_offset' equal to the length of that tuple.
 """
 
 from absl import logging

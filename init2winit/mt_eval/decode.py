@@ -18,6 +18,7 @@
 Temperature sampling and beam search routines.
 """
 
+import functools
 import typing
 from typing import Any, Callable, Mapping, Optional, Tuple, Union
 
@@ -64,37 +65,54 @@ def brevity_penalty(alpha, length):
 # Beam handling utility functions:
 
 
-def add_beam_dim(x, beam_size):
+def is_scalar(x, offset: int) -> bool:
+  """Checks if x is scalar."""
+  # The `classical` scalar
+  if x.ndim == 0:
+    return True
+  # The scalar in the case of scan over layers:
+  if x.ndim < offset + 1:
+    return True
+  return False
+
+
+def add_beam_dim(x, beam_size: int, offset: int = 0):
   """Creates new beam dimension in non-scalar array and tiles into it."""
-  if x.ndim == 0:  # ignore scalars (e.g. cache index)
+  if is_scalar(x, offset):
     return x
-  x = jnp.expand_dims(x, axis=1)
+  x = jnp.expand_dims(x, axis=offset + 1)
   tile_dims = [1] * x.ndim
-  tile_dims[1] = beam_size
+  tile_dims[offset + 1] = beam_size
   return jnp.tile(x, tile_dims)
 
 
-def flatten_beam_dim(x):
+def flatten_beam_dim(x, offset: int = 0):
   """Flattens the first two dimensions of a non-scalar array."""
-  if x.ndim == 0:  # ignore scalars (e.g. cache index)
+  if is_scalar(x, offset):
     return x
-  return x.reshape((x.shape[0] * x.shape[1],) + x.shape[2:])
+  xshape = list(x.shape)
+  b_sz = xshape.pop(offset)
+  xshape[offset] *= b_sz
+  return x.reshape(xshape)
 
 
-def unflatten_beam_dim(x, batch_size, beam_size):
+def unflatten_beam_dim(x, batch_size, beam_size, offset: int = 0):
   """Unflattens the first, flat batch*beam dimension of a non-scalar array."""
-  if x.ndim == 0:  # ignore scalars (e.g. cache index)
+  if is_scalar(x, offset):
     return x
-  assert batch_size * beam_size == x.shape[0]
-  return x.reshape((batch_size, beam_size) + x.shape[1:])
+  assert batch_size * beam_size == x.shape[offset]
+  xshape = list(x.shape)
+  newshape = xshape[:offset] + [batch_size, beam_size] + xshape[offset + 1:]
+  return x.reshape(newshape)
 
 
-def flat_batch_beam_expand(x, beam_size):
+def flat_batch_beam_expand(x, beam_size, offset: int = 0):
   """Expands the each batch item by beam_size in batch_dimension."""
-  return flatten_beam_dim(add_beam_dim(x, beam_size))
+  return flatten_beam_dim(add_beam_dim(x, beam_size, offset), offset)
 
 
-def gather_beams(nested, beam_indices, batch_size, new_beam_size):
+def gather_beams(nested, beam_indices, batch_size, new_beam_size,
+                 offset: int = 0):
   """Gathers the beam slices indexed by beam_indices into new beam array.
 
   Args:
@@ -102,6 +120,7 @@ def gather_beams(nested, beam_indices, batch_size, new_beam_size):
     beam_indices: array of beam_indices
     batch_size: int: size of batch.
     new_beam_size: int: size of _new_ beam dimension.
+    offset: int : cache axis from scan over layers.
 
   Returns:
     New pytree with new beam arrays.
@@ -110,11 +129,20 @@ def gather_beams(nested, beam_indices, batch_size, new_beam_size):
   batch_indices = jnp.reshape(
       jnp.arange(batch_size * new_beam_size) // new_beam_size,
       (batch_size, new_beam_size))
+  assert offset < 4, 'scan_over_layers_offset >= 4 is not supported'
   def gather_fn(x):
-    if x.ndim == 0:  # ignore scalars (e.g. cache index)
+    if is_scalar(x, offset):
       return x
-    else:
+    # Unfortunately an elegant indexing with arbitrary number of :, :,...
+    # prepended is not available.
+    elif offset == 0:
       return x[batch_indices, beam_indices]
+    elif offset == 1:
+      return x[:, batch_indices, beam_indices]
+    elif offset == 2:
+      return x[:, :, batch_indices, beam_indices]
+    else:
+      return x[:, :, :, batch_indices, beam_indices]
   return jax.tree_map(gather_fn, nested)
 
 
@@ -177,7 +205,8 @@ class SamplingState:
 def beam_init(batch_size,
               beam_size,
               max_decode_len,
-              cache):
+              cache,
+              offset: int = 0):
   """Initializes the beam search state data structure."""
   cur_index0 = jnp.array(0)
   live_logprobs0 = jnp.tile(
@@ -190,7 +219,8 @@ def beam_init(batch_size,
       (batch_size, beam_size, max_decode_len), jnp.int32)
   finished_flags0 = jnp.zeros((batch_size, beam_size), jnp.bool_)
   # add beam dimension to attention cache pytree elements
-  beam_cache0 = jax.tree_map(lambda x: add_beam_dim(x, beam_size), cache)
+  beam_cache0 = jax.tree_map(lambda x: add_beam_dim(x, beam_size, offset),
+                             cache)
   return BeamState(cur_index=cur_index0,
                    live_logprobs=live_logprobs0,
                    finished_scores=finished_scores0,
@@ -231,7 +261,8 @@ def beam_search(inputs,
                 beam_size=4,
                 alpha=0.6,
                 eos_id=EOS_ID,
-                max_decode_len=None):
+                max_decode_len=None,
+                offset: int = 0):
   """Beam search for transformer machine translation.
 
   Args:
@@ -243,6 +274,7 @@ def beam_search(inputs,
     alpha: float: scaling factor for brevity penalty.
     eos_id: int: end-of-sentence token for target vocabulary.
     max_decode_len: int: maximum length of decoded translations.
+    offset: int: used by scan over layers
 
   Returns:
      Tuple of:
@@ -260,7 +292,7 @@ def beam_search(inputs,
   beam_search_init_state = beam_init(batch_size,
                                      beam_size,
                                      max_decode_len,
-                                     cache)
+                                     cache, offset)
 
   def beam_search_loop_cond_fn(state):
     """Beam search loop termination condition."""
@@ -296,19 +328,23 @@ def beam_search(inputs,
                           (batch_size, beam_size, 1)))
     # Flatten beam dimension into batch to be compatible with model.
     # {[batch, beam, ...], ...} --> {[batch * beam, ...], ...}
-    flat_cache = jax.tree_map(flatten_beam_dim, state.cache)
+    flat_cache = jax.tree_map(functools.partial(flatten_beam_dim,
+                                                offset=offset), state.cache)
 
     # Call fast-decoder model on current tokens to get next-position logits.
     # --> [batch * beam, vocab]
     flat_logits, new_flat_cache = tokens_to_logits(flat_ids, flat_cache)
-
+    # Tokens to logits
     # unflatten beam dimension
     # [batch * beam, vocab] --> [batch, beam, vocab]
     logits = unflatten_beam_dim(flat_logits, batch_size, beam_size)
     # Unflatten beam dimension in attention cache arrays
     # {[batch * beam, ...], ...} --> {[batch, beam, ...], ...}
-    new_cache = jax.tree_map(
-        lambda x: unflatten_beam_dim(x, batch_size, beam_size), new_flat_cache)
+
+    def unflatten_beam_dim_in_cache(x):
+      return unflatten_beam_dim(x, batch_size, beam_size, offset=offset)
+
+    new_cache = jax.tree_map(unflatten_beam_dim_in_cache, new_flat_cache)
 
     # Gather log probabilities from logits
     candidate_log_probs = jax.nn.log_softmax(logits)
@@ -364,8 +400,9 @@ def beam_search(inputs,
 
     top_alive_indices = gather_beams(topk_beam_indices, new_topk_indices,
                                      batch_size, beam_size)
+    # Apply offset to the cache
     top_alive_cache = gather_beams(new_cache, top_alive_indices, batch_size,
-                                   beam_size)
+                                   beam_size, offset=offset)
 
     # Update FINISHED (reached end of sentence) sequences:
     # Calculate new seq scores from log probabilities.
@@ -582,7 +619,8 @@ def decode_step(batch,
                 max_decode_len,
                 flax_module,
                 eos_id=EOS_ID,
-                beam_size=4):
+                beam_size=4,
+                offset: int = 0):
   """Predict translation with fast decoding beam search on a batch."""
   inputs = batch['inputs']
 
@@ -597,8 +635,9 @@ def decode_step(batch,
       inputs,
       train=False,
       method=flax_module.encode)
-  encoded_inputs = flat_batch_beam_expand(encoded_inputs, beam_size)
-  raw_inputs = flat_batch_beam_expand(inputs, beam_size)
+  # Inputs don't need an offset in case of scan over layers.
+  encoded_inputs = flat_batch_beam_expand(encoded_inputs, beam_size, offset=0)
+  raw_inputs = flat_batch_beam_expand(inputs, beam_size, offset=0)
 
   def tokens_ids_to_logits(flat_ids, flat_cache):
     """Token slice to logits from decoder model."""
@@ -628,7 +667,8 @@ def decode_step(batch,
       beam_size=beam_size,
       alpha=0.6,
       eos_id=eos_id,
-      max_decode_len=max_decode_len)
+      max_decode_len=max_decode_len,
+      offset=offset)
 
   # Beam search returns [n_batch, n_beam, n_length + 1] with beam dimension
   # sorted in increasing order of log-probability.

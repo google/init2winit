@@ -47,7 +47,8 @@ DEFAULT_EVAL_CONFIG = {
     'beam_size': 4,
     'sample_size': 15,
     'temperature': 1.0,  # 1.0 means no temperature.
-    'rescale_log_probs': True
+    'rescale_log_probs': True,
+    'scan_over_layers_offset': 0,  # Models not using scan over layers.
 }
 
 
@@ -172,7 +173,7 @@ class InferenceManager(object):
             self.initialize_cache,
             max_length=self.max_length,
             params_rng=params_rng,
-            dropout_rng=dropout_rng))
+            dropout_rng=dropout_rng), axis_name='gather')
 
   def initialize_cache(self, inputs, max_length, params_rng, dropout_rng):
     """Initialize a cache for a given input shape and max decode length."""
@@ -214,7 +215,8 @@ class InferenceManager(object):
           max_decode_len=self.max_length,
           flax_module=self.flax_module,
           eos_id=self.eos_id,
-          beam_size=self.mt_eval_config.get('beam_size'))
+          beam_size=self.mt_eval_config.get('beam_size'),
+          offset=self.mt_eval_config.get('scan_over_layers_offset', 0))
     self.pmapped_predictor = jax.pmap(decoder, static_broadcasted_argnums=())
 
   def translate_and_calculate_bleu(self):
