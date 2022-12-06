@@ -458,6 +458,7 @@ class TransformerLM(nn.Module):
 
 
 class TransformerLM1B(base_model.BaseModel):
+  """Model class for Transformer language model for LM1B dataset."""
 
   def build_flax_module(self):
     max_len = max(self.hps.max_target_length, self.hps.max_eval_target_length)
@@ -479,5 +480,12 @@ class TransformerLM1B(base_model.BaseModel):
         model_dtype=self.hps.model_dtype,
         pad_token=self.dataset_meta_data.get('pad_token', 0),
     )
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs
 
 

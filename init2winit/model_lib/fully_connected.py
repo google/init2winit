@@ -89,7 +89,9 @@ class FullyConnected(nn.Module):
     return x
 
 
+# pylint: disable=missing-class-docstring
 class FullyConnectedModel(base_model.BaseModel):
+  """Model class for fully connected model."""
 
   def build_flax_module(self):
     kernel_inits = [
@@ -101,3 +103,10 @@ class FullyConnectedModel(base_model.BaseModel):
         hid_sizes=tuple(self.hps.hid_sizes),
         activation_function=self.hps.activation_function,
         kernel_inits=tuple(kernel_inits))
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs

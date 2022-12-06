@@ -271,3 +271,10 @@ class FakeModel(base_model.BaseModel):
 
   def build_flax_module(self):
     return FakeResNet(num_classes=self.hps['output_shape'][-1])
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs

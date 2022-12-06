@@ -227,3 +227,10 @@ class NQM(base_model.BaseModel):
                                                self.hps.noise_decay_power,
                                                self.hps.nqm_mode)
     return NQMLoss(hessian=hessian, noise_scaling=noise_scaling)
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs

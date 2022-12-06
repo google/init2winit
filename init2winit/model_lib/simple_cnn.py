@@ -78,6 +78,7 @@ class SimpleCNN(nn.Module):
 
 
 class SimpleCNNModel(base_model.BaseModel):
+  """Model class for Simple CNN Model."""
 
   def build_flax_module(self):
     """Simple CNN with a set of conv layers followed by fully connected layers."""
@@ -86,3 +87,10 @@ class SimpleCNNModel(base_model.BaseModel):
         num_filters=self.hps.num_filters,
         kernel_sizes=self.hps.kernel_sizes,
         activation_function=self.hps.activation_function)
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs

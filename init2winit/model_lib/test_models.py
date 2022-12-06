@@ -120,7 +120,10 @@ DATA_HPS = {
         'output_shape': (5,),
     },
     'mlperf_resnet': {},
-    'nqm': {},
+    'nqm': {
+        'input_shape': (10,),
+        'output_shape': (1,),
+    },
     'performer': {
         'input_shape': (64,),
         'max_eval_target_length': 64,
@@ -178,7 +181,7 @@ LOSS_NAME = {
     'lstm': 'cross_entropy',
     'max_pooling_cnn': 'cross_entropy',
     'mlperf_resnet': 'cross_entropy',
-    'nqm': {},
+    'nqm': 'cross_entropy',
     'performer': 'cross_entropy',
     'resnet': 'cross_entropy',
     'simple_cnn': 'cross_entropy',
@@ -206,7 +209,7 @@ METRICS_NAME = {
     'lstm': 'classification_metrics',
     'max_pooling_cnn': 'classification_metrics',
     'mlperf_resnet': 'classification_metrics',
-    'nqm': None,
+    'nqm': 'classification_metrics',
     'performer': 'classification_metrics',
     'resnet': 'classification_metrics',
     'simple_cnn': 'classification_metrics',
@@ -236,7 +239,7 @@ dtypes = ['bfloat16', 'float32']
 # Construct keys for tests for initialization
 # TODO(kasimbeg): Add HPS for excluded models and include in tests.
 # pylint: disable=g-complex-comprehension
-skipped_models = ['nqm', 'unet', 'vit', 'conformer',
+skipped_models = ['unet', 'vit', 'conformer',
                   'xformer_translate_binary', 'mlperf_resnet',
                   'deepspeech', 'local_attention_transformer']
 model_init_keys = [
@@ -267,20 +270,17 @@ dtype_and_remat_scan_keys = [
 
 # TODO(kasimbeg): clean this up after get_fake_inputs is implemented for
 # all models
-def _get_fake_inputs(model, hps):
-  """Temporary helper method to get fake batch."""
+def _get_fake_inputs_for_initialization(model, hps):
+  """Temporary helper method to get fake inputs for initialization test."""
   fake_inputs_hps = copy.copy(hps)
   fake_inputs_hps.batch_size = 2
   fake_inputs = model.get_fake_inputs(fake_inputs_hps)
 
   if fake_inputs:
     return fake_inputs
-  elif isinstance(hps.input_shape, list):  # Typical case for seq2seq models
-    fake_inputs = [
-        np.zeros((2, *x), hps.model_dtype) for x in hps.input_shape
-    ]
-  else:  # Typical case for classification models
-    fake_inputs = [np.zeros((2, *hps.input_shape), hps.model_dtype)]
+  else:
+    raise NotImplementedError(
+        'Method get_fake_inputs not implemented for model.')
 
   return fake_inputs
 
@@ -305,7 +305,7 @@ class ModelsTest(parameterized.TestCase):
         loss_name=LOSS_NAME[model_str],
         metrics_name=METRICS_NAME[model_str])
 
-    fake_input_batch = _get_fake_inputs(model, hps)
+    fake_input_batch = _get_fake_inputs_for_initialization(model, hps)
 
     rng = jax.random.PRNGKey(0)
     params_rng, dropout_rng = jax.random.split(rng, num=2)

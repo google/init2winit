@@ -20,6 +20,7 @@ from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
+import jax.numpy as jnp
 
 from ml_collections.config_dict import config_dict
 
@@ -218,6 +219,7 @@ class WideResnet(nn.Module):
 
 
 class WideResnetModel(base_model.BaseModel):
+  """Model class for wide Resnet Model."""
 
   def build_flax_module(self):
     """Wide Resnet."""
@@ -236,3 +238,10 @@ class WideResnetModel(base_model.BaseModel):
         batch_size=self.hps.batch_size,
         virtual_batch_size=self.hps.virtual_batch_size,
         total_batch_size=self.hps.total_accumulated_batch_size)
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs

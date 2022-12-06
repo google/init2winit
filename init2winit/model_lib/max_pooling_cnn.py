@@ -112,6 +112,7 @@ class MaxPoolingCNN(nn.Module):
 
 
 class MaxPoolingCNNModel(base_model.BaseModel):
+  """Model class for MaxPooling CNNModel."""
 
   def build_flax_module(self):
     """CNN with a set of conv layers with max pooling followed by fully connected layers."""
@@ -126,3 +127,10 @@ class MaxPoolingCNNModel(base_model.BaseModel):
         num_dense_units=self.hps.num_dense_units,
         activation_fn=self.hps.activation_fn,
         normalizer=self.hps.normalizer)
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs
