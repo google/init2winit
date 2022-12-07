@@ -46,7 +46,6 @@ class SpecAug(nn.Module):
                 batch_size,
                 choose_range,
                 mask_size,
-                global_seed,
                 max_length=None,
                 masks_per_frame=0.0,
                 multiplicity=1,
@@ -57,7 +56,7 @@ class SpecAug(nn.Module):
     else:
       max_length = choose_range * max_ratio
     masked_portion = jax.random.uniform(
-        key=global_seed,
+        key=self.next_prng_key(),
         shape=(batch_size, multiplicity),
         minval=0.0,
         maxval=1.0)
@@ -72,7 +71,7 @@ class SpecAug(nn.Module):
 
     # Choose starting point.
     random_start = jax.random.uniform(
-        key=global_seed, shape=(batch_size, multiplicity), maxval=1.0)
+        key=self.next_prng_key(), shape=(batch_size, multiplicity), maxval=1.0)
     start_with_in_valid_range = random_start * (choose_range - length + 1)
     start = start_with_in_valid_range.astype(jnp.int32)
     end = start + length - 1
@@ -104,7 +103,7 @@ class SpecAug(nn.Module):
 
     return mask
 
-  def _time_mask(self, inputs, length, global_seed):
+  def _time_mask(self, inputs, length):
     # Get time masking parameters.
     time_mask_max_frames = self.time_mask_max_frames
     use_dynamic_time_mask_max_frames = self.use_dynamic_time_mask_max_frames
@@ -128,7 +127,6 @@ class SpecAug(nn.Module):
         batch_size,
         choose_range=length,
         mask_size=time_length,
-        global_seed=global_seed,
         max_length=time_mask_max_frames,
         masks_per_frame=self.time_masks_per_frame,
         multiplicity=multiplicity,
@@ -137,7 +135,7 @@ class SpecAug(nn.Module):
     outputs = jnp.einsum('bxy,bx->bxy', inputs, block_arrays)
     return outputs
 
-  def _frequency_mask(self, inputs, global_seed):
+  def _frequency_mask(self, inputs):
     # Mask parameters.
     freq_mask_max_bins = self.freq_mask_max_bins
     multiplicity = self.freq_mask_count
@@ -154,7 +152,6 @@ class SpecAug(nn.Module):
         batch_size,
         choose_range=choose_range,
         mask_size=num_freq,
-        global_seed=global_seed,
         max_length=freq_mask_max_bins,
         masks_per_frame=0.0,
         multiplicity=multiplicity,
@@ -167,9 +164,7 @@ class SpecAug(nn.Module):
   def __call__(self, inputs, paddings):
     lengths = jnp.einsum('bh->b', 1 - paddings).astype(jnp.int32)
 
-    prng_key = self.next_prng_key()
-    inputs = self._time_mask(inputs, lengths, global_seed=prng_key)
-    prng_key = self.next_prng_key()
-    inputs = self._frequency_mask(inputs, global_seed=prng_key)
+    inputs = self._time_mask(inputs, lengths)
+    inputs = self._frequency_mask(inputs)
 
     return inputs, paddings
