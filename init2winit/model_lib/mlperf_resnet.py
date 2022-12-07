@@ -57,6 +57,7 @@ FAKE_MODEL_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     data_format='NHWC',
     activation_function='relu',
     grad_clip=None,
+    dropout_rate=0.0,
 ))
 
 
@@ -89,6 +90,7 @@ MLPERF_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     data_format='NHWC',
     activation_function='relu',
     grad_clip=None,
+    dropout_rate=0.0,
 ))
 
 
@@ -167,6 +169,7 @@ class ResNet(nn.Module):
   total_batch_size: Optional[int] = None
   data_format: Optional[str] = None
   activation_function: Optional[str] = 'relu'
+  dropout_rate: float = 0.0
 
   @nn.compact
   def __call__(self, x, train):
@@ -208,6 +211,8 @@ class ResNet(nn.Module):
             activation_function=self.activation_function,
             )(x, train=train)
     x = jnp.mean(x, axis=(1, 2))
+    if self.dropout_rate > 0.0:
+      x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
     x = nn.Dense(self.num_classes, kernel_init=nn.initializers.normal(),
                  dtype=self.dtype)(x)
     return x
@@ -263,7 +268,8 @@ class ResnetModelMLPerf(base_model.BaseModel):
         virtual_batch_size=self.hps.virtual_batch_size,
         total_batch_size=self.hps.total_accumulated_batch_size,
         data_format=self.hps.data_format,
-        activation_function=self.hps.activation_function)
+        activation_function=self.hps.activation_function,
+        dropout_rate=self.hps.dropout_rate)
 
 
 class FakeModel(base_model.BaseModel):
