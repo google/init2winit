@@ -61,6 +61,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         dropout_rate=0.1,
         total_accumulated_batch_size=None,
         grad_clip=None,
+        label_smoothing=0.0,
+        use_shallue_label_smoothing=False,
     ))
 
 
