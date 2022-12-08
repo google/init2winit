@@ -274,7 +274,7 @@ def preprocess_data(
 def get_librispeech_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
                              shuffle_rng):
   """Helper method to get train, eval and test sets for librispeech data."""
-  train_ds_builder = tfds.builder('librispeech')
+  train_ds_builder = tfds.builder('librispeech/2.1.1')
 
   train_data = get_raw_dataset(train_ds_builder, hps.train_split,
                                shuffle_rng[0])
