@@ -50,6 +50,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         l2_decay_rank_threshold=2,
         total_accumulated_batch_size=None,
         grad_clip=None,
+        dropout_rate=0.0,
+        # dropout will exist only if there are at least two top mlp layers
     ))
 
 
@@ -105,6 +107,7 @@ class DLRM(nn.Module):
   num_dense_features: int
   embed_dim: int = 128
   keep_diags: bool = True
+  dropout_rate: float = 0.0
 
   @nn.compact
   def __call__(self, x, train):
@@ -160,6 +163,10 @@ class DLRM(nn.Module):
                   top_mlp_input)
       if layer_idx < (num_layers_top - 1):
         top_mlp_input = nn.relu(top_mlp_input)
+      if self.dropout_rate > 0.0 and layer_idx == num_layers_top - 2:
+        top_mlp_input = nn.Dropout(
+            rate=self.dropout_rate, deterministic=not train)(
+                top_mlp_input)
     logits = top_mlp_input
     return logits
 
@@ -175,7 +182,8 @@ class DLRMModel(base_model.BaseModel):
         mlp_top_dims=self.hps.mlp_top_dims,
         num_dense_features=self.hps.num_dense_features,
         embed_dim=self.hps.embed_dim,
-        keep_diags=self.hps.keep_diags)
+        keep_diags=self.hps.keep_diags,
+        dropout_rate=self.hps.dropout_rate)
 
   def get_fake_inputs(self, hps):
     """Helper method solely for purpose of initalizing the model."""
