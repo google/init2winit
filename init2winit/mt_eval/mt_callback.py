@@ -81,7 +81,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     del dataset
     del params
 
-    merged_callback_config = inference.DEFAULT_EVAL_CONFIG
+    merged_callback_config = inference.DEFAULT_EVAL_CONFIG.copy()
     merged_callback_config.update(callback_config)
 
     self.callback_config = merged_callback_config
