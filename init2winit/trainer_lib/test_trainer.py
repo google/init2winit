@@ -768,8 +768,8 @@ class TrainerTest(parameterized.TestCase):
       # Note that there is a small numerical different here with np vs jnp.
       decay_factor = (1 + np.cos(
           (final_step - 1) / num_train_steps_reload * np.pi)) * 0.5
-      self.assertEqual(float(final_learning_rate),
-                       hps.lr_hparams['base_lr'] * decay_factor)
+      self.assertAlmostEqual(float(final_learning_rate),
+                             hps.lr_hparams['base_lr'] * decay_factor)
 
     self.assertEqual(set(df.columns.values), set(get_column_names()))
 

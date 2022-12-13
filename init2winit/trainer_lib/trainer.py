@@ -120,6 +120,7 @@ def update(
       params=params,
       batch=batch,
       batch_stats=new_batch_stats,
+      cost_fn=opt_cost,
       grad_fn=grad_fn)
   new_params = optax.apply_updates(params, model_updates)
 
@@ -215,6 +216,7 @@ class Trainer(base_trainer.BaseTrainer):
              self._metrics_state, batch, self._global_step, lr, rng,
              self._local_device_indices, self._sum_train_cost)
         self._global_step += 1
+        lr = self._optimizer_state.hyperparams['learning_rate'][0]
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.

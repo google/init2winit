@@ -232,21 +232,33 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         base_opt_init_fn=opt_init,
         base_opt_update_fn=opt_update,
     )
+  elif hps.opt_hparams.get('use_pal', False):
+    opt_init, opt_update = parabolic_approximation_line_search.parabolic_approximation_line_search(
+        mu=hps.opt_hparams['mu'],
+        alpha=hps.opt_hparams['alpha'],
+        s_max=hps.opt_hparams['s_max'],
+        pal_steps=hps.opt_hparams['pal_steps'],
+        batch_axis_name=batch_axis_name,
+        base_opt_init_fn=opt_init,
+        base_opt_update_fn=opt_update
+    )
 
   if opt_init is None or opt_update is None:
     raise NotImplementedError('Optimizer {} not implemented'.format(
         hps.optimizer))
   return opt_init, _wrap_update_fn(hps.optimizer, opt_update,
-                                   hps.opt_hparams.get('use_sam', False))
+                                   hps.opt_hparams.get('use_sam', False),
+                                   hps.opt_hparams.get('use_pal', False))
 
 
-def _wrap_update_fn(opt_name, opt_update, use_sam=False):
+def _wrap_update_fn(opt_name, opt_update, use_sam=False, use_pal=False):
   """Wraps the optimizer update function to have the same function signiture.
 
   Args:
     opt_name: the optimizer name.
     opt_update: the optimizer update function.
     use_sam: flag to use sharpness aware minimization updates.
+    use_pal: flag to use parabolic approximation line search updates.
 
   Returns:
     A wrapped optimizer update function.
@@ -257,6 +269,7 @@ def _wrap_update_fn(opt_name, opt_update, use_sam=False):
                 params,
                 batch=None,
                 batch_stats=None,
+                cost_fn=None,
                 grad_fn=None):
     if opt_name == 'hessian_free':
       variables = {'params': params}
@@ -266,6 +279,9 @@ def _wrap_update_fn(opt_name, opt_update, use_sam=False):
     if use_sam:
       return opt_update(
           grads, optimizer_state, grad_fn_params_tuple=(grad_fn, params))
+    elif use_pal:
+      return opt_update(
+          grads, optimizer_state, cost_fn_params_tuple=(cost_fn, params))
     return opt_update(grads, optimizer_state, params=params)
 
   return update_fn

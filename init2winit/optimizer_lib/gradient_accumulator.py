@@ -52,6 +52,7 @@ import optax
 class GradientAccumulatorState(NamedTuple):
   """State for the gradient accumulator."""
   base_state: NamedTuple  # The state of the base optimizer.
+  hyperparams: dict[str, jnp.ndarray]
   num_per_step_batches: jnp.ndarray  # shape=(), dtype=jnp.int32.
   accumulations: optax.Updates  # Gradient accumulators for each parameter.
 
@@ -102,8 +103,10 @@ def accumulate_gradients(
   steps_per_update = total_batch_size // per_step_batch_size
 
   def init_fn(params):
+    base_state = base_opt_init_fn(params)
     return GradientAccumulatorState(
-        base_state=base_opt_init_fn(params),
+        base_state=base_state,
+        hyperparams=base_state.hyperparams,
         num_per_step_batches=jnp.zeros([], jnp.int32),
         accumulations=jax.tree_map(jnp.zeros_like, params))
 
@@ -129,6 +132,7 @@ def accumulate_gradients(
           total_gradients, state.base_state, params=params)
       reset_state = GradientAccumulatorState(
           base_state=updated_base_state,
+          hyperparams=updated_base_state.hyperparams,
           num_per_step_batches=0,
           accumulations=zeros_params)
       return updates, reset_state
@@ -136,6 +140,7 @@ def accumulate_gradients(
     def accumulation_continuation(updated_accumulations, _, state):
       updated_state = GradientAccumulatorState(
           base_state=state.base_state,
+          hyperparams=state.base_state.hyperparams,
           num_per_step_batches=state.num_per_step_batches + 1,
           accumulations=updated_accumulations)
       return zeros_params, updated_state
