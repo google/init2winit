@@ -64,13 +64,20 @@ _ALL_MODELS = {
     'transformer':
         (transformer_lm.TransformerLM1B, transformer_lm.DEFAULT_HPARAMS),
     'conformer': (conformer.ConformerModel, conformer.DEFAULT_HPARAMS),
+    'mlcommons_conformer': (conformer.MLCommonsConformerModel,
+                            conformer.MLCOMMONS_DEFAULT_HPARAMS),
     'local_attention_transformer':
         (local_attention_transformer.LocalAttentionTransformer,
          local_attention_transformer.DEFAULT_HPARAMS),
     'deepspeech': (deepspeech.DeepSpeechModel, deepspeech.DEFAULT_HPARAMS),
+    'mlcommons_deepspeech': (deepspeech.MLCommonsDeepSpeechModel,
+                             deepspeech.MLCOMMONS_DEFAULT_HPARAMS),
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
     'xformer_translate': (xformer_translate.TransformerTranslate,
                           xformer_translate.DEFAULT_HPARAMS),
+    'mlcommons_xformer_translate':
+        (xformer_translate.MLCommonsTransformerTranslate,
+         xformer_translate.MLCOMMONS_DEFAULT_HPARAMS),
     'xformer_translate_binary': (xformer_translate_binary.TransformerTranslate,
                                  xformer_translate_binary.DEFAULT_HPARAMS),
     'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS),

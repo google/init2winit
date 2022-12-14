@@ -76,11 +76,24 @@ DATA_HPS = {
         'tokenizer_type':
             'WPM',
     },
+    'mlcommons_conformer': {
+        'input_shape': (64,),
+        'max_eval_target_length':
+            64,
+        'max_target_length':
+            64,
+        'output_shape': (16,),
+        'vocab_size':
+            16,
+        'tokenizer_type':
+            'WPM',
+    },
     'convolutional_autoencoder': {
         'input_shape': ((28, 28, 1)),
         'output_shape': ((28, 28, 1)),
     },
     'deepspeech': {},
+    'mlcommons_deepspeech': {},
     'dlrm': {
         'input_shape': (39,),  # Like criteo1tb
     },
@@ -163,6 +176,16 @@ DATA_HPS = {
         'output_shape': (16,),
         'vocab_size': 16,
     },
+    'mlcommons_xformer_translate': {
+        'dec_num_layers': 2,
+        'enc_num_layers': 2,
+        'input_shape': [(64,), (64,)],
+        'max_eval_target_length': 64,
+        'max_predict_length': 64,
+        'max_target_length': 64,
+        'output_shape': (16,),
+        'vocab_size': 16,
+    },
 }
 
 LOSS_NAME = {
@@ -171,8 +194,10 @@ LOSS_NAME = {
     'adabelief_vgg': 'cross_entropy',
     'autoencoder': 'sigmoid_binary_cross_entropy',
     'conformer': 'ctc',
+    'mlcommons_conformer': 'ctc',
     'convolutional_autoencoder': 'sigmoid_binary_cross_entropy',
     'deepspeech': 'ctc',
+    'mlcommons_deepspeech': 'ctc',
     'dlrm': 'sigmoid_binary_cross_entropy',
     'fake_resnet': 'cross_entropy',
     'fully_connected': 'cross_entropy',
@@ -191,6 +216,7 @@ LOSS_NAME = {
     'wide_resnet': 'cross_entropy',
     'xformer_translate_binary': 'cross_entropy',
     'xformer_translate': 'cross_entropy',
+    'mlcommons_xformer_translate': 'cross_entropy',
 }
 
 METRICS_NAME = {
@@ -199,8 +225,10 @@ METRICS_NAME = {
     'adabelief_vgg': 'classification_metrics',
     'autoencoder': 'binary_autoencoder_metrics',
     'conformer': 'ctc_metrics',
+    'mlcommons_conformer': 'ctc_metrics',
     'convolutional_autoencoder': 'binary_autoencoder_metrics',
     'deepspeech': 'ctc_metrics',
+    'mlcommons_deepspeech': 'ctc_metrics',
     'dlrm': 'binary_classification_metrics_dlrm_no_auc',
     'fake_resnet': 'classification_metrics',
     'fully_connected': 'classification_metrics',
@@ -219,6 +247,7 @@ METRICS_NAME = {
     'wide_resnet': 'classification_metrics',
     'xformer_translate_binary': 'classification_metrics',
     'xformer_translate': 'classification_metrics',
+    'mlcommons_xformer_translate': 'classification_metrics',
 }
 
 # Automatically test all defined models.
@@ -239,9 +268,11 @@ dtypes = ['bfloat16', 'float32']
 # Construct keys for tests for initialization
 # TODO(kasimbeg): Add HPS for excluded models and include in tests.
 # pylint: disable=g-complex-comprehension
-skipped_models = ['unet', 'vit', 'conformer',
-                  'xformer_translate_binary', 'mlperf_resnet',
-                  'deepspeech', 'local_attention_transformer']
+skipped_models = [
+    'unet', 'vit', 'conformer', 'mlcommons_conformer',
+    'xformer_translate_binary', 'mlperf_resnet', 'deepspeech',
+    'mlcommons_deepspeech', 'local_attention_transformer'
+]
 model_init_keys = [
     ('test_model_{}_dtype_{}'.format(
         model_str,

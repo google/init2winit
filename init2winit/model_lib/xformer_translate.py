@@ -39,6 +39,53 @@ import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import numpy as np
 
+
+MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        batch_size=64,
+        share_embeddings=False,
+        logits_via_embedding=False,
+        emb_dim=512,
+        num_heads=8,
+        enc_num_layers=None,
+        dec_num_layers=None,
+        enc_remat_scan_lengths=None,
+        dec_remat_scan_lengths=None,
+        qkv_dim=512,
+        mlp_dim=512,
+        dropout_rate=0.1,
+        aux_dropout_rate=0.1,
+        optimizer='adam',
+        opt_hparams={
+            'beta1': .9,
+            'beta2': .98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.0
+        },
+        layer_rescale_factors={},
+        normalizer='layer_norm',
+        lr_hparams={
+            'base_lr': 0.05,
+            'warmup_steps': 8000,
+            'factors': 'constant * linear_warmup * rsqrt_decay',
+            'schedule': 'compound'
+        },
+        label_smoothing=0.1,
+        l2_decay_factor=None,
+        l2_decay_rank_threshold=0,
+        rng_seed=-1,
+        use_shallue_label_smoothing=False,
+        model_dtype='float32',
+        grad_clip=None,
+        enc_self_attn_kernel_init='xavier_uniform',
+        dec_self_attn_kernel_init='xavier_uniform',
+        dec_cross_attn_kernel_init='xavier_uniform',
+        decode=False,
+        total_accumulated_batch_size=None,
+        normalize_attention=False,
+    ))
+
+
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         batch_size=64,
@@ -1101,3 +1148,48 @@ class TransformerTranslate(base_model.BaseModel):
         for x in hps.input_shape
     ]
     return dummy_inputs
+
+
+class MLCommonsTransformerTranslate(TransformerTranslate):
+  """Uses dropout_rate and aux_dropout_rate as hps.
+
+  Otherwise intended to be the same as Transformer Translate Model.
+  """
+
+  def build_flax_module(self):
+    max_len = max(self.hps.max_target_length, self.hps.max_eval_target_length,
+                  self.hps.max_predict_length)
+    enc_self_attn_kernel_init_fn = model_utils.INITIALIZERS[
+        self.hps.enc_self_attn_kernel_init]()
+    dec_self_attn_kernel_init_fn = model_utils.INITIALIZERS[
+        self.hps.dec_self_attn_kernel_init]()
+    dec_cross_attn_kernel_init_fn = model_utils.INITIALIZERS[
+        self.hps.dec_cross_attn_kernel_init]()
+    dtype = utils.dtype_from_str(self.hps.model_dtype)
+
+    return Transformer(
+        vocab_size=self.hps.vocab_size,
+        output_vocab_size=self.hps.vocab_size,
+        share_embeddings=self.hps.share_embeddings,
+        logits_via_embedding=self.hps.logits_via_embedding,
+        dtype=dtype,
+        emb_dim=self.hps.emb_dim,
+        num_heads=self.hps.num_heads,
+        enc_num_layers=self.hps.enc_num_layers,
+        dec_num_layers=self.hps.dec_num_layers,
+        qkv_dim=self.hps.qkv_dim,
+        mlp_dim=self.hps.mlp_dim,
+        max_len=max_len,
+        dropout_rate=self.hps.dropout_rate,
+        normalizer=self.hps.normalizer,
+        attention_dropout_rate=self.hps.aux_dropout_rate,
+        normalize_attention=self.hps.normalize_attention,
+        enc_self_attn_kernel_init_fn=enc_self_attn_kernel_init_fn,
+        dec_self_attn_kernel_init_fn=dec_self_attn_kernel_init_fn,
+        dec_cross_attn_kernel_init_fn=dec_cross_attn_kernel_init_fn,
+        should_decode=self.hps.decode,
+        enc_remat_scan_lengths=self.hps.enc_remat_scan_lengths,
+        dec_remat_scan_lengths=self.hps.dec_remat_scan_lengths,
+    )
+
+    

@@ -41,6 +41,49 @@ import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import numpy as np
 
+MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        activation_function='relu',
+        optimizer='adam',
+        opt_hparams={
+            'beta1': .9,
+            'beta2': .98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.0
+        },
+        lr_hparams={
+            'base_lr': 0.1,
+            'schedule': 'constant'
+        },
+        batch_size=256,
+        eval_batch_size=128,
+        l2_decay_factor=1e-6,
+        l2_decay_rank_threshold=0,
+        use_shallue_label_smoothing=False,
+        rng_seed=-1,
+        model_dtype='float32',
+        grad_clip=5.0,
+        encoder_dim=512,
+        num_attention_heads=8,
+        num_encoder_layers=16,
+        convolution_kernel_size=5,
+        freq_mask_count=2,
+        freq_mask_max_bins=27,
+        time_mask_count=10,
+        time_mask_max_frames=40,
+        time_mask_max_ratio=0.05,
+        time_masks_per_frame=0.0,
+        use_dynamic_time_mask_max_frames=True,
+        use_specaug=True,
+        dropout_rate=0.1,
+        ## dropout_rate pipes to attention and feed_forward residual dropouts
+        aux_dropout_rate=0.1,  ## This pipes to input_dropout
+        enable_decoder_pre_layer_norm=True,
+        enable_conformer_post_layer_norm=True,
+        use_lingvo_attention=False,
+        total_accumulated_batch_size=None,))
+
+
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation_function='relu',
@@ -888,3 +931,37 @@ class ConformerModel(base_model.BaseModel):
         for x in hps.input_shape
     ]
     return dummy_inputs
+
+
+class MLCommonsConformerModel(ConformerModel):
+  """Uses dropout_rate and aux_dropout_rate as hps.
+
+  Otherwise intended to be the same as ConformerModel.
+  """
+
+  def build_flax_module(self):
+    config = ConformerConfig(
+        vocab_size=self.hps.output_shape[1],
+        encoder_dim=self.hps.encoder_dim,
+        num_attention_heads=self.hps.num_attention_heads,
+        num_encoder_layers=self.hps.num_encoder_layers,
+        convolution_kernel_size=self.hps.convolution_kernel_size,
+        freq_mask_count=self.hps.freq_mask_count,
+        freq_mask_max_bins=self.hps.freq_mask_max_bins,
+        time_mask_count=self.hps.time_mask_count,
+        time_mask_max_frames=self.hps.time_mask_max_frames,
+        time_mask_max_ratio=self.hps.time_mask_max_ratio,
+        time_masks_per_frame=self.hps.time_masks_per_frame,
+        use_dynamic_time_mask_max_frames=self.hps
+        .use_dynamic_time_mask_max_frames,
+        use_specaug=self.hps.use_specaug,
+        attention_residual_dropout_rate=self.hps.dropout_rate,
+        feed_forward_residual_dropout_rate=self.hps.dropout_rate,
+        input_dropout_rate=self.hps.aux_dropout_rate,
+        enable_conformer_post_layer_norm=self.hps
+        .enable_conformer_post_layer_norm,
+        enable_decoder_pre_layer_norm=self.hps.enable_decoder_pre_layer_norm,
+        use_lingvo_attention=self.hps.use_lingvo_attention)
+    module = ConformerEncoderDecoder(config)
+
+    return module
