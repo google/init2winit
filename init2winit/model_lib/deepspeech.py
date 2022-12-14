@@ -42,6 +42,46 @@ PRNGKey = Any
 Shape = Tuple[int]
 Dtype = Any
 
+MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        activation_function='relu',
+        optimizer='adam',
+        opt_hparams={
+            'beta1': .9,
+            'beta2': .98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.0
+        },
+        batch_size=256,
+        eval_batch_size=128,
+        l2_decay_factor=1e-6,
+        l2_decay_rank_threshold=0,
+        use_shallue_label_smoothing=False,
+        rng_seed=-1,
+        model_dtype='float32',
+        grad_clip=10.0,
+        num_lstm_layers=4,
+        num_ffn_layers=3,
+        encoder_dim=512,
+        freq_mask_count=2,
+        freq_mask_max_bins=27,
+        time_mask_count=10,
+        time_mask_max_frames=40,
+        time_mask_max_ratio=0.05,
+        time_masks_per_frame=0.0,
+        use_dynamic_time_mask_max_frames=True,
+        use_specaug=True,
+        aux_dropout_rate=0.1,
+        dropout_rate=0.1,
+        enable_residual_connections=False,
+        enable_decoder_layer_norm=False,
+        bidirectional=True,
+        total_accumulated_batch_size=None,
+        enable_subsampling_batchnorm=False,
+        enable_synced_batchnorm=False,
+        enable_ffn_relu=False))
+
+
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation_function='relu',
@@ -957,3 +997,37 @@ class DeepSpeechModel(base_model.BaseModel):
         for x in hps.input_shape
     ]
     return dummy_inputs
+
+
+class MLCommonsDeepSpeechModel(DeepSpeechModel):
+  """Uses dropout_rate and aux_dropout_rate as hps.
+
+  Otherwise intended to be the same as DeepSpeechModel.
+  """
+
+  def build_flax_module(self):
+    config = DeepspeechConfig(
+        vocab_size=self.hps.output_shape[1],
+        encoder_dim=self.hps.encoder_dim,
+        num_lstm_layers=self.hps.num_lstm_layers,
+        num_ffn_layers=self.hps.num_ffn_layers,
+        freq_mask_count=self.hps.freq_mask_count,
+        freq_mask_max_bins=self.hps.freq_mask_max_bins,
+        time_mask_count=self.hps.time_mask_count,
+        time_mask_max_frames=self.hps.time_mask_max_frames,
+        time_mask_max_ratio=self.hps.time_mask_max_ratio,
+        time_masks_per_frame=self.hps.time_masks_per_frame,
+        use_dynamic_time_mask_max_frames=self.hps
+        .use_dynamic_time_mask_max_frames,
+        use_specaug=self.hps.use_specaug,
+        input_dropout_rate=self.hps.aux_dropout_rate,
+        feed_forward_dropout_rate=self.hps.dropout_rate,
+        enable_residual_connections=self.hps.enable_residual_connections,
+        enable_decoder_layer_norm=self.hps.enable_decoder_layer_norm,
+        bidirectional=self.hps.bidirectional,
+        enable_subsampling_batchnorm=self.hps.enable_subsampling_batchnorm,
+        enable_synced_batchnorm=self.hps.enable_synced_batchnorm,
+        enable_ffn_relu=self.hps.enable_ffn_relu)
+    module = DeepSpeechEncoderDecoder(config)
+
+    return module
