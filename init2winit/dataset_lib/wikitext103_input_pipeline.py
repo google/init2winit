@@ -24,7 +24,7 @@ import tensorflow as tf
 TRAIN_FILENAME = 'train.txt'
 VALID_FILENAME = 'valid.txt'
 TEST_FILENAME = 'test.txt'
-SHUFFLE_BUFFER_SIZE = 5_000_000
+SHUFFLE_BUFFER_SIZE = 1000_000
 PAD_ID = -1
 
 
@@ -69,11 +69,14 @@ def batch_with_padding(dataset: tf.data.Dataset,
   return padded_batched_dataset
 
 
-def get_wikitext2_dataset(
-    hps: config_dict.ConfigDict, train_batch_size: int, valid_batch_size: int,
-    test_batch_size: int, shuffle_seed: int
+def get_wikitext103_dataset(
+    hps: config_dict.ConfigDict,
+    train_batch_size: int,
+    valid_batch_size: int,
+    test_batch_size: int,
+    shuffle_seed: int,
 ) -> tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset, tf.data.Dataset]:
-  """Returns wikitext-2 dataset.
+  """Returns wikitext-103 dataset.
 
   Args:
     hps: Dataset hyper parameters.
@@ -97,9 +100,12 @@ def get_wikitext2_dataset(
   # Tokenize data
   tokenizer = get_trained_tokenizer(train_text_dataset)
 
-  train_dataset_tokenized = tokenizer.tokenize(train_text_dataset)
-  valid_dataset_tokenized = tokenizer.tokenize(valid_text_dataset)
-  test_dataset_tokenized = tokenizer.tokenize(test_text_dataset)
+  train_dataset_tokenized = tokenizer.tokenize(
+      train_text_dataset)
+  valid_dataset_tokenized = tokenizer.tokenize(
+      valid_text_dataset)
+  test_dataset_tokenized = tokenizer.tokenize(
+      test_text_dataset)
 
   # Divide data in sequences of length sequence_length + 1, to contain inputs
   # and corresponding targets
