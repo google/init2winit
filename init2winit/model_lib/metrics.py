@@ -96,7 +96,7 @@ class OGBGMeanAveragePrecision(
     if not np.logical_or(weights == 1, weights == 0).all():
       raise ValueError(f'Weights must be {0, 1}, received {weights}.')
 
-    weights = weights.astype(np.bool)
+    weights = weights.astype(bool)
 
     probs = expit(logits)  # Sigmoid.
     num_tasks = targets.shape[1]
