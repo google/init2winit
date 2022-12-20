@@ -26,12 +26,9 @@ import numpy as np
 import tensorflow.compat.v2 as tf
 
 
-NUM_CLASSES = 1000
-
-
 DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     input_shape=(224, 224, 3),
-    output_shape=(NUM_CLASSES,),
+    output_shape=(1000,),
     train_size=1281167,
     valid_size=50000,
     test_size=10000,  # ImageNet-v2.
@@ -40,23 +37,6 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
 METADATA = {
     'apply_one_hot_in_loss': False,
 }
-
-
-def transpose_and_normalize_image(image):
-  mean = tf.constant([[mlperf_input_pipeline.MEAN_RGB]], dtype=image.dtype)
-  stddev = tf.constant(
-      [[mlperf_input_pipeline.STDDEV_RGB]], dtype=image.dtype)
-  image -= mean
-  image /= stddev
-  return image
-
-
-# Note that this will run before batching.
-def _preprocess_fn(x, target):
-  return {
-      'inputs': transpose_and_normalize_image(x),
-      'targets': tf.one_hot(target, NUM_CLASSES),
-  }
 
 
 def get_mlperf_imagenet(rng,
@@ -98,24 +78,21 @@ def get_mlperf_imagenet(rng,
       dtype=input_dtype,
       split='train',
       rng=rng,
-      shuffle_size=shuffle_buffer_size,
-      preprocess_fn=_preprocess_fn)
+      shuffle_size=shuffle_buffer_size)
 
   eval_train_ds = mlperf_input_pipeline.load_split(
       host_batch_size,
       dtype=input_dtype,
       split='eval_train',
       rng=rng,
-      shuffle_size=shuffle_buffer_size,
-      preprocess_fn=_preprocess_fn)
+      shuffle_size=shuffle_buffer_size)
 
   eval_ds = mlperf_input_pipeline.load_split(
       eval_host_batch_size,
       dtype=input_dtype,
       split='validation',
       rng=rng,
-      shuffle_size=shuffle_buffer_size,
-      preprocess_fn=_preprocess_fn)
+      shuffle_size=shuffle_buffer_size)
 
   # We do not have TFRecords of ImageNet-v2 in the same format as the
   # train/validation splits above, so we reuse the same test split from the

@@ -85,8 +85,6 @@ def load_split(
   Returns:
     A `tf.data.Dataset`.
   """
-  num_classes = 1000
-
   if split not in ['train', 'eval_train', 'valid', 'test']:
     raise ValueError('Unrecognized split {}'.format(split))
   if split in ['train', 'eval_train']:
@@ -119,14 +117,24 @@ def load_split(
       preprocess_rng = tf.random.experimental.stateless_fold_in(
           tf.cast(shuffle_rng, tf.int64), example_index)
       image = imagenet_preprocessing.preprocess_for_train(
-          hps, example['image'], preprocess_rng, dtype, image_size)
+          example['image'],
+          preprocess_rng,
+          dtype,
+          image_size,
+          crop=hps.crop,
+          random_flip=hps.random_flip,
+          use_randaug=hps.use_randaug,
+          randaug_magnitude=hps.randaug.magnitude,
+          randaug_num_layers=hps.randaug.num_layers)
     else:
       image = imagenet_preprocessing.preprocess_for_eval(
           example['image'], dtype, image_size)
 
     example_dict = {
-        'inputs': image,
-        'targets': tf.one_hot(example['label'], num_classes)
+        'inputs':
+            image,
+        'targets':
+            tf.one_hot(example['label'], imagenet_preprocessing.NUM_CLASSES)
     }
 
     if split == 'train':

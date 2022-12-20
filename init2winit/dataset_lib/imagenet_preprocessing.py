@@ -23,6 +23,7 @@ import tensorflow.compat.v2 as tf
 CROP_PADDING = 32
 MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
+NUM_CLASSES = 1000
 
 
 def distorted_bounding_box_crop(image_bytes,
@@ -31,7 +32,7 @@ def distorted_bounding_box_crop(image_bytes,
                                 min_object_covered=0.1,
                                 aspect_ratio_range=(0.75, 1.33),
                                 area_range=(0.05, 1.0),
-                                max_attempts=100):
+                                max_attempts=10):
   """Generates cropped_image using one of the bboxes randomly distorted.
 
   See `tf.image.sample_distorted_bounding_box` for more documentation.
@@ -89,7 +90,8 @@ def _at_least_x_are_equal(a, b, x):
   return tf.greater_equal(tf.reduce_sum(match), x)
 
 
-def _decode_and_random_crop(image_bytes, image_size, rng_seed):
+def _decode_and_random_crop(image_bytes, image_size, rng_seed, area_range,
+                            use_center_crop_if_random_failed):
   """Make a random crop of image_size."""
   bbox = tf.constant([0.0, 0.0, 1.0, 1.0], dtype=tf.float32, shape=[1, 1, 4])
   image = distorted_bounding_box_crop(
@@ -98,24 +100,25 @@ def _decode_and_random_crop(image_bytes, image_size, rng_seed):
       rng_seed=rng_seed,
       min_object_covered=0.1,
       aspect_ratio_range=(3. / 4, 4. / 3.),
-      area_range=(0.08, 1.0),
+      area_range=area_range,
       max_attempts=10)
   original_shape = tf.image.extract_jpeg_shape(image_bytes)
   bad = _at_least_x_are_equal(original_shape, tf.shape(image), 3)
 
-  image = tf.cond(bad, lambda: _decode_and_center_crop(image_bytes, image_size),
+  image = tf.cond(bad and use_center_crop_if_random_failed,
+                  lambda: _decode_and_center_crop(image_bytes, image_size),
                   lambda: _resize(image, image_size))
 
   return image
 
 
-def maybe_repeat(arg, n_reps):
+def _maybe_repeat(arg, n_reps):
   if not isinstance(arg, abc.Sequence):
     arg = (arg,) * n_reps
   return arg
 
 
-def resize(image, size, method='bilinear'):
+def _resize_for_inception(image, size, method='bilinear'):
   """Resizes image to a given size.
 
   Args:
@@ -128,7 +131,7 @@ def resize(image, size, method='bilinear'):
   Returns:
     A function for resizing an image.
   """
-  size = maybe_repeat(size, 2)
+  size = _maybe_repeat(size, 2)
 
   # Note: use TF-2 version of tf.image.resize as the version in TF-1 is
   # buggy: https://github.com/tensorflow/tensorflow/issues/6720.
@@ -170,7 +173,7 @@ def _decode_and_inception_crop(image_data,
   target_height, target_width, _ = tf.unstack(crop_size)
   crop_window = tf.stack([offset_y, offset_x, target_height, target_width])
   image = tf.image.decode_and_crop_jpeg(image_data, crop_window, channels=3)
-  image = resize(image, size, method)
+  image = _resize_for_inception(image, size, method)
 
   return image
 
@@ -203,44 +206,64 @@ def normalize_image(image):
   return image
 
 
-def preprocess_for_train(hps,
-                         image_bytes,
+def preprocess_for_train(image_bytes,
                          rng_seed,
                          dtype=tf.float32,
-                         image_size=224):
+                         image_size=224,
+                         crop='random',
+                         random_crop_area_range=(0.08, 1.0),
+                         use_center_crop_if_random_failed=False,
+                         random_flip=True,
+                         use_randaug=False,
+                         randaug_magnitude=0,
+                         randaug_num_layers=0):
   """Preprocesses the given image for training.
 
   Args:
-    hps: ConfigDict of options.
     image_bytes: `Tensor` representing an image binary of arbitrary size.
     rng_seed: `Tensor` random seed.
     dtype: data type of the image.
     image_size: image size.
+    crop: string describing what crop type to use ('random', 'inception', or
+      'center').
+    random_crop_area_range: tuple, area_range passed to random crop
+    use_center_crop_if_random_failed: bool, if True use central crop when random
+      crop doesn't succeed after max_num_attempts. Otherwise use full resized
+      image.
+    random_flip: bool, applies random flip if True
+    use_randaug: bool, whether to use randaugment
+    randaug_magnitude: int, passed to randaugment if use_randaug is True
+    randaug_num_layers: int, passed to randaugment if use_randaug is True
 
   Returns:
     A preprocessed image `Tensor`.
   """
   crop_rng, flip_rng, randaug_rng = tf.unstack(tf.random.split(rng_seed, 3))
-  if hps.crop == 'random':
-    image = _decode_and_random_crop(image_bytes, image_size, crop_rng)
-  elif hps.crop == 'inception':
+  if crop == 'random':
+    image = _decode_and_random_crop(
+        image_bytes,
+        image_size,
+        crop_rng,
+        random_crop_area_range,
+        use_center_crop_if_random_failed=use_center_crop_if_random_failed)
+  elif crop == 'inception':
     image = _decode_and_inception_crop(image_bytes, image_size)
-  elif hps.crop == 'center':
+  elif crop == 'center':
     image = _decode_and_center_crop(image_bytes, image_size)
   else:
-    raise ValueError(f'{hps.crop} is not a valid crop strategy')
+    raise ValueError(f'{crop} is not a valid crop strategy')
 
   image = tf.reshape(image, [image_size, image_size, 3])
-  if hps['random_flip']:
+  if random_flip:
     image = tf.image.stateless_random_flip_left_right(image, seed=flip_rng)
 
-  if hps.get('use_randaug'):
+  if use_randaug:
     # NOTE(dsuo): autoaugment code expects uint8 image; not sure why we use
     # float32[0, 255], but just making sure pipeline runs.
     image = tf.cast(tf.clip_by_value(image, 0, 255), tf.uint8)
     image = autoaugment.distort_image_with_randaugment(image,
-                                                       hps.randaug.num_layers,
-                                                       hps.randaug.magnitude,
+                                                       randaug_num_layers,
+                                                       randaug_magnitude,
                                                        randaug_rng)
 
   image = tf.cast(image, tf.float32)
