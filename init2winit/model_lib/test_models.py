@@ -176,6 +176,16 @@ DATA_HPS = {
         'output_shape': (16,),
         'vocab_size': 16,
     },
+    'xformer_translate_mlc_variant': {
+        'dec_num_layers': 2,
+        'enc_num_layers': 2,
+        'input_shape': [(64,), (64,)],
+        'max_eval_target_length': 64,
+        'max_predict_length': 64,
+        'max_target_length': 64,
+        'output_shape': (16,),
+        'vocab_size': 16,
+    },
     'mlcommons_xformer_translate': {
         'dec_num_layers': 2,
         'enc_num_layers': 2,
@@ -216,6 +226,7 @@ LOSS_NAME = {
     'wide_resnet': 'cross_entropy',
     'xformer_translate_binary': 'cross_entropy',
     'xformer_translate': 'cross_entropy',
+    'xformer_translate_mlc_variant': 'cross_entropy',
     'mlcommons_xformer_translate': 'cross_entropy',
 }
 
@@ -248,6 +259,7 @@ METRICS_NAME = {
     'xformer_translate_binary': 'classification_metrics',
     'xformer_translate': 'classification_metrics',
     'mlcommons_xformer_translate': 'classification_metrics',
+    'xformer_translate_mlc_variant': 'classification_metrics',
 }
 
 # Automatically test all defined models.
