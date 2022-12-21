@@ -111,7 +111,6 @@ class DLRM(nn.Module):
 
   @nn.compact
   def __call__(self, x, train):
-    del train
     bot_mlp_input, cat_features = jnp.split(x, [self.num_dense_features], 1)
     cat_features = jnp.asarray(cat_features, dtype=jnp.int32)
 
