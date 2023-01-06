@@ -136,6 +136,11 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         momentum=hps.opt_hparams['momentum'],
         nesterov=(hps.optimizer == 'nesterov'))
   elif hps.optimizer == 'distributed_shampoo':
+    if hps.opt_hparams.get('frequent_directions', False):
+      statistics_compute_steps = hps.opt_hparams[
+          'preconditioning_compute_steps']
+    else:
+      statistics_compute_steps = hps.opt_hparams['statistics_compute_steps']
     # pylint: disable=line-too-long
     opt_init, opt_update = utils.static_inject_hyperparams(
         distributed_shampoo.distributed_shampoo
@@ -151,7 +156,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         .opt_hparams['start_preconditioning_step'],
         preconditioning_compute_steps=hps
         .opt_hparams['preconditioning_compute_steps'],
-        statistics_compute_steps=hps.opt_hparams['statistics_compute_steps'],
+        statistics_compute_steps=statistics_compute_steps,
         best_effort_shape_interpretation=hps
         .opt_hparams['best_effort_shape_interpretation'],
         nesterov=hps.opt_hparams['nesterov'],
@@ -167,6 +172,8 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         .opt_hparams['moving_average_for_momentum'],
         skip_preconditioning_dim_size_gt=hps
         .opt_hparams['skip_preconditioning_dim_size_gt'],
+        relative_matrix_epsilon=hps.opt_hparams.get('relative_matrix_epsilon',
+                                                    True),
         clip_by_scaled_gradient_norm=hps
         .opt_hparams['clip_by_scaled_gradient_norm'],
         merge_small_dims_block_size=hps.opt_hparams.get(
