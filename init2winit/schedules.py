@@ -320,8 +320,8 @@ def compound_schedule(schedule_hparams, max_training_updates):
   return lr_fn
 
 
-def prepend_linear_warmup(schedule_hparams, max_training_updates,
-                          base_lr_schedule):
+def prepend_polynomial_warmup(schedule_hparams, max_training_updates,
+                              base_lr_schedule):
   """Models the base_lr_schedule to include a warmup phase.
 
   The returned schedule will have the following form:
@@ -372,8 +372,8 @@ def prepend_linear_warmup(schedule_hparams, max_training_updates,
 
 def warmup_then_piecewise_constant_schedule(schedule_hparams,
                                             max_training_updates):
-  return prepend_linear_warmup(schedule_hparams, max_training_updates,
-                               piecewise_constant_schedule)
+  return prepend_polynomial_warmup(schedule_hparams, max_training_updates,
+                                   piecewise_constant_schedule)
 
 
 lr_fn_dict = {
@@ -476,7 +476,7 @@ def get_schedule_fn(schedule_hparams, max_training_updates, stretch_factor=1):
   if schedule_hparams['schedule'][-len(warmup_suffix):] == warmup_suffix:
     base_name = schedule_hparams['schedule'][:-len(warmup_suffix)]
     base_lr_schedule = lr_fn_dict[base_name]
-    schedule_fn = prepend_linear_warmup(
+    schedule_fn = prepend_polynomial_warmup(
         schedule_hparams, max_training_updates, base_lr_schedule)
   else:
     schedule_fn = lr_fn_dict[schedule_hparams['schedule']](
