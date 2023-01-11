@@ -15,10 +15,11 @@
 
 """A JAX implementation of DLRM."""
 
-from typing import List
+from typing import List, Optional
 
 import flax.linen as nn
 from init2winit.model_lib import base_model
+from init2winit.model_lib import model_utils
 from jax import nn as jnn
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
@@ -26,6 +27,8 @@ from ml_collections.config_dict import config_dict
 # small hparams used for unit tests
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
+        activation_function='relu',
+        embedding_init_multiplier=None,
         rng_seed=-1,
         model_dtype='float32',
         vocab_size=32 * 128 * 1024,
@@ -108,11 +111,15 @@ class DLRM(nn.Module):
   embed_dim: int = 128
   keep_diags: bool = True
   dropout_rate: float = 0.0
+  activation_function: str = 'relu'
+  embedding_init_multiplier: Optional[float] = None
 
   @nn.compact
   def __call__(self, x, train):
     bot_mlp_input, cat_features = jnp.split(x, [self.num_dense_features], 1)
     cat_features = jnp.asarray(cat_features, dtype=jnp.int32)
+
+    activation_fn = model_utils.ACTIVATIONS[self.activation_function]
 
     # bottom mlp
     mlp_bottom_dims = self.mlp_bottom_dims
@@ -122,18 +129,21 @@ class DLRM(nn.Module):
           kernel_init=jnn.initializers.glorot_uniform(),
           bias_init=jnn.initializers.normal(stddev=jnp.sqrt(1.0 / dense_dim)),
       )(bot_mlp_input)
-      bot_mlp_input = nn.relu(bot_mlp_input)
+      bot_mlp_input = activation_fn(bot_mlp_input)
     bot_mlp_output = bot_mlp_input
     batch_size = bot_mlp_output.shape[0]
     feature_stack = jnp.reshape(bot_mlp_output,
                                 [batch_size, -1, self.embed_dim])
 
     base_init_fn = jnn.initializers.uniform(scale=1.0)
+    if self.embedding_init_multiplier is None:
+      embedding_init_multiplier = 1 / jnp.sqrt(self.vocab_size)
+    else:
+      embedding_init_multiplier = self.embedding_init_multiplier
     # Embedding table init and lookup for a single unified table.
     idx_lookup = jnp.reshape(cat_features, [-1]) % self.vocab_size
     def scaled_init(key, shape, dtype=jnp.float_):
-      return (base_init_fn(key, shape, dtype) /
-              jnp.sqrt(self.vocab_size))
+      return base_init_fn(key, shape, dtype) * embedding_init_multiplier
 
     embedding_table = self.param(
         'embedding_table',
@@ -161,7 +171,7 @@ class DLRM(nn.Module):
               stddev=jnp.sqrt(1.0 / mlp_top_dims[layer_idx])))(
                   top_mlp_input)
       if layer_idx < (num_layers_top - 1):
-        top_mlp_input = nn.relu(top_mlp_input)
+        top_mlp_input = activation_fn(top_mlp_input)
       if self.dropout_rate > 0.0 and layer_idx == num_layers_top - 2:
         top_mlp_input = nn.Dropout(
             rate=self.dropout_rate, deterministic=not train)(
@@ -176,6 +186,8 @@ class DLRMModel(base_model.BaseModel):
   def build_flax_module(self):
     """DLRM for ad click probability prediction."""
     return DLRM(
+        activation_function=self.hps.activation_function,
+        embedding_init_multiplier=self.hps.embedding_init_multiplier,
         vocab_size=self.hps.vocab_size,
         mlp_bottom_dims=self.hps.mlp_bottom_dims,
         mlp_top_dims=self.hps.mlp_top_dims,
