@@ -27,6 +27,7 @@ high-level overview of Conformer encoder layer.
   y = layer_norm(x)
 """
 
+import functools
 import math
 from typing import Any, List
 
@@ -81,7 +82,8 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         enable_decoder_pre_layer_norm=True,
         enable_conformer_post_layer_norm=True,
         use_lingvo_attention=False,
-        total_accumulated_batch_size=None,))
+        total_accumulated_batch_size=None,
+        attn_temperature=1.0))
 
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
@@ -123,7 +125,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         enable_decoder_pre_layer_norm=True,
         enable_conformer_post_layer_norm=True,
         use_lingvo_attention=False,
-        total_accumulated_batch_size=None,))
+        total_accumulated_batch_size=None,
+        attn_temperature=1.0))
 
 
 @struct.dataclass
@@ -159,6 +162,7 @@ class ConformerConfig:
   enable_conformer_post_layer_norm: bool = False
   enable_decoder_pre_layer_norm: bool = False
   use_lingvo_attention: bool = False
+  attn_temperature: float = 1.0
 
 
 class LayerNorm(nn.Module):
@@ -396,7 +400,8 @@ def dot_product_attention(query,
                           dropout_rate=0.,
                           deterministic=False,
                           dtype=jnp.float32,
-                          precision=None):
+                          precision=None,
+                          temperature=1.0):
   """Computes dot-product attention given query, key, and value.
 
   This is the core function for applying attention based on
@@ -429,6 +434,7 @@ def dot_product_attention(query,
     dtype: the dtype of the computation (default: float32)
     precision: numerical precision of the computation see `jax.lax.Precision`
       for details.
+    temperature: Constant factor to multiply logits by before computing softmax.
 
   Returns:
     Output of shape `[batch..., q_length, num_heads, v_depth_per_head]`.
@@ -450,7 +456,7 @@ def dot_product_attention(query,
 
   # return weighted sum over values for each query position
   return jnp.einsum('...hqk,...khd->...qhd', attn_weights, value,
-                    precision=precision)
+                    precision=precision) * temperature
 
 
 class MultiHeadedSelfAttention(nn.Module):
@@ -506,6 +512,8 @@ class MultiHeadedSelfAttention(nn.Module):
           value_vec=inputs,
           atten_mask=atten_mask)[0]
     else:
+      attn_fn = functools.partial(
+          dot_product_attention, temperature=config.attn_temperature)
       result = nn.SelfAttention(
           num_heads=config.num_attention_heads,
           qkv_features=config.encoder_dim,
@@ -515,7 +523,7 @@ class MultiHeadedSelfAttention(nn.Module):
           bias_init=nn.initializers.zeros,
           use_bias=True,
           broadcast_dropout=False,
-          attention_fn=dot_product_attention,
+          attention_fn=attn_fn,
           dropout_rate=config.attention_dropout_rate,
           deterministic=not train)(inputs, attention_mask)
 
@@ -961,7 +969,8 @@ class MLCommonsConformerModel(ConformerModel):
         enable_conformer_post_layer_norm=self.hps
         .enable_conformer_post_layer_norm,
         enable_decoder_pre_layer_norm=self.hps.enable_decoder_pre_layer_norm,
-        use_lingvo_attention=self.hps.use_lingvo_attention)
+        use_lingvo_attention=self.hps.use_lingvo_attention,
+        attn_temperature=self.hps.attn_temperature)
     module = ConformerEncoderDecoder(config)
 
     return module
