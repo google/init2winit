@@ -271,6 +271,13 @@ class ResnetModelMLPerf(base_model.BaseModel):
         activation_function=self.hps.activation_function,
         dropout_rate=self.hps.dropout_rate)
 
+  def get_fake_inputs(self, hps):
+    """Helper method solely for purpose of initializing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs
+
 
 class FakeModel(base_model.BaseModel):
   """Fake Model for easy debugging."""

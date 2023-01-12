@@ -2105,3 +2105,10 @@ class LocalAttentionTransformer(base_model.BaseModel):
         feedforward_dropout=self.hps.feedforward_dropout,
         feedforward_depths=self.hps.feedforward_depths,
         dtype=self.hps.model_dtype)
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initialzing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+    ]
+    return dummy_inputs

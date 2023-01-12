@@ -92,8 +92,20 @@ DATA_HPS = {
         'input_shape': ((28, 28, 1)),
         'output_shape': ((28, 28, 1)),
     },
-    'deepspeech': {},
-    'mlcommons_deepspeech': {},
+    'deepspeech': {
+        'max_input_length': 64,
+        'max_target_length': 64,
+        'input_shape': [(64,), (64,)],
+        'output_shape': (-1, 32),
+        'tokenizer_type': 'WPM',
+    },
+    'mlcommons_deepspeech': {
+        'max_input_length': 64,
+        'max_target_length': 64,
+        'input_shape': [(64,), (64,)],
+        'output_shape': (-1, 32),
+        'tokenizer_type': 'WPM',
+    },
     'dlrm': {
         'input_shape': (39,),  # Like criteo1tb
     },
@@ -132,7 +144,10 @@ DATA_HPS = {
         'input_shape': (32, 32, 3),
         'output_shape': (5,),
     },
-    'mlperf_resnet': {},
+    'mlperf_resnet': {
+        'input_shape': (32, 32, 3),
+        'output_shape': (5,),
+    },
     'nqm': {
         'input_shape': (10,),
         'output_shape': (1,),
@@ -159,13 +174,28 @@ DATA_HPS = {
         'output_shape': (16,),
         'vocab_size': 16,
     },
-    'unet': {},
-    'vit': {},
+    'unet': {
+        'input_shape': (64, 64),
+        'output_shape': (64, 64),
+    },
+    'vit': {
+        'input_shape': (32, 32, 3),
+        'output_shape': (5,),
+    },
     'wide_resnet': {
         'input_shape': (32, 32, 3),
         'output_shape': (5,),
     },
-    'xformer_translate_binary': {},
+    'xformer_translate_binary': {
+        'dec_num_layers': 2,
+        'enc_num_layers': 2,
+        'input_shape': [(64,), (64,)],
+        'max_eval_target_length': 64,
+        'max_predict_length': 64,
+        'max_target_length': 64,
+        'output_shape': (16,),
+        'vocab_size': 16,
+    },
     'xformer_translate': {
         'dec_num_layers': 2,
         'enc_num_layers': 2,
@@ -279,12 +309,14 @@ dtypes = ['bfloat16', 'float32']
 
 # Construct keys for tests for initialization
 # TODO(kasimbeg): Add HPS for excluded models and include in tests.
-# pylint: disable=g-complex-comprehension
 skipped_models = [
-    'unet', 'vit', 'conformer', 'mlcommons_conformer',
-    'xformer_translate_binary', 'mlperf_resnet', 'deepspeech',
-    'mlcommons_deepspeech', 'local_attention_transformer'
+    'deepspeech',
+    'mlcommons_deepspeech',
+    'conformer',
+    'mlcommons_conformer',
+    'local_attention_transformer'
 ]
+# pylint: disable=g-complex-comprehension
 model_init_keys = [
     ('test_model_{}_dtype_{}'.format(
         model_str,

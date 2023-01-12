@@ -1064,3 +1064,12 @@ class TransformerTranslate(base_model.BaseModel):
         binarize_hparams=self.hps.binarize_hparams,
         dynamic_context=DynamicContext(),
     )
+
+  def get_fake_inputs(self, hps):
+    """Helper method solely for the purpose of initializing the model."""
+    dummy_inputs = [
+        jnp.zeros((hps.batch_size, *x), dtype=hps.model_dtype)
+        for x in hps.input_shape
+    ]
+    return dummy_inputs
+  
