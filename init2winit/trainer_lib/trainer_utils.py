@@ -114,7 +114,9 @@ def check_for_early_stopping(
     early_stopping_target_name,
     early_stopping_target_value,
     early_stopping_mode,
-    eval_report):
+    early_stopping_min_steps,
+    eval_report,
+):
   """Check if we reached the metric value to stop training early."""
   if early_stopping_target_name is not None:
     if early_stopping_target_name not in eval_report:
@@ -127,12 +129,16 @@ def check_for_early_stopping(
           'Need to provide a early_stopping_mode if using early stopping.')
     # Note that because eval metrics are synced across hosts, this should
     # stop training on every host at the same step.
+    if eval_report['global_step'] < early_stopping_min_steps:
+      return False
     if early_stopping_mode == 'above':
-      return (eval_report[early_stopping_target_name] >=
-              early_stopping_target_value)
+      return (
+          eval_report[early_stopping_target_name] >= early_stopping_target_value
+      )
     else:
-      return (eval_report[early_stopping_target_name] <=
-              early_stopping_target_value)
+      return (
+          eval_report[early_stopping_target_name] <= early_stopping_target_value
+      )
 
 
 def prefetch_input_pipeline(ds, n_prefetch=0, devices=None):

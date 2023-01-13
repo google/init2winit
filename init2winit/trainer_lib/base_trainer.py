@@ -55,6 +55,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       early_stopping_target_name=None,
       early_stopping_target_value=None,
       early_stopping_mode=None,
+      early_stopping_min_steps=0,
       eval_steps=None,
       metrics_logger=None,
       init_logger=None,
@@ -63,7 +64,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       external_checkpoint_path=None,
       dataset_meta_data=None,
       loss_name=None,
-      metrics_name=None):
+      metrics_name=None,
+  ):
     """Main training loop.
 
     Trains the given network on the specified dataset for the given number of
@@ -84,8 +86,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       eval_batch_size: the evaluation batch size. If None, use hps.batch_size.
       eval_num_batches: (int) The number of batches used for evaluating on
         validation sets. Set to None to evaluate on the whole eval set.
-      test_num_batches: (int) The number of batches used for evaluating on
-        test sets. Set to None to evaluate on the whole test set.
+      test_num_batches: (int) The number of batches used for evaluating on test
+        sets. Set to None to evaluate on the whole test set.
       eval_train_num_batches: (int) The number of batches for evaluating on
         train. Set to None to evaluate on the whole training set.
       eval_frequency: (int) Evaluate every k steps.
@@ -102,6 +104,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         stop when the metric is above or below the threshold value. Example: if
         "above", then training will stop when
         `report[early_stopping_target_name] >= early_stopping_target_value`.
+      early_stopping_min_steps: Only allows early stopping after at least this
+        many steps.
       eval_steps: List of integers indicating which steps to perform evals. If
         provided, eval_frequency will be ignored. Performing an eval implies
         saving a checkpoint that will be used to resume training in the case of
@@ -111,7 +115,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       init_logger: Used for black box initializers that have learning curves.
       training_metrics_config: Dict specifying the configuration of the
         training_metrics_grabber. Set to None to skip logging of advanced
-        training metrics.
       callback_configs: List of configs specifying general callbacks to run
         during the eval phase. Empty list means no callbacks are run. See
         callbacks.py for details on what is expected in a config.
@@ -124,9 +127,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       loss_name: name of the loss function. Not directly used in base trainer.
         Users are expected to overwrite the initialization method in a
         customimzed trainer to access it.
-      metrics_name: Not directly used in the base trainer. Users are expected
-        to overwrite the initialization method in a customimzed trainer to
-        access it.
+      metrics_name: Not directly used in the base trainer. Users are expected to
+        overwrite the initialization method in a customimzed trainer to access
+        it.
     """
     del dataset_meta_data
     del loss_name
@@ -149,6 +152,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._early_stopping_target_name = early_stopping_target_name
     self._early_stopping_target_value = early_stopping_target_value
     self._early_stopping_mode = early_stopping_mode
+    self._early_stopping_min_steps = early_stopping_min_steps
     self._eval_steps = eval_steps
     self._metrics_logger = metrics_logger
     self._init_logger = init_logger
@@ -448,7 +452,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._early_stopping_target_name,
         self._early_stopping_target_value,
         self._early_stopping_mode,
-        report)
+        self._early_stopping_min_steps,
+        report,
+    )
     if early_stopping_condition:
       if self._early_stopping_mode == 'above':
         comparison_string = '>='

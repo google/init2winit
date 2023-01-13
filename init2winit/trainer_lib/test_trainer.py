@@ -901,7 +901,8 @@ class TrainerTest(parameterized.TestCase):
     for metric, val in zip(test_metric_names, test_metric_vals):
       self.assertAlmostEqual(result[metric], val, places=5)
 
-  def test_early_stopping(self):
+  @parameterized.parameters(False, True)
+  def test_early_stopping(self, min_steps):
     """Test training early stopping on MNIST with a small model."""
     rng = jax.random.PRNGKey(0)
 
@@ -973,10 +974,12 @@ class TrainerTest(parameterized.TestCase):
     early_stopping_target_name = 'test/ce_loss'
     early_stopping_target_value = 0.005
     early_stopping_mode = 'less'
+    early_stopping_min_steps = 0
     eval_num_batches = 5
     test_num_batches = 5
     eval_every = 10
-    checkpoint_steps = [1, 3, 15]
+    if min_steps:
+      early_stopping_min_steps = 40
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
     epoch_reports = list(
         trainer.Trainer(
@@ -992,12 +995,19 @@ class TrainerTest(parameterized.TestCase):
             test_num_batches=test_num_batches,
             eval_train_num_batches=eval_num_batches,
             eval_frequency=eval_every,
-            checkpoint_steps=checkpoint_steps,
+            checkpoint_steps=[],
             early_stopping_target_name=early_stopping_target_name,
             early_stopping_target_value=early_stopping_target_value,
             early_stopping_mode=early_stopping_mode,
+            early_stopping_min_steps=early_stopping_min_steps,
             metrics_logger=metrics_logger,
-            init_logger=init_logger).train())
+            init_logger=init_logger,
+        ).train()
+    )
+    if min_steps:
+      # With min steps, we should've run an extra 10 steps.
+      self.assertLen(epoch_reports, 4)
+      epoch_reports.pop()
     self.assertLen(epoch_reports, 3)
     self.assertGreater(
         epoch_reports[-2][early_stopping_target_name],

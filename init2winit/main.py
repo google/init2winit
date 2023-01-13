@@ -121,7 +121,11 @@ flags.DEFINE_enum(
         'metric is above or below the threshold value. Example: if "above", '
         'then training will stop when '
         '`report[early_stopping_target_name] >= early_stopping_target_value`.'))
-
+flags.DEFINE_integer(
+    'early_stopping_min_steps',
+    0,
+    help='Only allows early stopping after at least this many steps.',
+)
 flags.DEFINE_list(
     'eval_steps', [],
     'List of steps to evaluate the model. Evaluating implies saving a '
@@ -174,6 +178,7 @@ def _run(
     early_stopping_target_name,
     early_stopping_target_value,
     early_stopping_mode,
+    early_stopping_min_steps,
     eval_steps,
     hparam_file,
     hparam_overrides,
@@ -186,7 +191,8 @@ def _run(
     worker_id,
     training_metrics_config,
     callback_configs,
-    external_checkpoint_path):
+    external_checkpoint_path,
+):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
   initializer = initializers.get_initializer(initializer_name)
@@ -255,6 +261,7 @@ def _run(
             early_stopping_target_name,
             early_stopping_target_value,
             early_stopping_mode,
+            early_stopping_min_steps,
             eval_steps,
             metrics_logger,
             init_logger,
@@ -263,7 +270,9 @@ def _run(
             external_checkpoint_path=external_checkpoint_path,
             dataset_meta_data=dataset_meta_data,
             loss_name=loss_name,
-            metrics_name=metrics_name).train())
+            metrics_name=metrics_name,
+        ).train()
+    )
     logging.info(epoch_reports)
     meta_data['status'] = 'done'
   except utils.TrainingDivergedError as err:
@@ -322,6 +331,7 @@ def main(unused_argv):
         early_stopping_target_name=FLAGS.early_stopping_target_name,
         early_stopping_target_value=FLAGS.early_stopping_target_value,
         early_stopping_mode=FLAGS.early_stopping_mode,
+        early_stopping_min_steps=FLAGS.early_stopping_min_steps,
         eval_steps=eval_steps,
         hparam_file=FLAGS.hparam_file,
         hparam_overrides=FLAGS.hparam_overrides,
