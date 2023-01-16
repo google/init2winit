@@ -14,6 +14,10 @@
 # limitations under the License.
 
 """Contains Tokenizer class for word level tokenization.
+
+Note that the current tokenization workflow is not yet optimized for time and
+memory yet.
+
 """
 
 import tensorflow as tf
@@ -68,7 +72,7 @@ class Tokenizer:
     idss = []
     for line in dataset:
       ids = []
-      words = line.numpy().split() + [b'<eos>']
+      words = line.numpy().split() + [EOS_TOKEN]
       for word in words:
         try:
           ids.append(self.dictionary.word2idx[word])
