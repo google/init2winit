@@ -29,6 +29,7 @@ from init2winit.dataset_lib import ogbg_molpcba
 from init2winit.dataset_lib import proteins
 from init2winit.dataset_lib import small_image_datasets
 from init2winit.dataset_lib import translate_wmt
+from init2winit.dataset_lib import wikitext103
 from init2winit.dataset_lib import wikitext2
 
 _Dataset = collections.namedtuple(
@@ -99,6 +100,9 @@ _ALL_DATASETS = {
                  proteins.METADATA, None),
     'wikitext2':
         _Dataset(wikitext2.get_wikitext2, wikitext2.DEFAULT_HPARAMS,
+                 wikitext2.METADATA, None),
+    'wikitext103':
+        _Dataset(wikitext103.get_wikitext103, wikitext103.DEFAULT_HPARAMS,
                  wikitext2.METADATA, None),
 }
 

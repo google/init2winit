@@ -117,10 +117,6 @@ class LSTMModel(base_model.BaseModel):
   def evaluate_batch(self, params, batch_stats, batch):
     """Evaluates metrics on the given batch.
 
-    This method uses the class method apply_on_batch instead of
-    flax_module.apply because the flax_module. The apply_on_batch method
-    handles the 'length' input into the flax_nlp LSTM inner module.
-
     We use the CLU metrics library to evaluate the metrics, and we require
     that each metric_fn in metrics_bundle has the API:
       metric_fn(logits, targets, weights), including the argument names.

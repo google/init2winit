@@ -339,7 +339,7 @@ def tabulate_model(model, hps):
   tabulate_fn = nn.tabulate(model.flax_module, jax.random.PRNGKey(0),
                             console_kwargs={'force_terminal': False,
                                             'force_jupyter': False,
-                                            'width': 120},
+                                            'width': 240},
                             )
   fake_inputs_hps = copy.copy(hps)
   fake_inputs_hps.batch_size = 2
