@@ -86,6 +86,7 @@ _ALL_MODELS = {
                                  xformer_translate_binary.DEFAULT_HPARAMS),
     'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS),
     'dlrm': (dlrm.DLRMModel, dlrm.DEFAULT_HPARAMS),
+    'dlrm_resnet': (dlrm.DLRMResNetModel, dlrm.DEFAULT_RESNET_HPARAMS),
     'vit': (vit.ViTModel, vit.DEFAULT_HPARAMS),
     'unet': (unet.UNetModel, unet.DEFAULT_HPARAMS),
     'lstm': (lstm_lm.LSTMModel, lstm_lm.DEFAULT_HPARAMS),

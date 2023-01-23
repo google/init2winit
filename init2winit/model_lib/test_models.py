@@ -109,6 +109,9 @@ DATA_HPS = {
     'dlrm': {
         'input_shape': (39,),  # Like criteo1tb
     },
+    'dlrm_resnet': {
+        'input_shape': (39,),  # Like criteo1tb
+    },
     'fake_resnet': {
         'input_shape': (32, 32, 3),
         'output_shape': (5,),
@@ -239,6 +242,7 @@ LOSS_NAME = {
     'deepspeech': 'ctc',
     'mlcommons_deepspeech': 'ctc',
     'dlrm': 'sigmoid_binary_cross_entropy',
+    'dlrm_resnet': 'sigmoid_binary_cross_entropy',
     'fake_resnet': 'cross_entropy',
     'fully_connected': 'cross_entropy',
     'gnn': 'sigmoid_binary_cross_entropy',
@@ -271,6 +275,7 @@ METRICS_NAME = {
     'deepspeech': 'ctc_metrics',
     'mlcommons_deepspeech': 'ctc_metrics',
     'dlrm': 'binary_classification_metrics_dlrm_no_auc',
+    'dlrm_resnet': 'binary_classification_metrics_dlrm_no_auc',
     'fake_resnet': 'classification_metrics',
     'fully_connected': 'classification_metrics',
     'gnn': 'binary_classification_metrics',
@@ -301,7 +306,7 @@ classification_models = [
     'fully_connected', 'simple_cnn', 'max_pooling_cnn', 'wide_resnet', 'resnet',
     'adabelief_densenet', 'adabelief_vgg', 'fake_resnet'
 ]
-binary_classification_models = ['dlrm']  # TODO(kasimbeg)
+binary_classification_models = ['dlrm', 'dlrm_resnet']  # TODO(kasimbeg)
 generative_models = ['unet']  # TODO(kasimbeg)
 
 # Model arguments
@@ -310,11 +315,11 @@ dtypes = ['bfloat16', 'float32']
 # Construct keys for tests for initialization
 # TODO(kasimbeg): Add HPS for excluded models and include in tests.
 skipped_models = [
-    'deepspeech',
-    'mlcommons_deepspeech',
     'conformer',
+    'deepspeech',
+    'local_attention_transformer',
     'mlcommons_conformer',
-    'local_attention_transformer'
+    'mlcommons_deepspeech',
 ]
 # pylint: disable=g-complex-comprehension
 model_init_keys = [
