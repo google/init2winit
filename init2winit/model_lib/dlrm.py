@@ -54,6 +54,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         total_accumulated_batch_size=None,
         grad_clip=None,
         dropout_rate=0.0,
+        normalizer='none',
         # dropout will exist only if there are at least two top mlp layers
     ))
 
@@ -116,6 +117,7 @@ class DLRM(nn.Module):
   dropout_rate: float = 0.0
   activation_function: str = 'relu'
   embedding_init_multiplier: Optional[float] = None
+  normalizer: str = 'none'
 
   @nn.compact
   def __call__(self, x, train):
@@ -123,7 +125,7 @@ class DLRM(nn.Module):
     cat_features = jnp.asarray(cat_features, dtype=jnp.int32)
 
     activation_fn = model_utils.ACTIVATIONS[self.activation_function]
-
+    normalizer_layer = model_utils.get_normalizer(self.normalizer, train)
     # bottom mlp
     mlp_bottom_dims = self.mlp_bottom_dims
     for dense_dim in mlp_bottom_dims:
@@ -133,6 +135,7 @@ class DLRM(nn.Module):
           bias_init=jnn.initializers.normal(stddev=jnp.sqrt(1.0 / dense_dim)),
       )(bot_mlp_input)
       bot_mlp_input = activation_fn(bot_mlp_input)
+      bot_mlp_input = normalizer_layer()(bot_mlp_input)
     bot_mlp_output = bot_mlp_input
     batch_size = bot_mlp_output.shape[0]
     feature_stack = jnp.reshape(bot_mlp_output,
@@ -156,6 +159,7 @@ class DLRM(nn.Module):
     embed_features = embedding_table[idx_lookup]
     embed_features = jnp.reshape(
         embed_features, [batch_size, -1, self.embed_dim])
+    embed_features = normalizer_layer()(embed_features)
     feature_stack = jnp.concatenate([feature_stack, embed_features], axis=1)
     dot_interact_output = dot_interact(
         concat_features=feature_stack, keep_diags=self.keep_diags)
@@ -175,6 +179,7 @@ class DLRM(nn.Module):
                   top_mlp_input)
       if layer_idx < (num_layers_top - 1):
         top_mlp_input = activation_fn(top_mlp_input)
+        top_mlp_input = normalizer_layer()(top_mlp_input)
       if self.dropout_rate > 0.0 and layer_idx == num_layers_top - 2:
         top_mlp_input = nn.Dropout(
             rate=self.dropout_rate, deterministic=not train)(
@@ -197,7 +202,8 @@ class DLRMModel(base_model.BaseModel):
         num_dense_features=self.hps.num_dense_features,
         embed_dim=self.hps.embed_dim,
         keep_diags=self.hps.keep_diags,
-        dropout_rate=self.hps.dropout_rate)
+        dropout_rate=self.hps.dropout_rate,
+        normalizer=self.hps.normalizer)
 
   def get_fake_inputs(self, hps):
     """Helper method solely for purpose of initalizing the model."""
