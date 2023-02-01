@@ -25,7 +25,11 @@ from init2winit.model_lib import losses
 import jax
 import numpy as np
 
-CLASSIFICATION_LOSSES = ['cross_entropy', 'bi_tempered_cross_entropy']
+CLASSIFICATION_LOSSES = [
+    'cross_entropy',
+    'bi_tempered_cross_entropy',
+    'rescaled_mean_squared_error',
+]
 RECONSTRUCTION_LOSSES = [
     'sigmoid_binary_cross_entropy',
     'bi_tempered_sigmoid_binary_cross_entropy',
@@ -45,10 +49,16 @@ CLASSIFICATION_TEST_DATA = [{
         0.9,
     'bi_tempered_t2':
         2.0,
+    'sq_loss_k':
+        1.0,
+    'sq_loss_m':
+        1.0,
     'cross_entropy':
         8.956906,
     'bi_tempered_cross_entropy':
         1.9120569,
+    'rescaled_mean_squared_error':
+        37.56,
 }, {
     'logits':
         np.array([[4, 2, 0, -4, 5], [14, 2, -5, 10, 12], [20, -3, 7, -9, 6],
@@ -62,10 +72,16 @@ CLASSIFICATION_TEST_DATA = [{
         0.9,
     'bi_tempered_t2':
         2.0,
+    'sq_loss_k':
+        5.0,
+    'sq_loss_m':
+        10.0,
     'cross_entropy':
         6.7589717,
     'bi_tempered_cross_entropy':
         1.7393580,
+    'rescaled_mean_squared_error':
+        140.56666,
 }]
 
 RECONSTRUCTION_TEST_DATA = [{
@@ -100,6 +116,10 @@ RECONSTRUCTION_TEST_DATA = [{
         0.9,
     'bi_tempered_t2':
         2.0,
+    'sq_loss_k':
+        1.0,
+    'sq_loss_m':
+        1.0,
     'sigmoid_binary_cross_entropy':
         11.996754,
     'bi_tempered_sigmoid_binary_cross_entropy':
@@ -178,8 +198,11 @@ class LossesTest(parameterized.TestCase):
   @parameterized.named_parameters(*CLASSIFICATION_KEYS)
   def test_classification_losses(self, loss_name):
     for data in CLASSIFICATION_TEST_DATA:
-      loss_fn = losses.get_loss_fn(loss_name, data['bi_tempered_t1'],
-                                   data['bi_tempered_t2'])
+      loss_fn = losses.get_loss_fn(loss_name,
+                                   data['bi_tempered_t1'],
+                                   data['bi_tempered_t2'],
+                                   data['sq_loss_k'],
+                                   data['sq_loss_m'])
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['one_hot_targets'], data['weights']),
           data[loss_name],
