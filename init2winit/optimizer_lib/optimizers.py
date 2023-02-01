@@ -200,8 +200,21 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
   elif hps.optimizer == 'adafactor':
     opt_init, opt_update = utils.static_inject_hyperparams(optax.adafactor)(
         learning_rate=0.0,
-        decay_rate=hps.opt_hparams['adafactor_decay_rate'],
-        clipping_threshold=hps.opt_hparams['clipping_threshold'])
+        min_dim_size_to_factor=hps.opt_hparams['min_dim_size_to_factor'],
+        decay_rate=hps.opt_hparams['decay_rate'],
+        decay_offset=hps.opt_hparams['decay_offset'],
+        multiply_by_parameter_scale=hps
+        .opt_hparams['multiply_by_parameter_scale'],
+        clipping_threshold=hps.opt_hparams['clipping_threshold'],
+        momentum=hps.opt_hparams['momentum'],
+        weight_decay_rate=weight_decay,
+        eps=hps.opt_hparams['epsilon'],
+        factored=hps.opt_hparams['factored'],
+        # NOTE(dsuo): we provide this wiring, but specifying a weight decay
+        # mask in a config file / serializing properly is not completely
+        # straightforward.
+        weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
+    )
   elif hps.optimizer == 'hessian_free':
     if model is None:
       raise ValueError(
