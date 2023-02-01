@@ -27,6 +27,7 @@ github.com/facebookresearch/fastMRI/tree/main/fastmri/data
 
 import flax.linen as nn
 from init2winit.model_lib import base_model
+from init2winit.model_lib import model_utils
 import jax
 import jax.numpy as jnp
 from ml_collections import config_dict
@@ -75,6 +76,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         chans=32,
         num_pool_layers=4,
         dropout_rate=0.0,
+        activation='leaky_relu',
         optimizer='adam',
         opt_hparams=opt_hparams,
         lr_hparams=lr_hparams,
@@ -84,6 +86,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         model_dtype='float32',
         grad_clip=None,
         total_accumulated_batch_size=None,
+        normalizer='unet_instance_norm',
     ))
 
 
@@ -133,26 +136,36 @@ class UNet(nn.Module):
   chans: int = 32
   num_pool_layers: int = 4
   drop_prob: float = 0.0
+  activation: str = 'leaky_relu'
+  normalizer: str = 'unet_instance_norm'
 
   @nn.compact
   def __call__(self, x, train=True):
-    down_sample_layers = [ConvBlock(self.chans, self.drop_prob)]
+    down_sample_layers = [
+        ConvBlock(self.chans, self.drop_prob, self.activation, self.normalizer)
+    ]
 
     ch = self.chans
     for _ in range(self.num_pool_layers - 1):
-      down_sample_layers.append(ConvBlock(ch * 2, self.drop_prob))
+      down_sample_layers.append(
+          ConvBlock(ch * 2, self.drop_prob, self.activation, self.normalizer)
+      )
       ch *= 2
-    conv = ConvBlock(ch * 2, self.drop_prob)
+    conv = ConvBlock(ch * 2, self.drop_prob, self.activation, self.normalizer)
 
     up_conv = []
     up_transpose_conv = []
     for _ in range(self.num_pool_layers - 1):
-      up_transpose_conv.append(TransposeConvBlock(ch))
-      up_conv.append(ConvBlock(ch, self.drop_prob))
+      up_transpose_conv.append(TransposeConvBlock(ch, self.activation))
+      up_conv.append(
+          ConvBlock(ch, self.drop_prob, self.activation, self.normalizer)
+      )
       ch //= 2
 
-    up_transpose_conv.append(TransposeConvBlock(ch))
-    up_conv.append(ConvBlock(ch, self.drop_prob))
+    up_transpose_conv.append(TransposeConvBlock(ch, self.activation))
+    up_conv.append(
+        ConvBlock(ch, self.drop_prob, self.activation, self.normalizer)
+    )
 
     final_conv = nn.Conv(self.out_chans, kernel_size=(1, 1), strides=(1, 1))
 
@@ -200,6 +213,8 @@ class ConvBlock(nn.Module):
   """
   out_chans: int
   drop_prob: float
+  activation: str
+  normalizer: str
 
   @nn.compact
   def __call__(self, x, train=True):
@@ -220,10 +235,21 @@ class ConvBlock(nn.Module):
         strides=(1, 1),
         use_bias=False)(
             x)
-    # InstanceNorm2d was run with no learnable params in reference code
+    # InstanceNorm2d was implemented with no learnable params in reference code
     # so this is a simple normalization along channels
-    x = _simple_instance_norm2d(x, (1, 2))
-    x = jax.nn.leaky_relu(x, negative_slope=0.2)
+    if self.normalizer == 'unet_instance_norm':
+      x = _simple_instance_norm2d(x, (1, 2))
+    elif self.normalizer == 'layer_norm':
+      # Layer Norm typically normalizes across channels as well
+      x = nn.LayerNorm(reduction_axes=(1, 2, 3))(x)
+    else:
+      raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
+    if self.activation == 'leaky_relu':
+      x = jax.nn.leaky_relu(x, negative_slope=0.2)
+    elif self.activation in model_utils.ACTIVATIONS:
+      x = model_utils.ACTIVATIONS[self.activation](x)
+    else:
+      raise ValueError('Unsupported activation: {}'.format(self.activation))
     # Ref code uses dropout2d which applies the same mask for the entire channel
     # Replicated by using broadcast dims to have the same filter on HW
     x = nn.Dropout(
@@ -235,8 +261,15 @@ class ConvBlock(nn.Module):
         strides=(1, 1),
         use_bias=False)(
             x)
-    x = _simple_instance_norm2d(x, (1, 2))
-    x = jax.nn.leaky_relu(x, negative_slope=0.2)
+    # InstanceNorm2d was implemented with no learnable params in reference code
+    # so this is a simple normalization along channels
+    if self.normalizer == 'unet_instance_norm':
+      x = _simple_instance_norm2d(x, (1, 2))
+    elif self.normalizer == 'layer_norm':
+      # Layer Norm typically normalizes across channels as well
+      x = nn.LayerNorm(reduction_axes=(1, 2, 3))(x)
+    else:
+      raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
     x = nn.Dropout(
         self.drop_prob, broadcast_dims=(1, 2), deterministic=not train)(
             x)
@@ -250,6 +283,7 @@ class TransposeConvBlock(nn.Module):
   out_chans: Number of channels in the output.
   """
   out_chans: int
+  activation: str
 
   @nn.compact
   def __call__(self, x):
@@ -265,7 +299,12 @@ class TransposeConvBlock(nn.Module):
         self.out_chans, kernel_size=(2, 2), strides=(2, 2), use_bias=False)(
             x)
     x = _simple_instance_norm2d(x, (1, 2))
-    x = jax.nn.leaky_relu(x, negative_slope=0.2)
+    if self.activation == 'leaky_relu':
+      x = jax.nn.leaky_relu(x, negative_slope=0.2)
+    elif self.activation in model_utils.ACTIVATIONS:
+      x = model_utils.ACTIVATIONS[self.activation](x)
+    else:
+      raise ValueError('Unsupported activation: {}'.format(self.activation))
 
     return x
 
@@ -303,7 +342,9 @@ class UNetModel(base_model.BaseModel):
         out_chans=self.hps.out_chans,
         chans=self.hps.chans,
         num_pool_layers=self.hps.num_pool_layers,
-        drop_prob=self.hps.dropout_rate)
+        drop_prob=self.hps.dropout_rate,
+        activation=self.hps.activation,
+        normalizer=self.hps.normalizer)
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initializing the model."""
