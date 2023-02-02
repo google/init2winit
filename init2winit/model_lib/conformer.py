@@ -36,6 +36,7 @@ from flax import struct
 from init2winit.model_lib import base_model
 from init2winit.model_lib import librispeech_preprocessor as preprocessor
 from init2winit.model_lib import lingvo_attention
+from init2winit.model_lib import model_utils
 from init2winit.model_lib import spectrum_augmenter
 import jax
 import jax.numpy as jnp
@@ -44,7 +45,7 @@ import numpy as np
 
 MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        activation_function='relu',
+        activation_function='swish',
         optimizer='adam',
         opt_hparams={
             'beta1': .9,
@@ -83,12 +84,13 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         enable_conformer_post_layer_norm=True,
         use_lingvo_attention=False,
         total_accumulated_batch_size=None,
-        attn_temperature=1.0))
+        attn_temperature=1.0,
+        ))
 
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        activation_function='relu',
+        activation_function='swish',
         optimizer='adam',
         opt_hparams={
             'beta1': .9,
@@ -163,6 +165,7 @@ class ConformerConfig:
   enable_decoder_pre_layer_norm: bool = False
   use_lingvo_attention: bool = False
   attn_temperature: float = 1.0
+  activation_function: str = 'swish'
 
 
 class LayerNorm(nn.Module):
@@ -308,7 +311,7 @@ class FeedForwardModule(nn.Module):
         use_bias=True,
         kernel_init=nn.initializers.xavier_uniform())(
             inputs)
-    inputs = nn.swish(inputs)
+    inputs = model_utils.ACTIVATIONS[self.config.activation_function](inputs)
     inputs = nn.Dropout(rate=config.feed_forward_dropout_rate)(
         inputs, deterministic=not train)
 
@@ -652,7 +655,7 @@ class ConvolutionBlock(nn.Module):
 
     inputs = BatchNorm(config)(inputs, input_paddings, train)
 
-    inputs = nn.swish(inputs)
+    inputs = model_utils.ACTIVATIONS[self.config.activation_function](inputs)
     inputs = nn.Dense(
         config.encoder_dim,
         kernel_init=nn.initializers.xavier_uniform())(inputs)
@@ -927,7 +930,9 @@ class ConformerModel(base_model.BaseModel):
         enable_conformer_post_layer_norm=self.hps
         .enable_conformer_post_layer_norm,
         enable_decoder_pre_layer_norm=self.hps.enable_decoder_pre_layer_norm,
-        use_lingvo_attention=self.hps.use_lingvo_attention)
+        use_lingvo_attention=self.hps.use_lingvo_attention,
+        activation_function=self.hps.activation_function,
+        )
     module = ConformerEncoderDecoder(config)
 
     return module
@@ -970,7 +975,9 @@ class MLCommonsConformerModel(ConformerModel):
         .enable_conformer_post_layer_norm,
         enable_decoder_pre_layer_norm=self.hps.enable_decoder_pre_layer_norm,
         use_lingvo_attention=self.hps.use_lingvo_attention,
-        attn_temperature=self.hps.attn_temperature)
+        attn_temperature=self.hps.attn_temperature,
+        activation_function=self.hps.activation_function,
+        )
     module = ConformerEncoderDecoder(config)
 
     return module

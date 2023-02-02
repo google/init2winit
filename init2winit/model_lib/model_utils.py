@@ -42,6 +42,7 @@ ACTIVATIONS = {
     'silu': jax.nn.silu,
     'leaky_relu': jax.nn.leaky_relu,
     'gelu': jax.nn.gelu,
+    'swish': jax.nn.swish,
 }
 
 lecun_normal = functools.partial(
