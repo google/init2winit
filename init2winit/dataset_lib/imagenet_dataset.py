@@ -15,9 +15,13 @@
 
 """ImageNet input pipeline with resnet preprocessing."""
 
+import dataclasses
 import itertools
+from typing import Any
 
 from absl import logging
+from grain._src.tensorflow import transforms
+import grain.tensorflow as grain
 from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import image_preprocessing
 from init2winit.dataset_lib import imagenet_preprocessing
@@ -41,15 +45,204 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         use_mixup=False,
         mixup={'alpha': 0.5},
         use_randaug=False,
-        randaug={
-            'magnitude': 15,
-            'num_layers': 2
-        }))
+        randaug={'magnitude': 15, 'num_layers': 2},
+        use_grain=False,
+    )
+)
 
 # pylint:disable=raise-missing-from
 METADATA = {
     'apply_one_hot_in_loss': False,
 }
+
+
+@dataclasses.dataclass(frozen=True)
+class PreprocessForTrainTransform(grain.RandomMapTransform):
+  """Preprocess the data for training."""
+
+  dtype: Any
+  image_size: int
+  crop: str
+  random_flip: bool
+  use_randaug: bool
+  randaug_magnitude: int
+  randaug_num_layers: int
+
+  def random_map(self, features, seed):
+    inputs = imagenet_preprocessing.preprocess_for_train(
+        features['image'],
+        seed,
+        self.dtype,
+        self.image_size,
+        crop=self.crop,
+        random_flip=self.random_flip,
+        use_randaug=self.use_randaug,
+        randaug_magnitude=self.randaug_magnitude,
+        randaug_num_layers=self.randaug_num_layers,
+    )
+    targets = tf.one_hot(features['label'], imagenet_preprocessing.NUM_CLASSES)
+    result = {'inputs': inputs, 'targets': targets, 'weights': 1}
+    for k in grain.META_FEATURES:
+      if k in features:
+        result[k] = features[k]
+    return result
+
+
+@dataclasses.dataclass(frozen=True)
+class PreprocessForEvalTransform(grain.MapTransform):
+  """Deterministically preprocess the data for eval."""
+
+  dtype: Any
+  image_size: int
+  include_example_keys: bool
+
+  def map(self, features):
+    inputs = imagenet_preprocessing.preprocess_for_eval(
+        features['image'], self.dtype, self.image_size
+    )
+    targets = tf.one_hot(features['label'], imagenet_preprocessing.NUM_CLASSES)
+    result = {
+        'inputs': inputs,
+        'targets': targets,
+    }
+    if self.include_example_keys:
+      result['example_key'] = result['tfds_id']
+    for k in grain.META_FEATURES:
+      if k in features:
+        result[k] = features[k]
+    return result
+
+
+@dataclasses.dataclass(frozen=True)
+class MixupTransform(grain.MapTransform):
+  """Perform mixup.
+
+  This is a random transform that needs one RNG seed per batch. We handle the
+  seed manually, because Grain currently doesn't support random transforms after
+  the examples have been batched.
+  """
+
+  alpha: float
+  initial_seed: np.ndarray
+
+  def map(self, features):
+    # Start with a fixed initial seed across all hosts, and compute it
+    # deterministically using the batch index, so that it's the same across all
+    # hosts. This will not be correct (the seed will no longer be the same on
+    # all hosts) if we restart an experiment using a different number of hosts.
+    #
+    # Grain currently doesn't support the `ds.enumerate()`
+    # functionality, they suggested moving mixup to the training loop where we
+    # can access the step number.
+    batch_index = features[grain.INDEX][0] // jax.host_count()
+    seed = tf.random.experimental.stateless_fold_in(
+        self.initial_seed, batch_index
+    )
+    inputs, targets = image_preprocessing.mixup_tf(
+        seed, features['inputs'], features['targets'], self.alpha
+    )
+    features['inputs'] = inputs
+    features['targets'] = targets
+    return features
+
+
+def load_split_grain(
+    per_host_batch_size,
+    split,
+    hps,
+    image_size=224,
+    dtype=tf.float32,
+    shuffle_rng=None,
+    tfds_dataset_name='imagenet2012:5.*.*',
+):
+  """Uses Grain to load the data. See documentation for `load_split`."""
+  # Grain starts counting at 1
+  # TODO(mbadura): Change this once we handle recovering from preemption
+  initial_step = 1
+
+  grain.config.update('tf_interleaved_shuffle', True)
+
+  global_batch_size = jax.process_count() * per_host_batch_size
+  if split == 'train':
+    start_index = (initial_step - 1) * global_batch_size + jax.process_index()
+  else:
+    start_index = jax.process_index()
+
+  decoders = {'image': tfds.decode.SkipDecoding()}
+
+  if split == 'train':
+    transformations = [
+        PreprocessForTrainTransform(
+            dtype,
+            image_size,
+            crop=hps.crop,
+            random_flip=hps.random_flip,
+            use_randaug=hps.use_randaug,
+            randaug_magnitude=hps.randaug.magnitude,
+            randaug_num_layers=hps.randaug.num_layers,
+        )
+    ]
+  elif split == 'eval_train':
+    # Cache undecoded images for eval_train
+    # TODO(mbadura): Consider caching transformed images
+    transformations = [
+        transforms.CacheTransform(),
+        PreprocessForEvalTransform(
+            dtype=dtype,
+            image_size=image_size,
+            include_example_keys=hps.get('include_example_keys'),
+        ),
+    ]
+  else:
+    # Cache processed images for validation and test
+    transformations = [
+        PreprocessForEvalTransform(
+            dtype=dtype,
+            image_size=image_size,
+            include_example_keys=hps.get('include_example_keys'),
+        ),
+        transforms.CacheTransform(),
+    ]
+
+  # Using a separate transformation because we need to perform mixup after
+  # batching. Otherwise just pass the batch_size argument directly to
+  # `grain.load_from_tfds`.
+  transformations += [
+      grain.TfBatch(
+          batch_size=per_host_batch_size, drop_remainder=split == 'train'
+      )
+  ]
+
+  if split == 'train' and hps.use_mixup:
+    mixup_rng = tf.convert_to_tensor(shuffle_rng, dtype=tf.int32)
+    mixup_rng = multihost_utils.broadcast_one_to_all(
+        mixup_rng, is_source=jax.process_index() == 0
+    )
+    transformations += [
+        MixupTransform(alpha=hps.mixup.alpha, initial_seed=mixup_rng)
+    ]
+
+  data_dir = tfds.core.constants.ARRAY_RECORD_DATA_DIR
+  if split in ['train', 'eval_train']:
+    tfds_split = 'train'
+  elif split == 'valid':
+    tfds_split = 'validation'
+  else:
+    tfds_split = 'test'
+  loader = grain.load_from_tfds(
+      name=tfds_dataset_name,
+      data_dir=data_dir,
+      split=tfds_split,
+      shuffle=split == 'train',
+      seed=shuffle_rng,
+      shard_options=grain.ShardByJaxProcess(drop_remainder=split == 'train'),
+      decoders=decoders,
+      transformations=transformations,
+      num_epochs=None if split == 'train' else 1,
+  )
+
+  dataset_iter = loader.as_dataset(start_index=start_index)
+  return dataset_iter
 
 
 # TODO(gilmer,gdahl,znado): Fix eval metrics to include final partial batch!
@@ -115,32 +308,24 @@ def load_split(
       # NOTE(dsuo): using fold_in so as not to disturb shuffle_rng.
       # preprocess_rng is different for each example.
       preprocess_rng = tf.random.experimental.stateless_fold_in(
-          tf.cast(shuffle_rng, tf.int64), example_index)
-      image = imagenet_preprocessing.preprocess_for_train(
-          example['image'],
-          preprocess_rng,
+          tf.cast(shuffle_rng, tf.int64), example_index
+      )
+      transform = PreprocessForTrainTransform(
           dtype,
           image_size,
-          crop=hps.crop,
-          random_flip=hps.random_flip,
-          use_randaug=hps.use_randaug,
-          randaug_magnitude=hps.randaug.magnitude,
-          randaug_num_layers=hps.randaug.num_layers)
+          hps.crop,
+          hps.random_flip,
+          hps.use_randaug,
+          hps.randaug.magnitude,
+          hps.randaug.num_layers,
+      )
+      example_dict = transform.random_map(example, preprocess_rng)
+
     else:
-      image = imagenet_preprocessing.preprocess_for_eval(
-          example['image'], dtype, image_size)
-
-    example_dict = {
-        'inputs':
-            image,
-        'targets':
-            tf.one_hot(example['label'], imagenet_preprocessing.NUM_CLASSES)
-    }
-
-    if split == 'train':
-      example_dict['weights'] = 1
-    elif hps.get('include_example_keys'):
-      example_dict['example_key'] = example['tfds_id']
+      transform = PreprocessForEvalTransform(
+          dtype, image_size, hps.get('include_example_keys')
+      )
+      example_dict = transform.map(example)
 
     return example_dict
 
@@ -151,7 +336,8 @@ def load_split(
       read_config=read_config,
       decoders={
           'image': tfds.decode.SkipDecoding(),
-      })
+      },
+  )
 
   ds = ds.cache()
 
@@ -159,22 +345,26 @@ def load_split(
     ds = ds.shuffle(
         16 * per_host_batch_size,
         seed=shuffle_rng[0],
-        reshuffle_each_iteration=True)
+        reshuffle_each_iteration=True,
+    )
     ds = ds.repeat()
 
   ds = ds.enumerate().map(
-      decode_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls)
+      decode_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls
+  )
   ds = ds.batch(per_host_batch_size, drop_remainder=False)
 
   if split == 'train' and hps.use_mixup:
     mixup_rng = tf.convert_to_tensor(shuffle_rng, dtype=tf.int32)
     mixup_rng = tf.random.experimental.stateless_fold_in(mixup_rng, 0)
     mixup_rng = multihost_utils.broadcast_one_to_all(
-        mixup_rng, is_source=jax.process_index() == 0)
+        mixup_rng, is_source=jax.process_index() == 0
+    )
 
     def mixup_batch(batch_index, batch):
       per_batch_mixup_rng = tf.random.experimental.stateless_fold_in(
-          mixup_rng, batch_index)
+          mixup_rng, batch_index
+      )
       (inputs, targets) = image_preprocessing.mixup_tf(
           per_batch_mixup_rng,
           batch['inputs'],
@@ -186,7 +376,8 @@ def load_split(
       return batch
 
     ds = ds.enumerate().map(
-        mixup_batch, num_parallel_calls=hps.num_tf_data_map_parallel_calls)
+        mixup_batch, num_parallel_calls=hps.num_tf_data_map_parallel_calls
+    )
 
   if split != 'train':
     ds = ds.cache()
@@ -202,30 +393,40 @@ def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps):
   image_size = hps.input_shape[0]
 
   logging.info('Loading train split')
-  train_ds = load_split(
+
+  if hps.use_grain:
+    load_split_fn = load_split_grain
+  else:
+    load_split_fn = load_split
+
+  train_ds = load_split_fn(
       per_host_batch_size,
       'train',
       hps=hps,
       image_size=image_size,
-      shuffle_rng=shuffle_rng)
+      shuffle_rng=shuffle_rng,
+  )
   train_ds = tfds.as_numpy(train_ds)
   logging.info('Loading eval_train split')
-  eval_train_ds = load_split(
-      per_host_eval_batch_size, 'eval_train', hps=hps, image_size=image_size)
+  eval_train_ds = load_split_fn(
+      per_host_eval_batch_size, 'eval_train', hps=hps, image_size=image_size
+  )
   eval_train_ds = tfds.as_numpy(eval_train_ds)
   logging.info('Loading eval split')
-  validation_ds = load_split(
-      per_host_eval_batch_size, 'valid', hps=hps, image_size=image_size)
+  validation_ds = load_split_fn(
+      per_host_eval_batch_size, 'valid', hps=hps, image_size=image_size
+  )
   validation_ds = tfds.as_numpy(validation_ds)
 
   test_ds = None
   if hps.use_imagenetv2_test:
-    test_ds = load_split(
+    test_ds = load_split_fn(
         per_host_eval_batch_size,
         'test',
         hps=hps,
         image_size=image_size,
-        tfds_dataset_name='imagenet_v2/matched-frequency')
+        tfds_dataset_name='imagenet_v2/matched-frequency',
+    )
     test_ds = tfds.as_numpy(test_ds)
 
   def train_iterator_fn():
@@ -247,16 +448,18 @@ def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps):
     else:
       yield from ()
 
-  return data_utils.Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
-                            test_epoch)
+  return data_utils.Dataset(
+      train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch
+  )
 
 
 def get_fake_batch(hps):
   return {
-      'inputs':
-          np.ones((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype),
-      'targets':
-          np.ones((hps.batch_size, *hps.output_shape), dtype=hps.model_dtype),
-      'weights':
-          np.ones((hps.batch_size,), dtype=hps.model_dtype),
+      'inputs': np.ones(
+          (hps.batch_size, *hps.input_shape), dtype=hps.model_dtype
+      ),
+      'targets': np.ones(
+          (hps.batch_size, *hps.output_shape), dtype=hps.model_dtype
+      ),
+      'weights': np.ones((hps.batch_size,), dtype=hps.model_dtype),
   }
