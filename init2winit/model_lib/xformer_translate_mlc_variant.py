@@ -87,6 +87,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         glu=False,
         ffn_activation='relu',
         residual_scale=1.0,
+        attn_temp=1.0,
     ))
 
 
@@ -310,6 +311,7 @@ class Encoder1DBlock(nn.Module):
   glu: bool = False
   ffn_activation: str = 'relu'
   residual_scale: float = 1.0
+  attn_temp: float = 1.0
 
   @nn.compact
   def __call__(self,
@@ -354,7 +356,8 @@ class Encoder1DBlock(nn.Module):
         broadcast_dropout=False,
         dropout_rate=self.attention_dropout_rate,
         normalize_attention=self.normalize_attention,
-        name='EncoderSelfAttention')(
+        name='EncoderSelfAttention',
+        attn_temp=self.attn_temp)(
             x, mask=encoder_mask, deterministic=not train)
 
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
@@ -410,6 +413,7 @@ class EncoderDecoder1DBlock(nn.Module):
   glu: bool = False
   residual_scale: float = 1.0
   ffn_activation: str = 'relu'
+  attn_temp: float = 1.0
 
   @nn.compact
   def __call__(self,
@@ -459,7 +463,8 @@ class EncoderDecoder1DBlock(nn.Module):
         dropout_rate=self.attention_dropout_rate,
         decode=self.decode,
         name='DecoderSelfAttention',
-        normalize_attention=self.normalize_attention)(
+        normalize_attention=self.normalize_attention,
+        attn_temp=self.attn_temp)(
             x, decoder_mask, deterministic=not train)
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
     x = x * self.residual_scale + targets
@@ -477,7 +482,8 @@ class EncoderDecoder1DBlock(nn.Module):
         use_bias=False,
         broadcast_dropout=False,
         dropout_rate=self.attention_dropout_rate,
-        normalize_attention=self.normalize_attention)(
+        normalize_attention=self.normalize_attention,
+        attn_temp=self.attn_temp)(
             y, encoded, encoder_decoder_mask, deterministic=not train)
 
     y = nn.Dropout(rate=self.dropout_rate)(
@@ -542,6 +548,7 @@ class Encoder(nn.Module):
   glu: bool = False
   residual_scale: float = 1.0
   ffn_activation: str = 'relu'
+  attn_temp: float = 1.0
 
   @nn.compact
   def __call__(self,
@@ -595,6 +602,7 @@ class Encoder(nn.Module):
         ffn_activation=self.ffn_activation,
         glu=self.glu,
         residual_scale=self.residual_scale,
+        attn_temp=self.attn_temp,
         )
     if self.enc_remat_scan_lengths is None:
       for lyr in range(self.enc_num_layers):
@@ -665,6 +673,7 @@ class Decoder(nn.Module):
   dec_remat_scan_lengths: Optional[Sequence[int]] = None
   glu: bool = False
   residual_scale: float = 1.0
+  attn_temp: float = 1.0
   ffn_activation: str = 'relu'
 
   @nn.compact
@@ -732,6 +741,7 @@ class Decoder(nn.Module):
         ffn_activation=self.ffn_activation,
         glu=self.glu,
         residual_scale=self.residual_scale,
+        attn_temp=self.attn_temp,
         )
 
     if self.dec_remat_scan_lengths is None:
@@ -840,6 +850,7 @@ class Transformer(nn.Module):
   should_decode: bool = False
   glu: bool = False
   residual_scale: float = 1.0
+  attn_temp: float = 1.0
   ffn_activation: str = 'relu'
 
   def setup(self):
@@ -887,6 +898,7 @@ class Transformer(nn.Module):
         ffn_activation=self.ffn_activation,
         glu=self.glu,
         residual_scale=self.residual_scale,
+        attn_temp=self.attn_temp,
         )
     self.decoder = Decoder(
         output_vocab_size=self.output_vocab_size,
@@ -911,6 +923,7 @@ class Transformer(nn.Module):
         ffn_activation=self.ffn_activation,
         glu=self.glu,
         residual_scale=self.residual_scale,
+        attn_temp=self.attn_temp,
         )
 
   @nn.compact
@@ -1150,6 +1163,7 @@ class TransformerTranslate(base_model.BaseModel):
         ffn_activation=self.hps.ffn_activation,
         glu=self.hps.glu,
         residual_scale=self.hps.residual_scale,
+        attn_temp=self.hps.attn_temp,
     )
 
   def get_fake_inputs(self, hps):

@@ -59,7 +59,8 @@ def dot_product_attention_weights(query: Array,
                                   dropout_rate: float = 0.,
                                   deterministic: bool = False,
                                   dtype: Optional[Dtype] = None,
-                                  precision: PrecisionLike = None):
+                                  precision: PrecisionLike = None,
+                                  attn_temp: float = 1.0):
   """Computes dot-product attention weights given query and key.
 
   Used by :func:`dot_product_attention`, which is what you'll most likely use.
@@ -87,6 +88,8 @@ def dot_product_attention_weights(query: Array,
     dtype: the dtype of the computation (default: infer from inputs and params)
     precision: numerical precision of the computation see `jax.lax.Precision`
       for details.
+    attn_temp: Attention logits will be normalized by C / sqrt{d} where C is
+      the attn_temp.
 
   Returns:
     Output of shape `[batch..., num_heads, q_length, kv_length]`.
@@ -105,8 +108,9 @@ def dot_product_attention_weights(query: Array,
   depth = query.shape[-1]
   query = query / jnp.sqrt(depth).astype(dtype)
   # attn weight shape is (batch..., num_heads, q_length, kv_length)
+  # Note: Very important that attn_temp applied BEFORE the masking operation.
   attn_weights = jnp.einsum('...qhd,...khd->...hqk', query, key,
-                            precision=precision)
+                            precision=precision) * attn_temp
 
   # apply attention bias: masking, dropout, proximity bias, etc.
   if bias is not None:
@@ -147,7 +151,8 @@ def dot_product_attention(query: Array,
                           dropout_rate: float = 0.,
                           deterministic: bool = False,
                           dtype: Optional[Dtype] = None,
-                          precision: PrecisionLike = None):
+                          precision: PrecisionLike = None,
+                          attn_temp: float = 1.0):
   """Computes dot-product attention given query, key, and value.
 
   This is the core function for applying attention based on
@@ -179,6 +184,8 @@ def dot_product_attention(query: Array,
     dtype: the dtype of the computation (default: infer from inputs)
     precision: numerical precision of the computation see `jax.lax.Precision`
       for details.
+    attn_temp: Attention logits will be normalized by C / sqrt{d} where C is
+      the attn_temp.
 
   Returns:
     Output of shape `[batch..., q_length, num_heads, v_depth_per_head]`.
@@ -195,7 +202,7 @@ def dot_product_attention(query: Array,
   # compute attention weights
   attn_weights = dot_product_attention_weights(
       query, key, bias, mask, broadcast_dropout, dropout_rng, dropout_rate,
-      deterministic, dtype, precision)
+      deterministic, dtype, precision, attn_temp)
 
   # return weighted sum over values for each query position
   return jnp.einsum('...hqk,...khd->...qhd', attn_weights, value,
@@ -245,6 +252,7 @@ class MultiHeadDotProductAttention(Module):
   attention_fn: Callable[[Array, Array, Array], Array] = dot_product_attention
   decode: bool = False
   normalize_attention: bool = False
+  attn_temp: float = 1.0
 
   @compact
   def __call__(self,
@@ -354,7 +362,8 @@ class MultiHeadDotProductAttention(Module):
         broadcast_dropout=self.broadcast_dropout,
         deterministic=m_deterministic,
         dtype=self.dtype,
-        precision=self.precision)  # pytype: disable=wrong-keyword-args
+        precision=self.precision,
+        attn_temp=self.attn_temp)  # pytype: disable=wrong-keyword-args
     # back to the original inputs dimensions
     out = DenseGeneral(features=features,
                        axis=(-2, -1),
