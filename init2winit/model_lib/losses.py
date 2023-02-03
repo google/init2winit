@@ -140,21 +140,21 @@ def unnormalized_bi_tempered_sigmoid_binary_cross_entropy(
   return jnp.sum((weighted_losses).reshape(losses.shape[0], -1), axis=-1)
 
 
-def bi_tempered_sigmoid_binary_cross_entropy(logits,
+def bi_tempered_sigmoid_binary_cross_entropy(hps,
+                                             logits,
                                              targets,
-                                             weights=None,
-                                             t1=1.0,
-                                             t2=1.0):
+                                             weights=None):
   """Computes the bi-tempered sigmoid binary cross entropy between logits and targets.
 
   Args:
+    hps: ConfigDict containing bi_tempered_t1 and bi_tempered_t2,
+      where bi_tempered_loss_t1 is the temperature of the logarithm (<1.0 for
+      boundedness and bi_tempered_loss_t2 is the temperature of the exponential
+      (>1.0 for tail heaviness, < 1.0 for finite support).
     logits: float array of shape (batch, output_shape).
     targets: float array of shape (batch, output_shape).
     weights: None or float array of shape (batch,) or shape (batch,
       output_shape).
-    t1: temperature of the logarithm (< 1.0 for boundedness).
-    t2: temperature of the exponential (> 1.0 for tail heaviness, < 1.0 for
-      finite support).
 
   Returns:
     float value of sigmoid binary cross entropy between logits and targets.
@@ -164,9 +164,15 @@ def bi_tempered_sigmoid_binary_cross_entropy(logits,
   else:
     normalization = weights.sum()
 
-  return jnp.sum(
-      unnormalized_bi_tempered_sigmoid_binary_cross_entropy(
-          logits, targets, weights, t1, t2)) / normalization
+  losses = unnormalized_bi_tempered_sigmoid_binary_cross_entropy(
+      logits,
+      targets,
+      weights,
+      hps.bi_tempered_loss_t1,
+      hps.bi_tempered_loss_t2,
+  )
+
+  return jnp.sum(losses) / normalization
 
 
 def unnormalized_sigmoid_mean_squared_error(logits, targets, weights=None):
@@ -204,15 +210,17 @@ def sigmoid_mean_squared_error(logits, targets, weights=None):
   return jnp.sum(unnormalized_sigmoid_mse) / normalization
 
 
-def rescaled_mean_squared_error(logits, targets, weights=None, k=1.0, m=1.0):
+def rescaled_mean_squared_error(hps, logits, targets, weights=None):
   """Square loss for classification. See https://arxiv.org/abs/2006.07322.
 
   Args:
+    hps: ConfigDict containing hyper params 'rescaled_loss_k' and
+      'rescaled_loss_m', where 'rescaled_loss_k' is a scalar to multily
+      loss at true label and 'rescaled_loss_m' is a scalar to multiply the
+      one-hot labels.
     logits: Array with shape [batch_size, num_labels].
     targets: One-hot encoded labels with shape [batch size, num labels].
     weights: None or float array of shape (batch,).
-    k: Scalar used to multiply the loss at the true label.
-    m: Scalar used to multiply the one-hot labels.
 
   Returns:
     The square loss for classification, averaged over the first dimension
@@ -220,9 +228,16 @@ def rescaled_mean_squared_error(logits, targets, weights=None, k=1.0, m=1.0):
     classes and an example with the true integer label c, this is defined as
     (k*(logits[c] - m)^2 + sum_{i neq c} logits[i]^2)/(C*batch_size)
   """
-  k_scale = jnp.ones_like(targets) + (k-1) * targets
-  losses = jnp.mean(k_scale * jnp.square(logits - targets * m),
-                    axis=-1)
+
+  if logits.ndim != targets.ndim:
+    raise ValueError(
+        'Incorrect shapes. Got shape %s logits and %s targets'
+        % (str(logits.shape), str(targets.shape))
+    )
+  k_scale = jnp.ones_like(targets) + (hps.rescaled_loss_k - 1) * targets
+  losses = jnp.mean(
+      k_scale * jnp.square(logits - targets * hps.rescaled_loss_m), axis=-1
+  )
   if weights is not None:
     if weights.ndim != targets.ndim - 1:
       raise ValueError('Incorrect shapes. Got shape %s weights and %s targets' %
@@ -312,18 +327,18 @@ def weighted_unnormalized_bi_tempered_cross_entropy(logits,
   return loss
 
 
-def weighted_bi_tempered_cross_entropy(logits,
+def weighted_bi_tempered_cross_entropy(hps,
+                                       logits,
                                        targets,
-                                       weights=None,
-                                       t1=1.0,
-                                       t2=1.0):
+                                       weights=None):
   """Same as weighted_unnormalized, but additionally takes the mean."""
   if weights is None:
     normalization = targets.shape[0]
   else:
     normalization = weights.sum()
   unnormalized_cross_entropy = weighted_unnormalized_bi_tempered_cross_entropy(
-      logits, targets, weights, t1, t2)
+      logits, targets, weights, hps.bi_tempered_loss_t1, hps.bi_tempered_loss_t2
+  )
   return jnp.sum(unnormalized_cross_entropy) / normalization
 
 
@@ -396,18 +411,13 @@ _ALL_LOSS_FUNCTIONS = {
 }
 
 
-def get_loss_fn(loss_name, bi_tempered_t1=1.0, bi_tempered_t2=1.0,
-                sq_loss_k=1.0, sq_loss_m=1.0):
+def get_loss_fn(loss_name, hps=None):
   """Get the corresponding loss function based on the loss_name.
 
   Args:
     loss_name: (str) e.g. cross_entropy.
-    bi_tempered_t1: (float) tempereature 1 of the bi-tempered loss.
-    bi_tempered_t2: (float) tempereature 2 of the bi-tempered loss.
-    sq_loss_k: Scalar used to multiply the rescaled_squared_loss
-      at the true label.
-    sq_loss_m: Scalar used to multiply the one-hot labels for
-      rescaled_squared_loss.
+    hps: (ConfigDict) optionally containing loss hyperparameters for some loss
+    functions like rescaled_mean_squared_error_loss and bi_tempered_losses.
 
   Returns:
     The loss function.
@@ -417,9 +427,9 @@ def get_loss_fn(loss_name, bi_tempered_t1=1.0, bi_tempered_t2=1.0,
   try:
     loss_fn = _ALL_LOSS_FUNCTIONS[loss_name][0]
     if 'bi_tempered' in loss_name:
-      loss_fn = functools.partial(loss_fn, t1=bi_tempered_t1, t2=bi_tempered_t2)
-    elif 'rescaled_mean_squared_error' in loss_name:
-      loss_fn = functools.partial(loss_fn, k=sq_loss_k, m=sq_loss_m)
+      return functools.partial(loss_fn, hps)
+    if 'rescaled_mean_squared_error' in loss_name:
+      return functools.partial(loss_fn, hps)
     return loss_fn
   except KeyError as loss_fn_not_found_error:
     raise ValueError('Unrecognized loss function: {}'.format(
