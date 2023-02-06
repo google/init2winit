@@ -55,6 +55,7 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         mlp_dim=512,
         dropout_rate=0.1,
         aux_dropout_rate=0.1,
+        tie_dropouts=False,
         optimizer='adam',
         opt_hparams={
             'beta1': .9,
@@ -1153,6 +1154,7 @@ class TransformerTranslate(base_model.BaseModel):
 class MLCommonsTransformerTranslate(TransformerTranslate):
   """Uses dropout_rate and aux_dropout_rate as hps.
 
+  Dropouts are tied if tie_dropouts is True.
   Otherwise intended to be the same as Transformer Translate Model.
   """
 
@@ -1166,6 +1168,11 @@ class MLCommonsTransformerTranslate(TransformerTranslate):
     dec_cross_attn_kernel_init_fn = model_utils.INITIALIZERS[
         self.hps.dec_cross_attn_kernel_init]()
     dtype = utils.dtype_from_str(self.hps.model_dtype)
+    aux_dropout_rate = (
+        self.hps.dropout_rate
+        if self.hps.tie_dropouts
+        else self.hps.aux_dropout_rate
+    )
 
     return Transformer(
         vocab_size=self.hps.vocab_size,
@@ -1182,7 +1189,7 @@ class MLCommonsTransformerTranslate(TransformerTranslate):
         max_len=max_len,
         dropout_rate=self.hps.dropout_rate,
         normalizer=self.hps.normalizer,
-        attention_dropout_rate=self.hps.aux_dropout_rate,
+        attention_dropout_rate=aux_dropout_rate,
         normalize_attention=self.hps.normalize_attention,
         enc_self_attn_kernel_init_fn=enc_self_attn_kernel_init_fn,
         dec_self_attn_kernel_init_fn=dec_self_attn_kernel_init_fn,

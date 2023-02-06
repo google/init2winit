@@ -73,6 +73,7 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         use_specaug=True,
         aux_dropout_rate=0.1,
         dropout_rate=0.1,
+        tie_dropouts=False,
         enable_residual_connections=False,
         enable_decoder_layer_norm=False,
         bidirectional=True,
@@ -620,7 +621,7 @@ class GenericRNN(nn.Module):
       ]
     if len(initial_states) != num_cells:
       raise ValueError(
-          f'Please provide {self.num_cells} (`num_layers`, *2 if bidirectional) '
+          f'Please provide {self.num_cells} (`num_layers`, *2 if bidirectional)'
           f'initial states.')
 
     # For each layer, apply the forward and optionally the backward RNN cell.
@@ -1002,10 +1003,18 @@ class DeepSpeechModel(base_model.BaseModel):
 class MLCommonsDeepSpeechModel(DeepSpeechModel):
   """Uses dropout_rate and aux_dropout_rate as hps.
 
+  Dropouts are tied if tie_dropouts is True.
   Otherwise intended to be the same as DeepSpeechModel.
   """
 
   def build_flax_module(self):
+
+    aux_dropout_rate = (
+        self.hps.dropout_rate
+        if self.hps.tie_dropouts
+        else self.hps.aux_dropout_rate
+    )
+
     config = DeepspeechConfig(
         vocab_size=self.hps.output_shape[1],
         encoder_dim=self.hps.encoder_dim,
@@ -1020,7 +1029,7 @@ class MLCommonsDeepSpeechModel(DeepSpeechModel):
         use_dynamic_time_mask_max_frames=self.hps
         .use_dynamic_time_mask_max_frames,
         use_specaug=self.hps.use_specaug,
-        input_dropout_rate=self.hps.aux_dropout_rate,
+        input_dropout_rate=aux_dropout_rate,
         feed_forward_dropout_rate=self.hps.dropout_rate,
         enable_residual_connections=self.hps.enable_residual_connections,
         enable_decoder_layer_norm=self.hps.enable_decoder_layer_norm,

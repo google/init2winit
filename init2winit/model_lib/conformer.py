@@ -80,6 +80,7 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         dropout_rate=0.1,
         ## dropout_rate pipes to attention and feed_forward residual dropouts
         aux_dropout_rate=0.1,  ## This pipes to input_dropout
+        tie_dropouts=False,
         enable_decoder_pre_layer_norm=True,
         enable_conformer_post_layer_norm=True,
         use_lingvo_attention=False,
@@ -949,10 +950,18 @@ class ConformerModel(base_model.BaseModel):
 class MLCommonsConformerModel(ConformerModel):
   """Uses dropout_rate and aux_dropout_rate as hps.
 
+  Dropouts are tied if tie_dropouts is True.
   Otherwise intended to be the same as ConformerModel.
   """
 
   def build_flax_module(self):
+
+    aux_dropout_rate = (
+        self.hps.dropout_rate
+        if self.hps.tie_dropouts
+        else self.hps.aux_dropout_rate
+    )
+
     config = ConformerConfig(
         vocab_size=self.hps.output_shape[1],
         encoder_dim=self.hps.encoder_dim,
@@ -970,7 +979,7 @@ class MLCommonsConformerModel(ConformerModel):
         use_specaug=self.hps.use_specaug,
         attention_residual_dropout_rate=self.hps.dropout_rate,
         feed_forward_residual_dropout_rate=self.hps.dropout_rate,
-        input_dropout_rate=self.hps.aux_dropout_rate,
+        input_dropout_rate=aux_dropout_rate,
         enable_conformer_post_layer_norm=self.hps
         .enable_conformer_post_layer_norm,
         enable_decoder_pre_layer_norm=self.hps.enable_decoder_pre_layer_norm,
