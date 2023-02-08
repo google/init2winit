@@ -202,7 +202,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
     opt_init, opt_update = utils.static_inject_hyperparams(optax.adafactor)(
         learning_rate=0.0,
         min_dim_size_to_factor=hps.opt_hparams['min_dim_size_to_factor'],
-        decay_rate=hps.opt_hparams['decay_rate'],
+        decay_rate=hps.opt_hparams['adafactor_decay_rate'],
         decay_offset=hps.opt_hparams['decay_offset'],
         multiply_by_parameter_scale=hps
         .opt_hparams['multiply_by_parameter_scale'],
