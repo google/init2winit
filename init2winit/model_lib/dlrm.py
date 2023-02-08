@@ -83,9 +83,9 @@ def dot_interact(concat_features, keep_diags=True):
   feature_dim = xactions.shape[-1]
 
   if keep_diags:
-    indices = jnp.array(jnp.triu_indices(feature_dim))
+    indices = jnp.array(jnp.triu_indices(feature_dim, k=0))
   else:
-    indices = jnp.array(jnp.tril_indices(feature_dim))
+    indices = jnp.array(jnp.tril_indices(feature_dim, k=0))
   num_elems = indices.shape[1]
   indices = jnp.tile(indices, [1, batch_size])
   indices0 = jnp.reshape(jnp.tile(jnp.reshape(
