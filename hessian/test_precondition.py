@@ -81,7 +81,7 @@ class RunPreconditionTest(absltest.TestCase):
                  {'foo': 0.2, 'bar': {'baz': 0.6}}]
 
     optimizer_state = init_fn(params)
-    optimizer_state.base_state.hyperparams['learning_rate'] = lr
+    optimizer_state.hyperparams['learning_rate'] = lr
 
     for gradient in gradients:
       updates, optimizer_state = update_fn(gradient, optimizer_state, params)
@@ -153,7 +153,7 @@ class RunPreconditionTest(absltest.TestCase):
                  {'foo': 0.2, 'bar': {'baz': 0.6}}]
 
     optimizer_state = init_fn(params)
-    optimizer_state.base_state.hyperparams['learning_rate'] = lr
+    optimizer_state.hyperparams['learning_rate'] = lr
 
     for gradient in gradients:
       updates, optimizer_state = update_fn(gradient,

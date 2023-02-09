@@ -252,7 +252,9 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
   elif hps.optimizer == 'samuel':
     opt_init, opt_update = samuel.from_hparams(hps.opt_hparams)
 
-  if hps.get('total_accumulated_batch_size', None) is not None:
+  batch_size = hps.batch_size
+  accum_size = hps.get('total_accumulated_batch_size')
+  if accum_size is not None and accum_size != batch_size:
     # We do not synchronize batch norm stats across devices, so if there is no
     # virtual_batch_size set in the hyperparameters, the per-core batch size
     # (hps.batch_size // num_hosts) is used as the virtual batch size.
