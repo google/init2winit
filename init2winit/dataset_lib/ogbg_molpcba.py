@@ -213,7 +213,7 @@ def _get_batch_iterator(dataset_iter,
 
   """
   if not num_shards:
-    num_shards = jax.device_count()
+    num_shards = jax.local_device_count()
 
   # We will construct num_shards smaller batches and then put them together.
   batch_size /= num_shards
