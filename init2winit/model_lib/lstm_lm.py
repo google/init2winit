@@ -23,11 +23,14 @@ from typing import Tuple, Union
 from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib.lstm import LSTM
+from jax import lax
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 
 Array = jnp.ndarray
 StateType = Union[Array, Tuple[Array, ...]]
+
+MASK_TOKEN = 0
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
@@ -52,6 +55,15 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         rng_seed=-1,
         grad_clip=0.25,
     ))
+
+
+def shift_right(x, axis=1):
+  """Shift the input to the right by padding and slicing on axis."""
+  pad_widths = [(0, 0)] * len(x.shape)
+  pad_widths[axis] = (1, 0)
+  padded = jnp.pad(
+      x, pad_widths, mode='constant', constant_values=x.dtype.type(MASK_TOKEN))
+  return lax.dynamic_slice_in_dim(padded, 0, padded.shape[axis] - 1, axis)
 
 
 class WrappedLSTM(nn.Module):
@@ -85,6 +97,8 @@ class WrappedLSTM(nn.Module):
     Returns:
       Decoded outputs for the final LSTM layer.
     """
+    # Shift inputs tokens to the right by 1 and pad from left w MASK_TOKEN
+    inputs = shift_right(inputs)
     # Embed input sequences, resulting shape is (batch_size, seq_len, emb_dim)
     embedded_inputs = nn.Embed(
         num_embeddings=self.vocab_size, features=self.emb_dim)(inputs)

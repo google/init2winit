@@ -24,20 +24,18 @@ import tensorflow as tf
 TRAIN_FILENAME = 'train.txt'
 VALID_FILENAME = 'valid.txt'
 TEST_FILENAME = 'test.txt'
-SHUFFLE_BUFFER_SIZE = 5_000_000
-PAD_ID = -1
+
+SHUFFLE_BUFFER_SIZE = 100_000
+
+PAD_ID = 0
+
+AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
 def get_trained_tokenizer(train_dataset: tf.data.Dataset,) -> tf.data.Dataset:
   tokenizer = wikitext_tokenizer.Tokenizer()
   tokenizer.train(train_dataset)
   return tokenizer
-
-
-def split_input_target(sequence):
-  input_sequence = sequence[:-1]
-  target_sequence = sequence[1:]
-  return {'inputs': input_sequence, 'targets': target_sequence}
 
 
 def batch_with_padding(dataset: tf.data.Dataset,
@@ -101,42 +99,45 @@ def get_wikitext2_dataset(
   valid_dataset_tokenized = tokenizer.tokenize(valid_text_dataset)
   test_dataset_tokenized = tokenizer.tokenize(test_text_dataset)
 
-  # Divide data in sequences of length sequence_length + 1, to contain inputs
-  # and corresponding targets
+  # Divide data in sequences of length sequence_length
   train_dataset_sequences = batch_with_padding(
       train_dataset_tokenized,
-      hps.sequence_length + 1,
-      padded_shapes=hps.sequence_length + 1,
+      hps.sequence_length,
+      padded_shapes=hps.sequence_length,
   )
   valid_dataset_sequences = batch_with_padding(
       valid_dataset_tokenized,
-      hps.sequence_length + 1,
-      padded_shapes=hps.sequence_length + 1,
+      hps.sequence_length,
+      padded_shapes=hps.sequence_length,
   )
   test_dataset_sequences = batch_with_padding(
       test_dataset_tokenized,
-      hps.sequence_length + 1,
-      padded_shapes=hps.sequence_length + 1,
+      hps.sequence_length,
+      padded_shapes=hps.sequence_length,
   )
 
   # Split the sequences into inputs and targets.
-  train_dataset_sequences = train_dataset_sequences.map(split_input_target)
-  valid_dataset_sequences = valid_dataset_sequences.map(split_input_target)
-  test_dataset_sequences = test_dataset_sequences.map(split_input_target)
+  train_dataset_sequences = train_dataset_sequences.map(
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+  valid_dataset_sequences = valid_dataset_sequences.map(
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+  test_dataset_sequences = test_dataset_sequences.map(
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
 
   # Copy the train_dataset_sequences to a non repeating dataset
   eval_train_dataset_sequences = train_dataset_sequences
 
   # Shuffle the train sequences.
   train_dataset_sequences = train_dataset_sequences.shuffle(
-      SHUFFLE_BUFFER_SIZE, seed=shuffle_seed)
+      SHUFFLE_BUFFER_SIZE, seed=shuffle_seed
+  )
 
   # Perform batching for training, validation and testing.
   # Make training data repeat indefinitely.
   train_dataset_sequences = train_dataset_sequences.repeat()
   train_dataset = train_dataset_sequences.batch(
-      train_batch_size,
-      drop_remainder=False).prefetch(tf.data.experimental.AUTOTUNE)
+      train_batch_size, drop_remainder=False
+  ).prefetch(tf.data.experimental.AUTOTUNE)
   # Use padded batches for eval_train, validation and test_datasets since the
   # sequences do not repeat indefintely.
   eval_train_dataset = batch_with_padding(
