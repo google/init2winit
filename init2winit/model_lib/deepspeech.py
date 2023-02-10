@@ -80,7 +80,8 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         total_accumulated_batch_size=None,
         enable_subsampling_batchnorm=False,
         enable_synced_batchnorm=False,
-        enable_ffn_relu=False))
+        enable_ffn_relu=False,
+        layernorm_everywhere=False))
 
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
@@ -120,7 +121,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         total_accumulated_batch_size=None,
         enable_subsampling_batchnorm=False,
         enable_synced_batchnorm=False,
-        enable_ffn_relu=False))
+        enable_ffn_relu=False,
+        layernorm_everywhere=False))
 
 
 @struct.dataclass
@@ -152,6 +154,7 @@ class DeepspeechConfig:
   enable_subsampling_batchnorm: bool = False
   enable_synced_batchnorm: bool = False
   enable_ffn_relu: bool = False
+  layernorm_everywhere: bool = False
 
 
 class Subsample(nn.Module):
@@ -286,10 +289,16 @@ class FeedForwardModule(nn.Module):
     padding_mask = jnp.expand_dims(1 - input_paddings, -1)
     config = self.config
 
-    inputs = BatchNorm(config.encoder_dim, config.dtype,
-                       config.batch_norm_momentum, config.batch_norm_epsilon,
-                       config.enable_synced_batchnorm)(inputs, input_paddings,
-                                                       train)
+    if config.layernorm_everywhere:
+      inputs = LayerNorm(config.encoder_dim)(inputs)
+    else:
+      inputs = BatchNorm(
+          config.encoder_dim,
+          config.dtype,
+          config.batch_norm_momentum,
+          config.batch_norm_epsilon,
+          config.enable_synced_batchnorm)(inputs, input_paddings, train)
+
     inputs = nn.Dense(
         config.encoder_dim,
         use_bias=True,
@@ -747,10 +756,16 @@ class BatchRNN(nn.Module):
   def __call__(self, inputs, input_paddings, train):
     config = self.config
 
-    inputs = BatchNorm(config.encoder_dim, config.dtype,
-                       config.batch_norm_momentum, config.batch_norm_epsilon,
-                       config.enable_synced_batchnorm)(inputs, input_paddings,
-                                                       train)
+    if config.layernorm_everywhere:
+      inputs = LayerNorm(config.encoder_dim)(inputs)
+    else:
+      inputs = BatchNorm(
+          config.encoder_dim,
+          config.dtype,
+          config.batch_norm_momentum,
+          config.batch_norm_epsilon,
+          config.enable_synced_batchnorm)(inputs, input_paddings, train)
+
     lengths = jnp.sum(1 - input_paddings, axis=-1, dtype=jnp.int32)
 
     output, _ = LSTM(
@@ -986,7 +1001,8 @@ class DeepSpeechModel(base_model.BaseModel):
         bidirectional=self.hps.bidirectional,
         enable_subsampling_batchnorm=self.hps.enable_subsampling_batchnorm,
         enable_synced_batchnorm=self.hps.enable_synced_batchnorm,
-        enable_ffn_relu=self.hps.enable_ffn_relu)
+        enable_ffn_relu=self.hps.enable_ffn_relu,
+        layernorm_everywhere=self.hps.layernorm_everywhere)
     module = DeepSpeechEncoderDecoder(config)
 
     return module
@@ -1036,7 +1052,8 @@ class MLCommonsDeepSpeechModel(DeepSpeechModel):
         bidirectional=self.hps.bidirectional,
         enable_subsampling_batchnorm=self.hps.enable_subsampling_batchnorm,
         enable_synced_batchnorm=self.hps.enable_synced_batchnorm,
-        enable_ffn_relu=self.hps.enable_ffn_relu)
+        enable_ffn_relu=self.hps.enable_ffn_relu,
+        layernorm_everywhere=self.hps.layernorm_everywhere)
     module = DeepSpeechEncoderDecoder(config)
 
     return module
