@@ -270,6 +270,12 @@ class ConvBlock(nn.Module):
       x = nn.LayerNorm(reduction_axes=(1, 2, 3))(x)
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
+    if self.activation == 'leaky_relu':
+      x = jax.nn.leaky_relu(x, negative_slope=0.2)
+    elif self.activation in model_utils.ACTIVATIONS:
+      x = model_utils.ACTIVATIONS[self.activation](x)
+    else:
+      raise ValueError('Unsupported activation: {}'.format(self.activation))
     x = nn.Dropout(
         self.drop_prob, broadcast_dims=(1, 2), deterministic=not train)(
             x)
