@@ -31,10 +31,12 @@ from flax import linen as nn
 from flax import struct
 from init2winit.model_lib import base_model
 from init2winit.model_lib import librispeech_preprocessor as preprocessor
+from init2winit.model_lib import model_utils
 from init2winit.model_lib import spectrum_augmenter
 import jax
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
+
 
 Array = jnp.ndarray
 StateType = Union[Array, Tuple[Array, ...]]
@@ -44,7 +46,7 @@ Dtype = Any
 
 MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        activation_function='relu',
+        activation='relu',
         optimizer='adam',
         opt_hparams={
             'beta1': .9,
@@ -80,13 +82,12 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         total_accumulated_batch_size=None,
         enable_subsampling_batchnorm=False,
         enable_synced_batchnorm=False,
-        enable_ffn_relu=False,
         layernorm_everywhere=False))
 
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        activation_function='relu',
+        activation='relu',
         optimizer='adam',
         opt_hparams={
             'beta1': .9,
@@ -121,7 +122,6 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         total_accumulated_batch_size=None,
         enable_subsampling_batchnorm=False,
         enable_synced_batchnorm=False,
-        enable_ffn_relu=False,
         layernorm_everywhere=False))
 
 
@@ -153,7 +153,7 @@ class DeepspeechConfig:
   bidirectional: bool = False
   enable_subsampling_batchnorm: bool = False
   enable_synced_batchnorm: bool = False
-  enable_ffn_relu: bool = False
+  activation: str = 'relu'
   layernorm_everywhere: bool = False
 
 
@@ -179,9 +179,9 @@ class Subsample(nn.Module):
         input_channels=1,
         output_channels=config.encoder_dim,
         enable_batchnorm=config.enable_subsampling_batchnorm,
-        enable_synced_batchnorm=config.enable_synced_batchnorm)(outputs,
-                                                                output_paddings,
-                                                                train)
+        enable_synced_batchnorm=config.enable_synced_batchnorm,
+        activation=config.activation,
+    )(outputs, output_paddings, train)
 
     outputs, output_paddings = Conv2dSubsampling(
         encoder_dim=config.encoder_dim,
@@ -191,9 +191,9 @@ class Subsample(nn.Module):
         input_channels=config.encoder_dim,
         output_channels=config.encoder_dim,
         enable_batchnorm=config.enable_subsampling_batchnorm,
-        enable_synced_batchnorm=config.enable_synced_batchnorm)(outputs,
-                                                                output_paddings,
-                                                                train)
+        enable_synced_batchnorm=config.enable_synced_batchnorm,
+        activation=config.activation
+    )(outputs, output_paddings, train)
 
     batch_size, subsampled_lengths, subsampled_dims, channels = outputs.shape
 
@@ -228,6 +228,7 @@ class Conv2dSubsampling(nn.Module):
   batch_norm_epsilon: float = 0.001
   enable_batchnorm: bool = False
   enable_synced_batchnorm: bool = False
+  activation: str = 'relu'
 
   def setup(self):
     self.filter_shape = (3, 3, self.input_channels, self.output_channels)
@@ -257,7 +258,10 @@ class Conv2dSubsampling(nn.Module):
                           self.enable_synced_batchnorm)(
                               outputs, input_paddings=None, train=train)
 
-    outputs = nn.relu(outputs)
+    if self.activation in model_utils.ACTIVATIONS:
+      outputs = model_utils.ACTIVATIONS[self.activation](outputs)
+    else:
+      raise ValueError('Unsupported activation: {}'.format(self.activation))
 
     # Computing correct paddings post input convolution.
     input_length = paddings.shape[1]
@@ -304,8 +308,10 @@ class FeedForwardModule(nn.Module):
         use_bias=True,
         kernel_init=nn.initializers.xavier_uniform())(inputs)
 
-    if config.enable_ffn_relu:
-      inputs = nn.relu(inputs)
+    if config.activation in model_utils.ACTIVATIONS:
+      inputs = model_utils.ACTIVATIONS[config.activation](inputs)
+    else:
+      raise ValueError('Unsupported activation: {}'.format(config.activation))
     inputs *= padding_mask
 
     inputs = nn.Dropout(rate=config.feed_forward_dropout_rate)(
@@ -1001,7 +1007,7 @@ class DeepSpeechModel(base_model.BaseModel):
         bidirectional=self.hps.bidirectional,
         enable_subsampling_batchnorm=self.hps.enable_subsampling_batchnorm,
         enable_synced_batchnorm=self.hps.enable_synced_batchnorm,
-        enable_ffn_relu=self.hps.enable_ffn_relu,
+        activation=self.hps.activation,
         layernorm_everywhere=self.hps.layernorm_everywhere)
     module = DeepSpeechEncoderDecoder(config)
 
@@ -1052,7 +1058,7 @@ class MLCommonsDeepSpeechModel(DeepSpeechModel):
         bidirectional=self.hps.bidirectional,
         enable_subsampling_batchnorm=self.hps.enable_subsampling_batchnorm,
         enable_synced_batchnorm=self.hps.enable_synced_batchnorm,
-        enable_ffn_relu=self.hps.enable_ffn_relu,
+        activation=self.hps.activation,
         layernorm_everywhere=self.hps.layernorm_everywhere)
     module = DeepSpeechEncoderDecoder(config)
 
