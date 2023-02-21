@@ -72,6 +72,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         scale_attention_init=1.0,
         layer_norm_struct=None,
         attn_temperature=1.0,
+        use_glu=False,
     ))
 
 
@@ -169,6 +170,7 @@ class MlpBlock(nn.Module):
   mlp_dim: Optional[int] = None  # Defaults to 4x input dim
   dropout: float = 0.0
   activation: str = 'gelu'
+  use_glu: bool = False
 
   @nn.compact
   def __call__(self, x, train=True):
@@ -184,6 +186,13 @@ class MlpBlock(nn.Module):
       x = model_utils.ACTIVATIONS[self.activation](x)
     else:
       raise ValueError('Unsupported activation: {}'.format(self.activation))
+
+    if self.use_glu:
+      y = nn.Dense(
+          self.mlp_dim,
+          **inits)(x)
+      x = x * y
+
     x = nn.Dropout(rate=self.dropout)(x, train)
     x = nn.Dense(d, **inits)(x)
     return x
@@ -200,25 +209,32 @@ class Encoder1DBlock(nn.Module):
   residual_alpha: float = 0.5
   scale_attention_init: float = 1.0
   attn_temperature: float = 1.0
+  use_glu: bool = False
+
   @nn.compact
   def __call__(self, x, train=True):
     out = {}
     if self.normalizer == 'pre_layer_norm':
       maybe_pre_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=None)
+          self.normalizer, train, dtype=None
+      )
       maybe_post_normalize = model_utils.get_normalizer(
-          'none', train, dtype=None)
+          'none', train, dtype=None
+      )
     elif self.normalizer == 'post_layer_norm':
       maybe_pre_normalize = model_utils.get_normalizer(
-          'none', train, dtype=None)
+          'none', train, dtype=None
+      )
       maybe_post_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=None)
+          self.normalizer, train, dtype=None
+      )
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
     y = maybe_pre_normalize()(x)
     attn_fn = functools.partial(
-        dot_product_attention, temperature=self.attn_temperature)
+        dot_product_attention, temperature=self.attn_temperature
+    )
     y = out['sa'] = nn.SelfAttention(
         num_heads=self.num_heads,
         kernel_init=nn.initializers.variance_scaling(
@@ -244,6 +260,7 @@ class Encoder1DBlock(nn.Module):
         dropout=self.dropout,
         name='MlpBlock_3',
         activation=self.activation,
+        use_glu=self.use_glu
     )(y, train)
     y = nn.Dropout(rate=self.dropout)(y, train)
     x = 2*(self.residual_alpha*x+(1-self.residual_alpha)*y)
@@ -269,6 +286,8 @@ class Encoder(nn.Module):
   scale_attention_init: float = 1.0
   layer_norm_struct: Sequence[str] = None
   attn_temperature: float = 1.0
+  use_glu: bool = False
+
   @nn.compact
   def __call__(self, x, train=True):
     out = {}
@@ -286,7 +305,8 @@ class Encoder(nn.Module):
             resnet_style_residual=self.resnet_style_residual,
             residual_alpha=self.residual_alpha,
             scale_attention_init=self.scale_attention_init,
-            attn_temperature=self.attn_temperature)
+            attn_temperature=self.attn_temperature,
+            use_glu=self.use_glu)
       else:
         assert(len(self.layer_norm_struct)) == self.depth
         block = Encoder1DBlock(
@@ -299,7 +319,8 @@ class Encoder(nn.Module):
             resnet_style_residual=self.resnet_style_residual,
             residual_alpha=self.residual_alpha,
             scale_attention_init=self.scale_attention_init,
-            attn_temperature=self.attn_temperature)
+            attn_temperature=self.attn_temperature,
+            use_glu=self.use_glu)
       x, out[f'block{lyr:02d}'] = block(x, train)
     out['pre_ln'] = x  # Alias for last block, but without the number in it.
 
@@ -367,6 +388,7 @@ class ViT(nn.Module):
   scale_attention_init: float = 1.0
   layer_norm_struct: Sequence[str] = None
   attn_temperature: float = 1.0
+  use_glu: bool = False
   @nn.compact
   def __call__(self, x, *, train=False):
     out = {}
@@ -402,6 +424,7 @@ class ViT(nn.Module):
         scale_attention_init=self.scale_attention_init,
         layer_norm_struct=self.layer_norm_struct,
         attn_temperature=self.attn_temperature,
+        use_glu=self.use_glu,
         name='Transformer')(
             x, train=not train)
     encoded = out['encoded'] = x
@@ -455,7 +478,8 @@ class ViTModel(base_model.BaseModel):
         'num_classes', 'rep_size', 'pool_type', 'posemb', 'width', 'depth',
         'mlp_dim', 'num_heads', 'patch_size', 'dropout_rate', 'head_zeroinit',
         'normalizer', 'activation', 'resnet_style_residual', 'residual_alpha',
-        'scale_attention_init', 'layer_norm_struct', 'attn_temperature'
+        'scale_attention_init', 'layer_norm_struct', 'attn_temperature',
+        'use_glu'
     ]
 
     args = {k: self.hps[k] for k in keys}
@@ -488,10 +512,10 @@ def decode_variant(variant):
   return {
       # pylint:disable=line-too-long
       # Reference: Table 2 of https://arxiv.org/abs/2106.04560.
-      'width': {'Ti': 192, 'S': 384, 'M': 512, 'B': 768, 'L': 1024, 'H': 1280, 'g': 1408, 'G': 1664}[v],
-      'depth': {'Ti': 12, 'S': 12, 'M': 12, 'B': 12, 'L': 24, 'H': 32, 'g': 40, 'G': 48}[v],
-      'mlp_dim': {'Ti': 768, 'S': 1536, 'M': 2048, 'B': 3072, 'L': 4096, 'H': 5120, 'g': 6144, 'G': 8192}[v],
-      'num_heads': {'Ti': 3, 'S': 6, 'M': 8, 'B': 12, 'L': 16, 'H': 16, 'g': 16, 'G': 16}[v],
+      'width': {'Ti': 192, 'S': 384, 'V': 384, 'M': 512, 'B': 768, 'L': 1024, 'H': 1280, 'g': 1408, 'G': 1664}[v],
+      'depth': {'Ti': 12, 'S': 12, 'V': 12, 'M': 12, 'B': 12, 'L': 24, 'H': 32, 'g': 40, 'G': 48}[v],
+      'mlp_dim': {'Ti': 768, 'S': 1536, 'V': 1152, 'M': 2048, 'B': 3072, 'L': 4096, 'H': 5120, 'g': 6144, 'G': 8192}[v],
+      'num_heads': {'Ti': 3, 'S': 6, 'V': 6, 'M': 8, 'B': 12, 'L': 16, 'H': 16, 'g': 16, 'G': 16}[v],
       # pylint:enable=line-too-long
       'patch_size': (int(patch), int(patch))
   }

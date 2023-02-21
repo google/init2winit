@@ -770,13 +770,20 @@ class BatchRNN(nn.Module):
           config.dtype,
           config.batch_norm_momentum,
           config.batch_norm_epsilon,
-          config.enable_synced_batchnorm)(inputs, input_paddings, train)
+          config.enable_synced_batchnorm,
+      )(inputs, input_paddings, train)
 
     lengths = jnp.sum(1 - input_paddings, axis=-1, dtype=jnp.int32)
 
+    hidden_size = (
+        config.encoder_dim // 2 if config.bidirectional else config.encoder_dim
+    )
+
     output, _ = LSTM(
-        hidden_size=config.encoder_dim // 2, bidirectional=config.bidirectional,
-        num_layers=1)(inputs, lengths)
+        hidden_size=hidden_size,
+        bidirectional=config.bidirectional,
+        num_layers=1,
+    )(inputs, lengths)
 
     return output
 
@@ -823,23 +830,30 @@ class DeepSpeechEncoderDecoder(nn.Module):
       outputs, output_paddings = self.specaug(outputs, output_paddings)
 
     # Subsample input by a factor of 4 by performing strided convolutions.
-    outputs, output_paddings = Subsample(
-        config=config)(outputs, output_paddings, train)
+    outputs, output_paddings = Subsample(config=config)(
+        outputs, output_paddings, train
+    )
 
     # Run the lstm layers.
     for _ in range(config.num_lstm_layers):
       if config.enable_residual_connections:
-        outputs = outputs + BatchRNN(config)(outputs, output_paddings, train)
+        outputs = outputs + BatchRNN(config)(
+            outputs, output_paddings, train
+        )
       else:
-        outputs = BatchRNN(config)(outputs, output_paddings, train)
+        outputs = BatchRNN(config)(
+            outputs, output_paddings, train
+        )
 
     for _ in range(config.num_ffn_layers):
       if config.enable_residual_connections:
         outputs = outputs + FeedForwardModule(config=self.config)(
-            outputs, output_paddings, train)
+            outputs, output_paddings, train
+        )
       else:
-        outputs = FeedForwardModule(config=self.config)(outputs,
-                                                        output_paddings, train)
+        outputs = FeedForwardModule(config=self.config)(
+            outputs, output_paddings, train
+        )
 
     # Run the decoder which in this case is a trivial projection layer.
     if config.enable_decoder_layer_norm:
