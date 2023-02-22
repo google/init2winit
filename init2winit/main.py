@@ -40,7 +40,6 @@ from jax import lax
 from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow as tf
-from vizier import pyvizier
 
 gfile = tf.io.gfile
 
