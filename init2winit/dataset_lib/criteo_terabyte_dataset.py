@@ -20,6 +20,7 @@ validation and test split (taking the first half for test and second half for
 validation). See here for the NVIDIA example:
 https://github.com/NVIDIA/DeepLearningExamples/blob/4e764dcd78732ebfe105fc05ea3dc359a54f6d5e/PyTorch/Recommendation/DLRM/preproc/run_spark_cpu.sh#L119.
 """
+
 import functools
 import math
 import os.path
@@ -27,6 +28,7 @@ import os.path
 from absl import logging
 from init2winit.dataset_lib import data_utils
 import jax
+from jax.experimental import multihost_utils
 from ml_collections import config_dict
 import numpy as np
 import tensorflow as tf
@@ -116,7 +118,12 @@ def criteo_tsv_reader(
   if split not in ['train', 'eval_train', 'validation', 'test']:
     raise ValueError(f'Invalid split name {split}.')
   is_training = split == 'train'
-  file_shuffle_seed = shuffle_rng[0] if is_training else None
+  if is_training:
+    file_shuffle_seed = multihost_utils.broadcast_one_to_all(
+        shuffle_rng[0], is_source=jax.process_index() == 0
+    )
+  else:
+    file_shuffle_seed = None
   ds = tf.data.Dataset.list_files(
       file_path, shuffle=is_training, seed=file_shuffle_seed)
   index = jax.process_index()
