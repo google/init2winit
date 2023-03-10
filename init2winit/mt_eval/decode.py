@@ -170,16 +170,16 @@ def gather_topk_beams(nested, score_or_log_prob, batch_size, new_beam_size):
 class BeamState:
   """Holds beam search state data."""
   # The position of the decoding loop in the length dimension.
-  cur_index: jnp.DeviceArray  # scalar int32: current decoded length index
+  cur_index: jax.Array  # scalar int32: current decoded length index
   # The active sequence log probabilities and finished sequence scores.
-  live_logprobs: jnp.DeviceArray  # float32: [batch_size, beam_size]
-  finished_scores: jnp.DeviceArray  # float32: [batch_size, beam_size]
+  live_logprobs: jax.Array  # float32: [batch_size, beam_size]
+  finished_scores: jax.Array  # float32: [batch_size, beam_size]
   # The current active-beam-searching and finished sequences.
-  live_seqs: jnp.DeviceArray  # int32: [batch_size, beam_size, max_decode_len]
-  finished_seqs: jnp.DeviceArray  # int32: [batch_size, beam_size,
+  live_seqs: jax.Array  # int32: [batch_size, beam_size, max_decode_len]
+  finished_seqs: jax.Array  # int32: [batch_size, beam_size,
   #                                         max_decode_len]
   # Records which of the 'finished_seqs' is occupied and not a filler slot.
-  finished_flags: jnp.DeviceArray  # bool: [batch_size, beam_size]
+  finished_flags: jax.Array  # bool: [batch_size, beam_size]
   # The current state of the autoregressive decoding caches.
   cache: typing.Any  # Any pytree of arrays, e.g. flax attention Cache object
 
@@ -189,16 +189,16 @@ class BeamState:
 class SamplingState:
   """Holds sampling state data."""
   # The position of the decoding loop in the length dimension.
-  cur_index: jnp.DeviceArray  # scalar int32: current decoded length index
+  cur_index: jax.Array  # scalar int32: current decoded length index
   # The active sequence probabilities and finished sequence scores.
-  all_log_probs: jnp.DeviceArray  # float32: [batch_size, sample_size]
+  all_log_probs: jax.Array  # float32: [batch_size, sample_size]
   # All sequences we are sampling.
-  all_seqs: jnp.DeviceArray  # int32: [batch_size, sample_size, max_decode_len]
+  all_seqs: jax.Array  # int32: [batch_size, sample_size, max_decode_len]
   # Sequences that are finished.
-  finished_seqs: jnp.DeviceArray  # int32: [batch_size, sample_size,
+  finished_seqs: jax.Array  # int32: [batch_size, sample_size,
   #                                         max_decode_len]
   # Records which of the 'finished_seqs' is occupied and not a filler slot.
-  finished_flags: jnp.DeviceArray  # bool: [batch_size, sample_size]
+  finished_flags: jax.Array  # bool: [batch_size, sample_size]
   cache: Any  # Any pytree of arrays, e.g. flax attention Cache object
 
 
@@ -454,9 +454,9 @@ def beam_search(inputs,
   return finished_seqs, finished_scores
 
 
-def sampling(inputs: jnp.DeviceArray,
+def sampling(inputs: jax.Array,
              cache: Any,
-             tokens_to_logits: Callable[..., Tuple[jnp.DeviceArray, Any]],
+             tokens_to_logits: Callable[..., Tuple[jax.Array, Any]],
              rng: Union[jnp.ndarray, np.ndarray, int],
              sample_size: int,
              eos_id: int,
