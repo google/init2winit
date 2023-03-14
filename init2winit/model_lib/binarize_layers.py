@@ -36,7 +36,6 @@ from init2winit.model_lib import model_utils
 import jax
 from jax import lax
 from jax import random
-from jax.interpreters.xla import DeviceArray
 import jax.numpy as jnp
 from ml_collections import config_dict
 import numpy as np
@@ -109,7 +108,7 @@ def add_straight_through_estimator(jax_function) -> None:
 
 
 @jax.custom_jvp
-def floor_with_gradient(x: DeviceArray) -> DeviceArray:
+def floor_with_gradient(x: jax.Array) -> jax.Array:
   """Floor with Straight-Through-Estimator gradient."""
   return jnp.floor(x)
 
