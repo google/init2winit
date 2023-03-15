@@ -150,6 +150,7 @@ def load_split_grain(
     per_host_batch_size,
     split,
     hps,
+    global_step,
     image_size=224,
     dtype=tf.float32,
     shuffle_rng=None,
@@ -158,11 +159,11 @@ def load_split_grain(
   """Uses Grain to load the data. See documentation for `load_split`."""
   # Grain starts counting at 1
   # TODO(mbadura): Change this once we handle recovering from preemption
-  initial_step = 1
+  initial_step = global_step + 1
 
   grain.config.update('tf_interleaved_shuffle', True)
-
   global_batch_size = jax.process_count() * per_host_batch_size
+
   if split == 'train':
     start_index = (initial_step - 1) * global_batch_size + jax.process_index()
   else:
@@ -250,6 +251,7 @@ def load_split(
     per_host_batch_size,
     split,
     hps,
+    global_step,
     dtype=tf.float32,
     image_size=224,
     shuffle_rng=None,
@@ -268,6 +270,8 @@ def load_split(
     split: One of ['train', 'eval_train', 'valid'].
     hps: The hparams the experiment is run with. Required fields are train_size
       and valid_size.
+    global_step: Step at which we start. Used for determinism in the Grain
+      version of this function. Unused here.
     dtype: data type of the image.
     image_size: The target size of the images.
     shuffle_rng: The RNG used to shuffle the split. Only used if `split ==
@@ -278,6 +282,7 @@ def load_split(
   Returns:
     A `tf.data.Dataset`.
   """
+  del global_step
   if split not in ['train', 'eval_train', 'valid', 'test']:
     raise ValueError('Unrecognized split {}'.format(split))
   if split in ['train', 'eval_train']:
@@ -385,7 +390,7 @@ def load_split(
   return ds
 
 
-def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps):
+def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps, global_step=0):
   """Data generators for imagenet."""
   per_host_batch_size = batch_size // jax.process_count()
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
@@ -405,16 +410,25 @@ def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps):
       hps=hps,
       image_size=image_size,
       shuffle_rng=shuffle_rng,
+      global_step=global_step,
   )
   train_ds = tfds.as_numpy(train_ds)
   logging.info('Loading eval_train split')
   eval_train_ds = load_split_fn(
-      per_host_eval_batch_size, 'eval_train', hps=hps, image_size=image_size
+      per_host_eval_batch_size,
+      'eval_train',
+      hps=hps,
+      image_size=image_size,
+      global_step=global_step,
   )
   eval_train_ds = tfds.as_numpy(eval_train_ds)
   logging.info('Loading eval split')
   validation_ds = load_split_fn(
-      per_host_eval_batch_size, 'valid', hps=hps, image_size=image_size
+      per_host_eval_batch_size,
+      'valid',
+      hps=hps,
+      image_size=image_size,
+      global_step=global_step,
   )
   validation_ds = tfds.as_numpy(validation_ds)
 
@@ -426,6 +440,7 @@ def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps):
         hps=hps,
         image_size=image_size,
         tfds_dataset_name='imagenet_v2/matched-frequency',
+        global_step=global_step,
     )
     test_ds = tfds.as_numpy(test_ds)
 

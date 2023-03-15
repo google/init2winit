@@ -390,10 +390,16 @@ class Trainer(base_trainer.BaseTrainer):
     # However, if `drop_remainer=False`, then this iterator will always return
     # batches of the same size, and the final batch will have elements from the
     # start of the (num_epochs + 1)-th epoch.
-    train_iter = itertools.islice(
-        self._dataset.train_iterator_fn(),
-        self._global_step,
-        self._num_train_steps)
+    if self._hps.get('use_grain'):
+      train_iter = itertools.islice(
+          self._dataset.train_iterator_fn(), self._num_train_steps
+      )
+    else:
+      train_iter = itertools.islice(
+          self._dataset.train_iterator_fn(),
+          self._global_step,
+          self._num_train_steps,
+      )
 
 
     train_iter = trainer_utils.prefetch_input_pipeline(

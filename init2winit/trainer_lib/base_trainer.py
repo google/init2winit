@@ -298,7 +298,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     # TODO(gdahl): Is there any harm in removing the test and always folding-in
     # global step, even when training fresh at step 0?
-    if is_restored:
+    if is_restored and not self._hps.get('use_grain'):
       # Fold the restored step into the dataset RNG so that we will get a
       # different shuffle each time we restore, so that we do not repeat a
       # previous dataset ordering again after restoring. This is not the only
@@ -314,13 +314,28 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       # Also note that for evaluating on the training split, because we are
       # reshuffling each time, we will get a new eval_train split each time we
       # are pre-empted.
+      #
+      # We don't change the RNG when using Grain, because it has its own
+      # preemption recovery logic.
       data_rng = jax.random.fold_in(data_rng, global_step)
 
-    dataset = self._dataset_builder(
-        data_rng,
-        self._hps.batch_size,
-        eval_batch_size=self._eval_batch_size,
-        hps=self._hps)
+    if self._hps.get('use_grain'):
+      # Datasets that support Grain must allow the additional `global_step`
+      # argument.
+      dataset = self._dataset_builder(
+          data_rng,
+          self._hps.batch_size,
+          eval_batch_size=self._eval_batch_size,
+          hps=self._hps,
+          global_step=global_step,
+      )
+    else:
+      dataset = self._dataset_builder(
+          data_rng,
+          self._hps.batch_size,
+          eval_batch_size=self._eval_batch_size,
+          hps=self._hps,
+      )
 
     update_fn = functools.partial(
         trainer_update_fn,
