@@ -251,7 +251,7 @@ def load_split(
     per_host_batch_size,
     split,
     hps,
-    global_step,
+    global_step=None,
     dtype=tf.float32,
     image_size=224,
     shuffle_rng=None,
@@ -271,7 +271,8 @@ def load_split(
     hps: The hparams the experiment is run with. Required fields are train_size
       and valid_size.
     global_step: Step at which we start. Used for determinism in the Grain
-      version of this function. Unused here.
+      version of this function. Unused here, present only so that the API is
+      consistent with the Grain version.
     dtype: data type of the image.
     image_size: The target size of the images.
     shuffle_rng: The RNG used to shuffle the split. Only used if `split ==
