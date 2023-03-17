@@ -26,11 +26,13 @@ from typing import Sequence
 
 from absl import flags
 from absl import logging
+import flax
 from flax import jax_utils
 from flax.training import checkpoints as flax_checkpoints
 import jax
 import jax.numpy as jnp
 
+flax.config.update('flax_use_orbax_checkpointing', False)
 
 FLAGS = flags.FLAGS
 
