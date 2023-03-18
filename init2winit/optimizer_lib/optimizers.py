@@ -282,7 +282,8 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         mu=hps.opt_hparams['mu'],
         alpha=hps.opt_hparams['alpha'],
         s_max=hps.opt_hparams['s_max'],
-        pal_steps=hps.opt_hparams['pal_steps'],
+        start_step=hps.opt_hparams['start_step'],
+        stop_step=hps.opt_hparams['stop_step'],
         batch_axis_name=batch_axis_name,
         base_opt_init_fn=opt_init,
         base_opt_update_fn=opt_update
