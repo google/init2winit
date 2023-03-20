@@ -204,7 +204,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         across hosts!
       data_rng: the jax PRNGKey used for dataset randomness. Should be
         *different* across hosts!
-      trainer_update_fn: the function for updating the model.
+      trainer_update_fn: the function for updating the model. If None, this will
+        skip pmapping the update function.
 
     Returns:
       A long tuple of the following:
@@ -337,34 +338,38 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           hps=self._hps,
       )
 
-    update_fn = functools.partial(
-        trainer_update_fn,
-        training_cost=self._model.training_cost,
-        grad_clip=self._hps.get('grad_clip'),
-        optimizer_update_fn=optimizer_update_fn,
-        metrics_update_fn=metrics_update_fn)
-    # in_axes = (
-    #     optimizer_state = 0,
-    #     params = 0,
-    #     batch_stats = 0,
-    #     metrics_state = 0,
-    #     batch = 0,
-    #     step = None,
-    #     lr = None,
-    #     rng = None,
-    #     local_device_index = 0,
-    #     running_train_cost = 0,
-    #     training_cost,
-    #     grad_clip,
-    #     optimizer_update_fn,
-    #     metrics_state_update_fn)
-    # Also, we can donate buffers for 'optimizer', 'batch_stats',
-    # 'batch' and 'training_metrics_state' for update's pmapped computation.
-    update_pmapped = jax.pmap(
-        update_fn,
-        axis_name='batch',
-        in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0),
-        donate_argnums=(0, 1, 2, 8))
+    if trainer_update_fn is not None:
+      update_fn = functools.partial(
+          trainer_update_fn,
+          training_cost=self._model.training_cost,
+          grad_clip=self._hps.get('grad_clip'),
+          optimizer_update_fn=optimizer_update_fn,
+          metrics_update_fn=metrics_update_fn)
+      # in_axes = (
+      #     optimizer_state = 0,
+      #     params = 0,
+      #     batch_stats = 0,
+      #     metrics_state = 0,
+      #     batch = 0,
+      #     step = None,
+      #     lr = None,
+      #     rng = None,
+      #     local_device_index = 0,
+      #     running_train_cost = 0,
+      #     training_cost,
+      #     grad_clip,
+      #     optimizer_update_fn,
+      #     metrics_state_update_fn)
+      # Also, we can donate buffers for 'optimizer', 'batch_stats',
+      # 'batch' and 'training_metrics_state' for update's pmapped computation.
+      update_pmapped = jax.pmap(
+          update_fn,
+          axis_name='batch',
+          in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0),
+          donate_argnums=(0, 1, 2, 8))
+    else:
+      update_pmapped = None
+
     return (
         lr_fn,
         optimizer_update_fn,
@@ -407,7 +412,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         *different* across hosts!
       callback_rng: the jax PRNGKey used for eval callbacks. Should be
         *different* across hosts!
-      trainer_update_fn: the function for updating the model.
+      trainer_update_fn: the function for updating the model. If None, this will
+        skip pmapping the update function.
     """
     (self._lr_fn,
      self._optimizer_update_fn,
@@ -488,7 +494,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       self,
       lr,
       start_step,
-      start_time):
+      start_time,
+      save=True):
     """Evaluate.
 
     Has the side-effects of:
@@ -502,6 +509,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       lr: the current learning rate.
       start_step: the training start step.
       start_time: the training start time.
+      save: flag to save a checkpoint to disk. defaults to True.
 
     Returns:
       A Dict[str, Any] eval report, originally created in
@@ -519,7 +527,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._eval_train_num_batches,
         self._evaluate_batch_pmapped)
     self._run_eval_callbacks(report)
-    if jax.process_index() == 0:
+    if jax.process_index() == 0 and save:
       self._save(self._train_dir)
     steps_since_last_eval = self._global_step - self._prev_eval_step
     steps_per_sec_no_eval = steps_since_last_eval / time_since_last_eval
