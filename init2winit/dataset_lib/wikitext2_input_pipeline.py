@@ -105,6 +105,11 @@ def get_wikitext2_dataset(
       hps.sequence_length,
       padded_shapes=hps.sequence_length,
   )
+  eval_train_dataset_sequences = batch_with_padding(
+      train_dataset_tokenized,
+      hps.eval_sequence_length,
+      padded_shapes=hps.sequence_length,
+  )
   valid_dataset_sequences = batch_with_padding(
       valid_dataset_tokenized,
       hps.sequence_length,
@@ -119,13 +124,12 @@ def get_wikitext2_dataset(
   # Split the sequences into inputs and targets.
   train_dataset_sequences = train_dataset_sequences.map(
       lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+  eval_train_dataset_sequences = eval_train_dataset_sequences.map(
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
   valid_dataset_sequences = valid_dataset_sequences.map(
       lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
   test_dataset_sequences = test_dataset_sequences.map(
       lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
-
-  # Copy the train_dataset_sequences to a non repeating dataset
-  eval_train_dataset_sequences = train_dataset_sequences
 
   # Shuffle the train sequences.
   train_dataset_sequences = train_dataset_sequences.shuffle(

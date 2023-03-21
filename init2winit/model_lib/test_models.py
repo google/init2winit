@@ -465,6 +465,9 @@ class ModelsTest(parameterized.TestCase):
         'max_target_length': 64,
         'max_eval_target_length': 64,
         'dropout_rate': 0.1,
+        'recurrent_dropout_rate': 0.1,
+        'residual_connections': False,
+        'cell_kwargs': {},
         'attention_dropout_rate': 0.1,
         'momentum': 0.9,
         'normalizer': 'layer_norm',
@@ -526,15 +529,27 @@ class ModelsTest(parameterized.TestCase):
       return outputs, new_batch_stats
 
     outputs, new_batch_stats = forward_pass(params, xs, dropout_rng)
-    self.assertEqual(outputs.shape,
-                     (text_input_shape[0], text_input_shape[1], vocab_size))
+
+    if model_str == 'lstm':
+      # This is to accomodate weight tying and mask token of value 0
+      expected_output_size = vocab_size + 1
+    else:
+      expected_output_size = vocab_size
+
+    self.assertEqual(
+        outputs.shape,
+        (text_input_shape[0], text_input_shape[1], expected_output_size),
+    )
 
     intermediates_type_matches_model_type = jax.tree_util.tree_map(
         lambda x: x.dtype == small_hps.model_dtype,
-        new_batch_stats['intermediates'])
+        new_batch_stats['intermediates'],
+    )
     self.assertTrue(
-        jax.tree_util.tree_reduce(lambda x, y: x and y,
-                                  intermediates_type_matches_model_type))
+        jax.tree_util.tree_reduce(
+            lambda x, y: x and y, intermediates_type_matches_model_type
+        )
+    )
 
     # If it's a batch norm model check the batch stats changed.
     if batch_stats:
@@ -544,9 +559,12 @@ class ModelsTest(parameterized.TestCase):
 
     # Test batch_norm in inference mode.
     outputs = model.flax_module.apply(
-        {'params': params, 'batch_stats': batch_stats}, xs, train=False)
-    self.assertEqual(outputs.shape,
-                     (text_input_shape[0], text_input_shape[1], vocab_size))
+        {'params': params, 'batch_stats': batch_stats}, xs, train=False
+    )
+    self.assertEqual(
+        outputs.shape,
+        (text_input_shape[0], text_input_shape[1], expected_output_size),
+    )
 
   @parameterized.named_parameters(*dtype_and_remat_scan_keys)
   def test_translate_model(self, dtype_str, remat_scan_lengths):

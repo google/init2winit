@@ -110,27 +110,31 @@ def get_wikitext103_dataset(
       hps.sequence_length,
       padded_shapes=hps.sequence_length,
   )
+  eval_train_sequences = batch_with_padding(
+      train_dataset_tokenized,
+      hps.eval_sequence_length,
+      padded_shapes=hps.eval_sequence_length,
+  )
   valid_dataset_sequences = batch_with_padding(
       valid_dataset_tokenized,
-      hps.sequence_length,
-      padded_shapes=hps.sequence_length,
+      hps.eval_sequence_length,
+      padded_shapes=hps.eval_sequence_length,
   )
   test_dataset_sequences = batch_with_padding(
       test_dataset_tokenized,
-      hps.sequence_length,
-      padded_shapes=hps.sequence_length,
+      hps.eval_sequence_length,
+      padded_shapes=hps.eval_sequence_length,
   )
 
   # Split the sequences into inputs and targets.
   train_dataset_sequences = train_dataset_sequences.map(
       lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+  eval_train_dataset_sequences = eval_train_sequences.map(
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
   valid_dataset_sequences = valid_dataset_sequences.map(
       lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
   test_dataset_sequences = test_dataset_sequences.map(
       lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
-
-  # Copy the train_dataset_sequences to a non repeating dataset
-  eval_train_dataset_sequences = train_dataset_sequences
 
   # Shuffle the train sequences.
   train_dataset_sequences = train_dataset_sequences.shuffle(

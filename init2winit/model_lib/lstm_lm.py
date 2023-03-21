@@ -18,8 +18,9 @@
 Inspired by
 https://github.com/pytorch/examples/blob/main/word_language_model/model.py
 """
-from typing import Tuple, Union
+from typing import Any, Mapping, Tuple, Union
 
+import flax
 from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib.lstm import LSTM
@@ -34,26 +35,33 @@ MASK_TOKEN = 0
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        batch_size=32,
+        # training params
+        batch_size=256,
+        rng_seed=-1,
+        # model architecture params
+        model_dtype='float32',
         bidirectional=False,
-        dropout_rate=0.2,
-        emb_dim=200,
-        hidden_size=200,
-        layer_rescale_factors={},
+        residual_connections=False,
+        cell_kwargs={},
+        emb_dim=320,
+        hidden_size=1024,
+        num_layers=3,
+        dropout_rate=0.1,
+        recurrent_dropout_rate=0.1,
+        # optimizer params
         lr_hparams={
             'schedule': 'constant',
-            'base_lr': 0.1,
+            'base_lr': 1e-3,
         },
         l2_decay_factor=None,
-        model_dtype='float32',
-        optimizer='sgd',
+        grad_clip=None,
+        optimizer='adam',
         opt_hparams={
-            'momentum': 0.9,
-            'learning_rate': 0.1,
+            'beta1': 0.9,
+            'beta2': 0.999,
+            'epsilon': 1e-8,
+            'weight_decay': 0,
         },
-        num_layers=1,
-        rng_seed=-1,
-        grad_clip=0.25,
     ))
 
 
@@ -66,23 +74,36 @@ def shift_right(x, axis=1):
   return lax.dynamic_slice_in_dim(padded, 0, padded.shape[axis] - 1, axis)
 
 
-class WrappedLSTM(nn.Module):
+class LSTMLM(nn.Module):
   """Class for LSTM flax linen model with embedding and decoding layer.
 
   Attributes:
-    emb_dim: embedding dimension
+    emb_dim: Embedding dimension
     vocab_size: size of vocab of tokens to be embedded
     hidden_size: size of LSTM cell
-    embedding_layer: nn.Embed class
-    lstm: flax_nlp.recurrent LSTM class
-    decoder: nn.Decoder class
+    num_layers: The number of stacked recurrent layers. The output of first
+      layer, with optional droput applied, feeds into the next layer.
+    dropout_rate: Dropout rate to be applied between LSTM layers and
+      on output of final LSTM layer.
+    recurrent_dropout_rate: Dropout rate to be applied on the hidden state at
+      each time step repeating the same dropout mask.
+    bidirectional: Process the sequence left-to-right and right-to-left and
+      contatenate the outputs of the two directions.
+    residual_connections: Add residual connection between layers.
+    cell_type: The LSTM cell class to use. Default
+      `flax.linen.OptimizedLSTMCell. If you use hidden_size of >2048, consider
+      using `flax.linen.LSTMCell` instead.
+    cell_kwargs: Optional keyword arguments to instatiate the cell with.
   """
   emb_dim: int
   vocab_size: int
   hidden_size: int
-  num_layers: int
-  dropout_rate: float
-  bidirectional: bool
+  num_layers: int = 1
+  dropout_rate: float = 0.
+  recurrent_dropout_rate: float = 0.
+  bidirectional: bool = False
+  residual_connections: bool = False
+  cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
 
   @nn.compact
   def __call__(
@@ -101,7 +122,7 @@ class WrappedLSTM(nn.Module):
     inputs = shift_right(inputs)
     # Embed input sequences, resulting shape is (batch_size, seq_len, emb_dim)
     embedded_inputs = nn.Embed(
-        num_embeddings=self.vocab_size, features=self.emb_dim)(inputs)
+        num_embeddings=self.vocab_size + 1, features=self.emb_dim)(inputs)
     # Dropout on embeddings
     embedded_inputs = nn.Dropout(
         rate=self.dropout_rate, deterministic=(not train))(
@@ -112,7 +133,11 @@ class WrappedLSTM(nn.Module):
     lstm_output, _ = LSTM(
         hidden_size=self.hidden_size,
         num_layers=self.num_layers,
-        bidirectional=self.bidirectional,)(
+        bidirectional=self.bidirectional,
+        dropout_rate=self.dropout_rate,
+        recurrent_dropout_rate=self.recurrent_dropout_rate,
+        residual_connections=self.residual_connections,
+        cell_kwargs=self.cell_kwargs)(
             embedded_inputs,
             lengths=jnp.sum(jnp.ones(embedded_inputs.shape[:-1],
                                      dtype=jnp.int32), axis=1),
@@ -121,7 +146,7 @@ class WrappedLSTM(nn.Module):
     lstm_output = nn.Dropout(
         rate=self.dropout_rate, deterministic=(not train))(lstm_output)
     # Decode outputs to vector of size vocab_size
-    logits = nn.Dense(self.vocab_size)(lstm_output)
+    logits = nn.Dense(self.vocab_size + 1)(lstm_output)
     return logits
 
 
@@ -164,13 +189,17 @@ class LSTMModel(base_model.BaseModel):
         logits=logits, targets=targets, weights=weights, axis_name='batch')
 
   def build_flax_module(self):
-    return WrappedLSTM(
+    return LSTMLM(
         emb_dim=self.hps.emb_dim,
         vocab_size=self.hps.vocab_size,
         hidden_size=self.hps.hidden_size,
         num_layers=self.hps.num_layers,
         dropout_rate=self.hps.dropout_rate,
-        bidirectional=self.hps.bidirectional)
+        recurrent_dropout_rate=self.hps.recurrent_dropout_rate,
+        bidirectional=self.hps.bidirectional,
+        residual_connections=self.hps.residual_connections,
+        cell_kwargs=self.hps.cell_kwargs,
+    )
 
   def get_fake_inputs(self, hps):
     dummy_inputs = jnp.ones((hps.batch_size, hps.sequence_length),

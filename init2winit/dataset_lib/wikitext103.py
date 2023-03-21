@@ -32,6 +32,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         sequence_length=128,
         max_target_length=128,
         max_eval_target_length=128,
+        eval_sequence_length=128,
         input_shape=(128,),
         output_shape=(VOCAB_SIZE,),
         vocab_size=VOCAB_SIZE,
@@ -88,13 +89,13 @@ def get_wikitext103(
         'process_count={} must divide batch_size={}.'.format(
             process_count, batch_size))
 
+  if eval_batch_size is None:
+    eval_batch_size = batch_size
+
   if eval_batch_size % process_count != 0:
     raise ValueError(
         'process_count={} must divide batch_size={}.'.format(
             process_count, batch_size))
-
-  if eval_batch_size is None:
-    eval_batch_size = batch_size
 
   train_dataset, eval_train_dataset, valid_dataset, test_dataset = (
       input_pipeline.get_wikitext103_dataset(
