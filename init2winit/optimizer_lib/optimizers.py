@@ -28,12 +28,7 @@ from init2winit.optimizer_lib.hessian_free import hessian_free
 import jax
 import optax
 
-distributed_shampoo = None
-try:
-  from optax_shampoo import distributed_shampoo  # pylint: disable=g-import-not-at-top
-except ModuleNotFoundError:
-  distributed_shampoo = None
-  logging.exception('\n\nUnable to import distributed_shampoo.\n\n')
+
 
 
 
@@ -179,6 +174,10 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         .opt_hparams['clip_by_scaled_gradient_norm'],
         merge_small_dims_block_size=hps.opt_hparams.get(
             'merge_small_dims_block_size', 4096),
+        generate_fd_metrics=hps.opt_hparams.get('generate_fd_metrics', False),
+        compression_rank=hps.opt_hparams.get('compression_rank', 0),
+        frequent_directions=hps.opt_hparams.get('frequent_directions', False),
+        average_grad=hps.opt_hparams.get('average_grad', False),
         eigh=hps.opt_hparams.get('eigh', False),
         skip_preconditioning_rank_lt=hps.opt_hparams.get(
             'skip_preconditioning_rank_lt', 1),
