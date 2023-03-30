@@ -152,6 +152,10 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         .opt_hparams['start_preconditioning_step'],
         preconditioning_compute_steps=hps
         .opt_hparams['preconditioning_compute_steps'],
+        decay_preconditioning_compute_steps=hps
+        .opt_hparams.get('decay_preconditioning_compute_steps', False),
+        end_preconditioning_compute_steps=hps
+        .opt_hparams.get('end_preconditioning_compute_steps', None),
         statistics_compute_steps=statistics_compute_steps,
         best_effort_shape_interpretation=hps
         .opt_hparams['best_effort_shape_interpretation'],
