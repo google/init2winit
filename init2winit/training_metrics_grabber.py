@@ -146,7 +146,7 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         though some are just scalars.
     """
     metrics_state = {}
-    metrics_state['param_norm'] = jax.tree_map(lambda x: 0.0, params)
+    metrics_state['param_norm'] = jnp.zeros(num_train_steps)
     if config['enable_train_cost']:
       metrics_state['train_cost'] = jnp.zeros(num_train_steps)
     if config['enable_param_norms']:
@@ -215,7 +215,8 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
       update = jax.tree_map(lambda x, y: x - y, old_params, new_params)
 
     next_metrics_state = {}
-    next_metrics_state['param_norm'] = param_norm
+    next_metrics_state['param_norm'] = metrics_state['param_norm'].at[
+        step].set(total_tree_norm_l2(param_norm))
     if config['enable_train_cost']:
       next_metrics_state['train_cost'] = metrics_state['train_cost'].at[
           step].set(train_cost)
