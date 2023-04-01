@@ -236,11 +236,9 @@ class GenericRNN(nn.Module):
 
   Attributes:
     cell_type: An RNN cell class to use, e.g., `flax.linen.LSTMCell`.
-    hidden_size: The size of each recurrent cell.
-    num_layers: The number of stacked recurrent layers. The output of the first
-      layer, with optional dropout applied, feeds into the next layer.
+    hidden_sizes: Per layer size of each recurrent cell.
     dropout_rate: Dropout rate to be applied between LSTM layers. Only applies
-      when num_layers > 1.
+      when num_layers=len(hidden_sizes) > 1.
     recurrent_dropout_rate: Dropout rate to be applied on the hidden state at
       each time step repeating the same dropout mask.
     bidirectional: Process the sequence left-to-right and right-to-left and
@@ -249,8 +247,7 @@ class GenericRNN(nn.Module):
     cell_kwargs: Optional keyword arguments to instantiate the cell with.
   """
   cell_type: Type[nn.recurrent.RNNCellBase]
-  hidden_size: int
-  num_layers: int = 1
+  hidden_sizes: Sequence[int]
   dropout_rate: float = 0.
   recurrent_dropout_rate: float = 0.
   bidirectional: bool = False
@@ -270,10 +267,11 @@ class GenericRNN(nn.Module):
       inputs: The input sequence <float32>[batch_size, sequence_length, ...]
       lengths: The lengths of each sequence in the batch. <int64>[batch_size]
       initial_states: The initial states for the cells. You must provide
-        `num_layers` initial states (when using bidirectional, `num_layers *
-        2`). These must be ordered in the following way: (layer_0_forward,
-        layer_0_backward, layer_1_forward, layer_1_backward, ...). If None, all
-        initial states will be initialized with zeros.
+        `num_layers` initial states, where `num_layers=len(hidden_sizes)` (when
+        using bidirectional, `num_layers * 2`). These must be ordered in the
+        following way: (layer_0_forward, layer_0_backward, layer_1_forward,
+        layer_1_backward, ...). If None, all initial states will be initialized
+        with zeros.
       deterministic: Disables dropout between layers when set to True.
 
     Returns:
@@ -285,52 +283,66 @@ class GenericRNN(nn.Module):
       For some cells like LSTMCell a state consists of an (c, h) tuple, while
       for others cells it only contains a single vector (h,).
     """
+    num_layers = len(self.hidden_sizes)
     batch_size = inputs.shape[0]
     final_states = []
     num_directions = 2 if self.bidirectional else 1
-    num_cells = self.num_layers * num_directions
+    num_cells = num_layers * num_directions
+
+    if self.bidirectional:
+      # pylint: disable=g-complex-comprehension
+      hidden_size_per_cell = [h for h in self.hidden_sizes for _ in range(2)]
+    else:
+      hidden_size_per_cell = self.hidden_sizes
 
     # Construct initial states.
     if initial_states is None:  # Initialize with zeros.
       rng = jax.random.PRNGKey(0)
       initial_states = [
-          self.cell_type.initialize_carry(rng, (batch_size,), self.hidden_size)
-          for _ in range(num_cells)
+          self.cell_type.initialize_carry(rng, (batch_size,), hidden_size)
+          for hidden_size in hidden_size_per_cell
       ]
     assert len(initial_states) == num_cells, (
         f'Please provide {self.num_cells} (`num_layers`, *2 if bidirectional) '
-        f'initial states.')
+        'initial states.'
+    )
 
     # For each layer, apply the forward and optionally the backward RNN cell.
     cell_idx = 0
-    for _ in range(self.num_layers):
-      # Unroll an RNN cell (forward direction) for this layer.
+    for hidden_size in self.hidden_sizes:
+      # Process sequence in forward direction through an RNN Cell for this
+      # layer.
       outputs, final_state = GenericRNNSequenceEncoder(
           cell_type=self.cell_type,
           cell_kwargs=self.cell_kwargs,
-          hidden_size=self.hidden_size,
+          hidden_size=hidden_size,
           recurrent_dropout_rate=self.recurrent_dropout_rate,
-          name=f'{self.name}SequenceEncoder_{cell_idx}')(
-              inputs,
-              lengths,
-              initial_state=initial_states[cell_idx],
-              deterministic=deterministic)
+          name=f'{self.name}SequenceEncoder_{cell_idx}',
+      )(
+          inputs,
+          lengths,
+          initial_state=initial_states[cell_idx],
+          deterministic=deterministic,
+      )
       final_states.append(final_state)
       cell_idx += 1
 
-      # Unroll an RNN cell (backward direction) for this layer.
+      # Process sequence in backward direction through an RNN Cell for this
+      # layer.
       if self.bidirectional:
         backward_outputs, backward_final_state = GenericRNNSequenceEncoder(
             cell_type=self.cell_type,
             cell_kwargs=self.cell_kwargs,
-            hidden_size=self.hidden_size,
+            hidden_size=hidden_size,
             recurrent_dropout_rate=self.recurrent_dropout_rate,
-            name=f'{self.name}SequenceEncoder_{cell_idx}')(
-                inputs,
-                lengths,
-                initial_state=initial_states[cell_idx],
-                reverse=True,
-                deterministic=deterministic)
+            name=f'{self.name}SequenceEncoder_{cell_idx}',
+        )(
+            inputs,
+            lengths,
+            initial_state=initial_states[cell_idx],
+            reverse=True,
+            deterministic=deterministic,
+        )
         outputs = jnp.concatenate([outputs, backward_outputs], axis=-1)
         final_states.append(backward_final_state)
         cell_idx += 1
@@ -357,10 +369,8 @@ class LSTM(nn.Module):
 
   Attributes:
     hidden_size: The size of each recurrent cell.
-    num_layers: The number of stacked recurrent layers. The output of the first
-      layer, with optional dropout applied, feeds into the next layer.
     dropout_rate: Dropout rate to be applied between LSTM layers. Only applies
-      when num_layers > 1.
+      when num_layers=len(hidden_sizes) > 1.
     recurrent_dropout_rate: Dropout rate to be applied on the hidden state at
       each time step repeating the same dropout mask.
     bidirectional: Process the sequence left-to-right and right-to-left and
@@ -372,8 +382,7 @@ class LSTM(nn.Module):
       best for hidden sizes up to 2048.
     cell_kwargs: Optional keyword arguments to instantiate the cell with.
   """
-  hidden_size: int
-  num_layers: int = 1
+  hidden_sizes: Sequence[int]
   dropout_rate: float = 0.
   recurrent_dropout_rate: float = 0.
   bidirectional: bool = False
@@ -401,10 +410,11 @@ class LSTM(nn.Module):
       inputs: The input sequence <float32>[batch_size, sequence_length, ...]
       lengths: The lengths of each sequence in the batch. <int64>[batch_size]
       initial_states: The initial states for the cells. You must provide
-        `num_layers` initial states (when using bidirectional, `num_layers *
-        2`). These must be ordered in the following way: (layer_0_forward,
-        layer_0_backward, layer_1_forward, layer_1_backward, ...). If None, all
-        initial states will be initialized with zeros.
+        `num_layers` initial states, where `num_layers=len(hidden_sizes)` (when
+        using bidirectional, `num_layers * 2`). These must be ordered in the
+        following way: (layer_0_forward, layer_0_backward, layer_1_forward,
+        layer_1_backward, ...). If None, all initial states will be initialized
+        with zeros.
       deterministic: Disables dropout between layers when set to True.
 
     Returns:
@@ -414,15 +424,16 @@ class LSTM(nn.Module):
     """
     return GenericRNN(
         cell_type=self.cell_type,
-        hidden_size=self.hidden_size,
-        num_layers=self.num_layers,
+        hidden_sizes=self.hidden_sizes,
         dropout_rate=self.dropout_rate,
         recurrent_dropout_rate=self.recurrent_dropout_rate,
         bidirectional=self.bidirectional,
         residual_connections=self.residual_connections,
         cell_kwargs=self.cell_kwargs,
-        name='LSTM')(
-            inputs,
-            lengths,
-            initial_states=initial_states,
-            deterministic=deterministic)
+        name='LSTM',
+    )(
+        inputs,
+        lengths,
+        initial_states=initial_states,
+        deterministic=deterministic,
+    )

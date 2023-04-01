@@ -44,10 +44,11 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         residual_connections=False,
         cell_kwargs={},
         emb_dim=320,
-        hidden_size=1024,
-        num_layers=3,
+        hidden_sizes=[1024, 1024, 1024],
         dropout_rate=0.1,
         recurrent_dropout_rate=0.1,
+        tie_embeddings=False,
+        projection_layer=False,
         # optimizer params
         lr_hparams={
             'schedule': 'constant',
@@ -62,7 +63,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
             'epsilon': 1e-8,
             'weight_decay': 0,
         },
-    ))
+    )
+)
 
 
 def shift_right(x, axis=1):
@@ -78,18 +80,21 @@ class LSTMLM(nn.Module):
   """Class for LSTM flax linen model with embedding and decoding layer.
 
   Attributes:
-    emb_dim: Embedding dimension
-    vocab_size: size of vocab of tokens to be embedded
-    hidden_size: size of LSTM cell
-    num_layers: The number of stacked recurrent layers. The output of first
-      layer, with optional droput applied, feeds into the next layer.
-    dropout_rate: Dropout rate to be applied between LSTM layers and
-      on output of final LSTM layer.
+    emb_dim: Embedding dimension.
+    vocab_size: Size of vocab of tokens to be embedded.
+    hidden_sizes: Per layer sizes of LSTM cell.
+    dropout_rate: Dropout rate to be applied between LSTM layers and on output
+      of final LSTM layer.
     recurrent_dropout_rate: Dropout rate to be applied on the hidden state at
       each time step repeating the same dropout mask.
     bidirectional: Process the sequence left-to-right and right-to-left and
       contatenate the outputs of the two directions.
     residual_connections: Add residual connection between layers.
+    tie_embeddings: If true share weights of the input embedding layer
+      with the output embeddings.
+    projection_layer: If true add projection layer after LSTM from LSTM output
+      size (hidden_sizes[-1]) to emb_dim. Useful if tie_embeddings is True and
+      hidden_sizes[-1] is not equal to emb_dim.
     cell_type: The LSTM cell class to use. Default
       `flax.linen.OptimizedLSTMCell. If you use hidden_size of >2048, consider
       using `flax.linen.LSTMCell` instead.
@@ -97,56 +102,81 @@ class LSTMLM(nn.Module):
   """
   emb_dim: int
   vocab_size: int
-  hidden_size: int
-  num_layers: int = 1
+  hidden_sizes: list[int]
   dropout_rate: float = 0.
   recurrent_dropout_rate: float = 0.
   bidirectional: bool = False
   residual_connections: bool = False
+  tie_embeddings: bool = False
+  projection_layer: bool = False
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
 
   @nn.compact
   def __call__(
       self,
       inputs: Array,
-      train: bool,) -> Array:
+      train: bool,
+  ) -> Array:
     """Returns output of LSTM model on input sequence.
 
     Args:
       inputs: The input sequence <float32>[batch_size, sequence_length, ...]
       train: Whether the model is training
+
     Returns:
       Decoded outputs for the final LSTM layer.
     """
+    # If tie_embeddings heck that last hidden size is equal to embedding dim
+    if self.tie_embeddings:
+      if self.hidden_sizes[-1] != self.emb_dim and not self.projection_layer:
+        raise ValueError(
+            'If tie_embeddings is True, hidden_sizes[-1] '
+            f'({self.hidden_sizes[-1]}) must be equal to emb_dim'
+            f'({self.emb_dim}) and/or projection_layer should be set to True.'
+        )
+
+    # Define embedding layer
+    embedding_layer = nn.Embed(
+        num_embeddings=self.vocab_size + 1, features=self.emb_dim
+    )
     # Shift inputs tokens to the right by 1 and pad from left w MASK_TOKEN
     inputs = shift_right(inputs)
     # Embed input sequences, resulting shape is (batch_size, seq_len, emb_dim)
-    embedded_inputs = nn.Embed(
-        num_embeddings=self.vocab_size + 1, features=self.emb_dim)(inputs)
+    embedded_inputs = embedding_layer(inputs)
     # Dropout on embeddings
     embedded_inputs = nn.Dropout(
-        rate=self.dropout_rate, deterministic=(not train))(
-            embedded_inputs)
+        rate=self.dropout_rate, deterministic=(not train)
+    )(embedded_inputs)
     # Apply LSTM on inputs embeddings
     # Output of the LSTM layer is a sequence of all outputs of the final layer
     # and a list of final states (h, c) for each cell and direction
-    lstm_output, _ = LSTM(
-        hidden_size=self.hidden_size,
-        num_layers=self.num_layers,
+    output, _ = LSTM(
+        hidden_sizes=self.hidden_sizes,
         bidirectional=self.bidirectional,
         dropout_rate=self.dropout_rate,
         recurrent_dropout_rate=self.recurrent_dropout_rate,
         residual_connections=self.residual_connections,
-        cell_kwargs=self.cell_kwargs)(
-            embedded_inputs,
-            lengths=jnp.sum(jnp.ones(embedded_inputs.shape[:-1],
-                                     dtype=jnp.int32), axis=1),
-            deterministic=(not train))
+        cell_kwargs=self.cell_kwargs,
+    )(
+        embedded_inputs,
+        lengths=jnp.sum(
+            jnp.ones(embedded_inputs.shape[:-1], dtype=jnp.int32), axis=1
+        ),
+        deterministic=(not train),
+    )
     # Apply dropout on outputs
-    lstm_output = nn.Dropout(
-        rate=self.dropout_rate, deterministic=(not train))(lstm_output)
+    output = nn.Dropout(
+        rate=self.dropout_rate, deterministic=(not train))(output)
+
+    # Optionally apply projection layer
+    if self.projection_layer:
+      output = nn.Dense(self.emb_dim)(output)
+
     # Decode outputs to vector of size vocab_size
-    logits = nn.Dense(self.vocab_size + 1)(lstm_output)
+    if self.tie_embeddings:
+      logits = embedding_layer.attend(output)
+    else:
+      logits = nn.Dense(self.vocab_size + 1)(output)
     return logits
 
 
@@ -189,15 +219,17 @@ class LSTMModel(base_model.BaseModel):
         logits=logits, targets=targets, weights=weights, axis_name='batch')
 
   def build_flax_module(self):
+
     return LSTMLM(
         emb_dim=self.hps.emb_dim,
         vocab_size=self.hps.vocab_size,
-        hidden_size=self.hps.hidden_size,
-        num_layers=self.hps.num_layers,
+        hidden_sizes=self.hps.hidden_sizes,
         dropout_rate=self.hps.dropout_rate,
         recurrent_dropout_rate=self.hps.recurrent_dropout_rate,
         bidirectional=self.hps.bidirectional,
         residual_connections=self.hps.residual_connections,
+        tie_embeddings=self.hps.tie_embeddings,
+        projection_layer=self.hps.projection_layer,
         cell_kwargs=self.hps.cell_kwargs,
     )
 

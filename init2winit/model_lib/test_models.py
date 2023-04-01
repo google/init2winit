@@ -347,6 +347,17 @@ dtype_and_remat_scan_keys = [
     for x, y in itertools.product(dtype_keys, remat_scan_keys)
 ]
 
+# Construct keys for LSTM parameterized test.
+# Params are (test_name, hidden_sizes, emb_dim, bidirectional,
+# tie_embeddings, projection_layer)
+lstm_keys = [
+    ('test_lstm_3_layers', [32, 32, 16], 16, False, False, False),
+    ('test_lstm_2_layers', [16, 16], 16, False, False, False),
+    ('test_lstm_bidirectional', [32, 32, 16], 16, True, False, False),
+    ('test_lstm_tie_embedding', [32, 32, 16], 16, False, True, False),
+    ('test_lstm_projection', [32, 32, 32], 16, False, False, True),
+]
+
 
 # TODO(kasimbeg): clean this up after get_fake_inputs is implemented for
 # all models
@@ -459,6 +470,8 @@ class ModelsTest(parameterized.TestCase):
         'emb_dim': 32,
         'num_heads': 2,
         'num_layers': 3,
+        'tie_embeddings': False,
+        'projection_layer': False,
         'qkv_dim': 32,
         'label_smoothing': 0.1,
         'mlp_dim': 64,
@@ -471,17 +484,14 @@ class ModelsTest(parameterized.TestCase):
         'attention_dropout_rate': 0.1,
         'momentum': 0.9,
         'normalizer': 'layer_norm',
-        'lr_hparams': {
-            'base_lr': 0.005,
-            'schedule': 'constant'
-        },
+        'lr_hparams': {'base_lr': 0.005, 'schedule': 'constant'},
         'output_shape': (vocab_size,),
         'model_dtype': dtype_str,
         # Training HParams.
         'l2_decay_factor': 1e-4,
         'decode': False,
         'vocab_size': vocab_size,
-        'hidden_size': 32,
+        'hidden_sizes': [32, 32, 32],
         'bidirectional': False,
         'normalize_attention': False,
     })
@@ -836,6 +846,85 @@ class ModelsTest(parameterized.TestCase):
         rngs={'dropout': dropout_rng},
         train=True)
     self.assertEqual(outputs.shape, (1, 8192, 98302))
+
+  @parameterized.named_parameters(*lstm_keys)
+  def test_lstm_model(
+      self,
+      hidden_sizes,
+      emb_dim,
+      bidirectional,
+      tie_embeddings,
+      projection_layer,
+  ):
+    """Test forward pass of the LSTM model."""
+    small_model_hps = {
+        'emb_dim': emb_dim,
+        'hidden_sizes': hidden_sizes,
+        'tie_embeddings': tie_embeddings,
+        'bidirectional': bidirectional,
+        'residual_connections': False,
+        'cell_kwargs': {},
+        'dropout_rate': 0.1,
+        'recurrent_dropout_rate': 0.1,
+        'batch_size': 16,
+        'model_dtype': 'float32',
+        'projection_layer': projection_layer,
+    }
+    model_cls = models.get_model('lstm')
+    hps = models.get_model_hparams('lstm')
+    hps.update(DATA_HPS['lstm'])
+    hps.update(small_model_hps)
+
+    assert isinstance(hps.hidden_sizes, list)
+
+    # make test input
+    input_batch_shape = (hps.batch_size, hps.sequence_length)
+    xs = jnp.array(
+        np.random.randint(size=input_batch_shape, low=1, high=hps.vocab_size)
+    )
+
+    # initialize model
+    model = model_cls(
+        hps,
+        dataset_meta_data={'shift_inputs': True, 'causal': True},
+        loss_name=LOSS_NAME['lstm'],
+        metrics_name=METRICS_NAME['lstm'],
+    )
+
+    fake_input_batch = _get_fake_inputs_for_initialization(model, hps)
+
+    rng = jax.random.PRNGKey(0)
+    params_rng, dropout_rng = jax.random.split(rng, num=2)
+    model_init_fn = functools.partial(model.flax_module.init, train=False)
+    init_dict = model_init_fn(
+        {'params': params_rng, 'dropout': dropout_rng}, *fake_input_batch
+    )
+
+    params = init_dict['params']
+    batch_stats = init_dict.get('batch_stats', {})
+
+    # Check that the forward pass works with mutated batch_stats.
+    # Due to a bug in flax, this jit is required, otherwise the model errors.
+    @jax.jit
+    def forward_pass(params, xs, dropout_rng):
+      outputs, new_batch_stats = model.flax_module.apply(
+          {'params': params, 'batch_stats': batch_stats},
+          xs,
+          mutable=['batch_stats'],
+          capture_intermediates=True,
+          rngs={'dropout': dropout_rng},
+          train=True,
+      )
+      return outputs, new_batch_stats
+
+    outputs, _ = forward_pass(params, xs, dropout_rng)
+
+    # Logit dimension includes mask token to support tying with embedding layer
+    expected_output_size = hps.vocab_size + 1
+    self.assertEqual(
+        outputs.shape,
+        (input_batch_shape[0], input_batch_shape[1], expected_output_size),
+    )
 
 
 if __name__ == '__main__':
