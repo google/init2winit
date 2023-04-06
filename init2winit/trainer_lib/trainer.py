@@ -46,7 +46,8 @@ def update(
     training_cost,
     grad_clip,
     optimizer_update_fn,
-    metrics_update_fn):
+    metrics_update_fn,
+    axis_name='batch'):
   """Single step of the training loop.
 
   This function will later be pmapped so we keep it outside of the Trainer class
@@ -80,6 +81,7 @@ def update(
       value g / ||g||_2 * grad_clip. If None, then no clipping will be applied.
     optimizer_update_fn: the optimizer update function.
     metrics_update_fn: the training metrics update function.
+    axis_name: axis_name used by pmap.
 
   Returns:
     A tuple of the new optimizer, the new batch stats, the scalar training cost,
@@ -102,10 +104,11 @@ def update(
 
   # If we are accumulating gradients, we handle gradient synchronization inside
   # the optimizer so that we can only sync when actually updating the model.
-  if isinstance(optimizer_state, gradient_accumulator.GradientAccumulatorState):
-    cost_value = lax.pmean(cost_value, axis_name='batch')
-  else:
-    cost_value, grad = lax.pmean((cost_value, grad), axis_name='batch')
+  if axis_name is not None:
+    if isinstance(optimizer_state, gradient_accumulator.GradientAccumulatorState):  # pylint:disable=g-line-too-long
+      cost_value = lax.pmean(cost_value, axis_name=axis_name)
+    else:
+      cost_value, grad = lax.pmean((cost_value, grad), axis_name=axis_name)
 
   grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
   # TODO(znado): move to inside optax gradient clipping.
