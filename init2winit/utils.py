@@ -25,6 +25,7 @@ import time
 
 from absl import logging as absl_logging
 from clu import metric_writers
+import flax
 import flax.linen as nn
 from flax.training import checkpoints as flax_checkpoints
 from init2winit import checkpoint
@@ -317,13 +318,13 @@ def log_pytree_shape_and_statistics(pytree, json_path=None):
     return
 
   if json_path:
-    shape_dict = jax.tree_map(lambda x: x.shape, pytree).pretty_repr()
+    shape_dict = flax.core.pretty_repr(jax.tree_map(lambda x: x.shape, pytree))
     with gfile.GFile(json_path, 'w') as json_file:
       json_file.write(shape_dict)
 
   absl_logging.info('Printing model param shapes.')
   shape_dict = jax.tree_map(_summary_str, pytree)
-  absl_logging.info(shape_dict.pretty_repr())
+  absl_logging.info(flax.core.pretty_repr(shape_dict))
   total_params = jax.tree_util.tree_reduce(
       operator.add, jax.tree_map(lambda x: x.size, pytree))
   absl_logging.info('Total params: %d', total_params)
