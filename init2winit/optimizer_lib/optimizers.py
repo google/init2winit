@@ -20,6 +20,7 @@ import flax
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import online_newton_step
+from init2winit.optimizer_lib import pax_adafactor
 from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib import sharpness_aware_minimization
 from init2winit.optimizer_lib import utils
@@ -218,6 +219,34 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         # mask in a config file / serializing properly is not completely
         # straightforward.
         weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
+    )
+  elif hps.optimizer == 'pax_adafactor':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        pax_adafactor.sharded_adafactor
+    )(
+        learning_rate=0.0,
+        weight_decay=weight_decay,
+        layerwise_adaptation=hps.opt_hparams['layerwise_adaptation'],
+        decay_method=hps.opt_hparams['decay_method'],
+        decay_adam=hps.opt_hparams['decay_adam'],
+        decay_pow=hps.opt_hparams['decay_pow'],
+        beta1=hps.opt_hparams['beta1'],
+        clip_threshold=hps.opt_hparams['clip_threshold'],
+        factored=hps.opt_hparams['factored'],
+        epsilon1_grad_sq_reg=hps.opt_hparams['epsilon1_grad_sq_reg'],
+        respect_skip_lp_regularization=hps
+        .opt_hparams['respect_skip_lp_regularization'],
+        exclude_from_layerwise_adaptation=hps
+        .opt_hparams['exclude_from_layerwise_adaptation'],
+        per_var_learning_summary=hps.opt_hparams['per_var_learning_summary'],
+        sort_factored_second_moment_dims=hps
+        .opt_hparams['sort_factored_second_moment_dims'],
+        min_dim_size_to_factor=hps.opt_hparams['min_dim_size_to_factor'],
+        multiply_by_parameter_scale=hps
+        .opt_hparams['multiply_by_parameter_scale'],
+        epsilon2_param_scale_reg=hps.opt_hparams['epsilon2_param_scale_reg'],
+        maybe_inf_to_nan=hps.opt_hparams['maybe_inf_to_nan'],
+        nesterov=hps.opt_hparams.get('nesterov', False),
     )
   elif hps.optimizer == 'hessian_free':
     if model is None:
