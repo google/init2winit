@@ -128,11 +128,52 @@ class HyperParameterTest(absltest.TestCase):
         'k': 5,
     }
     expected_msg = (
-        'Key a has dot children that would be overriden: b\nKey b has dot '
-        'children that would be overriden: c\nKey g has dot children that '
-        'would be overriden: h')
+        'Aborting dotted key expansion as prefix of dotted key is not a dict:'
+        ' prefix = a, prefix_value = 0'
+    )
     with self.assertRaisesWithLiteralMatch(ValueError, expected_msg):
       hyperparameters.expand_dot_keys(d)
+
+  def test_safe_dict_merge_expand_dot_keys(self):
+    """Test that dotted keys can be safely expanded when there's common prefix."""
+    d = {'a.b': {'c': 8}, 'a': {'d': 4}}
+
+    expected = {'a': {'d': 4, 'b': {'c': 8}}}
+    expanded = hyperparameters.expand_dot_keys(d)
+
+    self.assertEqual(expanded, expected)
+
+  def test_unsafe_dict_merge_expand_dot_keys(self):
+    """Test that we will raise an error when unsafe keys are present."""
+    d = {'a.b': {'c': 8}, 'a.b.c': 5}
+
+    expected_msg = (
+        'prefix = a.b.c already exists with value = 8'
+    )
+    with self.assertRaisesWithLiteralMatch(ValueError, expected_msg):
+      hyperparameters.expand_dot_keys(d)
+
+  def test_safe_expand_dot_keys(self):
+    """Test that dotted key expansion works when prefix is dict."""
+    d = {
+        'lr_hparams': {
+            'warmup_steps': 1000,
+            'schedule': 'cosine_warmup',
+        },
+        'lr_hparams.base_lr': 1.0,
+    }
+
+    expanded = hyperparameters.expand_dot_keys(d)
+
+    expected = {
+        'lr_hparams': {
+            'base_lr': 1.0,
+            'warmup_steps': 1000,
+            'schedule': 'cosine_warmup',
+        },
+    }
+
+    self.assertEqual(expanded, expected)
 
 
 if __name__ == '__main__':
