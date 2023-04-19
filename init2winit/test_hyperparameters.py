@@ -29,8 +29,8 @@ class HyperParameterTest(absltest.TestCase):
         'lr_hparams': {
             'schedule': 'polynomial',
             'power': 2.0,
-            'base_lr': .1,
-            'end_factor': .01,
+            'base_lr': 0.1,
+            'end_factor': 0.01,
             'decay_steps_factor': 0.5,
         },
     }
@@ -40,16 +40,43 @@ class HyperParameterTest(absltest.TestCase):
         initializer_name='noop',
         dataset_name='lm1b_v2',
         hparam_file=None,
-        hparam_overrides=hps_overrides)
+        hparam_overrides=hps_overrides,
+    )
 
-    self.assertEqual(merged_hps.lr_hparams['schedule'],
-                     'polynomial')
+    self.assertEqual(merged_hps.lr_hparams['schedule'], 'polynomial')
     self.assertEqual(
         set(merged_hps.lr_hparams.keys()),
-        set([
-            'schedule', 'power', 'base_lr',
-            'end_factor', 'decay_steps_factor'
-        ]))
+        set(
+            ['schedule', 'power', 'base_lr', 'end_factor', 'decay_steps_factor']
+        ),
+    )
+
+  def test_dot_override(self):
+    """Test overriding lr_hparams.base_lr works correctly."""
+    hps_overrides = {'lr_hparams.base_lr': 77.0}
+
+    merged_hps = hyperparameters.build_hparams(
+        model_name='transformer',
+        initializer_name='noop',
+        dataset_name='lm1b_v2',
+        hparam_file=None,
+        hparam_overrides=hps_overrides,
+    )
+
+    self.assertEqual(
+        merged_hps.lr_hparams['schedule'], 'rsqrt_normalized_decay_warmup'
+    )
+    expected_lr_hparams = {
+        'base_lr': 77.0,
+        'warmup_steps': 1000,
+        'squash_steps': 1000,
+        'schedule': 'rsqrt_normalized_decay_warmup',
+    }
+    self.assertEqual(
+        set(merged_hps.lr_hparams.keys()),
+        set(['schedule', 'warmup_steps', 'base_lr', 'squash_steps']),
+    )
+    self.assertEqual(merged_hps.lr_hparams.to_dict(), expected_lr_hparams)
 
   def test_optimizer_override(self):
     """Test polynomial schedule works correctly."""
@@ -61,8 +88,8 @@ class HyperParameterTest(absltest.TestCase):
         'lr_hparams': {
             'schedule': 'polynomial',
             'power': 2.0,
-            'base_lr': .1,
-            'end_factor': .01,
+            'base_lr': 0.1,
+            'end_factor': 0.01,
             'decay_steps_factor': 0.5,
         },
     }
@@ -72,16 +99,16 @@ class HyperParameterTest(absltest.TestCase):
         initializer_name='noop',
         dataset_name='lm1b_v2',
         hparam_file=None,
-        hparam_overrides=hps_overrides)
+        hparam_overrides=hps_overrides,
+    )
 
-    self.assertEqual(merged_hps.lr_hparams['schedule'],
-                     'polynomial')
+    self.assertEqual(merged_hps.lr_hparams['schedule'], 'polynomial')
     self.assertEqual(
         set(merged_hps.lr_hparams.keys()),
-        set([
-            'schedule', 'power', 'base_lr',
-            'end_factor', 'decay_steps_factor'
-        ]))
+        set(
+            ['schedule', 'power', 'base_lr', 'end_factor', 'decay_steps_factor']
+        ),
+    )
 
   def test_expand_dot_keys(self):
     """Test expanding keys with dots in them into sub-dicts."""
@@ -135,7 +162,7 @@ class HyperParameterTest(absltest.TestCase):
       hyperparameters.expand_dot_keys(d)
 
   def test_safe_dict_merge_expand_dot_keys(self):
-    """Test that dotted keys can be safely expanded when there's common prefix."""
+    """Test dotted keys can be safely expanded when there's common prefix."""
     d = {'a.b': {'c': 8}, 'a': {'d': 4}}
 
     expected = {'a': {'d': 4, 'b': {'c': 8}}}
@@ -147,9 +174,7 @@ class HyperParameterTest(absltest.TestCase):
     """Test that we will raise an error when unsafe keys are present."""
     d = {'a.b': {'c': 8}, 'a.b.c': 5}
 
-    expected_msg = (
-        'prefix = a.b.c already exists with value = 8'
-    )
+    expected_msg = 'prefix = a.b.c already exists with value = 8'
     with self.assertRaisesWithLiteralMatch(ValueError, expected_msg):
       hyperparameters.expand_dot_keys(d)
 
