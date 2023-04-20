@@ -22,23 +22,49 @@ def _check_schedule_hparams(schedule_hparams, expected_keys):
   if set(schedule_hparams.keys()) != set(expected_keys):
     raise ValueError(
         'Provided schedule_hparams keys are invalid. Recieved: {}, Expected: {}'
-        .format(sorted(schedule_hparams.keys()), sorted(expected_keys)))
+        .format(sorted(schedule_hparams.keys()), sorted(expected_keys))
+    )
 
 
 def constant_schedule(schedule_hparams, max_training_updates):
   del max_training_updates
-  _check_schedule_hparams(schedule_hparams,
-                          ['schedule', 'base_lr'])
+  _check_schedule_hparams(schedule_hparams, ['schedule', 'base_lr'])
   return lambda t: schedule_hparams['base_lr']
 
 
 def cosine_schedule(schedule_hparams, max_training_updates):
-  _check_schedule_hparams(schedule_hparams,
-                          ['schedule', 'base_lr'])
+  """LR schedule using cosine decay. 
+
+  Args:
+    schedule_hparams: hparams to control the schedule behaviour.
+    max_training_updates: number of training steps for the schedule.
+
+  Returns:
+
+  """
+  num_flat_steps_after_warmup = schedule_hparams.get(
+      'num_flat_steps_after_warmup', 0
+  )
+
+  if num_flat_steps_after_warmup > 0:
+    schedule_hparams.pop('num_flat_steps_after_warmup')
+
+  _check_schedule_hparams(schedule_hparams, ['schedule', 'base_lr'])
 
   def lr_fn(t):
-    decay_factor = (1 + np.cos(t / max_training_updates * np.pi)) * 0.5
-    return schedule_hparams['base_lr'] * decay_factor
+    if t <= num_flat_steps_after_warmup:
+      return schedule_hparams['base_lr']
+    else:
+      decay_factor = (
+          1
+          + np.cos(
+              (t - num_flat_steps_after_warmup)
+              / (max_training_updates - num_flat_steps_after_warmup)
+              * np.pi
+          )
+      ) * 0.5
+      return schedule_hparams['base_lr'] * decay_factor
+
   return lr_fn
 
 
