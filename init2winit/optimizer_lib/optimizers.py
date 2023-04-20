@@ -220,63 +220,6 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         # straightforward.
         weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
     )
-  elif hps.optimizer == 'pax_adafactor':
-    opt_init, opt_update = utils.static_inject_hyperparams(
-        pax_adafactor.sharded_adafactor
-    )(
-        learning_rate=0.0,
-        weight_decay=weight_decay,
-        layerwise_adaptation=hps.opt_hparams['layerwise_adaptation'],
-        decay_method=hps.opt_hparams['decay_method'],
-        decay_adam=hps.opt_hparams['decay_adam'],
-        decay_pow=hps.opt_hparams['decay_pow'],
-        beta1=hps.opt_hparams['beta1'],
-        clip_threshold=hps.opt_hparams['clip_threshold'],
-        factored=hps.opt_hparams['factored'],
-        epsilon1_grad_sq_reg=hps.opt_hparams['epsilon1_grad_sq_reg'],
-        respect_skip_lp_regularization=hps
-        .opt_hparams['respect_skip_lp_regularization'],
-        exclude_from_layerwise_adaptation=hps
-        .opt_hparams['exclude_from_layerwise_adaptation'],
-        per_var_learning_summary=hps.opt_hparams['per_var_learning_summary'],
-        sort_factored_second_moment_dims=hps
-        .opt_hparams['sort_factored_second_moment_dims'],
-        min_dim_size_to_factor=hps.opt_hparams['min_dim_size_to_factor'],
-        multiply_by_parameter_scale=hps
-        .opt_hparams['multiply_by_parameter_scale'],
-        epsilon2_param_scale_reg=hps.opt_hparams['epsilon2_param_scale_reg'],
-        maybe_inf_to_nan=hps.opt_hparams['maybe_inf_to_nan'],
-        nesterov=hps.opt_hparams.get('nesterov', False),
-    )
-  elif hps.optimizer == 'hessian_free':
-    if model is None:
-      raise ValueError(
-          'Model info should be provided for using the hessian free optimizer.')
-    opt_init, opt_update = utils.static_inject_hyperparams(hessian_free)(
-        flax_module=model.flax_module,
-        training_objective_fn=model.training_objective_fn,
-        learning_rate=0.0,  # Manually injected on each train step.
-        cg_max_iter=hps.opt_hparams['cg_max_iter'],
-        cg_iter_tracking_method=CGIterationTrackingMethod(
-            hps.opt_hparams['cg_iter_tracking_method']),
-        use_line_search=hps.opt_hparams['use_line_search'],
-        init_damping=hps.opt_hparams['init_damping'],
-        damping_ub=hps.opt_hparams['damping_ub'],
-        damping_lb=hps.opt_hparams['damping_lb'])
-  elif hps.optimizer == 'nadam':
-    opt_init, opt_update = utils.static_inject_hyperparams(kitchen_sink.nadamw)(
-        learning_rate=0.0,
-        b1=hps.opt_hparams['beta1'],
-        b2=hps.opt_hparams['beta2'],
-        eps=hps.opt_hparams['epsilon'],
-        eps_root=hps.opt_hparams.get('epsilon_root', 0.0),
-        debias=hps.opt_hparams.get('debias', True),
-        weight_decay=weight_decay,
-        # NOTE(dsuo): we provide this wiring, but specifying a weight decay
-        # mask in a config file / serializing properly is not completely
-        # straightforward.
-        weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
-    )
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
         kitchen_sink.kitchen_sink)(
