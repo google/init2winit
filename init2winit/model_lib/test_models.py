@@ -49,14 +49,19 @@ OUTPUT_SHAPE = {
 DATA_HPS = {
     'adabelief_densenet': {
         'input_shape': (32, 32, 3),
+        'num_layers': 1,
+        'growth_rate': 1,
         'output_shape': (5,),
+        'batch_size': 1
     },
     'adabelief_resnet': {
         'input_shape': (32, 32, 3),
+        'num_layers': 1,
         'output_shape': (5,),
     },
     'adabelief_vgg': {
         'input_shape': (32, 32, 3),
+        'num_layers': 1,
         'output_shape': (5,),
     },
     'autoencoder': {
@@ -130,11 +135,11 @@ DATA_HPS = {
         'output_shape': (5,),
     },
     'local_attention_transformer': {
-        'batch_size': 8,
-        'input_shape': (8192,),
-        'max_target_length': 8192,
-        'output_shape': (98302,),
-        'vocab_size': 98302,
+        'input_shape': (64,),
+        'max_target_length': 64,
+        'output_shape': (16,),
+        'vocab_size': 16,
+        'num_decoder_layers': 1,
     },
     'lstm': {
         'input_shape': (32,),
@@ -820,17 +825,17 @@ class ModelsTest(parameterized.TestCase):
     model_str = 'local_attention_transformer'
     model_hps = models.get_model_hparams(model_str)
     model_hps.update({
-        'output_shape': (98302,),
-        'batch_size': 8,
-        'max_target_length': 8192,
-        'vocab_size': 98302,
+        'output_shape': (8,),
+        'max_target_length': 16,
+        'vocab_size': 8,
+        'num_decoder_layers': 1,
     })
     model_cls = models.get_model(model_str)
     dropout_rng, params_rng = jax.random.split(jax.random.PRNGKey(0))
     loss = 'cross_entropy'
     metrics = 'classification_metrics'
     model = model_cls(model_hps, {}, loss, metrics)
-    inputs = jnp.array(np.random.randint(size=(1, 8192), low=1, high=98302))
+    inputs = jnp.array(np.random.randint(size=(1, 16), low=1, high=8))
     model_init_fn = jax.jit(
         functools.partial(model.flax_module.init, train=False))
     init_dict = model_init_fn({'params': params_rng}, inputs)
@@ -845,7 +850,7 @@ class ModelsTest(parameterized.TestCase):
         mutable=['batch_stats'],
         rngs={'dropout': dropout_rng},
         train=True)
-    self.assertEqual(outputs.shape, (1, 8192, 98302))
+    self.assertEqual(outputs.shape, (1, 16, 8))
 
   @parameterized.named_parameters(*lstm_keys)
   def test_lstm_model(

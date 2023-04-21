@@ -110,6 +110,9 @@ class VGG(nn.Module):
 # The numbers indicate the feature size of a convolutional layer, the
 # letter M indicates a max pooling layer.
 _layer_size_options = {
+    1: [
+        8, 'M', 16, 'M', 32, 32, 'M', 64, 64, 'M', 64, 64, 'M'
+        ],  # used for testing only.
     11: [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
     13: [
         64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'
