@@ -82,7 +82,7 @@ flags.DEFINE_integer(
     'test_num_batches', None,
     'Number of batches for eval on test set. Leave None to evaluate '
     'on the entire test set.')
-flags.DEFINE_integer('eval_train_num_batches', 0,
+flags.DEFINE_integer('eval_train_num_batches', None,
                      'Number of batches when evaluating on the training set.')
 flags.DEFINE_integer('eval_frequency', 1000, 'Evaluate every k steps.')
 flags.DEFINE_string(

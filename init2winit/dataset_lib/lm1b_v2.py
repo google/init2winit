@@ -138,7 +138,7 @@ def _get_lm1b(hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng):
         'n_devices={} must divide per_host_eval_batch_size={}.'.format(
             n_devices, per_host_eval_batch_size))
 
-  train_ds, eval_ds = lm1b_input_pipeline_v2.get_lm1b_datasets(
+  train_ds, eval_train_ds, eval_ds = lm1b_input_pipeline_v2.get_lm1b_datasets(
       hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng)
 
   def train_iterator_fn():
@@ -146,7 +146,7 @@ def _get_lm1b(hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng):
       yield _batch_to_dict(batch)
 
   def eval_train_epoch(num_batches=None):
-    eval_train_iter = iter(train_ds)
+    eval_train_iter = iter(eval_train_ds)
     for batch in itertools.islice(eval_train_iter, num_batches):
       batch = _batch_to_dict(batch)
       batch = maybe_pad_batch(batch, per_host_eval_batch_size)

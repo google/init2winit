@@ -265,7 +265,7 @@ def _pack_with_tf_ops(dataset: tf.data.Dataset, keys: List[str],
 # Main dataset prep routines.
 # -----------------------------------------------------------------------------
 def preprocess_data(dataset,
-                    shuffle=True,
+                    train=True,
                     num_epochs=1,
                     pack_examples=False,
                     shuffle_buffer_size=1024,
@@ -288,12 +288,11 @@ def preprocess_data(dataset,
   if max_length > 0:
     dataset = dataset.filter(length_filter(max_length))
 
-  if shuffle:
+  if train:
     if shuffle_seed:
       dataset = dataset.shuffle(shuffle_buffer_size, seed=shuffle_seed)
     else:
       dataset = dataset.shuffle(shuffle_buffer_size)
-  dataset = dataset.repeat(num_epochs)
 
   if pack_examples:
     dataset = pack_dataset(dataset, max_length)
@@ -311,10 +310,12 @@ def preprocess_data(dataset,
         },
         drop_remainder=drop_remainder)
 
+  repeated_dataset = dataset.repeat(num_epochs)
+
   if prefetch_size:
     dataset = dataset.prefetch(prefetch_size)
 
-  return dataset
+  return repeated_dataset, dataset
 
 
 def get_lm1b_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
@@ -344,21 +345,21 @@ def get_lm1b_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
   eval_data = eval_data.map(
       spm_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
 
-  train_ds = preprocess_data(
+  train_ds, eval_train_ds = preprocess_data(
       train_data,
-      shuffle=True,
+      train=True,
       num_epochs=None,
       pack_examples=hps.pack_examples,
       batch_size=per_host_batch_size,
       max_length=hps.max_target_length,
       shuffle_seed=shuffle_rng[0])
 
-  eval_ds = preprocess_data(
+  eval_ds, _ = preprocess_data(
       eval_data,
-      shuffle=False,
+      train=False,
       pack_examples=hps.pack_examples,
       batch_size=per_host_eval_batch_size,
       max_length=hps.max_eval_target_length,
       drop_remainder=False)
 
-  return train_ds, eval_ds
+  return train_ds, eval_train_ds, eval_ds
