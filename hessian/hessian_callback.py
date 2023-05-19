@@ -51,7 +51,8 @@ def set_up_hessian_eval(model, params, batch_stats, dataset,
     return out.reshape(-1, out.shape[-1])
 
   def batch_weights(batch_rng):
-    batch = batch_rng[0]
+    # TODO(b/280322542): this should be jax.random.bits(batch_rng)
+    batch = jax.random.key_data(batch_rng)[0]
     if 'weights' not in batch:
       return jnp.ones(len(batch['inputs']))
     else:

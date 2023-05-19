@@ -19,6 +19,7 @@ from typing import Dict
 
 from init2winit.dataset_lib import spm_tokenizer
 from init2winit.dataset_lib import wpm_tokenizer
+import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
@@ -276,8 +277,11 @@ def get_librispeech_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
   """Helper method to get train, eval and test sets for librispeech data."""
   train_ds_builder = tfds.builder('librispeech')
 
+  # TODO(b/280322542): should have here
+  # rng1, rng2 = jax.random.split(shuffle_rng)
   train_data = get_raw_dataset(train_ds_builder, hps.train_split,
-                               shuffle_rng[0])
+                               # TODO(b/280322542): use jax.random.bits(rng1)
+                               jax.random.key_data(shuffle_rng)[0])
   eval_data = get_raw_dataset(train_ds_builder, hps.eval_split)
   test_data = get_raw_dataset(train_ds_builder, hps.test_split)
 
@@ -286,7 +290,8 @@ def get_librispeech_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
       train=True,
       batch_size=per_host_batch_size,
       hps=hps,
-      shuffle_seed=shuffle_rng[1])
+      # TODO(b/280322542): use jax.random.bits(rng2)
+      shuffle_seed=jax.random.key_data(shuffle_rng)[1])
 
   eval_ds = preprocess_data(
       eval_data,

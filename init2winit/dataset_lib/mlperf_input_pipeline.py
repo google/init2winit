@@ -124,7 +124,8 @@ def load_split(batch_size,
     dataset = dataset.cache()  # cache compressed JPEGs instead
     dataset = dataset.shuffle(
         shuffle_size, reshuffle_each_iteration=True,
-        seed=shuffle_rng[0]).repeat()
+        # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
+        seed=jax.random.key_data(shuffle_rng)[0]).repeat()
     dataset = dataset.enumerate().map(dataset_parser, 64)
   else:
     dataset = dataset.map(dataset_parser, 64)

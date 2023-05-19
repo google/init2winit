@@ -120,7 +120,8 @@ def criteo_tsv_reader(
   is_training = split == 'train'
   if is_training:
     file_shuffle_seed = multihost_utils.broadcast_one_to_all(
-        shuffle_rng[0], is_source=jax.process_index() == 0
+        # TODO(b/280322542): use jax.random.bits(shuffle_prng)
+        jax.random.key_data(shuffle_rng)[0], is_source=jax.process_index() == 0
     )
   else:
     file_shuffle_seed = None
@@ -138,7 +139,8 @@ def criteo_tsv_reader(
       num_parallel_calls=128,
       deterministic=False)
   if is_training:
-    ds = ds.shuffle(buffer_size=524_288 * 100, seed=shuffle_rng[1])
+    # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
+    ds = ds.shuffle(buffer_size=524_288 * 100, seed=jax.random.key_data(shuffle_rng)[1])
   ds = ds.batch(batch_size, drop_remainder=is_training)
   parse_fn = functools.partial(_parse_example_fn, num_dense_features)
   ds = ds.map(parse_fn, num_parallel_calls=16)

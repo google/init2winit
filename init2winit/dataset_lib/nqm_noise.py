@@ -58,8 +58,10 @@ def get_nqm_noise(shuffle_rng, batch_size, eval_batch_size, hps=None):
   per_host_batch_size = batch_size // jax.process_count()
   # We only use the first part of the seed, which may result in slightly more
   # rng collisions than normal.
-  train_rng = np.random.RandomState(seed=shuffle_rng[0])
-  eval_rng = np.random.RandomState(seed=shuffle_rng[0])
+  # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
+  # and train_rng / eval_rng should possibly have different seeds?
+  train_rng = np.random.RandomState(seed=jax.random.key_data(shuffle_rng)[0])
+  eval_rng = np.random.RandomState(seed=jax.random.key_data(shuffle_rng)[0])
 
   def train_iterator_fn():
     while True:

@@ -350,7 +350,8 @@ def load_split(
   if split == 'train':
     ds = ds.shuffle(
         16 * per_host_batch_size,
-        seed=shuffle_rng[0],
+        # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
+        seed=jax.random.key_data(shuffle_rng)[0],
         reshuffle_each_iteration=True,
     )
     ds = ds.repeat()

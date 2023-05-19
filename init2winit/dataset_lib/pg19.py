@@ -423,7 +423,8 @@ def get_pg19_datasets(
       hps=hps,
       repeat=True,
       shuffle=True,
-      shuffle_rng=shuffle_rng[0],
+      # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
+      shuffle_rng=jax.random.key_data(shuffle_rng)[0],
       drop_remainder=True,
       process_count=process_count)
   eval_ds = get_dataset(

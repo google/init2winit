@@ -122,8 +122,12 @@ def _get_translate_wmt(per_host_batch_size,
   vocab_path = hps.vocab_path
   train_ds, eval_ds, predict_ds = mt_pipeline.get_wmt_datasets(
       hps,
-      shuffle_seed=shuffle_rng[0],
-      sample_seed=shuffle_rng[1],
+      # TODO(b/280322542): this should be:
+      # rng1, rng2 = jax.random.split(shuffle_rng)
+      # shuffle_seed=jax.random.bits(rng1)
+      # sample_seed=jax.random.bits(rng2)
+      shuffle_seed=jax.random.key_data(shuffle_rng)[0],
+      sample_seed=jax.random.key_data(shuffle_rng)[1],
       n_devices=jax.local_device_count(),
       per_host_batch_size=per_host_batch_size,
       per_host_eval_batch_size=per_host_eval_batch_size,
