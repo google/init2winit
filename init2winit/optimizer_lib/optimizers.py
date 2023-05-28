@@ -132,6 +132,46 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         weight_decay=weight_decay,
         momentum=hps.opt_hparams['momentum'],
         nesterov=(hps.optimizer == 'nesterov'))
+  elif hps.optimizer == 'tearfree':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        tearfree_optimizer.tearfree
+    )(
+        learning_rate=0.0,
+        options=tearfree_optimizer.TearfreeOptions(
+            grafting_options=tearfree_grafting.Options(
+                grafting_type=tearfree_grafting.GraftingType(
+                    hps.opt_hparams['graft_type']
+                ),
+                second_moment_decay=hps.opt_hparams['beta2'],
+                start_preconditioning_step=hps.opt_hparams[
+                    'start_preconditioning_step'
+                ],
+            ),
+            second_order_options=tearfree_second_order.Options(
+                merge_dims=hps.opt_hparams['merge_dims'],
+                shampoo_options=tearfree_shampoo.Options(
+                    second_moment_decay=hps.opt_hparams['beta2'],
+                    block_size=hps.opt_hparams['block_size'],
+                    update_statistics_freq=hps.opt_hparams[
+                        'update_statistics_freq'
+                    ],
+                    update_preconditioners_freq=hps.opt_hparams[
+                        'update_preconditioners_freq'
+                    ],
+                ),
+            ),
+            momentum_options=tearfree_momentum.Options(
+                momentum_decay=hps.opt_hparams['beta1'],
+                weight_decay=hps.opt_hparams['weight_decay'],
+                weight_decay_after_momentum=hps.opt_hparams[
+                    'weight_decay_after_momentum'
+                ],
+                nesterov=hps.opt_hparams['nesterov'],
+                ema=hps.opt_hparams['ema'],
+            ),
+        ),
+    )
+
   elif hps.optimizer == 'distributed_shampoo':
     if hps.opt_hparams.get('frequent_directions', False):
       statistics_compute_steps = hps.opt_hparams[
