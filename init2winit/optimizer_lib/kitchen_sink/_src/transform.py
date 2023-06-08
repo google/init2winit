@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Transforms."""
+import functools
 from typing import Any, List, NamedTuple, Optional
 
 import chex
@@ -425,15 +426,18 @@ class PreconditionByRssState(NamedTuple):
 
 
 def precondition_by_rss(
-    initial_accumulator_value: float = 0.1,
-    eps: float = 1e-7,
+    initial_accumulator_value: float = 0.0,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
     power: float = 0.5
 ) -> optax.GradientTransformation:
   """Rescale updates by the powers of the sum of all squared gradients to date.
 
   Args:
     initial_accumulator_value: starting value for accumulators, must be >= 0.
-    eps: a small floating point value to avoid zero denominator.
+    eps: term added to the denominator to improve numerical stability.
+    eps_root: term added to the denominator inside the root to improve
+      numerical stability when backpropagating gradients through the rescaling.
     power: the power to use when scaling (default is 0.5 to scale by root sum
     of squares).
 
@@ -444,15 +448,20 @@ def precondition_by_rss(
 
   def init_fn(params):
     sum_of_squares = jax.tree_map(
-        lambda t: jnp.full_like(t, initial_accumulator_value), params)
+        lambda t: jnp.full_like(t, initial_accumulator_value), params
+    )
     return PreconditionByRssState(sum_of_squares=sum_of_squares)
 
   def update_fn(updates, state, params=None):
     del params
     sum_of_squares = jax.tree_map(
-        lambda g, t: jnp.square(g) + t, updates, state.sum_of_squares)
-    updates = jax.tree_map(lambda scale, g: g / raise_power(scale + eps),
-                           sum_of_squares, updates)
+        lambda g, t: jnp.square(g) + t, updates, state.sum_of_squares
+    )
+    updates = jax.tree_map(
+        lambda scale, g: g / (raise_power(scale + eps_root) + eps),
+        sum_of_squares,
+        updates,
+    )
     return updates, PreconditionByRssState(sum_of_squares=sum_of_squares)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -763,6 +772,47 @@ def add_decayed_weights(
   return optax.GradientTransformation(init_fn, update_fn)
 
 
+class PytreeScalarState(NamedTuple):
+  """State for Scaling Updates Parameter-wise."""
+  pytree_scales: Any
+
+
+def scale_by_pytree(pytree_scales: Any) -> optax.GradientTransformation:
+  """Scales the updates parameter-wise.
+
+  Args:
+    pytree_scales: Scales for Parameters. Should be a pytree of the same 
+      structure as params.
+
+  Returns:
+    A `GradientTransformation` object.
+  """
+
+  def init_fn(params):
+    del params
+    return PytreeScalarState(pytree_scales=pytree_scales)
+
+  def update_fn(updates, state, params):
+    del params
+    return jax.tree_map(lambda x, y: x * y, updates, state.pytree_scales), state
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def no_op() -> optax.GradientTransformation:
+  """Implements a no_op transformation."""
+
+  def init_fn(params):
+    del params
+    return optax.EmptyState()
+
+  def update_fn(updates, state, params):
+    del params
+    return updates, state
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 # scale_by_rms exists only for backward compatability
 _composites = {
     'scale_by_adam': scale_by_adam,
@@ -770,6 +820,7 @@ _composites = {
     'scale_by_amsgrad': scale_by_amsgrad,
     'scale_by_nadam': scale_by_nadam,
     'scale_by_rms': precondition_by_rms,
+    'scale_by_lamb': functools.partial(optax.lamb, learning_rate=1.0),
     'sgd': optax.sgd,
 }
 
@@ -793,7 +844,9 @@ _miscellaneous = {
     'add_decayed_weights': add_decayed_weights,
     'polyak_averaging': polyak_averaging,
     'clip_updates': clip_updates,
-    'sanitize_values': sanitize_values
+    'sanitize_values': sanitize_values,
+    'no_op': no_op,
+    'scale_by_pytree': scale_by_pytree,
 }
 
 transformation_registry = {}

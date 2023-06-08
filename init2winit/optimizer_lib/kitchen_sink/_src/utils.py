@@ -24,11 +24,19 @@ import optax
 
 
 def is_leaf(x):
-  return 'element' in x
+  return isinstance(x, dict) and 'element' in x
 
 
-def map_element(fn, config):
-  return jax.tree_map(fn, config, is_leaf=is_leaf)
+def map_element(fn, config, true_leaf_fn=None):
+  if not isinstance(config, dict):
+    if true_leaf_fn is not None:
+      return true_leaf_fn(config)
+    else:
+      return config
+  elif 'element' in config:
+    return fn(config)
+  else:
+    return {k: map_element(fn, v, true_leaf_fn) for k, v in config.items()}
 
 
 def unfreeze_wrapper(init_fn, update_fn):
@@ -77,7 +85,7 @@ def apply_and_maybe_scale_by_learning_rate(config, learning_rate):
       return x
     return x
 
-  scaled = map_element(is_scale_by_lr, config)
+  scaled = map_element(is_scale_by_lr, config, true_leaf_fn=lambda x: False)
   num_scaled = jax.tree_util.tree_reduce(lambda x, y: x + y, scaled, 0)
 
   if num_scaled == 0:

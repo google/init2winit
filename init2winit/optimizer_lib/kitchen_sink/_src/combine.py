@@ -15,11 +15,11 @@
 
 """Combine utilities."""
 import functools
+from typing import Any, NamedTuple
 from typing import Callable
 from typing import Optional
 from typing import Tuple
 from typing import Union
-
 import jax
 import jax.numpy as jnp
 import optax
@@ -34,32 +34,28 @@ def join(by: Union[str, Callable[[optax.GradientTransformation, ...],
 
   if by is None or by == 'chain':
     return lambda *args, **kwargs: optax.chain(*(args + tuple(kwargs.values())))
-
   if isinstance(by, str):
     if by not in combinator_registry:
       raise ValueError(f'Unrecognized `by` function {by}.')
-    by = combinator_registry[by](*args, **kwargs)
+    by_init, by_update = combinator_registry[by](*args, **kwargs)
 
   # TODO(dsuo): match docs/autocomplete with combinator args.
   def transform(*args, **kwargs):
-
-    if by is None:
-      return optax.chain(*(args + tuple(kwargs.values())))
 
     def init(params: optax.Params) -> optax.OptState:
       args_state = tuple(chain.init(params) for chain in args)
       kwargs_state = {
           name: chain.init(params) for name, chain in kwargs.items()
       }
-
-      return args_state, kwargs_state
+      combinator_state = by_init(params, *args_state, **kwargs_state)
+      return combinator_state, args_state, kwargs_state
 
     def update(
         updates: optax.Updates,
         state: optax.OptState,
         params: Optional[optax.Params] = None
     ) -> Tuple[optax.Updates, optax.OptState]:
-      args_state, kwargs_state = state
+      combinator_state, args_state, kwargs_state = state
 
       args_results = [
           chain.update(updates, state, params)
@@ -79,7 +75,11 @@ def join(by: Union[str, Callable[[optax.GradientTransformation, ...],
           name: result[1] for name, result in kwargs_results.items()
       }
 
-      return by(*args_updates, **kwargs_updates), (args_state, kwargs_state)
+      updates, combinator_state = by_update(
+          combinator_state, *args_updates, **kwargs_updates
+      )
+
+      return updates, (combinator_state, args_state, kwargs_state)
 
     return optax.GradientTransformation(init, update)
 
@@ -95,7 +95,13 @@ def _grafting_helper(chain, use_global_norm=False):
   return norm
 
 
-def combine_by_grafting(eps: float = 1e-6, use_global_norm: bool = False):
+class GraftingState(NamedTuple):
+  """State for the Layered Adaptive RMS Preconditioner algorithm."""
+  mag_norm: Any
+  dir_norm: Any
+
+
+def combine_by_grafting(eps: float = 0.0, use_global_norm: bool = False):
   """Grafting combinator.
 
   Args:
@@ -108,27 +114,47 @@ def combine_by_grafting(eps: float = 1e-6, use_global_norm: bool = False):
     updates in the shape of params.
   """
 
-  def combinator(mag_chain, dir_chain):
+  def init(params, *args, **kwargs):
+    del args, kwargs
+    mag_norm = jax.tree_map(lambda x: 0.0, params)
+    dir_norm = jax.tree_map(lambda x: 0.0, params)
+
+    return GraftingState(mag_norm=mag_norm, dir_norm=dir_norm)
+
+  def update(state, mag_chain, dir_chain):
+    del state
     mag_norm = _grafting_helper(mag_chain, use_global_norm=use_global_norm)
     dir_norm = _grafting_helper(dir_chain, use_global_norm=use_global_norm)
 
-    norm = jax.tree_map(lambda dir, dirn, magn: dir / (dirn + eps) * magn,
-                        dir_chain, dir_norm, mag_norm)
+    updates = jax.tree_map(
+        lambda dir, dirn, magn: dir / (dirn + eps) * magn,
+        dir_chain,
+        dir_norm,
+        mag_norm,
+    )
 
-    return norm
+    return updates, GraftingState(mag_norm=mag_norm, dir_norm=dir_norm)
 
-  return combinator
+  return init, update
 
 
-def combine_by_sum(*args, **kwargs):
-  del args, kwargs
+def combine_by_sum():
+  """Sum combinator.
 
-  def combinator(*args, **kwargs):
+  Returns:
+    updates in the shape of params.
+  """
+
+  def init(params, *args, **kwargs):
+    del args, kwargs, params
+    return optax.EmptyState()
+
+  def update(state, *args, **kwargs):
     args = args + tuple(kwargs.values())
     return functools.reduce(
-        lambda x, y: jax.tree_multimap(lambda i, j: i + j, x, y), args)
+        lambda x, y: jax.tree_multimap(lambda i, j: i + j, x, y), args), state
 
-  return combinator
+  return init, update
 
 
 combinator_registry = {
