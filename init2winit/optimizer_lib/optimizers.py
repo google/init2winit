@@ -133,6 +133,33 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         momentum=hps.opt_hparams['momentum'],
         nesterov=(hps.optimizer == 'nesterov'))
   elif hps.optimizer == 'tearfree':
+    sketch_size = hps.opt_hparams.get('sketchy_rank')
+    if sketch_size is not None and sketch_size > 0:
+      opts = tearfree_sketchy.Options(
+          update_freq=hps.opt_hparams['update_preconditioners_freq'],
+          second_moment_decay=hps.opt_hparams['beta2'],
+          rank=sketch_size,
+          truncate_numerical_noise=True,
+      )
+      opts = {
+          'sketchy_options': opts,
+          'shampoo_options': None,
+          'second_order_type': tearfree_second_order.SecondOrderType.SKETCHY,
+      }
+    else:
+      opts = tearfree_shampoo.Options(
+          second_moment_decay=hps.opt_hparams['beta2'],
+          block_size=hps.opt_hparams['block_size'],
+          update_statistics_freq=hps.opt_hparams['update_statistics_freq'],
+          update_preconditioners_freq=hps.opt_hparams[
+              'update_preconditioners_freq'
+          ],
+      )
+      opts = {
+          'shampoo_options': opts,
+          'second_order_type': tearfree_second_order.SecondOrderType.SHAMPOO,
+      }
+
     opt_init, opt_update = utils.static_inject_hyperparams(
         tearfree_optimizer.tearfree
     )(
@@ -149,16 +176,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
             ),
             second_order_options=tearfree_second_order.Options(
                 merge_dims=hps.opt_hparams['merge_dims'],
-                shampoo_options=tearfree_shampoo.Options(
-                    second_moment_decay=hps.opt_hparams['beta2'],
-                    block_size=hps.opt_hparams['block_size'],
-                    update_statistics_freq=hps.opt_hparams[
-                        'update_statistics_freq'
-                    ],
-                    update_preconditioners_freq=hps.opt_hparams[
-                        'update_preconditioners_freq'
-                    ],
-                ),
+                **opts,
             ),
             momentum_options=tearfree_momentum.Options(
                 momentum_decay=hps.opt_hparams['beta1'],
