@@ -46,6 +46,7 @@ DEFAULT_CONFIG = ConfigDict({
     'enable_ema': False,
     'optstate_sumsq_fields': [],
     'optstate_sum_fields': [],
+    'enable_grafting_norms': False,
 })
 
 
@@ -113,6 +114,11 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         a field "semip_grad_normsq" which is a jnp array of length
         num_train_steps containing a time series of the squared L2 norm of the
         "semi-preconditioned" gradient.  Adaptive optimizers only.
+    - enable_grafting_norms (bool): if true, the metrics state will have two 
+        fields "mag_norms" and "dir_norms" which are pytrees in the shape of the
+        model params whose leaves are jnp arrays of length num_train_steps. This
+        will only work when you are using the grafting operation through 
+        the kitchen_sink API.
 
   Args:
     num_train_steps: (int) the number of steps of training.  We use this to
@@ -186,6 +192,11 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
       metrics_state['preconditioner_normsq'] = jnp.zeros(num_train_steps)
     if config['enable_semip_grad_normsq']:
       metrics_state['semip_grad_normsq'] = jnp.zeros(num_train_steps)
+    if config['enable_grafting_norms']:
+      metrics_state['mag_norms'] = jax.tree_map(
+          lambda x: jnp.zeros(num_train_steps), params)
+      metrics_state['dir_norms'] = jax.tree_map(
+          lambda x: jnp.zeros(num_train_steps), params)
     return metrics_state
 
   def update_fn(metrics_state, step, train_cost, grad, old_params, new_params,
@@ -288,6 +299,19 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         semip_grad_normsq = total_tree_norm_sql2(semip_grad)
         next_metrics_state['semip_grad_normsq'] = metrics_state[
             'semip_grad_normsq'].at[step].set(semip_grad_normsq)
+    if config['enable_grafting_norms']:
+      mag_norm = optimizer_utils.extract_field(optimizer_state, 'mag_norm')
+      if mag_norm is None:
+        raise ValueError('optimizer state has no field {}'.format('mag_norm'))
+      mag_norm = freeze(mag_norm)
+      next_metrics_state['mag_norms'] = _set_pytree_idx(
+          metrics_state['mag_norms'], mag_norm, step)
+      dir_norm = optimizer_utils.extract_field(optimizer_state, 'dir_norm')
+      if dir_norm is None:
+        raise ValueError('optimizer state has no field {}'.format('dir_norm'))
+      dir_norm = freeze(dir_norm)
+      next_metrics_state['dir_norms'] = _set_pytree_idx(
+          metrics_state['dir_norms'], dir_norm, step)
 
     return next_metrics_state
 
