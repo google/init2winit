@@ -139,7 +139,10 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
           update_freq=hps.opt_hparams['update_preconditioners_freq'],
           second_moment_decay=hps.opt_hparams['beta2'],
           rank=sketch_size,
-          truncate_numerical_noise=True,
+          epsilon=hps.opt_hparams.get('matrix_epsilon', 1e-16),
+          relative_epsilon=hps.opt_hparams.get(
+              'matrix_relative_epsilon', False
+          ),
       )
       opts = {
           'sketchy_options': opts,
