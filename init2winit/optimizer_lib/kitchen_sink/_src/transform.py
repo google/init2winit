@@ -150,6 +150,38 @@ def nesterovpp(
   return optax.GradientTransformation(init_fn, update_fn)
 
 
+def ema_nesterov(
+    moment_decay: float,
+    update_decay: float = None,
+) -> optax.GradientTransformation:
+  """Decouples the betas of the two Nesterov steps.
+
+  Args:
+    moment_decay: the decay rate used for the first moment and update step.
+    update_decay: the decay rate used for the update step. If none, this is set
+                  equal to moment_decay
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  def init_fn(params):
+    return optax.TraceState(trace=jax.tree_map(jnp.zeros_like, params))
+
+  def update_fn(updates, state, params=None):
+    del params
+    f_moment = lambda g, t: (1 - moment_decay) * g + moment_decay * t
+    if update_decay is not None:
+      f_update = lambda g, t: (1 - update_decay) * g + update_decay * t
+    else:
+      f_update = lambda g, t: (1 - moment_decay) * g + moment_decay * t
+    new_trace = jax.tree_map(f_moment, updates, state.trace)
+    updates = jax.tree_map(f_update, updates, new_trace)
+    return updates, optax.TraceState(trace=new_trace)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 class PreconditionBySecondMomentCoordinateWiseState(NamedTuple):
   """State for the Adam preconditioner."""
   count: chex.Array
@@ -826,6 +858,7 @@ _composites = {
 
 _first_moment_accumulators = {
     'nesterov': nesterov,
+    'ema_nesterov': ema_nesterov,
     'polyak_hb': polyak_hb,
     'first_moment_ema': first_moment_ema,
     'nesterovpp': nesterovpp,
