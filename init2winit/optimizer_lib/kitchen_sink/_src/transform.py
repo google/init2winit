@@ -122,6 +122,40 @@ def first_moment_ema(
       decay=decay, debias=debias, accumulator_dtype=accumulator_dtype)
 
 
+def normalized_first_moment_ema(
+    decay: float = 0.9,
+    debias: bool = False,
+) -> optax.GradientTransformation:
+  """Implements a scaled version of first moment ema.
+
+  Args:
+    decay: the decay rate used for the moment accumulation.
+    debias: whether to use bias correction or not.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  def init_fn(params):
+    return optax.EmaState(
+        count=jnp.zeros([], jnp.int32), ema=jax.tree_map(jnp.zeros_like, params)
+    )
+
+  def update_fn(updates, state, params=None):
+    del params
+    new_ema = _update_moment(updates, state.ema, decay, 1)
+
+    count = state.count + jnp.array(1, dtype=jnp.int32)
+    new_ema = new_ema if not debias else _bias_correction(new_ema, decay, count)
+
+    scale_factor = (1 + decay) / (1 - decay) ** 0.5
+    updates = jax.tree_map(lambda x: x * scale_factor, new_ema)
+
+    return updates, optax.EmaState(count=count, ema=new_ema)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 def nesterovpp(
     moment_decay: float,
     update_decay: float,
@@ -446,7 +480,58 @@ def scale_by_adam(b1: float = 0.9,
     mu_hat = mu if not debias else _bias_correction(mu, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
     updates = jax.tree_map(
-        lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat)
+        lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
+    )
+    return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def scale_by_normalized_adam(
+    b1: float = 0.9,
+    b2: float = 0.999,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    debias: bool = True,
+    power: float = 0.5,
+) -> optax.GradientTransformation:
+  """Rescale updates according to the Adam algorithm with Var. Normalization.
+
+  Args:
+    b1: decay rate for the exponentially weighted average of grads.
+    b2: decay rate for the exponentially weighted average of squared grads.
+    eps: term added to the denominator to improve numerical stability.
+    eps_root: term added to the denominator inside the square-root to improve
+      numerical stability when backpropagating gradients through the rescaling.
+    debias: whether to use moment bias correction.
+    power: the power to use in the preconditioner (0.5 in default adam).
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
+
+  def init_fn(params):
+    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
+
+  def update_fn(updates, state, params=None):
+    del params
+
+    mu = _update_moment(updates, state.mu, b1, 1)
+    nu = _update_moment(updates, state.nu, b2, 2)
+    count = state.count + jnp.array(1, dtype=jnp.int32)
+    mu_hat = mu if not debias else _bias_correction(mu, b1, count)
+    nu_hat = nu if not debias else _bias_correction(nu, b2, count)
+
+    scale_factor = (1 + b1) / (1 - b1) ** 0.5
+
+    updates = jax.tree_map(
+        lambda m, v: scale_factor * (m / (raise_power(v + eps_root) + eps)),
+        mu_hat,
+        nu_hat,
+    )
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -853,6 +938,7 @@ _composites = {
     'scale_by_nadam': scale_by_nadam,
     'scale_by_rms': precondition_by_rms,
     'scale_by_lamb': functools.partial(optax.lamb, learning_rate=1.0),
+    'scale_by_normalized_adam': scale_by_normalized_adam,
     'sgd': optax.sgd,
 }
 
@@ -861,6 +947,7 @@ _first_moment_accumulators = {
     'ema_nesterov': ema_nesterov,
     'polyak_hb': polyak_hb,
     'first_moment_ema': first_moment_ema,
+    'normalized_first_moment_ema': normalized_first_moment_ema,
     'nesterovpp': nesterovpp,
 }
 
