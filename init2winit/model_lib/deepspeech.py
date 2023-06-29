@@ -487,12 +487,12 @@ class GenericRNNSequenceEncoder(nn.Module):
       `RecurrentDropoutCell` such as RecurrentDropoutOptimizedLSTMCell.
   """
   hidden_size: int
-  cell_type: Type[nn.recurrent.RNNCellBase]
+  cell_type: Type[nn.RNNCellBase]
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
   recurrent_dropout_rate: float = 0.0
 
   def setup(self):
-    self.cell = self.cell_type(**self.cell_kwargs)
+    self.cell = self.cell_type(features=self.hidden_size, **self.cell_kwargs)
 
   @functools.partial(  # Repeatedly calls the below method to encode the inputs.
       nn.transforms.scan,
@@ -585,7 +585,7 @@ class GenericRNN(nn.Module):
       concatenate the outputs from the two directions.
     cell_kwargs: Optional keyword arguments to instantiate the cell with.
   """
-  cell_type: Type[nn.recurrent.RNNCellBase]
+  cell_type: Type[nn.RNNCellBase]
   hidden_size: int
   num_layers: int = 1
   dropout_rate: float = 0.
@@ -631,13 +631,16 @@ class GenericRNN(nn.Module):
     if initial_states is None:  # Initialize with zeros.
       rng = jax.random.PRNGKey(0)
       initial_states = [
-          self.cell_type.initialize_carry(rng, (batch_size,), self.hidden_size)
+          self.cell_type(self.hidden_size).initialize_carry(
+              rng, (batch_size, 1)
+          )
           for _ in range(num_cells)
       ]
     if len(initial_states) != num_cells:
       raise ValueError(
           f'Please provide {self.num_cells} (`num_layers`, *2 if bidirectional)'
-          f'initial states.')
+          'initial states.'
+      )
 
     # For each layer, apply the forward and optionally the backward RNN cell.
     cell_idx = 0
