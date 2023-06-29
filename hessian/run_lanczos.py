@@ -23,7 +23,6 @@ from flax import jax_utils
 from init2winit import checkpoint
 from init2winit import utils
 from init2winit.hessian import hessian_eval
-from init2winit.init_lib import init_utils
 from init2winit.init_lib import initializers
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
@@ -96,8 +95,8 @@ def eval_checkpoints(
   model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
 
   # Maybe run the initializer.
-  unreplicated_params, unreplicated_batch_stats = init_utils.initialize(
-      model, initializer, hps, init_rng, None)
+  unreplicated_params, unreplicated_batch_stats = model.initialize(
+      initializer, hps, init_rng, None)
 
   # Fold in a the unreplicated batch_stats and rng into the loss used by
   # hessian eval.

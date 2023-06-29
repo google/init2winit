@@ -25,7 +25,6 @@ from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import schedules
 from init2winit import utils
-from init2winit.init_lib import init_utils
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
 from init2winit.training_metrics_grabber import make_training_metrics
@@ -242,8 +241,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         max_training_updates=self._num_train_steps // stretch_factor,
         stretch_factor=stretch_factor)
 
-    unreplicated_params, unreplicated_batch_stats = init_utils.initialize(
-        self._model,
+    unreplicated_params, unreplicated_batch_stats = self._model.initialize(
         self._initializer,
         self._hps,
         init_rng,

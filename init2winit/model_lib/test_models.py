@@ -21,9 +21,9 @@ import copy
 import functools
 import itertools
 
-from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
+from init2winit.init_lib import initializers
 from init2winit.model_lib import models
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
@@ -144,7 +144,7 @@ DATA_HPS = {
     'lstm': {
         'input_shape': (32,),
         'max_target_length': 64,
-        'ouptut_shape': (16,),
+        'output_shape': (16,),
         'sequence_length': 64,
         'vocab_size': 16,
     },
@@ -390,6 +390,8 @@ class ModelsTest(parameterized.TestCase):
     model_cls = models.get_model(model_str)
     hps = models.get_model_hparams(model_str)
     hps.update(DATA_HPS[model_str])
+    if 'input_edge_shape' in hps and 'input_node_shape' in hps:
+      hps.input_shape = (hps.input_node_shape, hps.input_edge_shape)
     hps.model_dtype = model_dtype
 
     model = model_cls(
@@ -400,23 +402,9 @@ class ModelsTest(parameterized.TestCase):
         },
         loss_name=LOSS_NAME[model_str],
         metrics_name=METRICS_NAME[model_str])
-
-    fake_input_batch = _get_fake_inputs_for_initialization(model, hps)
-
     rng = jax.random.PRNGKey(0)
-    params_rng, dropout_rng = jax.random.split(rng, num=2)
-
-    # initialize model
-    model_init_fn = functools.partial(model.flax_module.init, train=False)
-    try:
-      init_dict = model_init_fn({
-          'params': params_rng,
-          'dropout': dropout_rng
-      }, *fake_input_batch)
-    except Exception as e:
-      logging.info(hps)
-      raise e
-
+    initializer = initializers.get_initializer('noop')
+    init_dict = model.initialize(initializer, hps, rng, metrics_logger=None)
     self.assertNotEmpty(init_dict)
 
   @parameterized.named_parameters(*classification_keys)

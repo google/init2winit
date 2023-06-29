@@ -23,7 +23,6 @@ from init2winit import checkpoint
 from init2winit import schedules
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
-from init2winit.init_lib import init_utils
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
 from init2winit.model_lib.binarize_layers import DynamicContext
@@ -342,13 +341,13 @@ class Trainer(base_trainer.BaseTrainer):
       teacher_model = teacher_model_cls(
           self._hps, self.dataset_meta_data, self.loss_name, self.metrics_name)
       logging.info('Initialize the teacher model.')
-      teacher_unreplicated_params, teacher_unreplicated_batch_stats = init_utils.initialize(
-          teacher_model,
-          self._initializer,
-          self._hps,
-          init_rng,
-          self._init_logger,
-      )
+      (teacher_unreplicated_params,
+       teacher_unreplicated_batch_stats) = teacher_model.initialize(
+           self._initializer,
+           self._hps,
+           init_rng,
+           self._init_logger,
+       )
       logging.info('Initialize teacher_model optimizer state.')
       optimizer_init_fn, _ = optimizers.get_optimizer(
           self._hps, self._model, batch_axis_name='batch')

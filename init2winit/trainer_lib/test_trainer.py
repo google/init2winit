@@ -32,7 +32,6 @@ from init2winit import hyperparameters
 from init2winit import utils
 from init2winit.dataset_lib import datasets
 from init2winit.dataset_lib.small_image_datasets import Dataset
-from init2winit.init_lib import init_utils
 from init2winit.init_lib import initializers
 from init2winit.model_lib import base_model
 from init2winit.model_lib import metrics
@@ -257,8 +256,8 @@ class TrainerTest(parameterized.TestCase):
     rng, init_rng = jax.random.split(rng)
 
     # First initialize with no rescale.
-    params, _ = init_utils.initialize(
-        model, initializer, hps, init_rng, metrics_logger=None)
+    params, _ = model.initialize(
+        initializer, hps, init_rng, metrics_logger=None)
 
     utils.log_pytree_shape_and_statistics(params)
     # Now rescale a layer by 100.
@@ -267,8 +266,8 @@ class TrainerTest(parameterized.TestCase):
         '/Dense_1/kernel': rescale_factor,
     }
 
-    rescaled_params, _ = init_utils.initialize(
-        model, initializer, hps, init_rng, metrics_logger=None)
+    rescaled_params, _ = model.initialize(
+        initializer, hps, init_rng, metrics_logger=None)
 
     # Check the right variable is rescaled
     v1 = params['Dense_1']['kernel']
