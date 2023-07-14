@@ -14,9 +14,10 @@
 # limitations under the License.
 
 """Common code used by different models."""
+import enum
 import functools
 
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Dict, Iterable
 
 from absl import logging
 from flax import linen as nn
@@ -290,3 +291,98 @@ def rescale_layers(params, layer_rescale_factors):
     traversal = traverse_util.ModelParamTraversal(lambda path, _: path == key)
     params = traversal.update(lambda x: x * layer_rescale_factors[key], params)
   return params
+
+
+# Define this so that if using pytree iteration utilities, can iterate over the
+# model shapes pytree without iterating over the shape tuples.
+class ShapeTuple:
+  def __init__(self, shape_tuple):
+    self.shape_tuple = shape_tuple
+
+  def __repr__(self):
+    return f'ShapeTuple({self.shape_tuple})'
+
+  def __eq__(self, other):
+    return self.shape_tuple == other.shape_tuple
+
+
+def param_shapes(params):
+  return jax.tree_map(lambda x: ShapeTuple(x.shape), params.unfreeze())
+
+
+class ParameterType(enum.Enum):
+  """Different types of neural network parameters."""
+  WEIGHT = 0
+  BIAS = 1
+  CONV_WEIGHT = 2
+  BATCH_NORM_SCALE = 3
+  BATCH_NORM_BIAS = 4
+  LAYER_NORM_SCALE = 5
+  LAYER_NORM_BIAS = 6
+  EMBEDDING = 7
+  ATTENTION_Q = 8
+  ATTENTION_K = 9
+  ATTENTION_V = 10
+  ATTENTION_OUT = 11
+  ATTENTION_QKV = 12  # This is used for implementations that fuse QKV together.
+  # We need to split this out because otherwise fused QKV models will have a
+  # different number of biases.
+  ATTENTION_BIAS = 13
+
+
+def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
+  """Get the ParameterType of each parameter."""
+  param_types_dict = {}
+  for name, value in shapes.items():
+    name = name.lower()
+    if isinstance(value, dict) or isinstance(value, FrozenDict):
+      param_types_dict[name] = param_types(
+          value, parent_name=parent_name + '/' + name)
+    else:
+      if 'batchnorm' in parent_name or 'bn' in parent_name:
+        if name == 'scale':
+          param_types_dict[name] = ParameterType.BATCH_NORM_SCALE
+        elif name == 'bias':
+          param_types_dict[name] = ParameterType.BATCH_NORM_BIAS
+        else:
+          raise ValueError(
+              f'Unrecognized batch norm parameter: {parent_name}/{name}.')
+      elif 'layernorm' in parent_name or 'ln' in parent_name:
+        if name == 'scale':
+          param_types_dict[name] = ParameterType.LAYER_NORM_SCALE
+        elif name == 'bias':
+          param_types_dict[name] = ParameterType.LAYER_NORM_BIAS
+        else:
+          raise ValueError(
+              f'Unrecognized layer norm parameter: {parent_name}/{name}.')
+      elif 'conv' in parent_name:
+        param_types_dict[name] = ParameterType.CONV_WEIGHT
+      # Note that this is exact equality, not contained in, because
+      # flax.linen.Embed names the embedding parameter "embedding"
+      # https://github.com/google/flax/blob/main/flax/linen/linear.py#L604.
+      elif ('embedding' in name or
+            ('embedding' in parent_name and name == 'kernel')):
+        param_types_dict[name] = ParameterType.EMBEDDING
+      elif 'attention' in parent_name:
+        if 'key' in parent_name and name == 'kernel':
+          param_types_dict[name] = ParameterType.ATTENTION_K
+        elif 'query' in parent_name and name == 'kernel':
+          param_types_dict[name] = ParameterType.ATTENTION_Q
+        elif 'value' in parent_name and name == 'kernel':
+          param_types_dict[name] = ParameterType.ATTENTION_V
+        elif 'out' in parent_name and name == 'kernel':
+          param_types_dict[name] = ParameterType.ATTENTION_OUT
+        elif name == 'bias':
+          param_types_dict[name] = ParameterType.ATTENTION_BIAS
+        elif 'scale' in name:
+          param_types_dict[name] = ParameterType.WEIGHT
+        elif 'in_proj_weight' in name:
+          param_types_dict[name] = ParameterType.ATTENTION_QKV
+        else:
+          raise ValueError(
+              f'Unrecognized attention parameter: {parent_name}/{name}.')
+      elif 'bias' in name:
+        param_types_dict[name] = ParameterType.BIAS
+      else:
+        param_types_dict[name] = ParameterType.WEIGHT
+  return param_types_dict

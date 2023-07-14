@@ -24,6 +24,7 @@ import itertools
 from absl.testing import absltest
 from absl.testing import parameterized
 from init2winit.init_lib import initializers
+from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
@@ -381,30 +382,36 @@ def _get_fake_inputs_for_initialization(model, hps):
   return fake_inputs
 
 
+def _initialize_model(model_str, model_dtype):
+  """Initialize a model given a registry name and dtype."""
+  model_cls = models.get_model(model_str)
+  hps = models.get_model_hparams(model_str)
+  hps.update(DATA_HPS[model_str])
+  if 'input_edge_shape' in hps and 'input_node_shape' in hps:
+    hps.input_shape = (hps.input_node_shape, hps.input_edge_shape)
+  hps.model_dtype = model_dtype
+
+  model = model_cls(
+      hps,
+      dataset_meta_data={
+          'shift_inputs': True,
+          'causal': True
+      },
+      loss_name=LOSS_NAME[model_str],
+      metrics_name=METRICS_NAME[model_str])
+  rng = jax.random.PRNGKey(0)
+  initializer = initializers.get_initializer('noop')
+  init_dict = model.initialize(initializer, hps, rng, metrics_logger=None)
+  return model, init_dict
+
+
 class ModelsTest(parameterized.TestCase):
   """Tests for initializers.py."""
 
   @parameterized.named_parameters(*model_init_keys)
   def test_model_initialization(self, model_str, model_dtype):
     """Test model initializations."""
-    model_cls = models.get_model(model_str)
-    hps = models.get_model_hparams(model_str)
-    hps.update(DATA_HPS[model_str])
-    if 'input_edge_shape' in hps and 'input_node_shape' in hps:
-      hps.input_shape = (hps.input_node_shape, hps.input_edge_shape)
-    hps.model_dtype = model_dtype
-
-    model = model_cls(
-        hps,
-        dataset_meta_data={
-            'shift_inputs': True,
-            'causal': True
-        },
-        loss_name=LOSS_NAME[model_str],
-        metrics_name=METRICS_NAME[model_str])
-    rng = jax.random.PRNGKey(0)
-    initializer = initializers.get_initializer('noop')
-    init_dict = model.initialize(initializer, hps, rng, metrics_logger=None)
+    _, init_dict = _initialize_model(model_str, model_dtype)
     self.assertNotEmpty(init_dict)
 
   @parameterized.named_parameters(*classification_keys)
@@ -918,6 +925,185 @@ class ModelsTest(parameterized.TestCase):
         outputs.shape,
         (input_batch_shape[0], input_batch_shape[1], expected_output_size),
     )
+
+  def test_vit_params_shapes(self):
+    """Test model parameter types."""
+    model_str = 'vit'
+    model_dtype = 'float32'
+    model, _ = _initialize_model(model_str, model_dtype)
+    expected = {
+        'Transformer': {
+            'encoder_norm': {
+                'bias': model_utils.ShapeTuple((384,)),
+                'scale': model_utils.ShapeTuple((384,)),
+            },
+        },
+        'embedding': {
+            'bias': model_utils.ShapeTuple((384,)),
+            'kernel': model_utils.ShapeTuple((16, 16, 3, 384,)),
+        },
+        'head': {
+            'bias': model_utils.ShapeTuple((1000,)),
+            'kernel': model_utils.ShapeTuple((384, 1000)),
+        },
+        'pre_logits': {
+            'bias': model_utils.ShapeTuple((384,)),
+            'kernel': model_utils.ShapeTuple((384, 384)),
+        },
+    }
+    expected_block = {
+        'LayerNorm_0': {
+            'bias': model_utils.ShapeTuple((384,)),
+            'scale': model_utils.ShapeTuple((384,)),
+        },
+        'LayerNorm_1': {
+            'bias': model_utils.ShapeTuple((384,)),
+            'scale': model_utils.ShapeTuple((384,)),
+        },
+        'MlpBlock_3': {
+            'Dense_0': {
+                'bias': model_utils.ShapeTuple((1536,)),
+                'kernel': model_utils.ShapeTuple((384, 1536)),
+            },
+            'Dense_1': {
+                'bias': model_utils.ShapeTuple((384,)),
+                'kernel': model_utils.ShapeTuple((1536, 384)),
+            },
+        },
+        'MultiHeadDotProductAttention_1': {
+            'key': {
+                'bias': model_utils.ShapeTuple((6, 64)),
+                'kernel': model_utils.ShapeTuple((384, 6, 64)),
+            },
+            'out': {
+                'bias': model_utils.ShapeTuple((384,)),
+                'kernel': model_utils.ShapeTuple((6, 64, 384)),
+            },
+            'query': {
+                'bias': model_utils.ShapeTuple((6, 64)),
+                'kernel': model_utils.ShapeTuple((384, 6, 64)),
+            },
+            'value': {
+                'bias': model_utils.ShapeTuple((6, 64)),
+                'kernel': model_utils.ShapeTuple((384, 6, 64)),
+            },
+        },
+    }
+    for li in range(12):
+      expected['Transformer'][f'encoderblock_{li}'] = expected_block
+    self.assertEqual(model.param_shapes, expected)
+
+  def test_vit_params_types(self):
+    """Test model parameter types."""
+    model_str = 'vit'
+    model_dtype = 'float32'
+    model, _ = _initialize_model(model_str, model_dtype)
+    expected = {
+        'transformer': {
+            'encoder_norm': {
+                'bias': model_utils.ParameterType.BIAS,
+                'scale': model_utils.ParameterType.WEIGHT,
+            },
+        },
+        'embedding': {
+            'bias': model_utils.ParameterType.BIAS,
+            'kernel': model_utils.ParameterType.EMBEDDING,
+        },
+        'head': {
+            'bias': model_utils.ParameterType.BIAS,
+            'kernel': model_utils.ParameterType.WEIGHT,
+        },
+        'pre_logits': {
+            'bias': model_utils.ParameterType.BIAS,
+            'kernel': model_utils.ParameterType.WEIGHT,
+        },
+    }
+    expected_block = {
+        'layernorm_0': {
+            'bias': model_utils.ParameterType.LAYER_NORM_BIAS,
+            'scale': model_utils.ParameterType.LAYER_NORM_SCALE,
+        },
+        'layernorm_1': {
+            'bias': model_utils.ParameterType.LAYER_NORM_BIAS,
+            'scale': model_utils.ParameterType.LAYER_NORM_SCALE,
+        },
+        'mlpblock_3': {
+            'dense_0': {
+                'bias': model_utils.ParameterType.BIAS,
+                'kernel': model_utils.ParameterType.WEIGHT,
+            },
+            'dense_1': {
+                'bias': model_utils.ParameterType.BIAS,
+                'kernel': model_utils.ParameterType.WEIGHT,
+            },
+        },
+        'multiheaddotproductattention_1': {
+            'key': {
+                'bias': model_utils.ParameterType.ATTENTION_BIAS,
+                'kernel': model_utils.ParameterType.ATTENTION_K,
+            },
+            'out': {
+                'bias': model_utils.ParameterType.ATTENTION_BIAS,
+                'kernel': model_utils.ParameterType.ATTENTION_OUT,
+            },
+            'query': {
+                'bias': model_utils.ParameterType.ATTENTION_BIAS,
+                'kernel': model_utils.ParameterType.ATTENTION_Q,
+            },
+            'value': {
+                'bias': model_utils.ParameterType.ATTENTION_BIAS,
+                'kernel': model_utils.ParameterType.ATTENTION_V,
+            },
+        },
+    }
+    for li in range(12):
+      expected['transformer'][f'encoderblock_{li}'] = expected_block
+    self.assertEqual(model.params_types, expected)
+
+  def test_mlperf_resnet_params_types(self):
+    """Test model parameter types."""
+    model_str = 'mlperf_resnet'
+    model_dtype = 'float32'
+    model, _ = _initialize_model(model_str, model_dtype)
+    expected = {
+        'conv0': {'kernel': model_utils.ParameterType.CONV_WEIGHT},
+        'dense_0': {
+            'bias': model_utils.ParameterType.BIAS,
+            'kernel': model_utils.ParameterType.WEIGHT,
+        },
+        'init_bn': {
+            'bias': model_utils.ParameterType.BATCH_NORM_BIAS,
+            'scale': model_utils.ParameterType.BATCH_NORM_SCALE,
+        },
+    }
+    expected_block = {
+        'bn1': {
+            'bias': model_utils.ParameterType.BATCH_NORM_BIAS,
+            'scale': model_utils.ParameterType.BATCH_NORM_SCALE,
+        },
+        'bn2': {
+            'bias': model_utils.ParameterType.BATCH_NORM_BIAS,
+            'scale': model_utils.ParameterType.BATCH_NORM_SCALE,
+        },
+        'bn3': {
+            'bias': model_utils.ParameterType.BATCH_NORM_BIAS,
+            'scale': model_utils.ParameterType.BATCH_NORM_SCALE,
+        },
+        'conv1': {'kernel': model_utils.ParameterType.CONV_WEIGHT},
+        'conv2': {'kernel': model_utils.ParameterType.CONV_WEIGHT},
+        'conv3': {'kernel': model_utils.ParameterType.CONV_WEIGHT},
+    }
+    for li in range(8):
+      expected[f'residualblock_{li}'] = copy.deepcopy(expected_block)
+      if li % 2 == 0:
+        expected[f'residualblock_{li}']['proj_bn'] = {
+            'bias': model_utils.ParameterType.BATCH_NORM_BIAS,
+            'scale': model_utils.ParameterType.BATCH_NORM_SCALE,
+        }
+        expected[f'residualblock_{li}']['proj_conv'] = {
+            'kernel': model_utils.ParameterType.CONV_WEIGHT,
+        }
+    self.assertEqual(model.params_types, expected)
 
 
 if __name__ == '__main__':

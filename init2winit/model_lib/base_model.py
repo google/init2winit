@@ -24,7 +24,6 @@ from init2winit.model_lib import losses
 from init2winit.model_lib import metrics
 from init2winit.model_lib import model_utils
 import jax
-from jax.nn import one_hot
 import jax.numpy as jnp
 import numpy as np
 
@@ -58,7 +57,7 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
   targets = batch['targets']
 
   if apply_one_hot_in_loss:
-    targets = one_hot(batch['targets'], logits.shape[-1])
+    targets = jax.nn.one_hot(batch['targets'], logits.shape[-1])
 
   # map the dict values (which are functions) to function(targets, logits)
   weights = batch.get('weights')  # Weights might not be defined.
@@ -214,6 +213,9 @@ class BaseModel(object):
                          hps.input_shape, hps.output_shape, init_rng,
                          metrics_logger)
 
+    self._param_shapes = model_utils.param_shapes(params)
+    self._param_types = model_utils.param_types(self._param_shapes)
+
     return params, batch_stats
 
   def evaluate_batch(self, params, batch_stats, batch):
@@ -285,7 +287,7 @@ class BaseModel(object):
 
     """
     if self.dataset_meta_data['apply_one_hot_in_loss']:
-      targets = one_hot(targets, logits.shape[-1])
+      targets = jax.nn.one_hot(targets, logits.shape[-1])
     # Optionally apply label smoothing.
     if self.hps.get('label_smoothing') is not None:
       targets = model_utils.apply_label_smoothing(
@@ -303,6 +305,28 @@ class BaseModel(object):
   def get_fake_inputs(self, hps):
     del hps
     return None
+
+  @property
+  def param_shapes(self):
+    """The shapes of the parameters in the model."""
+    if self._param_shapes is None:
+      raise ValueError(
+          'This should not happen, model.initialize() should be called '
+          'before model.param_shapes!')
+    return self._param_shapes
+
+  @property
+  def params_types(self):
+    """The types of the parameters in the model."""
+    if self._param_types is None:
+      raise ValueError(
+          'This should not happen, model.initialize() should be called '
+          'before model.param_types!')
+    return self._param_types
+
+  def is_output_params(self, param_key: str) -> bool:
+    """Whether a parameter name is the output layer parameters."""
+    raise NotImplementedError('Subclasses must implement is_output_params().')
 
   def build_flax_module(self) -> nn.Module:
     """The flax module must accept a kwarg `train` in `__call__`."""
