@@ -20,6 +20,7 @@ import functools
 from typing import Any, Callable, Dict, Iterable
 
 from absl import logging
+import flax
 from flax import linen as nn
 from flax import traverse_util
 from flax.core import FrozenDict
@@ -307,7 +308,7 @@ class ShapeTuple:
 
 
 def param_shapes(params):
-  return jax.tree_map(lambda x: ShapeTuple(x.shape), params.unfreeze())
+  return jax.tree_map(lambda x: ShapeTuple(x.shape), flax.core.unfreeze(params))
 
 
 class ParameterType(enum.Enum):
