@@ -21,6 +21,7 @@ import os.path
 import time
 
 from absl import logging
+from flax import jax_utils
 from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import schedules
@@ -29,8 +30,8 @@ from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
-import jax.numpy as jnp
 import numpy as np
+import orbax.checkpoint as orbax_checkpoint
 
 
 class BaseTrainer(metaclass=abc.ABCMeta):
@@ -148,6 +149,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._eval_train_num_batches = eval_train_num_batches
     self._eval_frequency = eval_frequency
     self._checkpoint_steps = checkpoint_steps
+    self._orbax_checkpointer = orbax_checkpoint.AsyncCheckpointer(
+        orbax_checkpoint.PyTreeCheckpointHandler(), timeout_secs=60
+    )
     self._early_stopping_target_name = early_stopping_target_name
     self._early_stopping_target_value = early_stopping_target_value
     self._early_stopping_mode = early_stopping_mode
@@ -189,6 +193,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # Numpy array of range(0, local_device_count) to send to each device to be
     # folded into the RNG inside each train step to get a unique per-device RNG.
     self._local_device_indices = np.arange(jax.local_device_count())
+
+  def wait_until_orbax_checkpointer_finished(self):
+    self._orbax_checkpointer.wait_until_finished()
 
   def setup_and_maybe_restore(self, init_rng, data_rng, trainer_update_fn):
     """Set up member variables for training and maybe Restore training state.
@@ -278,20 +285,24 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       unreplicated_metrics_state = metrics_init_fn(unreplicated_params,
                                                    unreplicated_batch_stats)
 
-    (optimizer_state,
-     params,
-     batch_stats,
-     metrics_state,
-     global_step,
-     sum_train_cost,
-     preemption_count,
-     is_restored) = checkpoint.replicate_and_maybe_restore_checkpoint(
-         unreplicated_optimizer_state,
-         unreplicated_params,
-         unreplicated_batch_stats,
-         unreplicated_metrics_state,
-         train_dir=self._train_dir,
-         external_checkpoint_path=self._external_checkpoint_path)
+    (
+        optimizer_state,
+        params,
+        batch_stats,
+        metrics_state,
+        global_step,
+        sum_train_cost,
+        preemption_count,
+        is_restored,
+    ) = checkpoint.replicate_and_maybe_restore_checkpoint(
+        unreplicated_optimizer_state,
+        unreplicated_params,
+        unreplicated_batch_stats,
+        unreplicated_metrics_state,
+        train_dir=self._train_dir,
+        external_checkpoint_path=self._external_checkpoint_path,
+        orbax_checkpointer=self._orbax_checkpointer,
+    )
     if is_restored:
       preemption_count += 1
 
@@ -364,7 +375,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           update_fn,
           axis_name='batch',
           in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0),
-          donate_argnums=(0, 1, 2, 8))
+          donate_argnums=(0, 1, 2, 8),
+      )
     else:
       update_pmapped = None
 
@@ -430,7 +442,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._eval_callbacks = self._setup_eval_callbacks(callback_rng)
 
   def _save(self, checkpoint_dir, max_to_keep=1):
-    checkpoint.save_unreplicated_checkpoint_background(
+    checkpoint.save_unreplicated_checkpoint(
         checkpoint_dir,
         self._optimizer_state,
         self._params,
@@ -439,7 +451,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._global_step,
         self._preemption_count,
         self._sum_train_cost,
-        max_to_keep=max_to_keep)
+        self._orbax_checkpointer,
+        max_to_keep=max_to_keep,
+    )
 
   def _get_step_frequency(self, cur_step, start_step, start_time):
     return float(cur_step - start_step) / (time.time() - start_time)
@@ -525,16 +539,17 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._eval_train_num_batches,
         self._evaluate_batch_pmapped)
     self._run_eval_callbacks(report)
-    if jax.process_index() == 0 and save:
+    if save:
       self._save(self._train_dir)
     steps_since_last_eval = self._global_step - self._prev_eval_step
     steps_per_sec_no_eval = steps_since_last_eval / time_since_last_eval
     run_time = time.time() - self._time_at_prev_eval_end
     steps_per_sec = steps_since_last_eval / run_time
 
-    mean_train_cost = self._sum_train_cost.mean().item() / max(
-        1, self._global_step - self._prev_eval_step)
-    self._sum_train_cost = jnp.zeros(jax.local_device_count())
+    mean_train_cost = jax.lax.pmean(self._sum_train_cost, axis_name=[])[
+        0
+    ].item() / max(1, self._global_step - self._prev_eval_step)
+    self._sum_train_cost = jax_utils.replicate(0.0)
     epoch = self._global_step * self._hps.batch_size // self._hps.train_size
     overall_steps_per_sec = self._get_step_frequency(
         self._global_step, start_step, start_time)

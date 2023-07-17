@@ -18,7 +18,6 @@ import itertools
 import time
 
 from absl import logging
-from init2winit import checkpoint
 from init2winit import utils
 from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import gradient_accumulator
@@ -202,7 +201,7 @@ class Trainer(base_trainer.BaseTrainer):
     self._time_at_prev_eval_end = start_time
     self._prev_eval_step = self._global_step
 
-    if self._global_step in self._checkpoint_steps and jax.process_index() == 0:
+    if self._global_step in self._checkpoint_steps:
       self._save(self._checkpoint_dir, max_to_keep=None)
 
     for _ in range(start_step, self._num_train_steps):
@@ -225,12 +224,9 @@ class Trainer(base_trainer.BaseTrainer):
              self._metrics_state, batch, self._global_step, lr, rng,
              self._local_device_indices, self._sum_train_cost)
         self._global_step += 1
-
-        if (
-            self._global_step in self._checkpoint_steps
-            and jax.process_index() == 0
-        ):
+        if self._global_step in self._checkpoint_steps:
           self._save(self._checkpoint_dir, max_to_keep=None)
+
         lr = self._optimizer_state.hyperparams['learning_rate'][0]
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
@@ -240,9 +236,7 @@ class Trainer(base_trainer.BaseTrainer):
           try:
             report = self._eval(lr, start_step, start_time)
           except utils.TrainingDivergedError as e:
-            # In case of NaN during evals, make sure to save the last
-            # checkpoint.
-            checkpoint.wait_for_checkpoint_save()
+            self.wait_until_orbax_checkpointer_finished()
             raise utils.TrainingDivergedError(
                 f'divergence at step {self._global_step}'
             ) from e
@@ -257,4 +251,5 @@ class Trainer(base_trainer.BaseTrainer):
       report = self._eval(lr, start_step, start_time)
       yield report
     # To make sure the last checkpoint was correctly saved.
-    checkpoint.wait_for_checkpoint_save()
+    self.wait_until_orbax_checkpointer_finished()
+

@@ -31,6 +31,7 @@ from init2winit.shared_test_utilities import pytree_equal
 import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
+import orbax.checkpoint as orbax_checkpoint
 from tensorflow.io import gfile
 
 FLAGS = flags.FLAGS
@@ -58,6 +59,8 @@ class CheckpointTest(parameterized.TestCase):
     model_init_fn = jax.jit(
         functools.partial(model.flax_module.init, train=False))
     init_dict = model_init_fn({'params': params_rng}, xs)
+    self.orbax_checkpointer = orbax_checkpoint.AsyncCheckpointer(
+        orbax_checkpoint.PyTreeCheckpointHandler(), timeout_secs=60)
     self.params = init_dict['params']
 
   def tearDown(self):
@@ -69,15 +72,12 @@ class CheckpointTest(parameterized.TestCase):
   def test_save_load_roundtrip(self):
     """Test that saving and loading produces the original state."""
     baz = ['a', 'b', 'ccc']
-    state = dict(params=self.params,
-                 global_step=5,
-                 completed_epochs=4,
-                 baz=baz)
-    checkpoint.save_checkpoint(
-        self.test_dir,
-        0,
-        state)
-    latest = checkpoint.load_latest_checkpoint(self.test_dir, target=state)
+    state = dict(params=self.params, global_step=5, completed_epochs=4, baz=baz)
+    checkpoint.save_checkpoint(self.test_dir, 0, state,
+                               orbax_checkpointer=self.orbax_checkpointer)
+    latest = checkpoint.load_latest_checkpoint(
+        self.test_dir, target=state, orbax_checkpointer=self.orbax_checkpointer
+    )
 
     self.assertEqual(latest['baz'], baz)
     assert pytree_equal(latest['params'], self.params)
@@ -88,11 +88,12 @@ class CheckpointTest(parameterized.TestCase):
     """Test that old checkpoints are deleted."""
     state1 = dict(params=self.params,
                   global_step=5,
-                  completed_epochs=4)
+                  completed_epochs=4,)
     checkpoint.save_checkpoint(
         self.test_dir,
         0,
         state1,
+        orbax_checkpointer=self.orbax_checkpointer,
         max_to_keep=1)
 
     state2 = dict(params=self.params,
@@ -102,23 +103,12 @@ class CheckpointTest(parameterized.TestCase):
         self.test_dir,
         1,
         state2,
+        orbax_checkpointer=self.orbax_checkpointer,
         max_to_keep=1)
     dir_contents = gfile.glob(os.path.join(self.test_dir, '*'))
-    self.assertLen(dir_contents, 1)
-
-  def test_save_checkpoint_background_reraises_error(self):
-    """Test than an error while saving a checkpoint is re-raised later."""
-    # Checkpoint error is not raised when it actually happens, but when we next
-    # write a checkpoint.
-    baz = ['a', 'b', 'ccc']
-    state = dict(params=self.params,
-                 global_step=5, completed_epochs=4,
-                 baz=baz)
-    checkpoint.save_checkpoint_background(
-        '/forbidden_directory/', 0, state)
-    with self.assertRaisesRegex(BaseException, r'Permission\sdenied'):
-      checkpoint.save_checkpoint_background(
-          self.test_dir, 0, state)
+    # Due to Flax Orbax migration using Orbax AsyncCheckpointer will result
+    # in 'max_to_keep + 1' files.
+    self.assertLen(dir_contents, 1 + 1)
 
   def test_all_variables_restored(self):
     """Test that all variables are properly restored.
@@ -153,13 +143,15 @@ class CheckpointTest(parameterized.TestCase):
                    params=saved_params,
                    batch_stats=saved_batch_stats,
                    training_metrics_grabber=saved_training_metrics),
+        orbax_checkpointer=self.orbax_checkpointer,
         max_to_keep=1)
 
     (ret_state, ret_params, ret_batch_stats, ret_training_metrics,
      ret_global_step, ret_sum_train_cost, ret_preemption_count, ret_is_restored,
      ) = checkpoint.replicate_and_maybe_restore_checkpoint(
          initial_optimizer_state, initial_params, initial_batch_stats,
-         initial_training_metrics, fresh_train_dir)
+         initial_training_metrics, fresh_train_dir,
+         orbax_checkpointer=self.orbax_checkpointer)
 
     assert pytree_equal(
         jax.device_get(jax_utils.unreplicate(ret_state)),
@@ -219,6 +211,7 @@ class CheckpointTest(parameterized.TestCase):
                      params=params,
                      batch_stats={},
                      training_metrics_grabber={}),
+          orbax_checkpointer=self.orbax_checkpointer,
           max_to_keep=1)
 
     def maybe_restore_checkpoint(params, train_dir, external_checkpoint_path):
@@ -227,7 +220,8 @@ class CheckpointTest(parameterized.TestCase):
       (_, ret_params, _, _,
        ret_global_step, ret_sum_train_cost, ret_preemption_count,
        ret_is_restored) = checkpoint.replicate_and_maybe_restore_checkpoint(
-           {}, params, {}, {}, train_dir, external_checkpoint_path)
+           {}, params, {}, {}, train_dir, external_checkpoint_path,
+           orbax_checkpointer=self.orbax_checkpointer)
 
       ret_params_unrep = jax.device_get(jax_utils.unreplicate(ret_params))
 

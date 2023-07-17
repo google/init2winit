@@ -19,7 +19,6 @@ import shutil
 import tempfile
 
 from absl.testing import absltest
-from init2winit import checkpoint
 from init2winit import hyperparameters
 from init2winit import utils
 from init2winit.dataset_lib import datasets
@@ -42,8 +41,7 @@ class OptimizersTest(absltest.TestCase):
     self.test_dir = tempfile.mkdtemp()
 
   def tearDown(self):
-    # To not delete a directory in which a file might be created:
-    checkpoint.wait_for_checkpoint_save()
+    self.trainer.wait_until_orbax_checkpointer_finished()
     shutil.rmtree(self.test_dir)
     super(OptimizersTest, self).tearDown()
 
@@ -109,23 +107,24 @@ class OptimizersTest(absltest.TestCase):
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
 
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
-    _ = list(
-        trainer.Trainer(
-            train_dir=self.test_dir,
-            model=model,
-            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
-            initializer=initializer,
-            num_train_steps=1,
-            hps=hps,
-            rng=jax.random.PRNGKey(42),
-            eval_batch_size=hps.batch_size,
-            eval_num_batches=None,
-            test_num_batches=0,
-            eval_train_num_batches=None,
-            eval_frequency=10,
-            checkpoint_steps=[],
-            metrics_logger=metrics_logger,
-            init_logger=init_logger).train())
+    self.trainer = trainer.Trainer(
+        train_dir=self.test_dir,
+        model=model,
+        dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+        initializer=initializer,
+        num_train_steps=1,
+        hps=hps,
+        rng=jax.random.PRNGKey(42),
+        eval_batch_size=hps.batch_size,
+        eval_num_batches=None,
+        test_num_batches=0,
+        eval_train_num_batches=None,
+        eval_frequency=10,
+        checkpoint_steps=[],
+        metrics_logger=metrics_logger,
+        init_logger=init_logger,
+    )
+    _ = list(self.trainer.train())
 
     with tf.io.gfile.GFile(os.path.join(self.test_dir,
                                         'measurements.csv')) as f:

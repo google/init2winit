@@ -361,7 +361,8 @@ class Trainer(base_trainer.BaseTrainer):
           teacher_unreplicated_batch_stats,
           None,  # unreplicated_metrics_state
           train_dir='none',  # a fake directory that does not exist
-          external_checkpoint_path=self._hps.teacher_checkpoint_path)
+          external_checkpoint_path=self._hps.teacher_checkpoint_path,
+          checkpointer=self._orbax_checkpointer)
 
     # overwrite self._update_pmap with teacher_model as an argument
     update_fn = functools.partial(
@@ -516,7 +517,7 @@ class Trainer(base_trainer.BaseTrainer):
                           train_time_since_prev_eval, dynamic_context)
       yield report
     # To make sure the last checkpoint was correctly saved.
-    checkpoint.wait_for_checkpoint_save()
+    self.wait_until_orbax_checkpointer_finished()
 
   def _eval(
       self,

@@ -27,7 +27,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from flax import jax_utils
 from flax import linen as nn
-from init2winit import checkpoint
 from init2winit import hyperparameters
 from init2winit import utils
 from init2winit.dataset_lib import datasets
@@ -46,7 +45,6 @@ import numpy as np
 import pandas
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
-
 FLAGS = flags.FLAGS
 
 _VOCAB_SIZE = 4
@@ -231,10 +229,11 @@ class TrainerTest(parameterized.TestCase):
   def setUp(self):
     super(TrainerTest, self).setUp()
     self.test_dir = tempfile.mkdtemp()
+    self.trainer = None
 
   def tearDown(self):
-    # To not delete a directory in which a file might be created:
-    checkpoint.wait_for_checkpoint_save()
+    if self.trainer is not None:
+      self.trainer.wait_until_orbax_checkpointer_finished()
     shutil.rmtree(self.test_dir)
     super(TrainerTest, self).tearDown()
 
@@ -399,27 +398,28 @@ class TrainerTest(parameterized.TestCase):
     initializer = initializers.get_initializer('noop')
 
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
-    _ = list(
-        trainer.Trainer(
-            train_dir=self.test_dir,
-            model=model,
-            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
-            initializer=initializer,
-            num_train_steps=10,
-            hps=hps,
-            rng=rng,
-            eval_batch_size=eval_batch_size,
-            eval_num_batches=eval_num_batches,
-            test_num_batches=0,
-            eval_train_num_batches=eval_num_batches,
-            # Note that for some reason, moving from the deprecated to linen
-            # Flax model API made training less stable so we need to eval more
-            # frequently in order to get a `train_loss[0]` that is earlier in
-            # training.
-            eval_frequency=2,
-            checkpoint_steps=[],
-            metrics_logger=metrics_logger,
-            init_logger=init_logger).train())
+    self.trainer = trainer.Trainer(
+        train_dir=self.test_dir,
+        model=model,
+        dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+        initializer=initializer,
+        num_train_steps=10,
+        hps=hps,
+        rng=rng,
+        eval_batch_size=eval_batch_size,
+        eval_num_batches=eval_num_batches,
+        test_num_batches=0,
+        eval_train_num_batches=eval_num_batches,
+        # Note that for some reason, moving from the deprecated to linen
+        # Flax model API made training less stable so we need to eval more
+        # frequently in order to get a `train_loss[0]` that is earlier in
+        # training.
+        eval_frequency=2,
+        checkpoint_steps=[],
+        metrics_logger=metrics_logger,
+        init_logger=init_logger,
+    )
+    _ = list(self.trainer.train())
 
     with tf.io.gfile.GFile(os.path.join(self.test_dir,
                                         'measurements.csv')) as f:
@@ -462,23 +462,28 @@ class TrainerTest(parameterized.TestCase):
     initializer = initializers.get_initializer('noop')
 
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
-    _ = list(
-        trainer.Trainer(
-            train_dir=self.test_dir,
-            model=model,
-            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
-            initializer=initializer,
-            num_train_steps=10,
-            hps=hps,
-            rng=rng,
-            eval_batch_size=eval_batch_size,
-            eval_num_batches=eval_num_batches,
-            test_num_batches=0,
-            eval_train_num_batches=eval_num_batches,
-            eval_frequency=2,
-            checkpoint_steps=[],
-            metrics_logger=metrics_logger,
-            init_logger=init_logger).train())
+    self.trainer = trainer.Trainer(
+        train_dir=self.test_dir,
+        model=model,
+        dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+        initializer=initializer,
+        num_train_steps=10,
+        hps=hps,
+        rng=rng,
+        eval_batch_size=eval_batch_size,
+        eval_num_batches=eval_num_batches,
+        test_num_batches=0,
+        eval_train_num_batches=eval_num_batches,
+        # Note that for some reason, moving from the deprecated to linen
+        # Flax model API made training less stable so we need to eval more
+        # frequently in order to get a `train_loss[0]` that is earlier in
+        # training.
+        eval_frequency=2,
+        checkpoint_steps=[],
+        metrics_logger=metrics_logger,
+        init_logger=init_logger,
+    )
+    _ = list(self.trainer.train())
 
     with tf.io.gfile.GFile(os.path.join(self.test_dir,
                                         'measurements.csv')) as f:
@@ -544,23 +549,24 @@ class TrainerTest(parameterized.TestCase):
     num_train_steps = _TEXT_TRAIN_SIZE // _TEXT_BATCH_SIZE * 3
 
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
-    _ = list(
-        trainer.Trainer(
-            train_dir=self.test_dir,
-            model=model,
-            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
-            initializer=initializer,
-            num_train_steps=num_train_steps,
-            hps=hps,
-            rng=rng,
-            eval_batch_size=eval_batch_size,
-            eval_num_batches=eval_num_batches,
-            test_num_batches=eval_num_batches,
-            eval_train_num_batches=eval_num_batches,
-            eval_frequency=eval_every,
-            checkpoint_steps=checkpoint_steps,
-            metrics_logger=metrics_logger,
-            init_logger=init_logger).train())
+    self.trainer = trainer.Trainer(
+        train_dir=self.test_dir,
+        model=model,
+        dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+        initializer=initializer,
+        num_train_steps=num_train_steps,
+        hps=hps,
+        rng=rng,
+        eval_batch_size=eval_batch_size,
+        eval_num_batches=eval_num_batches,
+        test_num_batches=eval_num_batches,
+        eval_train_num_batches=eval_num_batches,
+        eval_frequency=eval_every,
+        checkpoint_steps=checkpoint_steps,
+        metrics_logger=metrics_logger,
+        init_logger=init_logger,
+    )
+    _ = list(self.trainer.train())
 
     with tf.io.gfile.GFile(
         os.path.join(self.test_dir, 'measurements.csv')) as f:
@@ -574,23 +580,24 @@ class TrainerTest(parameterized.TestCase):
 
     # Test reload from the checkpoint by increasing num_train_steps.
     num_train_steps_reload = _TEXT_TRAIN_SIZE // _TEXT_BATCH_SIZE * 6
-    _ = list(
-        trainer.Trainer(
-            train_dir=self.test_dir,
-            model=model,
-            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
-            initializer=initializer,
-            num_train_steps=num_train_steps_reload,
-            hps=hps,
-            rng=rng,
-            eval_batch_size=eval_batch_size,
-            eval_num_batches=eval_num_batches,
-            test_num_batches=eval_num_batches,
-            eval_train_num_batches=eval_num_batches,
-            eval_frequency=eval_every,
-            checkpoint_steps=checkpoint_steps,
-            metrics_logger=metrics_logger,
-            init_logger=init_logger).train())
+    self.trainer = trainer.Trainer(
+        train_dir=self.test_dir,
+        model=model,
+        dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+        initializer=initializer,
+        num_train_steps=num_train_steps_reload,
+        hps=hps,
+        rng=rng,
+        eval_batch_size=eval_batch_size,
+        eval_num_batches=eval_num_batches,
+        test_num_batches=eval_num_batches,
+        eval_train_num_batches=eval_num_batches,
+        eval_frequency=eval_every,
+        checkpoint_steps=checkpoint_steps,
+        metrics_logger=metrics_logger,
+        init_logger=init_logger,
+    )
+    _ = list(self.trainer.train())
     with tf.io.gfile.GFile(
         os.path.join(self.test_dir, 'measurements.csv')) as f:
       df = pandas.read_csv(f)
@@ -685,23 +692,24 @@ class TrainerTest(parameterized.TestCase):
     eval_every = 10
     checkpoint_steps = [1, 3, 15]
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
-    epoch_reports = list(
-        trainer.Trainer(
-            train_dir=self.test_dir,
-            model=model,
-            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
-            initializer=initializer,
-            num_train_steps=num_train_steps,
-            hps=hps,
-            rng=rng,
-            eval_batch_size=eval_batch_size,
-            eval_num_batches=eval_num_batches,
-            test_num_batches=test_num_batches,
-            eval_train_num_batches=eval_num_batches,
-            eval_frequency=eval_every,
-            checkpoint_steps=checkpoint_steps,
-            metrics_logger=metrics_logger,
-            init_logger=init_logger).train())
+    self.trainer = trainer.Trainer(
+        train_dir=self.test_dir,
+        model=model,
+        dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+        initializer=initializer,
+        num_train_steps=num_train_steps,
+        hps=hps,
+        rng=rng,
+        eval_batch_size=eval_batch_size,
+        eval_num_batches=eval_num_batches,
+        test_num_batches=test_num_batches,
+        eval_train_num_batches=eval_num_batches,
+        eval_frequency=eval_every,
+        checkpoint_steps=checkpoint_steps,
+        metrics_logger=metrics_logger,
+        init_logger=init_logger,
+    )
+    epoch_reports = list(self.trainer.train())
 
     # check that the additional checkpoints are saved.
     checkpoint_dir = os.path.join(self.test_dir, 'checkpoints')
@@ -727,23 +735,24 @@ class TrainerTest(parameterized.TestCase):
 
     # Test reload from the checkpoint by increasing num_train_steps.
     num_train_steps_reload = 100
-    epoch_reports = list(
-        trainer.Trainer(
-            train_dir=self.test_dir,
-            model=model,
-            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
-            initializer=initializer,
-            num_train_steps=num_train_steps_reload,
-            hps=hps,
-            rng=rng,
-            eval_batch_size=eval_batch_size,
-            eval_num_batches=eval_num_batches,
-            test_num_batches=test_num_batches,
-            eval_train_num_batches=eval_num_batches,
-            eval_frequency=eval_every,
-            checkpoint_steps=checkpoint_steps,
-            metrics_logger=metrics_logger,
-            init_logger=init_logger).train())
+    self.trainer = trainer.Trainer(
+        train_dir=self.test_dir,
+        model=model,
+        dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+        initializer=initializer,
+        num_train_steps=num_train_steps_reload,
+        hps=hps,
+        rng=rng,
+        eval_batch_size=eval_batch_size,
+        eval_num_batches=eval_num_batches,
+        test_num_batches=test_num_batches,
+        eval_train_num_batches=eval_num_batches,
+        eval_frequency=eval_every,
+        checkpoint_steps=checkpoint_steps,
+        metrics_logger=metrics_logger,
+        init_logger=init_logger,
+    )
+    epoch_reports = list(self.trainer.train())
     self.assertLen(
         epoch_reports, (num_train_steps_reload - num_train_steps) / eval_every)
     with tf.io.gfile.GFile(
@@ -980,29 +989,28 @@ class TrainerTest(parameterized.TestCase):
     if min_steps:
       early_stopping_min_steps = 40
     metrics_logger, init_logger = utils.set_up_loggers(self.test_dir)
-    epoch_reports = list(
-        trainer.Trainer(
-            train_dir=self.test_dir,
-            model=model,
-            dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
-            initializer=initializer,
-            num_train_steps=num_train_steps,
-            hps=hps,
-            rng=rng,
-            eval_batch_size=eval_batch_size,
-            eval_num_batches=eval_num_batches,
-            test_num_batches=test_num_batches,
-            eval_train_num_batches=eval_num_batches,
-            eval_frequency=eval_every,
-            checkpoint_steps=[],
-            early_stopping_target_name=early_stopping_target_name,
-            early_stopping_target_value=early_stopping_target_value,
-            early_stopping_mode=early_stopping_mode,
-            early_stopping_min_steps=early_stopping_min_steps,
-            metrics_logger=metrics_logger,
-            init_logger=init_logger,
-        ).train()
+    self.trainer = trainer.Trainer(
+        train_dir=self.test_dir,
+        model=model,
+        dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+        initializer=initializer,
+        num_train_steps=num_train_steps,
+        hps=hps,
+        rng=rng,
+        eval_batch_size=eval_batch_size,
+        eval_num_batches=eval_num_batches,
+        test_num_batches=test_num_batches,
+        eval_train_num_batches=eval_num_batches,
+        eval_frequency=eval_every,
+        checkpoint_steps=[],
+        early_stopping_target_name=early_stopping_target_name,
+        early_stopping_target_value=early_stopping_target_value,
+        early_stopping_mode=early_stopping_mode,
+        early_stopping_min_steps=early_stopping_min_steps,
+        metrics_logger=metrics_logger,
+        init_logger=init_logger,
     )
+    epoch_reports = list(self.trainer.train())
     if min_steps:
       # With min steps, we should've run an extra 10 steps.
       self.assertLen(epoch_reports, 4)
