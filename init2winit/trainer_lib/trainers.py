@@ -16,7 +16,6 @@
 """Trainers for init2winit."""
 
 from init2winit.trainer_lib import data_selection_trainer
-from init2winit.trainer_lib import decay_lr_on_plateau_trainer
 from init2winit.trainer_lib import distillation_trainer
 from init2winit.trainer_lib import quantization_trainer
 from init2winit.trainer_lib import trainer
@@ -25,7 +24,6 @@ from init2winit.trainer_lib import trainer
 _ALL_TRAINERS = {
     'standard': trainer.Trainer,
     'quantization': quantization_trainer.Trainer,
-    'decay_lr_on_plateau': decay_lr_on_plateau_trainer.DecayLROnPlateauTrainer,
     'distillation': distillation_trainer.Trainer,
     'data_selection': data_selection_trainer.DataSelectionTrainer,
 }

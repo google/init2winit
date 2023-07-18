@@ -65,6 +65,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       dataset_meta_data=None,
       loss_name=None,
       metrics_name=None,
+      data_selector=None,
   ):
     """Main training loop.
 
@@ -130,6 +131,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       metrics_name: Not directly used in the base trainer. Users are expected to
         overwrite the initialization method in a customimzed trainer to access
         it.
+      data_selector: data selection function returned by
+        datasets.get_data_selector.
     """
     del dataset_meta_data
     del loss_name
@@ -137,6 +140,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._train_dir = train_dir
     self._model = model
     self._dataset_builder = dataset_builder
+    self._data_selector = data_selector
     self._initializer = initializer
     self._num_train_steps = num_train_steps
     self._hps = hps

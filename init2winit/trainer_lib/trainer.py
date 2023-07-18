@@ -193,6 +193,16 @@ class Trainer(base_trainer.BaseTrainer):
     train_iter = trainer_utils.prefetch_input_pipeline(
         train_iter, self._hps.num_device_prefetches)
 
+    if self._data_selector:
+      train_iter = self._data_selector(
+          train_iter,
+          optimizer_state=self._optimizer_state,
+          params=self._params,
+          batch_stats=self._batch_stats,
+          hps=self._hps,
+          global_step=self._global_step,
+          constant_base_rng=rng)
+
     start_time = time.time()
     start_step = self._global_step
 

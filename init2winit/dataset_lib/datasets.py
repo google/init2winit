@@ -16,8 +16,10 @@
 """Data generators for init2winit."""
 
 import collections
+from typing import Optional
 
 from init2winit.dataset_lib import criteo_terabyte_dataset
+from init2winit.dataset_lib import data_selectors
 from init2winit.dataset_lib import fake_dataset
 from init2winit.dataset_lib import fastmri_dataset
 from init2winit.dataset_lib import imagenet_dataset
@@ -187,3 +189,28 @@ def get_fake_batch(dataset_name):
     raise ValueError('Unrecognized dataset: {}'.format(dataset_name)) from None
 
   return getter
+
+
+def get_data_selector(selector_name: Optional[str]):
+  """Maps selector name to data_selector.
+
+  Args:
+    selector_name: the name of the selector.
+
+  Returns:
+    A function that takes a train_iter, optimizer_state, params, batch_stats,
+    hps, global_step, and constant_base_rng and returns a batch of data.
+  Raises
+    ValueError, if `selector_name` is not in `data_selectors.ALL_SELECTORS`.
+  """
+  if selector_name is None:
+    return data_selectors.ALL_SELECTORS['noop']
+
+  try:
+    selector = data_selectors.ALL_SELECTORS[selector_name]
+  except KeyError:
+    raise ValueError(
+        'Unrecognized selector: {}'.format(selector_name)) from None
+
+  return selector
+

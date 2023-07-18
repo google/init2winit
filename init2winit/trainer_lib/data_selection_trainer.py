@@ -15,6 +15,8 @@
 
 """Data selection trainer.
 
+TODO(b/291634353): reimplement as a data selector function.
+
 This is a modified version of the approach in the paper that uses a data
 selection model of the same size as the original model to avoid
 workload-specific changes.
