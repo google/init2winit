@@ -356,13 +356,10 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
         else:
           raise ValueError(
               f'Unrecognized layer norm parameter: {parent_name}/{name}.')
-      elif 'conv' in parent_name:
-        param_types_dict[name] = ParameterType.CONV_WEIGHT
-      # Note that this is exact equality, not contained in, because
-      # flax.linen.Embed names the embedding parameter "embedding"
-      # https://github.com/google/flax/blob/main/flax/linen/linear.py#L604.
-      elif ('embedding' in name or
+      elif ('conv' in parent_name or
             ('embedding' in parent_name and name == 'kernel')):
+        param_types_dict[name] = ParameterType.CONV_WEIGHT
+      elif 'embedding' in name:
         param_types_dict[name] = ParameterType.EMBEDDING
       elif 'attention' in parent_name:
         if 'key' in parent_name and name == 'kernel':
