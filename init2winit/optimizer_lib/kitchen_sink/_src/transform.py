@@ -53,13 +53,20 @@ def _canonicalize_dtype(dtype):
 
 def _update_moment(updates, moments, decay, order):
   """Compute the exponential moving average of the `order-th` moment."""
-  return jax.tree_map(lambda g, t: (1 - decay) * (g**order) + decay * t,
-                      updates, moments)
+  return jax.tree_map(
+      lambda g, t: (1 - decay) * (g**order) + decay * t, updates, moments
+  )
 
 
 def _bias_correction(moment, decay, count):
   """Perform bias correction. This becomes a no-op as count goes to infinity."""
   beta = 1 - decay**count
+  return jax.tree_map(lambda t: t / beta.astype(t.dtype), moment)
+
+
+def _variance_correction(moment, decay, count):
+  """Performs variance correction like we derived."""
+  beta = (((1 - decay) / (1 + decay)) * (1 - decay ** (2 * count))) ** 0.5
   return jax.tree_map(lambda t: t / beta.astype(t.dtype), moment)
 
 
@@ -83,8 +90,8 @@ def _bias_corrected_decay(decay, count):
   Returns:
     Bias corrected decay.
   """
-  t = count.astype(jnp.float32) + 1.
-  return decay * (1. - jnp.power(decay, t - 1.)) / (1. - jnp.power(decay, t))
+  t = count.astype(jnp.float32) + 1.0
+  return decay * (1.0 - jnp.power(decay, t - 1.0)) / (1.0 - jnp.power(decay, t))
 
 
 def scale_by_learning_rate(learning_rate, flip_sign=True):
@@ -98,18 +105,18 @@ def nesterov(
     decay: float = 0.9,
     accumulator_dtype: Optional[Any] = None,
 ) -> optax.GradientTransformation:
-
   return optax.trace(
-      decay=decay, nesterov=True, accumulator_dtype=accumulator_dtype)
+      decay=decay, nesterov=True, accumulator_dtype=accumulator_dtype
+  )
 
 
 def polyak_hb(
     decay: float = 0.9,
     accumulator_dtype: Optional[Any] = None,
 ) -> optax.GradientTransformation:
-
   return optax.trace(
-      decay=decay, nesterov=False, accumulator_dtype=accumulator_dtype)
+      decay=decay, nesterov=False, accumulator_dtype=accumulator_dtype
+  )
 
 
 def first_moment_ema(
@@ -117,9 +124,9 @@ def first_moment_ema(
     debias: bool = False,
     accumulator_dtype: Optional[Any] = None,
 ) -> optax.GradientTransformation:
-
   return optax.ema(
-      decay=decay, debias=debias, accumulator_dtype=accumulator_dtype)
+      decay=decay, debias=debias, accumulator_dtype=accumulator_dtype
+  )
 
 
 def normalized_first_moment_ema(
@@ -193,7 +200,7 @@ def ema_nesterov(
   Args:
     moment_decay: the decay rate used for the first moment and update step.
     update_decay: the decay rate used for the update step. If none, this is set
-                  equal to moment_decay
+      equal to moment_decay
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -218,6 +225,7 @@ def ema_nesterov(
 
 class PreconditionBySecondMomentCoordinateWiseState(NamedTuple):
   """State for the Adam preconditioner."""
+
   count: chex.Array
   nu: optax.Updates
 
@@ -242,6 +250,7 @@ def precondition_by_rms(
       numerical stability when backpropagating gradients through the rescaling.
     debias: whether to use bias correction or not
     power: the power to which the second moment is raised to
+
   Gotcha: Note that the usage of epsilon and defaults are different from optax's
     scale_by_rms. This matches optax's adam template.
 
@@ -253,26 +262,81 @@ def precondition_by_rms(
 
   def init_fn(params):
     return PreconditionBySecondMomentCoordinateWiseState(
-        count=jnp.zeros([], jnp.int32), nu=jax.tree_map(jnp.zeros_like, params))
+        count=jnp.zeros([], jnp.int32), nu=jax.tree_map(jnp.zeros_like, params)
+    )
 
   def update_fn(updates, state, params=None):
     del params
     nu = _update_moment(updates, state.nu, decay, 2)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     nu_hat = nu if not debias else _bias_correction(nu, decay, count)
-    updates = jax.tree_map(lambda u, v: u / (raise_power(v + eps_root) + eps),
-                           updates, nu_hat)
+    updates = jax.tree_map(
+        lambda u, v: u / (raise_power(v + eps_root) + eps), updates, nu_hat
+    )
     return updates, PreconditionBySecondMomentCoordinateWiseState(
-        count=count, nu=nu)
+        count=count, nu=nu
+    )
 
   return optax.GradientTransformation(init_fn, update_fn)
 
 
-def precondition_by_yogi(b2: float = 0.999,
-                         eps: float = 1e-8,
-                         eps_root: float = 0.0,
-                         initial_accumulator_value: float = 1e-6,
-                         debias: bool = True) -> optax.GradientTransformation:
+def precondition_by_rms_plus(
+    decay: float = 0.999,
+    gamma: float = 0.99,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    debias: bool = False,
+    power: float = 0.5,
+) -> optax.GradientTransformation:
+  """Convex Combination of usual RMS and raw un-preconditioned quantities.
+
+  Args:
+    decay: decay rate for exponentially weighted average of moments of grads.
+    gamma: convex combination coefficient.
+    eps: Term added to the denominator to improve numerical stability. The
+      default is kept to 1e-8 to match optax Adam implementation.
+    eps_root: term added to the denominator inside the square-root to improve
+      numerical stability when backpropagating gradients through the rescaling.
+    debias: whether to use bias correction or not
+    power: the power to which the second moment is raised to
+
+  Gotcha: Note that the usage of epsilon and defaults are different from optax's
+    scale_by_rms. This matches optax's adam template.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
+
+  def init_fn(params):
+    return PreconditionBySecondMomentCoordinateWiseState(
+        count=jnp.zeros([], jnp.int32), nu=jax.tree_map(jnp.zeros_like, params)
+    )
+
+  def update_fn(updates, state, params=None):
+    del params
+    nu = _update_moment(updates, state.nu, decay, 2)
+    count = state.count + jnp.array(1, dtype=jnp.int32)
+    nu_hat = nu if not debias else _bias_correction(nu, decay, count)
+    updates_rms = jax.tree_map(
+        lambda u, v: u / (raise_power(v + eps_root) + eps), updates, nu_hat
+    )
+    updates = _update_moment(updates, updates_rms, gamma, 1)
+    return updates, PreconditionBySecondMomentCoordinateWiseState(
+        count=count, nu=nu
+    )
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def precondition_by_yogi(
+    b2: float = 0.999,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    initial_accumulator_value: float = 1e-6,
+    debias: bool = True,
+) -> optax.GradientTransformation:
   """Preconditions updates according to the Yogi Preconditioner.
 
   References:
@@ -298,18 +362,24 @@ def precondition_by_yogi(b2: float = 0.999,
     value_like = lambda p: jnp.full_like(p, initial_accumulator_value)
     nu = jax.tree_map(value_like, params)  # Second Central moment
     return PreconditionBySecondMomentCoordinateWiseState(
-        count=jnp.zeros([], jnp.int32), nu=nu)
+        count=jnp.zeros([], jnp.int32), nu=nu
+    )
 
   def update_fn(updates, state, params=None):
     del params
-    nu = jax.tree_map(lambda g, v: v - (1 - b2) * jnp.sign(v - g**2) * (g**2),
-                      updates, state.nu)
+    nu = jax.tree_map(
+        lambda g, v: v - (1 - b2) * jnp.sign(v - g**2) * (g**2),
+        updates,
+        state.nu,
+    )
     count = state.count + jnp.array(1, dtype=jnp.int32)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_map(lambda u, v: u / (jnp.sqrt(v + eps_root) + eps),
-                           updates, nu_hat)
+    updates = jax.tree_map(
+        lambda u, v: u / (jnp.sqrt(v + eps_root) + eps), updates, nu_hat
+    )
     return updates, PreconditionBySecondMomentCoordinateWiseState(
-        count=count, nu=nu)
+        count=count, nu=nu
+    )
 
   return optax.GradientTransformation(init_fn, update_fn)
 
@@ -337,23 +407,27 @@ def precondition_by_amsgrad(
 
   def init_fn(params):
     return PreconditionBySecondMomentCoordinateWiseState(
-        count=jnp.zeros([], jnp.int32), nu=jax.tree_map(jnp.zeros_like, params))
+        count=jnp.zeros([], jnp.int32), nu=jax.tree_map(jnp.zeros_like, params)
+    )
 
   def update_fn(updates, state, params=None):
     del params
     nu = _update_moment(updates, state.nu, b2, 2)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     nu_hat = jax.tree_map(jnp.maximum, nu, state.nu)
-    updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps),
-                           updates, nu_hat)
+    updates = jax.tree_map(
+        lambda m, v: m / (jnp.sqrt(v + eps_root) + eps), updates, nu_hat
+    )
     return updates, PreconditionBySecondMomentCoordinateWiseState(
-        count=count, nu=nu)
+        count=count, nu=nu
+    )
 
   return optax.GradientTransformation(init_fn, update_fn)
 
 
 class ScaleByAMSGradState(NamedTuple):
   """State for the AMSGrad algorithm."""
+
   mu: optax.Updates
   nu: optax.Updates
 
@@ -385,7 +459,8 @@ def scale_by_amsgrad(
 
   def init_fn(params):
     mu = jax.tree_map(  # First moment
-        lambda t: jnp.zeros_like(t, dtype=mu_dtype), params)
+        lambda t: jnp.zeros_like(t, dtype=mu_dtype), params
+    )
     nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
     return ScaleByAMSGradState(mu=mu, nu=nu)
 
@@ -394,8 +469,9 @@ def scale_by_amsgrad(
     mu = _update_moment(updates, state.mu, b1, 1)
     nu = _update_moment(updates, state.nu, b2, 2)
     nu_hat = jax.tree_map(jnp.maximum, nu, state.nu)
-    updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + eps_root) + eps), mu,
-                           nu_hat)
+    updates = jax.tree_map(
+        lambda m, v: m / (jnp.sqrt(v + eps_root) + eps), mu, nu_hat
+    )
     return updates, ScaleByAMSGradState(mu=mu, nu=nu)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -404,12 +480,13 @@ def scale_by_amsgrad(
 # TODO(namanagarwal) : Remove the following
 class BiasCorrectionState(NamedTuple):
   """Holds an exponential moving average of past updates."""
+
   count: chex.Array  # shape=(), dtype=jnp.int32.
 
 
 def bias_correction(
-    decay: float = 0.9,
-    accumulator_dtype: Optional[Any] = None) -> optax.GradientTransformation:
+    decay: float = 0.9, accumulator_dtype: Optional[Any] = None
+) -> optax.GradientTransformation:
   """Compute the Adam style bias correction.
 
   Args:
@@ -439,17 +516,20 @@ def bias_correction(
 # TODO(namanagarwal): Add a test for Nadam
 class ScaleByAdamState(NamedTuple):
   """State for the NAdam algorithm."""
+
   count: chex.Array  # shape=(), dtype=jnp.int32.
   mu: optax.Updates
   nu: optax.Updates
 
 
-def scale_by_adam(b1: float = 0.9,
-                  b2: float = 0.999,
-                  eps: float = 1e-8,
-                  eps_root: float = 0.0,
-                  debias: bool = True,
-                  power: float = 0.5) -> optax.GradientTransformation:
+def scale_by_adam(
+    b1: float = 0.9,
+    b2: float = 0.999,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    debias: bool = True,
+    power: float = 0.5,
+) -> optax.GradientTransformation:
   """Rescale updates according to the Adam algorithm.
 
   Args:
@@ -482,6 +562,60 @@ def scale_by_adam(b1: float = 0.9,
     updates = jax.tree_map(
         lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
     )
+    return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def scale_by_adam_plus(
+    b1: float = 0.9,
+    b2: float = 0.999,
+    b3: float = 0.99,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    debias: bool = True,
+    power: float = 0.5,
+) -> optax.GradientTransformation:
+  """Rescale updates according to the Adam algorithm.
+
+  Args:
+    b1: decay rate for the exponentially weighted average of grads.
+    b2: decay rate for the exponentially weighted average of squared grads.
+    b3: convex comb. coeff. for mixing preconditioned grads with ema of grads.
+    eps: term added to the denominator to improve numerical stability.
+    eps_root: term added to the denominator inside the square-root to improve
+      numerical stability when backpropagating gradients through the rescaling.
+    debias: whether to use bias correction.
+    power: the power to use in the preconditioner (0.5 in default adam).
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
+
+  def init_fn(params):
+    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
+
+  def update_fn(updates, state, params=None):
+    del params
+
+    mu = _update_moment(updates, state.mu, b1, 1)
+    nu = _update_moment(updates, state.nu, b2, 2)
+    count = state.count + jnp.array(1, dtype=jnp.int32)
+    mu_hat = mu if not debias else _bias_correction(mu, b1, count)
+    nu_hat = nu if not debias else _bias_correction(nu, b2, count)
+    updates_rms = jax.tree_map(
+        lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
+    )
+
+    # original version of "plus2":
+    # updates = _update_moment(mu_hat, updates_rms, b3, 1)
+
+    # new version of "plus2":
+    mu_hat_2 = jax.tree_map(lambda m: m / (1.0 - b1), mu_hat)
+    updates = _update_moment(mu_hat_2, updates_rms, b3, 1)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -537,8 +671,105 @@ def scale_by_normalized_adam(
   return optax.GradientTransformation(init_fn, update_fn)
 
 
+def scale_by_normalized_adam_plus(
+    b1: float = 0.9,
+    b2: float = 0.999,
+    b3: float = 0.99,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    debias: bool = True,
+    power: float = 0.5,
+) -> optax.GradientTransformation:
+  """Rescale updates according to the Adam algorithm with Var. Normalization.
+
+  Args:
+    b1: decay rate for the exponentially weighted average of grads.
+    b2: decay rate for the exponentially weighted average of squared grads.
+    b3: convex combination coefficient.
+    eps: term added to the denominator to improve numerical stability.
+    eps_root: term added to the denominator inside the square-root to improve
+      numerical stability when backpropagating gradients through the rescaling.
+    debias: whether to use moment bias correction.
+    power: the power to use in the preconditioner (0.5 in default adam).
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
+
+  def init_fn(params):
+    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
+
+  def update_fn(updates, state, params=None):
+    del params
+
+    mu = _update_moment(updates, state.mu, b1, 1)
+    nu = _update_moment(updates, state.nu, b2, 2)
+    count = state.count + jnp.array(1, dtype=jnp.int32)
+    mu_hat = mu if not debias else _bias_correction(mu, b1, count)
+    nu_hat = nu if not debias else _bias_correction(nu, b2, count)
+
+    scale_factor = (1 + b1) / (1 - b1) ** 0.5
+
+    updates_rms = jax.tree_map(
+        lambda m, v: scale_factor * (m / (raise_power(v + eps_root) + eps)),
+        mu_hat,
+        nu_hat,
+    )
+    updates = _update_moment(mu_hat, updates_rms, b3, 1)
+    return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def scale_by_iteration_dependent_norm_adam(
+    b1: float = 0.9,
+    b2: float = 0.999,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    power: float = 0.5,
+) -> optax.GradientTransformation:
+  """Rescale updates according to the Adam algorithm.
+
+  Args:
+    b1: decay rate for the exponentially weighted average of grads.
+    b2: decay rate for the exponentially weighted average of squared grads.
+    eps: term added to the denominator to improve numerical stability.
+    eps_root: term added to the denominator inside the square-root to improve
+      numerical stability when backpropagating gradients through the rescaling.
+    power: the power to use in the preconditioner (0.5 in default adam).
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
+
+  def init_fn(params):
+    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
+
+  def update_fn(updates, state, params=None):
+    del params
+
+    mu = _update_moment(updates, state.mu, b1, 1)
+    nu = _update_moment(updates, state.nu, b2, 2)
+    count = state.count + jnp.array(1, dtype=jnp.int32)
+    mu_hat = _variance_correction(mu, b1, count)
+    nu_hat = _bias_correction(nu, b2, count)
+    updates = jax.tree_map(
+        lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
+    )
+    return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 class PreconditionByRssState(NamedTuple):
   """State holding the sum of gradient squares to date."""
+
   sum_of_squares: optax.Updates
 
 
@@ -546,17 +777,17 @@ def precondition_by_rss(
     initial_accumulator_value: float = 0.0,
     eps: float = 1e-8,
     eps_root: float = 0.0,
-    power: float = 0.5
+    power: float = 0.5,
 ) -> optax.GradientTransformation:
   """Rescale updates by the powers of the sum of all squared gradients to date.
 
   Args:
     initial_accumulator_value: starting value for accumulators, must be >= 0.
     eps: term added to the denominator to improve numerical stability.
-    eps_root: term added to the denominator inside the root to improve
-      numerical stability when backpropagating gradients through the rescaling.
-    power: the power to use when scaling (default is 0.5 to scale by root sum
-    of squares).
+    eps_root: term added to the denominator inside the root to improve numerical
+      stability when backpropagating gradients through the rescaling.
+    power: the power to use when scaling (default is 0.5 to scale by root sum of
+      squares).
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -587,7 +818,8 @@ def precondition_by_rss(
 def _sanitize_values(array, replacement=0.0):
   """Sanitizes NaN and Infinity values."""
   return jnp.nan_to_num(
-      array, nan=replacement, posinf=replacement, neginf=replacement)
+      array, nan=replacement, posinf=replacement, neginf=replacement
+  )
 
 
 def sanitize_values(replacement=0.0):
@@ -671,12 +903,14 @@ def clip_updates(clip_threshold=1.0):
   return optax.GradientTransformation(init_fn, update_fn)
 
 
-def scale_by_nadam(b1: float = 0.9,
-                   b2: float = 0.999,
-                   eps: float = 1e-8,
-                   eps_root: float = 0.0,
-                   debias: bool = True,
-                   power: float = 0.5) -> optax.GradientTransformation:
+def scale_by_nadam(
+    b1: float = 0.9,
+    b2: float = 0.999,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    debias: bool = True,
+    power: float = 0.5,
+) -> optax.GradientTransformation:
   """Rescale updates according to the NAdam algorithm.
 
   References:
@@ -716,7 +950,74 @@ def scale_by_nadam(b1: float = 0.9,
     mu_hat = mu_hat if not debias else _bias_correction(mu_hat, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
     updates = jax.tree_map(
-        lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat)
+        lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
+    )
+    return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def scale_by_nadam_plus(
+    b1: float = 0.9,
+    b2: float = 0.999,
+    b3: float = 0.99,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    debias: bool = True,
+    power: float = 0.5,
+) -> optax.GradientTransformation:
+  """Rescale updates according to the NAdam algorithm.
+
+  References:
+  There seem to be multiple versions of NAdam. The original version is here
+  https://openreview.net/forum?id=OM0jvwB8jIp57ZJjtNEZ (the pytorch imp. also
+  follows this)
+
+  Current code implements a simpler version with no momentum decay and slightly
+  different bias correction terms. The exact description can be found here
+  https://arxiv.org/pdf/1910.05446.pdf (Table 1)
+
+  Args:
+    b1: decay rate for the exponentially weighted average of grads.
+    b2: decay rate for the exponentially weighted average of squared grads.
+    b3: convex comb. coeff. for mixing preconditioned grads with ema of grads.
+    eps: term added to the denominator to improve numerical stability.
+    eps_root: term added to the denominator inside the square-root to improve
+      numerical stability when backpropagating gradients through the rescaling.
+    debias: whether to use bias correction.
+    power: the power to use in the preconditioner (0.5 in default adam).
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
+
+  def init_fn(params):
+    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
+
+  def update_fn(updates, state, params=None):
+    del params
+    mu = _update_moment(updates, state.mu, b1, 1)
+    nu = _update_moment(updates, state.nu, b2, 2)
+    count = state.count + jnp.array(1, dtype=jnp.int32)
+    mu_hat = _update_moment(updates, mu, b1, 1)
+    mu_hat = mu_hat if not debias else _bias_correction(mu_hat, b1, count)
+    nu_hat = nu if not debias else _bias_correction(nu, b2, count)
+    updates_rms = jax.tree_map(
+        lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
+    )
+    # v1: didn't work well!
+    # signed_updates = jax.tree_map(lambda x: jnp.sign(x), updates)
+    # updates = _update_moment(signed_updates, updates_rms, b3, 1)
+
+    # v2:
+    # updates = _update_moment(mu_hat, updates_rms, b3, 1)
+
+    # new version of "v2":
+    mu_hat_2 = jax.tree_map(lambda m: m / (1.0 - (b1**2)), mu_hat)
+    updates = _update_moment(mu_hat_2, updates_rms, b3, 1)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -724,6 +1025,7 @@ def scale_by_nadam(b1: float = 0.9,
 
 class PreconditionByLayeredAdaptiveRMSState(NamedTuple):
   """State for the Layered Adaptive RMS Preconditioner algorithm."""
+
   count: chex.Array  # shape=(), dtype=jnp.int32.
   nu: optax.Updates
   beta_array: Any
@@ -763,20 +1065,24 @@ def precondition_by_layered_adaptive_rms(
     count = jnp.zeros([], jnp.int32)
     nu = jax.tree_map(jnp.zeros_like, params)
     beta_array = jax.tree_map(
-        lambda x: _generate_per_parameter_array(decays, x), params)
+        lambda x: _generate_per_parameter_array(decays, x), params
+    )
     scale_array = jax.tree_map(
-        lambda x: _generate_per_parameter_array(scales, x), params)
+        lambda x: _generate_per_parameter_array(scales, x), params
+    )
 
     return PreconditionByLayeredAdaptiveRMSState(
-        count=count, nu=nu, beta_array=beta_array, scale_array=scale_array)
+        count=count, nu=nu, beta_array=beta_array, scale_array=scale_array
+    )
 
   def _generate_partition(decays, decay_distribution, length):
     # Generates length-sized array split according to decay_distribution.
     decays = jnp.array(decays)
     decay_distribution = jnp.array(decay_distribution)
     multiples = jnp.int32(jnp.floor(decay_distribution * length))
-    multiples = multiples.at[-1].set(multiples[-1] + length -
-                                     jnp.sum(multiples))
+    multiples = multiples.at[-1].set(
+        multiples[-1] + length - jnp.sum(multiples)
+    )
     return jnp.repeat(decays, multiples)
 
   def _generate_per_parameter_array(arr, params):
@@ -785,8 +1091,11 @@ def precondition_by_layered_adaptive_rms(
     # For > 2D Tensor - input_Index = second last dim , output_index = last dim
     input_index = max(len(params.shape) - 2, 0)
     output_index = len(params.shape) - 1
-    array_len = params.shape[
-        output_index] if modality == 'output' else params.shape[input_index]
+    array_len = (
+        params.shape[output_index]
+        if modality == 'output'
+        else params.shape[input_index]
+    )
     full_array = _generate_partition(arr, decay_distribution, array_len)
     # enlarge beta array to have same ndims as params but ones in shape
     # everywhere but the target_index for easy broadcasting
@@ -799,31 +1108,41 @@ def precondition_by_layered_adaptive_rms(
     # input beta can be an array here
     # the following code handles the adagrad case
     one_minus_beta = 1.0 - beta
-    one_minus_beta = jnp.where(one_minus_beta <= 0.0,
-                               jnp.ones_like(one_minus_beta), one_minus_beta)
+    one_minus_beta = jnp.where(
+        one_minus_beta <= 0.0, jnp.ones_like(one_minus_beta), one_minus_beta
+    )
     return one_minus_beta * (updates**order) + beta * moments
 
   def update_fn(updates, state, params=None):
     del params
-    nu = jax.tree_map(lambda g, t, b: _update_moment_general(g, t, b, 2),
-                      updates, state.nu, state.beta_array)
+    nu = jax.tree_map(
+        lambda g, t, b: _update_moment_general(g, t, b, 2),
+        updates,
+        state.nu,
+        state.beta_array,
+    )
     count = state.count + jnp.array(1, dtype=jnp.int32)
     # Decide what to do with bias correction
     # nu_hat = nu if not debias else _bias_correction(nu, b2, count)
     updates = jax.tree_map(
-        lambda m, v, s: s * (m / (jnp.sqrt(v + eps_root) + eps)), updates, nu,
-        state.scale_array)
+        lambda m, v, s: s * (m / (jnp.sqrt(v + eps_root) + eps)),
+        updates,
+        nu,
+        state.scale_array,
+    )
     return updates, PreconditionByLayeredAdaptiveRMSState(
         count=count,
         nu=nu,
         beta_array=state.beta_array,
-        scale_array=state.scale_array)
+        scale_array=state.scale_array,
+    )
 
   return optax.GradientTransformation(init_fn, update_fn)
 
 
 class Polyak_AveragingState(NamedTuple):
   """State for Polyak Averaging."""
+
   ema: optax.Updates
 
 
@@ -849,6 +1168,7 @@ def polyak_averaging(decay: float = 0.999) -> optax.GradientTransformation:
     return updates, Polyak_AveragingState(ema=new_ema)
 
   return optax.GradientTransformation(init_fn, update_fn)
+
 
 AddDecayedWeightsState = optax.EmptyState
 
@@ -882,8 +1202,8 @@ def add_decayed_weights(
     if params is None:
       raise ValueError(optax.NO_PARAMS_MSG)
     updates = jax.tree_util.tree_map(
-        lambda g, p: g + m * learning_rate * weight_decay * p,
-        updates, params)
+        lambda g, p: g + m * learning_rate * weight_decay * p, updates, params
+    )
     return updates, state
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -891,6 +1211,7 @@ def add_decayed_weights(
 
 class PytreeScalarState(NamedTuple):
   """State for Scaling Updates Parameter-wise."""
+
   pytree_scales: Any
 
 
@@ -898,7 +1219,7 @@ def scale_by_pytree(pytree_scales: Any) -> optax.GradientTransformation:
   """Scales the updates parameter-wise.
 
   Args:
-    pytree_scales: Scales for Parameters. Should be a pytree of the same 
+    pytree_scales: Scales for Parameters. Should be a pytree of the same
       structure as params.
 
   Returns:
@@ -933,12 +1254,18 @@ def no_op() -> optax.GradientTransformation:
 # scale_by_rms exists only for backward compatability
 _composites = {
     'scale_by_adam': scale_by_adam,
+    'scale_by_adam_plus': scale_by_adam_plus,
     'scale_by_yogi': optax.scale_by_yogi,
     'scale_by_amsgrad': scale_by_amsgrad,
     'scale_by_nadam': scale_by_nadam,
+    'scale_by_nadam_plus': scale_by_nadam_plus,
     'scale_by_rms': precondition_by_rms,
     'scale_by_lamb': functools.partial(optax.lamb, learning_rate=1.0),
     'scale_by_normalized_adam': scale_by_normalized_adam,
+    'scale_by_normalized_adam_plus': scale_by_normalized_adam_plus,
+    'scale_by_iteration_dependent_norm_adam': (
+        scale_by_iteration_dependent_norm_adam
+    ),
     'sgd': optax.sgd,
 }
 
@@ -953,10 +1280,13 @@ _first_moment_accumulators = {
 
 _preconditioners = {
     'precondition_by_rms': precondition_by_rms,
+    'precondition_by_rms_plus': precondition_by_rms_plus,
     'precondition_by_yogi': precondition_by_yogi,
     'precondition_by_rss': precondition_by_rss,
     'precondition_by_amsgrad': precondition_by_amsgrad,
-    'precondition_by_layered_adaptive_rms': precondition_by_layered_adaptive_rms
+    'precondition_by_layered_adaptive_rms': (
+        precondition_by_layered_adaptive_rms
+    ),
 }
 
 _miscellaneous = {
