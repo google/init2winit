@@ -938,7 +938,7 @@ class ModelsTest(parameterized.TestCase):
                 'scale': model_utils.ShapeTuple((384,)),
             },
         },
-        'embedding': {
+        'conv_patch_extract': {
             'bias': model_utils.ShapeTuple((384,)),
             'kernel': model_utils.ShapeTuple((16, 16, 3, 384,)),
         },
@@ -1005,9 +1005,9 @@ class ModelsTest(parameterized.TestCase):
                 'scale': model_utils.ParameterType.WEIGHT,
             },
         },
-        'embedding': {
+        'conv_patch_extract': {
             'bias': model_utils.ParameterType.BIAS,
-            'kernel': model_utils.ParameterType.EMBEDDING,
+            'kernel': model_utils.ParameterType.CONV_WEIGHT,
         },
         'head': {
             'bias': model_utils.ParameterType.BIAS,

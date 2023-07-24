@@ -396,7 +396,7 @@ class ViT(nn.Module):
     # Patch extraction
     x = out['stem'] = nn.Conv(
         self.width, self.patch_size, strides=self.patch_size,
-        padding='VALID', name='embedding')(x)
+        padding='VALID', name='conv_patch_extract')(x)
 
     n, h, w, c = x.shape
     x = jnp.reshape(x, [n, h * w, c])
