@@ -51,10 +51,12 @@ PrecisionLike = Union[None, str, lax.Precision, Tuple[str, str],
 
 default_kernel_init = lecun_normal()
 
-default_binarize_hparams = config_dict.ConfigDict({
-    'w_hparams': None,  # no weight binarization by default
-    'a_hparams': None,  # no activation binarization by default
-})
+
+def _default_binarize_hparams() -> config_dict.ConfigDict:
+  return config_dict.ConfigDict({
+      'w_hparams': None,  # no weight binarization by default
+      'a_hparams': None,  # no activation binarization by default
+  })
 
 
 @dataclass
@@ -617,8 +619,12 @@ class MultiHeadDotProductAttention(Module):
   use_bias: bool = True
   attention_fn: Callable[[Array, Array, Array], Array] = dot_product_attention
   decode: bool = False
-  binarize_hparams: config_dict.ConfigDict = default_binarize_hparams
-  dynamic_context: DynamicContext = DynamicContext()
+  binarize_hparams: config_dict.ConfigDict = dataclasses.field(
+      default_factory=_default_binarize_hparams
+  )
+  dynamic_context: DynamicContext = dataclasses.field(
+      default_factory=DynamicContext
+  )
 
   @compact
   def __call__(self,

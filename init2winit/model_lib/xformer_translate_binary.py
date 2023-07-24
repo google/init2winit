@@ -34,6 +34,13 @@ from ml_collections.config_dict import config_dict
 import numpy as np
 
 
+def _default_binarize_hparams():
+  return {
+      'w_hparams': None,  # no weight binarization by default
+      'a_hparams': None,  # no activation binarization by default
+  }
+
+
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         batch_size=64,
@@ -49,10 +56,10 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         attention_dropout_rate=0.1,
         optimizer='adam',
         opt_hparams={
-            'beta1': .9,
-            'beta2': .98,
+            'beta1': 0.9,
+            'beta2': 0.98,
             'epsilon': 1e-9,
-            'weight_decay': 0.0
+            'weight_decay': 0.0,
         },
         layer_rescale_factors={},
         normalizer='layer_norm',
@@ -60,7 +67,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
             'base_lr': 0.05,
             'warmup_steps': 8000,
             'factors': 'constant * linear_warmup * rsqrt_decay',
-            'schedule': 'compound'
+            'schedule': 'compound',
         },
         label_smoothing=0.1,
         l2_decay_factor=None,
@@ -74,10 +81,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         dec_cross_attn_kernel_init='xavier_uniform',
         decode=False,
         total_accumulated_batch_size=None,
-        binarize_hparams={
-            'w_hparams': None,  # no weight binarization by default
-            'a_hparams': None,  # no activation binarization by default
-        },
+        binarize_hparams=_default_binarize_hparams(),
         quant_steps={  # training step at which model is partially binarized
             'ff_weights': 90e3,
             'att_weights': 90e3,
@@ -97,7 +101,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         restart_base_lr=None,  # the base_lr used when a new lr cycle starts
         teacher_model_name=None,  # by default not using distillation
         teacher_checkpoint_path=None,  # by default not using distillation
-    ))
+    )
+)
 
 
 def _get_dtype(use_bfloat16):
@@ -215,8 +220,12 @@ class MlpBlock(nn.Module):
   dropout_rate: float = 0.1
   kernel_init: model_utils.Initializer = nn.initializers.xavier_uniform()
   bias_init: model_utils.Initializer = nn.initializers.normal(stddev=1e-6)
-  binarize_hparams: config_dict.ConfigDict = DEFAULT_HPARAMS.binarize_hparams
-  dynamic_context: DynamicContext = DynamicContext()
+  binarize_hparams: config_dict.ConfigDict = dataclasses.field(
+      default_factory=_default_binarize_hparams
+  )
+  dynamic_context: DynamicContext = dataclasses.field(
+      default_factory=DynamicContext
+  )
 
   @nn.compact
   def __call__(self, inputs, train):
@@ -278,8 +287,12 @@ class Encoder1DBlock(nn.Module):
   attention_dropout_rate: float = 0.1
   normalizer: str = 'layer_norm'
   enc_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
-  binarize_hparams: config_dict.ConfigDict = DEFAULT_HPARAMS.binarize_hparams
-  dynamic_context: DynamicContext = DynamicContext()
+  binarize_hparams: config_dict.ConfigDict = dataclasses.field(
+      default_factory=_default_binarize_hparams
+  )
+  dynamic_context: DynamicContext = dataclasses.field(
+      default_factory=DynamicContext
+  )
 
   @nn.compact
   def __call__(self,
@@ -373,8 +386,12 @@ class EncoderDecoder1DBlock(nn.Module):
   dec_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   dec_cross_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   decode: bool = False
-  binarize_hparams: config_dict.ConfigDict = DEFAULT_HPARAMS.binarize_hparams
-  dynamic_context: DynamicContext = DynamicContext()
+  binarize_hparams: config_dict.ConfigDict = dataclasses.field(
+      default_factory=_default_binarize_hparams
+  )
+  dynamic_context: DynamicContext = dataclasses.field(
+      default_factory=DynamicContext
+  )
 
   @nn.compact
   def __call__(self,
@@ -494,8 +511,12 @@ class Encoder(nn.Module):
   normalizer: str = 'layer_norm'
   attention_dropout_rate: float = 0.1
   enc_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
-  binarize_hparams: config_dict.ConfigDict = DEFAULT_HPARAMS.binarize_hparams
-  dynamic_context: DynamicContext = DynamicContext()
+  binarize_hparams: config_dict.ConfigDict = dataclasses.field(
+      default_factory=_default_binarize_hparams
+  )
+  dynamic_context: DynamicContext = dataclasses.field(
+      default_factory=DynamicContext
+  )
 
   @nn.compact
   def __call__(self,
@@ -604,8 +625,12 @@ class Decoder(nn.Module):
   attention_dropout_rate: float = 0.1
   dec_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   dec_cross_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
-  binarize_hparams: config_dict.ConfigDict = DEFAULT_HPARAMS.binarize_hparams
-  dynamic_context: DynamicContext = DynamicContext()
+  binarize_hparams: config_dict.ConfigDict = dataclasses.field(
+      default_factory=_default_binarize_hparams
+  )
+  dynamic_context: DynamicContext = dataclasses.field(
+      default_factory=DynamicContext
+  )
 
   @nn.compact
   def __call__(self,
@@ -753,8 +778,12 @@ class Transformer(nn.Module):
   dec_self_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   dec_cross_attn_kernel_init_fn: model_utils.Initializer = initializers.xavier_uniform()  # pylint: disable=line-too-long
   should_decode: bool = False
-  binarize_hparams: config_dict.ConfigDict = DEFAULT_HPARAMS.binarize_hparams
-  dynamic_context: DynamicContext = DynamicContext()
+  binarize_hparams: config_dict.ConfigDict = dataclasses.field(
+      default_factory=_default_binarize_hparams
+  )
+  dynamic_context: DynamicContext = dataclasses.field(
+      default_factory=DynamicContext
+  )
 
   def setup(self):
     if self.share_embeddings:
@@ -1072,4 +1101,3 @@ class TransformerTranslate(base_model.BaseModel):
         for x in hps.input_shape
     ]
     return dummy_inputs
-  
