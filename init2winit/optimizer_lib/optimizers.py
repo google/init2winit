@@ -17,6 +17,7 @@
 
 from absl import logging
 import flax
+from init2winit.model_lib.model_utils import ParameterType  # pylint: disable=g-importing-member
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import online_newton_step
