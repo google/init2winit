@@ -144,6 +144,8 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
           relative_epsilon=hps.opt_hparams.get(
               'matrix_relative_epsilon', False
           ),
+          add_ggt=hps.opt_hparams.get('add_ggt', False),
+          memory_alloc=hps.opt_hparams.get('memory_alloc', None),
       )
       opts = {
           'sketchy_options': opts,
