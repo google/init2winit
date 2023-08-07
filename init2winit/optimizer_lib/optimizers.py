@@ -146,6 +146,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
           ),
           add_ggt=hps.opt_hparams.get('add_ggt', False),
           memory_alloc=hps.opt_hparams.get('memory_alloc', None),
+          ekfac_svd=hps.opt_hparams.get('ekfac_svd', False),
       )
       opts = {
           'sketchy_options': opts,
