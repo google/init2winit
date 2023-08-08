@@ -477,6 +477,78 @@ def bias_correction(
   return optax.GradientTransformation(init_fn, update_fn)
 
 
+class ScaleBy_Adaptive_GD_State(NamedTuple):
+  """State for the adaptive GD algorithm."""
+
+  r: chex.Array
+  lambda_prev: chex.Array
+  lambda_sum: chex.Array
+  init_params: optax.Updates
+  prev_update: optax.Updates
+
+
+def scale_by_adaptive_gd(
+) -> optax.GradientTransformation:
+  """Rescale updates according to the Adam algorithm.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  def init_fn(params):
+    init_params = params  # x0
+    prev_update = jax.tree_map(
+        jnp.zeros_like, params
+    )  # previous update with lr included
+    return ScaleBy_Adaptive_GD_State(
+        r=jnp.ones([], jnp.float64),
+        lambda_prev=jnp.zeros([], jnp.float64),
+        lambda_sum=jnp.zeros([], jnp.float64),
+        init_params=init_params,
+        prev_update=prev_update,
+    )
+
+  def update_fn(updates, state, params):
+    # we can use layer-wise distances later for a layer-wise variant
+    layer_wise_curr_distance_squared = jax.tree_map(
+        lambda x_t, x_0: jnp.sum((x_t - x_0)**2), params, state.init_params
+    )
+    curr_distance_norm_squared = jnp.sum(layer_wise_curr_distance_squared)
+    # curr_r plays the role of r_t^2 here
+    curr_r = jnp.maximum(state.r, curr_distance_norm_squared)
+    # problem in the first update when lambda_sum = 0!
+    new_updates = jax.tree_map(
+        lambda g, g_prev: g + state.lambda_prev * g_prev,
+        updates,
+        state.prev_update,
+    )
+    new_update_norm_squared = jnp.sum(
+        jax.tree_map(
+            lambda u: jnp.sum(u**2),
+            new_updates,
+        )
+    )
+    lambda_new = 0.5 * (
+        jnp.sqrt(
+            state.lambda_sum**2 + jnp.divide(new_update_norm_squared, curr_r)
+        )
+        - state.lambda_sum
+    )
+    lambda_sum_new = state.lambda_sum + lambda_new
+    new_updates_with_lr = jax.tree_map(
+        lambda u: u / lambda_sum_new, new_updates
+    )
+    return new_updates_with_lr, ScaleBy_Adaptive_GD_State(
+        r=curr_r,
+        lambda_prev=lambda_new,
+        lambda_sum=lambda_sum_new,
+        init_params=state.init_params,
+        prev_update=new_updates_with_lr,
+    )
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 # TODO(namanagarwal): Add a test for Nadam
 class ScaleByAdamState(NamedTuple):
   """State for the NAdam algorithm."""
