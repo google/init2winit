@@ -218,7 +218,7 @@ class MetricLogger(object):
     try:
       with gfile.GFile(self._csv_path) as csv_file:
         measurements = pd.read_csv(csv_file)
-        measurements = measurements.append([metrics])
+        measurements = pd.concat([measurements, pd.DataFrame([metrics])])
     except (pd.errors.EmptyDataError, gfile.FileError) as e:
       measurements = pd.DataFrame([metrics], columns=sorted(metrics.keys()))
       if isinstance(e, pd.errors.EmptyDataError):
