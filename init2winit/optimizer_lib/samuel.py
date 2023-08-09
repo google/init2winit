@@ -32,8 +32,8 @@ import optax
 
 class SamuelState(NamedTuple):
   inner_state: NamedTuple
-  expert_weights: jnp.array
-  key: jnp.array
+  expert_weights: jnp.ndarray
+  key: jnp.ndarray
   current_expert: int = 0
   step: int = 0
 
@@ -41,10 +41,10 @@ class SamuelState(NamedTuple):
 def samuel(
     optimizers: List[str],
     hps: List[Dict[str, Any]],
-    mw_etas: jnp.array,
+    mw_etas: jnp.ndarray,
     seed: int = 0,
-    train_loss: float = 0.,
-    learning_rate: float = 0.,
+    train_loss: float = 0.0,
+    learning_rate: float = 0.0,
 ):
   """Samuel optimizer.
 
