@@ -304,8 +304,8 @@ def main(unused_argv):
   checkpoint_steps = [int(s.strip()) for s in FLAGS.checkpoint_steps]
   eval_steps = [int(s.strip()) for s in FLAGS.eval_steps]
   if jax.process_index() == 0:
-    makedirs(FLAGS.experiment_dir)
-  log_dir = os.path.join(FLAGS.experiment_dir, 'r=3/')
+    makedirs(experiment_dir)
+  log_dir = os.path.join(experiment_dir, 'r=3/')
   makedirs(log_dir)
   log_path = os.path.join(
       log_dir, 'worker{}_{}.log'.format(FLAGS.worker_id, jax.process_index()))
@@ -345,7 +345,7 @@ def main(unused_argv):
         loss_name=FLAGS.loss,
         metrics_name=FLAGS.metrics,
         num_train_steps=FLAGS.num_train_steps,
-        experiment_dir=FLAGS.experiment_dir,
+        experiment_dir=experiment_dir,
         worker_id=FLAGS.worker_id,
         training_metrics_config=training_metrics_config,
         callback_configs=callback_configs,

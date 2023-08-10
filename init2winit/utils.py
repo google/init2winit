@@ -416,3 +416,10 @@ def combine_gathered(x):
   flattened = x.reshape(n_device * n_batch, *lengths)
 
   return flattened
+
+
+def use_mock_tpu_backend() -> bool:
+  """Helper function to determine if mock TPU backend is used."""
+  return str(jax.devices()[0]).startswith(
+      ('MOCK_TPU', 'MegaScalePjRtDevice(wrapped=MOCK_TPU')
+  )

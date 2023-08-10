@@ -446,6 +446,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._eval_callbacks = self._setup_eval_callbacks(callback_rng)
 
   def _save(self, checkpoint_dir, max_to_keep=1):
+    if utils.use_mock_tpu_backend():
+      logging.info('Skip saving checkpoint when running with mock backend.')
+      return
+
     checkpoint.save_unreplicated_checkpoint(
         checkpoint_dir,
         self._optimizer_state,
