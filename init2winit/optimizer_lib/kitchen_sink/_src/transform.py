@@ -61,6 +61,27 @@ def _update_moment(updates, moments, decay, order):
   )
 
 
+def _update_first_moment_variance_preserved(updates, moments, decay):
+  """Applies variance preserved EMA. 
+  
+  Multiplies incoming gradient by sqrt{1-beta^2} as opposed to 1-beta. 
+  Introduces bias.
+  
+  Args:
+    updates: updates.
+    moments: moments,
+    decay: the decay parameter.
+
+  Returns:
+    Variance Preserved EMA.  
+  """
+  return jax.tree_map(
+      lambda g, t: ((1 - decay**2) ** 0.5) * g + decay * t,
+      updates,
+      moments,
+  )
+
+
 def _bias_correction(moment, decay, count):
   """Perform bias correction. This becomes a no-op as count goes to infinity."""
   beta = 1 - decay**count
@@ -940,6 +961,57 @@ def scale_by_iteration_dependent_norm_adam(
   return optax.GradientTransformation(init_fn, update_fn)
 
 
+def scale_by_adam_var_preserved(
+    b1: float = 0.9,
+    b2: float = 0.999,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    debias: bool = True,
+    power: float = 0.5,
+) -> optax.GradientTransformation:
+  """Edit first moments to preserve the variance across updates.
+
+  Args:
+    b1: decay rate for the exponentially weighted average of grads.
+    b2: decay rate for the exponentially weighted average of squared grads.
+    eps: term added to the denominator to improve numerical stability.
+    eps_root: term added to the denominator inside the square-root to improve
+      numerical stability when backpropagating gradients through the rescaling.
+    debias: whether to use moment bias correction. Note inspite of
+            implementation Adam style bias correction might not make sense here.
+            So it should not be used.
+    power: the power to use in the preconditioner (0.5 in default adam).
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
+
+  def init_fn(params):
+    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
+
+  def update_fn(updates, state, params=None):
+    del params
+
+    mu = _update_first_moment_variance_preserved(updates, state.mu, b1)
+    nu = _update_moment(updates, state.nu, b2, 2)
+    count = state.count + jnp.array(1, dtype=jnp.int32)
+    # see above comment about the debias.
+    mu_hat = mu if not debias else _bias_correction(mu, b1, count)
+    nu_hat = nu if not debias else _bias_correction(nu, b2, count)
+
+    updates = jax.tree_map(
+        lambda m, v: (m / (raise_power(v + eps_root) + eps)),
+        mu_hat,
+        nu_hat,
+    )
+    return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 class PreconditionByRssState(NamedTuple):
   """State holding the sum of gradient squares to date."""
 
@@ -1434,6 +1506,7 @@ _composites = {
     'scale_by_iteration_dependent_norm_adam': (
         scale_by_iteration_dependent_norm_adam
     ),
+    'scale_by_adam_var_preserved': scale_by_adam_var_preserved,
     'sgd': optax.sgd,
 }
 
