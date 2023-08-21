@@ -511,9 +511,14 @@ class ScaleBy_Adaptive_GD_State(NamedTuple):
   prev_update: optax.Updates
 
 
-def scale_by_adaptive_gd() -> optax.GradientTransformation:
+def scale_by_adaptive_gd(
+    init_r_squared: float = 1.0,
+) -> optax.GradientTransformation:
   """Rescale updates according to adaptive GD.
 
+  Args:
+    init_r_squared: initial guess for r^2.
+    
   Returns:
     An (init_fn, update_fn) tuple.
   """
@@ -524,7 +529,7 @@ def scale_by_adaptive_gd() -> optax.GradientTransformation:
         jnp.zeros_like, params
     )  # previous update with step-size/lr included
     return ScaleBy_Adaptive_GD_State(
-        r_squared=jnp.ones([], jnp.float64),
+        r_squared=init_r_squared*jnp.ones([], jnp.float64),
         lambda_prev=jnp.zeros([], jnp.float64),
         lambda_sum=jnp.zeros([], jnp.float64),
         init_params=init_params,
@@ -572,8 +577,13 @@ def scale_by_adaptive_gd() -> optax.GradientTransformation:
   return optax.GradientTransformation(init_fn, update_fn)
 
 
-def scale_by_layerwise_adaptive_gd() -> optax.GradientTransformation:
+def scale_by_layerwise_adaptive_gd(
+    init_r_squared: float = 1.0,
+) -> optax.GradientTransformation:
   """Rescale updates according to LAYER-WISE Adaptive GD.
+  
+  Args:
+    init_r_squared: initial guess for r^2.
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -585,7 +595,9 @@ def scale_by_layerwise_adaptive_gd() -> optax.GradientTransformation:
         jnp.zeros_like, params
     )  # previous update with step-size/lr included
     return ScaleBy_Adaptive_GD_State(
-        r_squared=jax.tree_map(lambda x: jnp.ones([], jnp.float64), params),
+        r_squared=jax.tree_map(
+            lambda x: init_r_squared * jnp.ones([], jnp.float64), params
+        ),
         lambda_prev=jax.tree_map(lambda x: jnp.zeros([], jnp.float64), params),
         lambda_sum=jax.tree_map(lambda x: jnp.zeros([], jnp.float64), params),
         init_params=init_params,
@@ -638,8 +650,13 @@ def scale_by_layerwise_adaptive_gd() -> optax.GradientTransformation:
   return optax.GradientTransformation(init_fn, update_fn)
 
 
-def scale_by_coordinate_wise_adaptive_gd() -> optax.GradientTransformation:
+def scale_by_coordinate_wise_adaptive_gd(
+    init_r_squared: float = 1.0,
+) -> optax.GradientTransformation:
   """Rescale updates according to COORDINATE-WISE Adaptive GD.
+
+  Args:
+    init_r_squared: Initial guess for r^2.
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -652,7 +669,7 @@ def scale_by_coordinate_wise_adaptive_gd() -> optax.GradientTransformation:
     )  # previous update with step-size/lr included
     return ScaleBy_Adaptive_GD_State(
         r_squared=jax.tree_map(
-            lambda x: jnp.ones_like(x) / jnp.size(x),
+            lambda x: init_r_squared * jnp.ones_like(x) / jnp.size(x),
             params,
         ),
         lambda_prev=jax.tree_map(jnp.zeros_like, params),
@@ -700,6 +717,165 @@ def scale_by_coordinate_wise_adaptive_gd() -> optax.GradientTransformation:
         lambda_sum=lambda_sum_new,
         init_params=state.init_params,
         prev_update=negative_new_updates_with_lr,
+    )
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+class ScaleBy_Adaptive_GD_Simple_State(NamedTuple):
+  """State for the simpler adaptive GD algorithm."""
+
+  r_squared: Any
+  mu_sum: Any
+  init_params: optax.Updates
+
+
+def scale_by_adaptive_gd_simple(
+    init_r_squared: float = 1.0,
+) -> optax.GradientTransformation:
+  """Rescale updates according to simpler adaptive GD.
+
+  Args:
+    init_r_squared: Initial guess for r^2.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  def init_fn(params):
+    init_params = jax.tree_map(jnp.copy, params)  # x0
+    return ScaleBy_Adaptive_GD_Simple_State(
+        r_squared=init_r_squared * jnp.ones([], jnp.float64),
+        mu_sum=jnp.zeros([], jnp.float64),
+        init_params=init_params,
+    )
+
+  def update_fn(updates, state, params):
+    # we can use layer-wise distances later for a layer-wise variant
+    layer_wise_curr_distance_squared = jax.tree_map(
+        lambda x_t, x_0: jnp.sum((x_t - x_0) ** 2), params, state.init_params
+    )
+    curr_distance_norm_squared = utils.total_tree_sum(
+        layer_wise_curr_distance_squared
+    )
+    curr_r_squared = jnp.maximum(state.r_squared, curr_distance_norm_squared)
+    update_norm_squared = utils.total_tree_norm_sql2(updates)
+    mu_sum_new = 0.5 * (
+        jnp.sqrt(
+            state.mu_sum**2
+            + jnp.divide((4*update_norm_squared), curr_r_squared)
+        )
+        + state.mu_sum
+    )
+    new_updates_with_lr = jax.tree_map(
+        lambda u: u / mu_sum_new, updates
+    )
+    return new_updates_with_lr, ScaleBy_Adaptive_GD_Simple_State(
+        r_squared=curr_r_squared,
+        mu_sum=mu_sum_new,
+        init_params=state.init_params,
+    )
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def scale_by_layerwise_adaptive_gd_simple(
+    init_r_squared: float = 1.0,
+) -> optax.GradientTransformation:
+  """Rescale updates according to simpler LAYER-WISE Adaptive GD.
+
+  Args:
+    init_r_squared: Initial guess for r^2.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  def init_fn(params):
+    init_params = jax.tree_map(jnp.copy, params)  # x0
+    return ScaleBy_Adaptive_GD_Simple_State(
+        r_squared=jax.tree_map(
+            lambda x: init_r_squared * jnp.ones([], jnp.float64), params
+        ),
+        mu_sum=jax.tree_map(lambda x: jnp.zeros([], jnp.float64), params),
+        init_params=init_params,
+    )
+
+  def update_fn(updates, state, params):
+    curr_distance_norm_squared = jax.tree_map(
+        lambda x_t, x_0: jnp.sum((x_t - x_0) ** 2), params, state.init_params
+    )
+    curr_r_squared = jax.tree_map(
+        jnp.maximum,
+        state.r_squared,
+        curr_distance_norm_squared,
+    )
+    update_norm_squared = jax.tree_map(
+        lambda u: jnp.sum(u ** 2), updates
+    )
+    mu_sum_new = jax.tree_map(
+        lambda l, g, r: 0.5 * (jnp.sqrt(l**2 + 4 * jnp.divide(g, r)) + l),
+        state.mu_sum,
+        update_norm_squared,
+        curr_r_squared,
+    )
+    new_updates_with_lr = jax.tree_map(
+        lambda u, l: u / l, updates, mu_sum_new
+    )
+    return new_updates_with_lr, ScaleBy_Adaptive_GD_Simple_State(
+        r_squared=curr_r_squared,
+        mu_sum=mu_sum_new,
+        init_params=state.init_params,
+    )
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+def scale_by_coordinate_wise_adaptive_gd_simple(
+    init_r_squared: float = 1.0,
+) -> optax.GradientTransformation:
+  """Rescale updates according to simpler COORDINATE-WISE Adaptive GD.
+  
+  Args:
+    init_r_squared: Initial guess for r^2.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  def init_fn(params):
+    init_params = jax.tree_map(jnp.copy, params)  # x0
+    return ScaleBy_Adaptive_GD_Simple_State(
+        r_squared=jax.tree_map(init_r_squared * jnp.ones_like, params),
+        mu_sum=jax.tree_map(jnp.zeros_like, params),
+        init_params=init_params,
+    )
+
+  def update_fn(updates, state, params):
+    curr_distance_norm_squared = jax.tree_map(
+        lambda x_t, x_0: jnp.square(x_t - x_0), params, state.init_params
+    )
+    curr_r_squared = jax.tree_map(
+        jnp.maximum,
+        state.r_squared,
+        curr_distance_norm_squared,
+    )
+    update_norm_squared = jax.tree_map(
+        jnp.square, updates
+    )
+    mu_sum_new = jax.tree_map(
+        lambda l, g, r: 0.5*(jnp.sqrt(jnp.square(l) + 4*jnp.divide(g, r)) + l),
+        state.mu_sum,
+        update_norm_squared,
+        curr_r_squared,
+    )
+    new_updates_with_lr = jax.tree_map(
+        jnp.divide, updates, mu_sum_new
+    )
+    return new_updates_with_lr, ScaleBy_Adaptive_GD_Simple_State(
+        r_squared=curr_r_squared,
+        mu_sum=mu_sum_new,
+        init_params=state.init_params,
     )
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -1489,9 +1665,16 @@ def no_op() -> optax.GradientTransformation:
 # scale_by_rms exists only for backward compatability
 _composites = {
     'scale_by_adaptive_gd': scale_by_adaptive_gd,
+    'scale_by_adaptive_gd_simple': scale_by_adaptive_gd_simple,
     'scale_by_layerwise_adaptive_gd': scale_by_layerwise_adaptive_gd,
+    'scale_by_layerwise_adaptive_gd_simple': (
+        scale_by_layerwise_adaptive_gd_simple
+    ),
     'scale_by_coordinate_wise_adaptive_gd': (
         scale_by_coordinate_wise_adaptive_gd
+    ),
+    'scale_by_coordinate_wise_adaptive_gd_simple': (
+        scale_by_coordinate_wise_adaptive_gd_simple
     ),
     'scale_by_adam': scale_by_adam,
     'scale_by_adam_plus': scale_by_adam_plus,
