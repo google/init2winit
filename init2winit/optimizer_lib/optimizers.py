@@ -180,6 +180,15 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
                 start_preconditioning_step=hps.opt_hparams[
                     'start_preconditioning_step'
                 ],
+                skip_preconditioning_any_dim_gt=hps.opt_hparams.get(
+                    'skip_precond_dim', 4096
+                ),
+                multiply_by_parameter_scale=hps.opt_hparams.get(
+                    'param_scale', True
+                ),
+                clipping_threshold=hps.opt_hparams.get(
+                    'clipping_threshold', 1.0
+                ),
             ),
             second_order_options=tearfree_second_order.Options(
                 merge_dims=hps.opt_hparams['merge_dims'],
