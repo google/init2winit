@@ -781,11 +781,13 @@ def scale_by_adaptive_gd_simple(
 
 def scale_by_layerwise_adaptive_gd_simple(
     init_r_squared: float = 1.0,
+    eps: float = 1e-8,
 ) -> optax.GradientTransformation:
   """Rescale updates according to simpler LAYER-WISE Adaptive GD.
 
   Args:
     init_r_squared: Initial guess for r^2.
+    eps: Initial value of mu_sum.
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -797,7 +799,7 @@ def scale_by_layerwise_adaptive_gd_simple(
         r_squared=jax.tree_map(
             lambda x: init_r_squared * jnp.ones([], jnp.float64), params
         ),
-        mu_sum=jax.tree_map(lambda x: jnp.zeros([], jnp.float64), params),
+        mu_sum=jax.tree_map(lambda x: eps * jnp.ones([], jnp.float64), params),
         init_params=init_params,
     )
 
@@ -833,11 +835,13 @@ def scale_by_layerwise_adaptive_gd_simple(
 
 def scale_by_coordinate_wise_adaptive_gd_simple(
     init_r_squared: float = 1.0,
+    eps: float = 1e-8,
 ) -> optax.GradientTransformation:
   """Rescale updates according to simpler COORDINATE-WISE Adaptive GD.
   
   Args:
     init_r_squared: Initial guess for r^2.
+    eps: Initial value for mu_sum.
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -846,8 +850,12 @@ def scale_by_coordinate_wise_adaptive_gd_simple(
   def init_fn(params):
     init_params = jax.tree_map(jnp.copy, params)  # x0
     return ScaleBy_Adaptive_GD_Simple_State(
-        r_squared=jax.tree_map(init_r_squared * jnp.ones_like, params),
-        mu_sum=jax.tree_map(jnp.zeros_like, params),
+        r_squared=jax.tree_map(
+            lambda x: init_r_squared*jnp.ones_like(x), params
+        ),
+        mu_sum=jax.tree_map(
+            lambda x: eps*jnp.ones_like(x), params
+        ),
         init_params=init_params,
     )
 
