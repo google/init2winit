@@ -45,7 +45,9 @@ DEFAULT_CONFIG = ConfigDict({
     'enable_semip_grad_normsq': False,
     'enable_ema': False,
     'optstate_sumsq_fields': [],
+    'optstate_sumsq_param_wise_fields': [],
     'optstate_sum_fields': [],
+    'optstate_sum_param_wise_fields': [],
     'enable_grafting_norms': False,
 })
 
@@ -98,12 +100,28 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         where each key is a field name in optstate_normsq_fields, and each
         value is a jnp array of length num_time_steps containing the time
         series of the normsq of this optstate field.
+    - optstate_sumsq_param_wise_fields (list of str): record the sum of squares 
+        of each of these fields in the optimizer state parameter wise.  
+        If this list is non-empty, the metrics state will have a field 
+        "optstate_sumsq_param_wise" which is a dict where each key is a field 
+        name in optstate_sum_fields, and each value is a pytree of the same type
+        as params but with each leaf a jnp array of length num_time_steps 
+        containing the time series of the sum of this optstate field for this 
+        parameter.
     - optstate_sum_fields (list of str): record the sum of each of these fields
         in the optimizer state.  If this list is non-empty, the metrics state
         will have a field "optstate_sum" which is a dict where each key is a
         field name in optstate_sum_fields, and each value is a jnp array
         of length num_time_steps containing the time series of the sum
         of this optstate field.
+    - optstate_sum_param_wise_fields (list of str): record the sum of each of 
+        these fields in the optimizer state parameter wise.  If this list is 
+        non-empty, the metrics state will have a field 
+        "optstate_sumsq_param_wise" which is a dict where each key is a field 
+        name in optstate_sum_fields, and each value is a pytree of the same type
+        as params but with each leaf a jnp array of length num_time_steps 
+        containing the time series of the sum of this optstate field for this 
+        parameter.
     - enable_preconditioner_normsq (bool): if true, the metrics state will have
         a field "preconditioner_normsq" which is a jnp array of length
         num_train_steps containing a time series of the squared L2 norm of the
@@ -183,10 +201,20 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
           field_name: jnp.zeros(num_train_steps)
           for field_name in config['optstate_sumsq_fields']
       }
+    if config['optstate_sumsq_param_wise_fields']:
+      metrics_state['optstate_sumsq_param_wise'] = {
+          field_name: jax.tree_map(lambda x: jnp.zeros(num_train_steps), params)
+          for field_name in config['optstate_sumsq_param_wise_fields']
+      }
     if config['optstate_sum_fields']:
       metrics_state['optstate_sum'] = {
           field_name: jnp.zeros(num_train_steps)
           for field_name in config['optstate_sum_fields']
+      }
+    if config['optstate_sum_param_wise_fields']:
+      metrics_state['optstate_sum_param_wise'] = {
+          field_name: jax.tree_map(lambda x: jnp.zeros(num_train_steps), params)
+          for field_name in config['optstate_sum_param_wise_fields']
       }
     if config['enable_preconditioner_normsq']:
       metrics_state['preconditioner_normsq'] = jnp.zeros(num_train_steps)
@@ -224,6 +252,8 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
     if (config['enable_update_norm'] or config['enable_update_norms'] or
         config['enable_ema']):
       update = jax.tree_map(lambda x, y: x - y, old_params, new_params)
+    else:
+      update = None
 
     next_metrics_state = {}
     next_metrics_state['param_norm'] = metrics_state['param_norm'].at[
@@ -275,6 +305,21 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         field_normsq = total_tree_norm_sql2(field)
         next_metrics_state['optstate_sumsq'][field_name] = metrics_state[
             'optstate_sumsq'][field_name].at[step].set(field_normsq)
+    if config['optstate_sumsq_param_wise_fields']:
+      next_metrics_state['optstate_sumsq_param_wise'] = {}
+      for field_name in config['optstate_sumsq_param_wise_fields']:
+        field = optimizer_utils.extract_field(optimizer_state, field_name)
+        if field is None:
+          raise ValueError('optimizer state has no field {}'.format(field_name))
+        field_normsq = jax.tree_map(_compute_leaf_norms, field)
+        field_normsqs = jax.tree_map(jnp.square, field_normsq)
+        next_metrics_state['optstate_sumsq_param_wise'][field_name] = (
+            _set_pytree_idx(
+                metrics_state['optstate_sumsq_param_wise'][field_name],
+                field_normsqs,
+                step,
+            )
+        )
     if config['optstate_sum_fields']:
       next_metrics_state['optstate_sum'] = {}
       for field_name in config['optstate_sum_fields']:
@@ -284,6 +329,20 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         field_normsq = total_tree_sum(field)
         next_metrics_state['optstate_sum'][field_name] = metrics_state[
             'optstate_sum'][field_name].at[step].set(field_normsq)
+    if config['optstate_sum_param_wise_fields']:
+      next_metrics_state['optstate_sum_param_wise'] = {}
+      for field_name in config['optstate_sum_param_wise_fields']:
+        field = optimizer_utils.extract_field(optimizer_state, field_name)
+        if field is None:
+          raise ValueError('optimizer state has no field {}'.format(field_name))
+        field_sums = jax.tree_map(jnp.sum, field)
+        next_metrics_state['optstate_sum_param_wise'][field_name] = (
+            _set_pytree_idx(
+                metrics_state['optstate_sum_param_wise'][field_name],
+                field_sums,
+                step,
+            )
+        )
     if (config['enable_preconditioner_normsq'] or
         config['enable_semip_grad_normsq']):
       preconditioner = freeze(
