@@ -74,6 +74,7 @@ flags.DEFINE_integer(
     'make from tf.data.map. Set to -1 for tf.data.AUTOTUNE.'
 )
 flags.DEFINE_integer('eval_batch_size', None, 'Batch size for evaluation.')
+flags.DEFINE_bool('eval_use_ema', None, 'If True evals will use ema of params.')
 flags.DEFINE_integer(
     'eval_num_batches', None,
     'Number of batches for evaluation. Leave None to evaluate '
@@ -169,6 +170,7 @@ def _run(
     dataset_name,
     data_selector_name,
     eval_batch_size,
+    eval_use_ema,
     eval_num_batches,
     test_num_batches,
     eval_train_num_batches,
@@ -256,6 +258,7 @@ def _run(
             merged_hps,
             rng,
             eval_batch_size,
+            eval_use_ema,
             eval_num_batches,
             test_num_batches,
             eval_train_num_batches,
@@ -325,6 +328,7 @@ def main(unused_argv):
         dataset_name=FLAGS.dataset,
         data_selector_name=FLAGS.data_selector,
         eval_batch_size=FLAGS.eval_batch_size,
+        eval_use_ema=FLAGS.eval_use_ema,
         eval_num_batches=FLAGS.eval_num_batches,
         test_num_batches=FLAGS.test_num_batches,
         eval_train_num_batches=FLAGS.eval_train_num_batches,
