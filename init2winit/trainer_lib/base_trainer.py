@@ -31,6 +31,7 @@ from init2winit.trainer_lib import trainer_utils
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
 import numpy as np
+import optax
 import orbax.checkpoint as orbax_checkpoint
 
 
@@ -47,6 +48,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       hps,
       rng,
       eval_batch_size,
+      eval_use_ema,
       eval_num_batches,
       test_num_batches,
       eval_train_num_batches,
@@ -85,6 +87,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       rng: (jax.random.PRNGKey) Rng seed used in model initialization and data
         shuffling.
       eval_batch_size: the evaluation batch size. If None, use hps.batch_size.
+      eval_use_ema: if True evals will use ema of params.
       eval_num_batches: (int) The number of batches used for evaluating on
         validation sets. Set to None to evaluate on the whole eval set.
       test_num_batches: (int) The number of batches used for evaluating on test
@@ -146,8 +149,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._hps = hps
     self._rng = rng
     eval_batch_size = (
-        self._hps.batch_size if eval_batch_size is None else eval_batch_size)
+        self._hps.batch_size if eval_batch_size is None else eval_batch_size
+    )
     self._eval_batch_size = eval_batch_size
+    self._eval_use_ema = eval_use_ema
     self._eval_num_batches = eval_num_batches
     self._test_num_batches = test_num_batches
     self._eval_train_num_batches = eval_train_num_batches
@@ -534,12 +539,28 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     Returns:
       A Dict[str, Any] eval report, originally created in
       trainer_utils.eval_metrics.
+
     """
     time_since_last_eval = time.time() - self._time_at_prev_eval_end
     self._batch_stats = trainer_utils.maybe_sync_batchnorm_stats(
-        self._batch_stats)
+        self._batch_stats
+    )
+
+    if self._eval_use_ema:
+      if isinstance(
+          self._optimizer_state.base_state.inner_state[0][0], optax.EmaState
+      ):
+        eval_params = self._optimizer_state.base_state.inner_state[0][0].ema
+      else:
+        raise ValueError(
+            'EMA computation should be the very first transformation in defined'
+            ' kitchensink optimizer.'
+        )
+    else:
+      eval_params = self._params
+
     report, eval_time = trainer_utils.eval_metrics(
-        self._params,
+        eval_params,
         self._batch_stats,
         self._dataset,
         self._eval_num_batches,

@@ -157,6 +157,59 @@ def polyak_hb(
   )
 
 
+def compute_params_ema_for_eval(
+    decay: float, warmup: bool = False
+) -> optax.GradientTransformation:
+  """Applies exponential moving average on weights.
+
+  Note, this implementation averages the weight before optimization because
+  trainable and non-trainable variables are handled separately. In such case
+  the updates on non-trainable variables like bn stats are not available in
+  updates.
+
+  This differs from optax.ema which applies ema on gradients so it changes
+  training process.
+
+  ema = ema * decay + new_weight * (1.0 - decay)
+
+  Args:
+    decay: A float number represents the weight on the moving average.
+    warmup: bool controlling if we ignore initial training steps for EMA.
+
+  Returns:
+    A GradientTransformation applying ema.
+  """
+
+  def init_fn(params):
+    return optax.EmaState(
+        count=jnp.array(0, dtype=jnp.int32), ema=jax.tree_map(jnp.copy, params))
+
+  def update_fn(updates, state, params):
+    if params is None:
+      raise ValueError('Params required for the EMA')
+
+    if warmup:
+      # https://github.com/tensorflow/tensorflow/blob/v2.9.1/tensorflow/python/training/moving_averages.py#L469
+      ema_decay = jnp.minimum(decay, (1. + state.count) / (10. + state.count))
+    else:
+      ema_decay = decay
+
+    def update_func(old_v, new_v):
+      if old_v.dtype == jnp.bool_ or jnp.issubdtype(old_v, jnp.integer):
+        # If it is integer, we directly return the new variable
+        # This is mainly supported for non_trainable
+        return new_v
+      else:
+        return old_v - (1.0 - ema_decay) * (old_v - new_v)
+
+    new_ema = jax.tree_map(update_func, state.ema, params)
+    count_inc = state.count + jnp.array(1, jnp.int32)
+
+    return updates, optax.EmaState(count=count_inc, ema=new_ema)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 def first_moment_ema(
     decay: float = 0.9,
     debias: bool = False,
@@ -1706,6 +1759,7 @@ _first_moment_accumulators = {
     'ema_nesterov': ema_nesterov,
     'polyak_hb': polyak_hb,
     'first_moment_ema': first_moment_ema,
+    'compute_params_ema_for_eval': compute_params_ema_for_eval,
     'normalized_first_moment_ema': normalized_first_moment_ema,
     'nesterovpp': nesterovpp,
 }

@@ -281,6 +281,7 @@ class TrainerTest(absltest.TestCase):
             hps=hps,
             rng=rng,
             eval_batch_size=eval_batch_size,
+            eval_use_ema=False,
             eval_num_batches=eval_num_batches,
             test_num_batches=test_num_batches,
             eval_train_num_batches=eval_num_batches,
