@@ -19,6 +19,7 @@ Loss functions take a batch of (logits, targets, weights) as input and
 return the mean of function values. This is to make trainer.py more agnostic to
 the details of the padding and masking.
 """
+
 import functools
 
 from absl import logging
@@ -26,6 +27,7 @@ from flax import linen as nn
 import jax
 import jax.numpy as jnp
 import optax
+
 
 bi_tempered_loss = None
 try:
@@ -394,9 +396,35 @@ def weighted_mean_absolute_error(logits, targets, weights=None):
   return jnp.sum(unnormalized_mean_absolute_error) / normalization
 
 
+def multiclass_hinge_loss(logits, targets, weights=None):
+  """Implements the multiclass hinge loss.
+
+  Args:
+    logits: Array with shape [batch_size, num_labels].
+    targets: One-hot encoded labels with shape [batch size, num labels].
+    weights: None or float array of shape (batch,).
+
+  Returns:
+    The multiclass hinge loss for classification, averaged over the first
+    dimension (batch) to match cross_entropy_loss.
+  """
+  losses = jnp.max(logits + 1.0 - targets, axis=-1) - jnp.sum(
+      logits * targets, axis=-1)
+  if weights is not None:
+    if weights.ndim != targets.ndim - 1:
+      raise ValueError('Incorrect shapes. Got shape %s weights and %s targets' %
+                       (str(weights.shape), str(targets.shape)))
+    normalization = weights.sum()
+    losses *= weights
+  else:
+    normalization = targets.shape[0]
+
+  return jnp.sum(losses) / normalization
+
 # TODO(cheolmin): add mean_squared_error
 _ALL_LOSS_FUNCTIONS = {
     'rescaled_mean_squared_error': (rescaled_mean_squared_error, None),
+    'multiclass_hinge_loss': (multiclass_hinge_loss, None),
     'sigmoid_mean_squared_error': (sigmoid_mean_squared_error, jax.nn.sigmoid),
     'sigmoid_binary_cross_entropy':
         (sigmoid_binary_cross_entropy, jax.nn.sigmoid),
