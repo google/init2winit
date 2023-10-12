@@ -62,18 +62,18 @@ def _update_moment(updates, moments, decay, order):
 
 
 def _update_first_moment_variance_preserved(updates, moments, decay):
-  """Applies variance preserved EMA. 
-  
-  Multiplies incoming gradient by sqrt{1-beta^2} as opposed to 1-beta. 
+  """Applies variance preserved EMA.
+
+  Multiplies incoming gradient by sqrt{1-beta^2} as opposed to 1-beta.
   Introduces bias.
-  
+
   Args:
     updates: updates.
     moments: moments,
     decay: the decay parameter.
 
   Returns:
-    Variance Preserved EMA.  
+    Variance Preserved EMA.
   """
   return jax.tree_map(
       lambda g, t: ((1 - decay**2) ** 0.5) * g + decay * t,
@@ -571,7 +571,7 @@ def scale_by_adaptive_gd(
 
   Args:
     init_r_squared: initial guess for r^2.
-    
+
   Returns:
     An (init_fn, update_fn) tuple.
   """
@@ -634,7 +634,7 @@ def scale_by_layerwise_adaptive_gd(
     init_r_squared: float = 1.0,
 ) -> optax.GradientTransformation:
   """Rescale updates according to LAYER-WISE Adaptive GD.
-  
+
   Args:
     init_r_squared: initial guess for r^2.
 
@@ -891,7 +891,7 @@ def scale_by_coordinate_wise_adaptive_gd_simple(
     eps: float = 1e-8,
 ) -> optax.GradientTransformation:
   """Rescale updates according to simpler COORDINATE-WISE Adaptive GD.
-  
+
   Args:
     init_r_squared: Initial guess for r^2.
     eps: Initial value for mu_sum.
@@ -1245,6 +1245,104 @@ def scale_by_adam_var_preserved(
         nu_hat,
     )
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
+class ScaleByAdapropState(NamedTuple):
+  """State for the AdaProp algorithm."""
+  count: chex.Array  # shape=(), dtype=jnp.int32.
+  pp: optax.Updates
+  mu: optax.Updates
+  nu: optax.Updates
+  gain: optax.Updates
+
+
+def scale_by_adaprop(
+    alpha: float = 1.0,
+    b1: float = 0.9,
+    b3: float = 1.0,
+    b4: float = 0.9,
+    eps: float = 1e-8,
+    use_nesterov: bool = False,
+    quantized_dtype: jnp.dtype = jnp.float32,
+) -> optax.GradientTransformation:
+  """Rescale updates according to the AdaProp algorithm.
+
+  Args:
+    alpha: upper bound on bet.
+    b1: decay rate for the exponentially weighted average of grads.
+    # b2: decay rate for the exponentially weighted average of absolute grads
+    #     is omitted because it is calculated from alpha and b1.
+    b3: decay rate for the exponentially weighted average of max grads.
+    b4: decay rate for the exponentially weighted average of reward.
+    eps: term added to the denominator to improve numerical stability.
+    use_nesterov: Whether to use Nesterov-style update.
+    quantized_dtype: type of the quantized input. Allowed options are
+      jnp.bfloat16 and jnp.float32. If floating-point type is specified,
+      accumulators are stored as such type, instead of quantized integers.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+
+  def init_fn(params):
+    prev_params = jax.tree_map(
+        lambda p: jnp.zeros_like(p, dtype=quantized_dtype), params
+    )
+    mu = jax.tree_map(
+        lambda p: jnp.zeros_like(p, dtype=quantized_dtype), params
+    )
+    nu = jax.tree_map(
+        lambda p: jnp.zeros_like(p, dtype=quantized_dtype), params
+    )
+    gain = jax.tree_map(
+        lambda p: jnp.ones_like(p, dtype=quantized_dtype), params
+    )
+
+    return ScaleByAdapropState(
+        count=jnp.zeros([], jnp.int32),
+        pp=prev_params,
+        mu=mu,
+        nu=nu,
+        gain=gain,
+    )
+
+  def update_fn(updates, state, params):
+    new_count = optax.safe_int32_increment(state.count)
+    b2 = 1.0 - (1.0 - b1)/alpha
+    mu = jax.tree_map(lambda g, t: (1-b1)*g + b1*t, updates, state.mu)
+    if use_nesterov:
+      mu2 = jax.tree_map(lambda g, t: (1-b1)*g + b1*t, updates, mu)
+      mu_hat = _bias_correction(mu2, b1, new_count)
+    else:
+      mu_hat = _bias_correction(mu, b1, new_count)
+    nu = jax.tree_map(lambda g, t: (1-b2)*jnp.abs(g) + b2*t, updates, state.nu)
+    nu_hat = _bias_correction(nu, b2, new_count)
+    pp = jax.tree_map(lambda p, t: (1-b4)*p + b4*t, params, state.pp)
+    pp_hat = _bias_correction(pp, b4, new_count)
+    param_change = jax.tree_map(lambda p, i: p - i, params, pp_hat)
+    g_max = jax.tree_map(lambda g, n: jnp.maximum(jnp.abs(g), n),
+                         updates, nu_hat)
+    gain = jax.tree_map(
+        lambda r, p, g, x: jnp.maximum(b3*r - p*g/(x + eps), 0.0),
+        state.gain, param_change, updates, g_max)
+    wealth = jax.tree_map(lambda g: 1.0 + g, gain)
+
+    bet_factor = jax.tree_map(
+        lambda m, n: m / (n + eps),
+        mu_hat,
+        nu_hat,
+    )
+    new_updates = jax.tree_map(lambda b, w: b * w,
+                               bet_factor, wealth)
+    return new_updates, ScaleByAdapropState(
+        count=new_count,
+        pp=pp,
+        mu=mu,
+        nu=nu,
+        gain=gain,
+    )
 
   return optax.GradientTransformation(init_fn, update_fn)
 

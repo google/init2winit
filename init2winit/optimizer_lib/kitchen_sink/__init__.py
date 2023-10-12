@@ -15,6 +15,7 @@
 
 """Kitchen Sink: decomposing optimizers in JAX."""
 
+from init2winit.optimizer_lib.kitchen_sink._src.alias import adapropw
 from init2winit.optimizer_lib.kitchen_sink._src.alias import nadamw
 from init2winit.optimizer_lib.kitchen_sink._src.core import kitchen_sink
 from init2winit.optimizer_lib.kitchen_sink._src.transform import add_decayed_weights
@@ -37,6 +38,7 @@ from init2winit.optimizer_lib.kitchen_sink._src.transform import PreconditionByR
 from init2winit.optimizer_lib.kitchen_sink._src.transform import PreconditionBySecondMomentCoordinateWiseState
 from init2winit.optimizer_lib.kitchen_sink._src.transform import sanitize_values
 from init2winit.optimizer_lib.kitchen_sink._src.transform import scale_by_adam
+from init2winit.optimizer_lib.kitchen_sink._src.transform import scale_by_adaprop
 from init2winit.optimizer_lib.kitchen_sink._src.transform import scale_by_amsgrad
 from init2winit.optimizer_lib.kitchen_sink._src.transform import scale_by_learning_rate
 from init2winit.optimizer_lib.kitchen_sink._src.transform import scale_by_nadam
@@ -49,6 +51,7 @@ __version__ = '0.0.1'
 
 __all__ = (
     'nadamw',
+    'adapropw',
     'kitchen_sink',
     'bias_correction',
     'BiasCorrectionState',
@@ -71,6 +74,7 @@ __all__ = (
     'sanitize_values',
     'scale_by_adam',
     'scale_by_amsgrad',
+    'scale_by_adaprop',
     'scale_by_learning_rate',
     'scale_by_nadam',
     'ScaleByAdamState',

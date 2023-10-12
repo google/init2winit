@@ -16,6 +16,7 @@
 """Aliases for optimizers not found in optax."""
 from typing import Any, Callable, Optional, Union
 from init2winit.optimizer_lib.kitchen_sink._src import transform
+import jax.numpy as jnp
 import optax
 
 
@@ -67,3 +68,56 @@ def nadamw(
       transform.scale_by_nadam(b1, b2, eps, eps_root, debias),
       optax.add_decayed_weights(weight_decay, weight_decay_mask),
       transform.scale_by_learning_rate(learning_rate))
+
+
+def adapropw(
+    learning_rate: optax.ScalarOrSchedule,
+    alpha: float = 1.0,
+    b1: float = 0.9,
+    b3: float = 1.0,
+    b4: float = 0.999,
+    eps: float = 1e-8,
+    use_nesterov: bool = False,
+    quantized_dtype: str = 'float32',
+    weight_decay: float = 0.0,
+    weight_decay_mask: Optional[Union[Any, Callable[[optax.Params],
+                                                    Any]]] = None,
+) -> optax.GradientTransformation:
+  """Rescale updates according to the AdaProp algorithm.
+
+  Args:
+    learning_rate: this is a fixed global scaling factor.
+    alpha: upper bound on bet.
+    b1: decay rate for the exponentially weighted average of grads.
+    b3: decay rate for the exponentially weighted average of max grads.
+    b4: decay rate for the exponentially weighted average of reward.
+    eps: term added to the denominator to improve numerical stability.
+    use_nesterov: Whether to use Nesterov-style update.
+    quantized_dtype: type of the quantized input. Allowed options are
+      'bfloat16' and 'float32'. If floating-point type is specified,
+      accumulators are stored as such type, instead of quantized integers.
+    weight_decay: strength of the weight decay regularization. Note that this
+      weight decay is multiplied with the learning rate. This is consistent with
+      other frameworks such as PyTorch, but different from (Loshchilov et al,
+      2019) where the weight decay is only multiplied with the "schedule
+      multiplier", but not the base learning rate.
+    weight_decay_mask: a tree with same structure as (or a prefix of) the params
+      PyTree, or a Callable that returns such a pytree given the params/updates.
+      The leaves should be booleans, `True` for leaves/subtrees you want to
+      apply the weight decay to, and `False` for those you want to skip. Note
+      that the Nadam gradient transformations are applied to all parameters.
+
+  Returns:
+    An (init_fn, update_fn) tuple.
+  """
+  if quantized_dtype == 'float32':
+    q_dtype = jnp.float32
+  else:
+    q_dtype = jnp.bfloat16
+  return optax.chain(
+      transform.scale_by_adaprop(alpha=alpha, b1=b1, b3=b3, b4=b4,
+                                 eps=eps, use_nesterov=use_nesterov,
+                                 quantized_dtype=q_dtype),
+      optax.add_decayed_weights(weight_decay, weight_decay_mask),
+      transform.scale_by_learning_rate(learning_rate, flip_sign=True),
+  )
