@@ -558,15 +558,15 @@ def _parse_policy_info(name, prob, level, replace_value, augmentation_hparams):
   # where we alter bboxes independently.
   # pylint:disable=deprecated-method
   # pytype:disable=wrong-arg-types
-  if 'prob' in inspect.getargspec(func)[0]:
+  if 'prob' in inspect.getfullargspec(func).args:
     args = tuple([prob] + list(args))
   # pytype:enable=wrong-arg-types
 
   # Add in replace arg if it is required for the function that is being called.
   # pytype:disable=wrong-arg-types
-  if 'replace' in inspect.getargspec(func)[0]:
+  if 'replace' in inspect.getfullargspec(func).args:
     # Make sure replace is the final argument
-    assert 'replace' == inspect.getargspec(func)[0][-1]
+    assert 'replace' == inspect.getfullargspec(func).args[-1]
     args = tuple(list(args) + [replace_value])
   # pytype:enable=wrong-arg-types
   # pylint:enable=deprecated-method
@@ -582,7 +582,7 @@ def _apply_func_with_prob(func, image, args, prob):
   # inside the function, so make sure it is always called.
   # pylint:disable=deprecated-method
   # pytype:disable=wrong-arg-types
-  if 'prob' in inspect.getargspec(func)[0]:
+  if 'prob' in inspect.getfullargspec(func).args:
     prob = 1.0
   # pytype:enable=wrong-arg-types
   # pylint:enable=deprecated-method
