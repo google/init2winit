@@ -44,6 +44,7 @@ order to avoid unnecessary cross replica communications.
 """
 from typing import NamedTuple, Optional
 
+from init2winit.optimizer_lib import utils as optimizer_utils
 import jax
 import jax.numpy as jnp
 import optax
@@ -110,6 +111,7 @@ def accumulate_gradients(
         num_per_step_batches=jnp.zeros([], jnp.int32),
         accumulations=jax.tree_map(jnp.zeros_like, params))
 
+  @optimizer_utils.no_cross_device_gradient_aggregation
   def update_fn(updates, state, params=None):
     zeros_params = jax.tree_map(jnp.zeros_like, state.accumulations)
 

@@ -19,7 +19,7 @@
 from absl.testing import absltest
 import chex
 from init2winit.optimizer_lib import optimizers
-from init2winit.optimizer_lib.utils import extract_field
+from init2winit.optimizer_lib import utils
 import jax.numpy as jnp
 from ml_collections.config_dict import ConfigDict
 
@@ -46,13 +46,32 @@ class ExtractFieldTest(chex.TestCase):
     del update_fn
     optimizer_state = init_fn({'foo': jnp.ones(10)})
     # Test that we can extract 'count'.
-    chex.assert_type(extract_field(optimizer_state, 'count'), int)
+    chex.assert_type(utils.extract_field(optimizer_state, 'count'), int)
     # Test that we can extract 'nu'.
-    chex.assert_shape(extract_field(optimizer_state, 'nu')['foo'], (10,))
+    chex.assert_shape(utils.extract_field(optimizer_state, 'nu')['foo'], (10,))
     # Test that we can extract 'mu'.
-    chex.assert_shape(extract_field(optimizer_state, 'mu')['foo'], (10,))
+    chex.assert_shape(utils.extract_field(optimizer_state, 'mu')['foo'], (10,))
     # Test that attemptping to extract a nonexistent field "abc" returns None.
-    chex.assert_equal(extract_field(optimizer_state, 'abc'), None)
+    chex.assert_equal(utils.extract_field(optimizer_state, 'abc'), None)
+
+
+class GradientAggregationDecoratorTest(chex.TestCase):
+  """Test the requires_gradient_aggregation() decorator."""
+
+  def test_no_aggregation(self):
+    """Tests behavior with the decorator."""
+    @utils.no_cross_device_gradient_aggregation
+    def dummy_update_fn(updates, state, params):
+      del updates, state, params
+
+    self.assertFalse(utils.requires_gradient_aggregation(dummy_update_fn))
+
+  def test_with_aggregation(self):
+    """Tests the default behavior."""
+    def dummy_update_fn(updates, state, params):
+      del updates, state, params
+
+    self.assertTrue(utils.requires_gradient_aggregation(dummy_update_fn))
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@ import time
 from absl import logging
 from init2winit import utils
 from init2winit.model_lib import model_utils
-from init2winit.optimizer_lib import gradient_accumulator
+from init2winit.optimizer_lib import utils as optimizer_utils
 from init2winit.trainer_lib import base_trainer
 from init2winit.trainer_lib import trainer_utils
 import jax
@@ -101,13 +101,12 @@ def update(
   (cost_value, new_batch_stats), grad = grad_fn(params)
   new_batch_stats = new_batch_stats.get('batch_stats', None)
 
-  # If we are accumulating gradients, we handle gradient synchronization inside
-  # the optimizer so that we can only sync when actually updating the model.
   if axis_name is not None:
-    if isinstance(optimizer_state, gradient_accumulator.GradientAccumulatorState):  # pylint:disable=g-line-too-long
-      cost_value = lax.pmean(cost_value, axis_name=axis_name)
-    else:
+    if optimizer_utils.requires_gradient_aggregation(optimizer_update_fn):
       cost_value, grad = lax.pmean((cost_value, grad), axis_name=axis_name)
+    else:
+      # Skip gradient aggregation, only aggregate the cost value.
+      cost_value = lax.pmean(cost_value, axis_name=axis_name)
 
   grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
   # TODO(znado): move to inside optax gradient clipping.

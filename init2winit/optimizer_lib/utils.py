@@ -103,3 +103,49 @@ def extract_field(state, field_name):
 
   # If we didn't find anything, return None.
   return None
+
+
+def no_cross_device_gradient_aggregation(
+    update_fn: optax.TransformUpdateFn,
+) -> optax.TransformUpdateFn:
+  """Decorator for signaling that the optimizer requires access to the device-level mean gradients.
+
+  Standard Optax optimizers assume that the `update` argument passed to the
+  `update_fn` function has already been aggregated across devices, however, in
+  some cases the per-device gradient is useful (e.g., in order to calculate
+  batch statistics or to avoid the synchronization point). This decorator is
+  used to signal the trainer not to perform any gradient aggregation before
+  calling the optimizer's update function. It will then be the responsibility of
+  the optimizer to aggregate the updates before returning the updated values.
+
+  Note that to get the true per-example gradients you would need to use the
+  unnormalized loss functions (e.g., weighted_unnormalized_cross_entropy) and
+  then instead of jax.value_and_grad you'd need to use one of the JAX jacobian
+  functions
+
+  Args:
+    update_fn: An optax update transformation function.
+
+  Returns:
+    The same callable, with an additional attribute that signals that no
+    aggregation should be performed.
+  """
+  setattr(update_fn, 'init2winit_requires_gradient_aggregation', False)
+  return update_fn
+
+
+def requires_gradient_aggregation(
+    update_fn: optax.TransformUpdateFn,
+) -> bool:
+  """Returns whether the given update_fn requires the gradient to be aggregated.
+
+  See no_cross_device_gradient_aggregation() above for additional details.
+
+  Args:
+    update_fn: An Optax update transformation function.
+
+  Returns:
+    True if the gradient should be aggregated across devices before invoking the
+    update function, False otherwise.
+  """
+  return getattr(update_fn, 'init2winit_requires_gradient_aggregation', True)
