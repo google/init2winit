@@ -142,7 +142,7 @@ def load_or_train_tokenizer(dataset: tf.data.Dataset,
   """Loads the tokenizer at `vocab_path` or trains a one from `dataset`."""
   try:
     return load_tokenizer(vocab_path)
-  except tf.errors.NotFoundError:
+  except (tf.errors.NotFoundError, gfile.FileError):
     logging.info('SentencePiece vocab not found, building one from data.')
     vocab_path = _train_sentencepiece(
         dataset,
