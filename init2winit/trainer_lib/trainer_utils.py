@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Utility functions related to training."""
+from collections.abc import Mapping
 import time
 
 from absl import logging
@@ -22,7 +23,6 @@ from flax import jax_utils
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
-from init2winit.optimizer_lib import gradient_accumulator
 import jax
 import numpy as np
 import optax
@@ -222,22 +222,33 @@ def evaluate(
 
 def inject_learning_rate(optimizer_state, lr):
   """Inject the given LR into any optimizer state that will accept it."""
-  # The optimizer state should always be an InjectHyperparamsState, and we
-  # inject the learning rate into all states that will accept it. We need to do
-  # this to allow arbitrary (non-jittable) LR schedules.
-  if isinstance(optimizer_state, optax.InjectHyperparamsState):
-    if 'learning_rate' in optimizer_state.hyperparams:
-      optimizer_state.hyperparams['learning_rate'] = lr
-  elif isinstance(
-      optimizer_state, gradient_accumulator.GradientAccumulatorState):
-    inject_learning_rate(optimizer_state.base_state, lr)
-  elif isinstance(optimizer_state, optax.MultiTransformState):
+  # We require that the optimizer state exposes an 'InjectHyperparamsState'-like
+  # interface, i.e., it should contain a `hyperparams` dictionary with a
+  # 'learning_rate' key where the learning rate can be set. We need to do this
+  # to allow arbitrary (non-jittable) LR schedules.
+  if isinstance(optimizer_state, optax.MultiTransformState):
     for v in optimizer_state.inner_states.values():
       inject_learning_rate(v.inner_state, lr)
+  elif (
+      hasattr(optimizer_state, 'hyperparams')
+      and isinstance(optimizer_state.hyperparams, Mapping)
+      and 'learning_rate' in optimizer_state.hyperparams
+  ):
+    optimizer_state.hyperparams['learning_rate'] = lr
   else:
     raise ValueError(
         'Unsupported optimizer_state type given when trying to inject the '
         'learning rate:\n\n{}.'.format(optimizer_state))
+  if (
+      hasattr(optimizer_state, 'base_state')
+      and hasattr(optimizer_state.base_state, 'hyperparams')
+      and isinstance(optimizer_state.base_state.hyperparams, Mapping)
+      and 'learning_rate' in optimizer_state.base_state.hyperparams
+  ):
+    # In case the optimizer did not map the hyperparams of the base state to the
+    # hyperparams of the outer state we set the learning_rate here. For most
+    # scenarios this should be a no-op.
+    optimizer_state.base_state.hyperparams['learning_rate'] = lr
 
 
 def _merge_and_apply_prefix(d1, d2, prefix):
