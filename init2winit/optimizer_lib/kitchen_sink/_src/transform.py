@@ -16,7 +16,7 @@
 """Transforms."""
 
 import functools
-from typing import Any, List, NamedTuple, Optional
+from typing import Any, List, NamedTuple, Optional, Union
 
 import chex
 from init2winit.optimizer_lib.kitchen_sink._src import utils
@@ -526,21 +526,16 @@ class BiasCorrectionState(NamedTuple):
 
 
 def bias_correction(
-    decay: float = 0.9, accumulator_dtype: Optional[Any] = None
+    decay: float = 0.9
 ) -> optax.GradientTransformation:
   """Compute the Adam style bias correction.
 
   Args:
     decay: the decay rate for the exponential moving average.
-    accumulator_dtype: optional `dtype` to used for the accumulator; if `None`
-      then the `dtype` is inferred from `params` and `updates`.
 
   Returns:
     An (init_fn, update_fn) tuple.
   """
-
-  accumulator_dtype = _canonicalize_dtype(accumulator_dtype)
-
   def init_fn(params):
     del params
     return BiasCorrectionState(count=jnp.zeros([], jnp.int32))
@@ -1779,6 +1774,63 @@ def add_decayed_weights(
   return optax.GradientTransformation(init_fn, update_fn)
 
 
+ProjectParamaetersState = optax.EmptyState
+
+
+def project_parameters_by_norm(
+    projection_radius: float = 1.0,
+    order: Union[int, str, None] = None,
+    axis: Union[None, tuple[int, ...], int] = None,
+    flip_update_sign: bool = True,
+) -> optax.GradientTransformation:
+  """Projects each parameter leaf to a fixed norm.
+
+  Args:
+    projection_radius: The norm of the projected parameters.
+    order: Order of the norm used for projection. Default is None, i.e. 2.
+    axis: Axes along which the projection happens. 
+          Default is None, i.e. the entire parameter is projected.
+    flip_update_sign:
+
+  Returns:
+
+  """
+
+  m = -1 if flip_update_sign else 1
+
+  def init_fn(params):
+    del params
+    return AddDecayedWeightsState()
+
+  def update_fn(updates, state, params):
+    if params is None:
+      raise ValueError(optax.NO_PARAMS_MSG)
+    updated_params = jax.tree_util.tree_map(lambda g, p: g + p, updates, params)
+    norms = jax.tree_util.tree_map(
+        lambda p: jnp.linalg.norm(p, ord=order, axis=axis, keepdims=True),
+        updated_params,
+    )
+    projection_multipliers = jax.tree_util.tree_map(
+        lambda n: jnp.where(
+            n < projection_radius,
+            jnp.ones_like(n),
+            (jnp.ones_like(n) / n) * projection_radius,
+        ),
+        norms,
+    )
+    projected_updated_params = jax.tree_util.tree_map(
+        lambda p, pd: p * pd,
+        updated_params,
+        projection_multipliers,
+    )
+    updates = jax.tree_util.tree_map(
+        lambda pup, p: pup + m * p, projected_updated_params, params
+    )
+    return updates, state
+
+  return optax.GradientTransformation(init_fn, update_fn)
+
+
 class PytreeScalarState(NamedTuple):
   """State for Scaling Updates Parameter-wise."""
 
@@ -1880,6 +1932,7 @@ _miscellaneous = {
     'sanitize_values': sanitize_values,
     'no_op': no_op,
     'scale_by_pytree': scale_by_pytree,
+    'project_parameters_by_norm': project_parameters_by_norm,
 }
 
 transformation_registry = {}
