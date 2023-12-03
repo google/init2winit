@@ -107,6 +107,14 @@ def update(
     else:
       # Skip gradient aggregation, only aggregate the cost value.
       cost_value = lax.pmean(cost_value, axis_name=axis_name)
+      if grad_clip:
+        # Calculating the gradient norm requires cross-device aggregation,
+        # performed, in this case, inside the optimizer. Calculating it again
+        # at this point may be inefficient.
+        raise NotImplementedError(
+            'Gradient clipping is not supported when gradient aggregation is'
+            ' performed internally by the optimizer.'
+        )
 
   grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
   # TODO(znado): move to inside optax gradient clipping.

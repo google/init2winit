@@ -24,6 +24,8 @@ from init2winit import utils
 from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
+from init2winit.optimizer_lib import optimizers
+from init2winit.optimizer_lib import utils as optimizers_utils
 from init2winit.trainer_lib import trainer
 import jax
 from jax import lax
@@ -33,17 +35,17 @@ import tensorflow.compat.v1 as tf
 
 
 
-class OptimizersTest(absltest.TestCase):
-  """Tests for optimizers.py."""
+class OptimizersTrainerTest(absltest.TestCase):
+  """Tests for optimizers.py that require starting a trainer object."""
 
   def setUp(self):
-    super(OptimizersTest, self).setUp()
+    super().setUp()
     self.test_dir = tempfile.mkdtemp()
 
   def tearDown(self):
     self.trainer.wait_until_orbax_checkpointer_finished()
     shutil.rmtree(self.test_dir)
-    super(OptimizersTest, self).tearDown()
+    super().tearDown()
 
   def test_shampoo_wrn(self):
     """Test distributed shampoo on fake dataset."""
@@ -132,6 +134,80 @@ class OptimizersTest(absltest.TestCase):
       df = pandas.read_csv(f)
       valid_ce_loss = df['valid/ce_loss'].values[-1]
       self.assertLess(valid_ce_loss, 1e-3)
+
+  def test_clip_raises_when_no_aggregation(self):
+    """Test that gradient clipping raises when no gradient aggregation."""
+    model_name = 'wide_resnet'
+    model_cls = models.get_model(model_name)
+    hparam_overrides = {
+        'grad_clip': 0.1,
+        'total_accumulated_batch_size': 1024,  # Use gradient accumulation.
+    }
+    input_pipeline_hps = config_dict.ConfigDict(dict(
+        num_tf_data_prefetches=-1,
+        num_device_prefetches=0,
+        num_tf_data_map_parallel_calls=-1,
+    ))
+    hps = hyperparameters.build_hparams(
+        model_name,
+        initializer_name='noop',
+        dataset_name='fake',
+        hparam_file=None,
+        hparam_overrides=hparam_overrides,
+        input_pipeline_hps=input_pipeline_hps)
+    initializer = initializers.get_initializer('noop')
+    dataset_builder = datasets.get_dataset('fake')
+    dataset = dataset_builder(
+        shuffle_rng=jax.random.PRNGKey(0),
+        batch_size=hps.batch_size,
+        eval_batch_size=hps.batch_size,
+        hps=hps)
+
+    loss_name = 'cross_entropy'
+    metrics_name = 'classification_metrics'
+    dataset_meta_data = datasets.get_dataset_meta_data('fake')
+    model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
+
+    self.trainer = trainer.Trainer(
+        train_dir=self.test_dir,
+        model=model,
+        dataset_builder=lambda *unused_args, **unused_kwargs: dataset,
+        initializer=initializer,
+        num_train_steps=10,
+        hps=hps,
+        rng=jax.random.PRNGKey(42),
+        eval_batch_size=hps.batch_size,
+        eval_use_ema=False,
+        eval_num_batches=None,
+        test_num_batches=0,
+        eval_train_num_batches=None,
+        eval_frequency=10,
+        checkpoint_steps=[],
+    )
+    with self.assertRaises(NotImplementedError):
+      _ = list(self.trainer.train())
+
+
+class OptimizersTest(absltest.TestCase):
+  """Tests for optimizers.py."""
+
+  def test_no_cross_device_gradient_aggregation(self):
+    """Test that no_cross_device_gradient_aggregation propagates correctly."""
+    _, update_fn = optimizers.get_optimizer(
+        config_dict.ConfigDict({
+            'optimizer': 'adam',
+            'l2_decay_factor': None,
+            'batch_size': 50,
+            'total_accumulated_batch_size': 100,  # Use gradient accumulation.
+            'opt_hparams': {
+                'beta1': 0.9,
+                'beta2': 0.999,
+                'epsilon': 1e-7,
+                'weight_decay': 0.0,
+            }
+        }))
+    # The gradient accumulation performs gradient aggregation internally.
+    self.assertFalse(optimizers_utils.requires_gradient_aggregation(update_fn))
 
 
 if __name__ == '__main__':

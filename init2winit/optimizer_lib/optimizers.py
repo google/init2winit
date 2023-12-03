@@ -379,4 +379,6 @@ def _wrap_update_fn(opt_name, opt_update, use_sam=False, use_pal=False):
           grads, optimizer_state, cost_fn_params_tuple=(cost_fn, params))
     return opt_update(grads, optimizer_state, params=params)
 
+  if not utils.requires_gradient_aggregation(opt_update):
+    return utils.no_cross_device_gradient_aggregation(update_fn)
   return update_fn
