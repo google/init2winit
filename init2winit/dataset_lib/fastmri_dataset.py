@@ -45,7 +45,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     # two, 100 files for validation, 99 for test. This amounts to 3,554 slices
     # for validation, 3,581 for test.
     test_dir='knee_singlecoil_val',
-    test_size=3548,
+    test_size=3581,
     num_test_h5_files=99,
     eval_seed=0,
 ))
@@ -215,7 +215,7 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
     if split == 'val':
       end = hps.num_valid_h5_files
     else:
-      end = -1
+      end = hps.num_test_h5_files + hps.num_valid_h5_files
 
   data_dir = hps.data_dir
 
@@ -224,7 +224,7 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
   elif split == 'test':
     data_dir = os.path.join(data_dir, hps.test_dir)
     start += hps.num_valid_h5_files
-    if end > -1:
+    if end != hps.num_test_h5_files + hps.num_valid_h5_files:
       end += hps.num_valid_h5_files
   else:  # split == 'val'
     data_dir = os.path.join(data_dir, hps.val_dir)

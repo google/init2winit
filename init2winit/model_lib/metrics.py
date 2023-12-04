@@ -436,9 +436,6 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
   targets = targets * std + mean
   ssims = jax.vmap(structural_similarity)(logits, targets, volume_max)
 
-  if weights is not None:
-    ssims = ssims * weights
-
   # NOTE(dsuo): map NaN ssims to -1.
   ssims = jnp.where(jnp.isnan(ssims), -1, ssims)
 
@@ -447,6 +444,12 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
   ssims = jnp.where(
       jnp.logical_or(ssims > 1, ssims < -1),
       jnp.ones_like(ssims) * -1, ssims)
+
+  # This step should come after setting NaNs to -1. Otherwise,
+  # padding elements with weight value 0 will be set to NaN * 0 = NaN
+  # and then to -1 instead of 0.
+  if weights is not None:
+    ssims = ssims * weights
 
   return ssims
 
