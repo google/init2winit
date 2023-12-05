@@ -1259,7 +1259,7 @@ def scale_by_adaprop(
     b3: float = 1.0,
     b4: float = 0.9,
     eps: float = 1e-8,
-    use_nesterov: bool = False,
+    use_nesterov: str = 'False',
     quantized_dtype: jnp.dtype = jnp.float32,
 ) -> optax.GradientTransformation:
   """Rescale updates according to the AdaProp algorithm.
@@ -1307,7 +1307,7 @@ def scale_by_adaprop(
     new_count = optax.safe_int32_increment(state.count)
     b2 = 1.0 - (1.0 - b1)/alpha
     mu = jax.tree_map(lambda g, t: (1-b1)*g + b1*t, updates, state.mu)
-    if use_nesterov:
+    if use_nesterov == 'True':
       mu2 = jax.tree_map(lambda g, t: (1-b1)*g + b1*t, updates, mu)
       mu_hat = _bias_correction(mu2, b1, new_count)
     else:
