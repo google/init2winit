@@ -17,14 +17,10 @@
 
 import itertools
 
-from absl import flags
 from absl.testing import absltest
 from init2winit.dataset_lib import small_image_datasets
 from jax import random
 from ml_collections.config_dict import config_dict
-
-_TFRECORD_SUFFIX = 'tfrecord'
-_ARRAY_RECORD_SUFFIX = 'array_record'
 
 
 class SmallImageDatasetsTest(absltest.TestCase):
@@ -51,20 +47,17 @@ class SmallImageDatasetsTest(absltest.TestCase):
     example_keys = [
         example['example_key'][0].decode('utf-8') for example in examples
     ]
-    file_format = (
-        _ARRAY_RECORD_SUFFIX
-        if flags.FLAGS.array_record_default else _TFRECORD_SUFFIX)
     self.assertEqual(example_keys, [
-        f'cifar10-train.{file_format}-00000-of-00001__45000',
-        f'cifar10-train.{file_format}-00000-of-00001__45001',
-        f'cifar10-train.{file_format}-00000-of-00001__45002',
-        f'cifar10-train.{file_format}-00000-of-00001__45003',
-        f'cifar10-train.{file_format}-00000-of-00001__45004',
-        f'cifar10-train.{file_format}-00000-of-00001__45005',
-        f'cifar10-train.{file_format}-00000-of-00001__45006',
-        f'cifar10-train.{file_format}-00000-of-00001__45007',
-        f'cifar10-train.{file_format}-00000-of-00001__45008',
-        f'cifar10-train.{file_format}-00000-of-00001__45009',
+        'cifar10-train.array_record-00000-of-00001__45000',
+        'cifar10-train.array_record-00000-of-00001__45001',
+        'cifar10-train.array_record-00000-of-00001__45002',
+        'cifar10-train.array_record-00000-of-00001__45003',
+        'cifar10-train.array_record-00000-of-00001__45004',
+        'cifar10-train.array_record-00000-of-00001__45005',
+        'cifar10-train.array_record-00000-of-00001__45006',
+        'cifar10-train.array_record-00000-of-00001__45007',
+        'cifar10-train.array_record-00000-of-00001__45008',
+        'cifar10-train.array_record-00000-of-00001__45009',
     ])
 
 
