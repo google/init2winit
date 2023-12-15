@@ -574,8 +574,7 @@ class HessianFreeState(NamedTuple):
 
 
 def hessian_free(
-    flax_module,
-    training_objective_fn,
+    model,
     learning_rate=1.0,
     cg_max_iter=100,
     cg_iter_tracking_method=CGIterationTrackingMethod.BACK_TRACKING,
@@ -598,8 +597,7 @@ def hessian_free(
   https://github.com/google/tree-math/blob/main/tree_math/_src/vector.py#L104.
 
   Args:
-    flax_module: A flax linen.nn.module.
-    training_objective_fn: A training objective function.
+    model: base model object containing flax module, params, loss_fn etc.
     learning_rate: A learning rate.
     cg_max_iter: The max number of CG iterations.
     cg_iter_tracking_method: A CGIterationTrackingMethod.
@@ -631,11 +629,12 @@ def hessian_free(
   @partial(tm.wrap, vector_argnames=['grads', 'p0'])
   def _update_fn(grads, p0, damping, total_cg_steps, variables, batch):
     def forward_fn(variables):
-      return flax_module.apply(variables, batch['inputs'], train=False)
+      return model.flax_module.apply(variables, batch['inputs'], train=False)
 
     def loss_fn(logits):
-      return training_objective_fn(
-          variables['params'], logits, batch['targets'], batch.get('weights'))
+      loss_numerator, loss_denominator = model.loss_fn(
+          logits, batch['targets'], batch.get('weights'))
+      return loss_numerator / loss_denominator
 
     outputs = forward_fn(variables)
 

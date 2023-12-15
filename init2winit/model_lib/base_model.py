@@ -293,8 +293,14 @@ class BaseModel(object):
       targets = model_utils.apply_label_smoothing(
           targets, self.hps.get('label_smoothing'))
 
-    objective_value = self.loss_fn(logits, targets, weights)
+    objective_numerator, objective_denominator = self.loss_fn(
+        logits, targets, weights)
 
+    (objective_numerator, objective_denominator) = jax.lax.psum(
+        (objective_numerator, objective_denominator), axis_name='batch')
+
+    # epsilon added to handle empty batch case if we encounter one.
+    objective_value = (objective_numerator / (objective_denominator + 1e-9))
     if self.hps.get('l2_decay_factor'):
       l2_loss = model_utils.l2_regularization(params,
                                               self.hps.l2_decay_rank_threshold)

@@ -780,15 +780,6 @@ class ConformerModel(base_model.BaseModel):
     c = jnp.less_equal(b, lengths[:, jnp.newaxis]).astype(lengths.dtype)
     return c
 
-  def compute_loss(self, logits, logit_paddings, labels, label_paddings):
-    logprobs = nn.log_softmax(logits)
-    per_seq_loss = self.loss_fn(logprobs, logit_paddings, labels,
-                                label_paddings)
-    normalizer = jnp.sum(1 - label_paddings)
-
-    normalized_loss = jnp.sum(per_seq_loss) / jnp.maximum(normalizer, 1)
-    return normalized_loss
-
   def collapse_and_remove_blanks(self, labels, seq_length, blank_id: int = 0):
     b, t = labels.shape
     # Zap out blank
@@ -861,8 +852,13 @@ class ConformerModel(base_model.BaseModel):
     labels = batch['targets']
     label_paddings = batch['target_paddings']
 
-    normalized_loss = self.compute_loss(logits, logit_paddings, labels,
-                                        label_paddings)
+    (objective_numerator, objective_denominator) = self.loss_fn(
+        logits, logit_paddings, labels, label_paddings)
+
+    (objective_numerator, objective_denominator) = jax.lax.psum(
+        (objective_numerator, objective_denominator), axis_name='batch')
+
+    normalized_loss = (objective_numerator / (objective_denominator))
     hyps, hyp_paddings = self.greedy_decode(logits, logit_paddings)
 
     return self.metrics_bundle.gather_from_model_output(
@@ -892,9 +888,15 @@ class ConformerModel(base_model.BaseModel):
     labels = batch['targets']
     label_paddings = batch['target_paddings']
 
-    normalized_loss = self.compute_loss(outputs, output_paddings, labels,
-                                        label_paddings)
-    return normalized_loss, new_batch_stats
+    (objective_numerator, objective_denominator) = self.loss_fn(
+        outputs, output_paddings, labels, label_paddings)
+
+    (objective_numerator, objective_denominator) = jax.lax.psum(
+        (objective_numerator, objective_denominator), axis_name='batch')
+
+    # epsilon added to handle empty batch case if we encounter one.
+    objective_value = (objective_numerator / (objective_denominator + 1e-9))
+    return objective_value, new_batch_stats
 
   def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
     """Wrapper around flax_module.apply."""
@@ -939,7 +941,7 @@ class ConformerModel(base_model.BaseModel):
     return module
 
   def get_fake_inputs(self, hps):
-    """Helper method solely for purpose of initalizing the model."""
+    """Helper method solely for purpose of initializing the model."""
     dummy_inputs = [
         jnp.zeros((hps.batch_size, *x), dtype=hps.model_dtype)
         for x in hps.input_shape

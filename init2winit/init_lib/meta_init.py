@@ -190,7 +190,9 @@ def meta_optimize_scales(loss_fn,
   def update(meta_params, optimizer_state, inputs, targets):
     """Update step."""
     def params_to_loss(params):
-      return loss_fn(fprop({'params': params}, inputs, train=True), targets)
+      loss_value, loss_weight = loss_fn(
+          fprop({'params': params}, inputs, train=True), targets)
+      return loss_value / loss_weight
 
     def _meta_loss(params):
       return meta_loss(params_to_loss, params, normalized_params, hps.epsilon)

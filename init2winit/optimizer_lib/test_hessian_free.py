@@ -48,6 +48,16 @@ _INPUT_DATA = np.array([
 ])
 
 
+# Starting cl/523831152 i2w loss functions return loss in 2 parts.
+# See CL description for context.
+def wrap_loss(loss_fn):
+  def wrapped_loss(logits, targets, weights=None):
+    loss_numerator, loss_denominator = loss_fn(logits, targets, weights)
+    return loss_numerator / loss_denominator
+
+  return wrapped_loss
+
+
 def _get_pd_mat(mat):
   """Returns a positive-definite matrix."""
   n = mat.shape[0]
@@ -277,8 +287,8 @@ class HessianFreeTest(absltest.TestCase):
       return model.flax_module.apply(variables, inputs, train=False)
 
     def opt_cost(params):
-      return model.loss_fn(forward_fn(params, batch['inputs']),
-                           batch['targets'])
+      return wrap_loss(model.loss_fn)(
+          forward_fn(params, batch['inputs']), batch['targets'])
 
     params = {
         'Dense_0': {
@@ -313,7 +323,8 @@ class HessianFreeTest(absltest.TestCase):
     p_arr_idx = 2
 
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
-    partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
+    partial_loss_fn = partial(
+        wrap_loss(model.loss_fn), targets=batch['targets'])
 
     def obj_fn(variables):
       return partial_loss_fn(partial_forward_fn(variables))
@@ -336,18 +347,44 @@ class HessianFreeTest(absltest.TestCase):
       return model.flax_module.apply(variables, inputs, train=False)
 
     def opt_cost(params):
-      return model.loss_fn(forward_fn(params, batch['inputs']),
-                           batch['targets'])
+      return wrap_loss(model.loss_fn)(
+          forward_fn(params, batch['inputs']), batch['targets']
+      )
 
     unravel_fn = ravel_pytree(variables['params'])[1]
 
     p = tm.Vector(
-        unravel_fn(jnp.array([
-            0.5, 0.2, 0.1, -0.4, -0.6, 0.4, 0.6, -0.7, 0.0, 0.5, -0.7, 0.2, 0.1,
-            -0.2, 0.4, -0.6, -0.8, 0.7, 0.2, 0.9, -0.1, 0.5])))
+        unravel_fn(
+            jnp.array([
+                0.5,
+                0.2,
+                0.1,
+                -0.4,
+                -0.6,
+                0.4,
+                0.6,
+                -0.7,
+                0.0,
+                0.5,
+                -0.7,
+                0.2,
+                0.1,
+                -0.2,
+                0.4,
+                -0.6,
+                -0.8,
+                0.7,
+                0.2,
+                0.9,
+                -0.1,
+                0.5,
+            ])
+        )
+    )
 
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
-    partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
+    partial_loss_fn = partial(
+        wrap_loss(model.loss_fn), targets=batch['targets'])
 
     def obj_fn(variables):
       return partial_loss_fn(partial_forward_fn(variables))
@@ -379,7 +416,8 @@ class HessianFreeTest(absltest.TestCase):
     d = ravel_pytree(variables['params'])[0].shape[0]
 
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
-    partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
+    partial_loss_fn = partial(
+        wrap_loss(model.loss_fn), targets=batch['targets'])
 
     matmul_fn = tm.unwrap(
         partial(gvp, variables, outputs, state.inner_state.damping,
@@ -421,8 +459,8 @@ class HessianFreeTest(absltest.TestCase):
       return logits
 
     def opt_cost(variables):
-      return model.loss_fn(forward_fn(variables, batch['inputs']),
-                           batch['targets'])
+      return wrap_loss(model.loss_fn)(
+          forward_fn(variables, batch['inputs']), batch['targets'])
 
     outputs = forward_fn(variables, batch['inputs'])
 
@@ -431,7 +469,8 @@ class HessianFreeTest(absltest.TestCase):
     d = ravel_pytree(variables['params'])[0].shape[0]
 
     partial_forward_fn = partial(forward_fn, inputs=batch['inputs'])
-    partial_loss_fn = partial(model.loss_fn, targets=batch['targets'])
+    partial_loss_fn = partial(
+        wrap_loss(model.loss_fn), targets=batch['targets'])
 
     jacobian = jax.jacfwd(partial_forward_fn)(variables)['params']
     jacobian_tensor = np.concatenate((

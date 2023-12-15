@@ -1051,7 +1051,13 @@ class TransformerTranslate(base_model.BaseModel):
           batch.get('targets_segmentation'),
           train=False)
       targets = lax.stop_gradient(softmax(targets))
-    total_loss = self.loss_fn(logits, targets, weights)
+    (total_loss, total_weight) = self.loss_fn(
+        logits, targets, weights)
+
+    (total_loss, total_weight) = lax.psum(
+        (total_loss, total_weight), axis_name='batch')
+
+    total_loss = (total_loss / total_weight)
 
     if self.hps.get('l2_decay_factor'):
       l2_loss = model_utils.l2_regularization(

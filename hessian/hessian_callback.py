@@ -36,10 +36,20 @@ def set_up_hessian_eval(model, params, batch_stats, dataset,
   # However, we need to provide batch_stats for the model.training_cost API.
   # The copy is needed b/c the trainer will modify underlying arrays.
   batch_stats = jax.tree_map(lambda x: x[:][0], batch_stats)
-  def batch_loss(module, batch_rng):
+  def batch_loss(params, batch_rng):
     batch, rng = batch_rng
-    return model.training_cost(
-        module, batch, batch_stats=batch_stats, dropout_rng=rng)[0]
+
+    apply_kwargs = {'train': True}
+    apply_kwargs['mutable'] = ['batch_stats']
+    apply_kwargs['rngs'] = {'dropout': rng}
+
+    logits, _ = model.apply_on_batch(
+        params, batch_stats, batch, **apply_kwargs)
+    weights = batch.get('weights')
+    loss_numerator, loss_denominator = model.loss_fn(
+        logits, batch['targets'], weights)
+
+    return (loss_numerator / loss_denominator)
 
   def batch_output(module, batch_rng):
     batch, rng = batch_rng

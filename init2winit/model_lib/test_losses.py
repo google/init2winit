@@ -161,6 +161,16 @@ RECONSTRUCTION_KEYS = [
 ]
 
 
+# Starting cl/523831152 i2w loss functions return loss in 2 parts.
+# See CL description for context.
+def wrap_loss(loss_fn):
+  def wrapped_loss(logits, targets, weights=None):
+    loss_numerator, loss_denominator = loss_fn(logits, targets, weights)
+    return loss_numerator / loss_denominator
+
+  return wrapped_loss
+
+
 class LossesTest(parameterized.TestCase):
   """Tests for losses.py."""
 
@@ -181,6 +191,8 @@ class LossesTest(parameterized.TestCase):
   def test_classification_losses(self, loss_name):
     for data in CLASSIFICATION_TEST_DATA:
       loss_fn = losses.get_loss_fn(loss_name, data['hps'])
+      loss_fn = wrap_loss(loss_fn)
+
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['one_hot_targets'], data['weights']),
           data[loss_name],
@@ -190,6 +202,7 @@ class LossesTest(parameterized.TestCase):
   def test_regression_losses(self, loss_name):
     for data in RECONSTRUCTION_TEST_DATA:
       loss_fn = losses.get_loss_fn(loss_name, data['hps'])
+      loss_fn = wrap_loss(loss_fn)
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['targets'], data['weights']),
           data[loss_name],
@@ -203,7 +216,9 @@ class LossesTest(parameterized.TestCase):
            'bi_tempered_cross_entropy')
       ]:
         sigmoid_binary_ce_fn = losses.get_loss_fn(binary_loss_name, data['hps'])
+        sigmoid_binary_ce_fn = wrap_loss(sigmoid_binary_ce_fn)
         ce_fn = losses.get_loss_fn(loss_name, data['hps'])
+        ce_fn = wrap_loss(ce_fn)
         self.assertAlmostEqual(
             sigmoid_binary_ce_fn(
                 np.array([[logits[0] - logits[1]] for logits in data['logits']
@@ -220,6 +235,7 @@ class LossesTest(parameterized.TestCase):
         'bi_tempered_sigmoid_binary_cross_entropy']:
       sigmoid_binary_ce_fn = losses.get_loss_fn(
           binary_loss_name, HPS_1)
+      sigmoid_binary_ce_fn = wrap_loss(sigmoid_binary_ce_fn)
       logits = np.arange(15).reshape(3, 5)
       targets = np.arange(15, 30).reshape(3, 5)
       targets = targets / np.max(targets)
@@ -244,29 +260,35 @@ class LossesTest(parameterized.TestCase):
           testcase_name='2_char_no_repeat_no_blank',
           logits=np.array([[[0.1, 0.8, 0.1], [0.1, 0.1, 0.8]]]),
           labels=np.array([[1, 2]]),
-          result=1.379453),
+          result=1.379453,
+      ),
       dict(
           testcase_name='1_char_1_blank',
           logits=np.array([[[0.2, 0.8], [0.8, 0.2]]]),
           labels=np.array([[1, 0]]),
-          result=0.874976))
+          result=0.874976,
+      ),
+  )
   def test_ctc_loss(self, logits, labels, result):
     """Tests the CTC loss computation."""
     ctc_loss = losses.get_loss_fn('ctc')
-    loss_value = ctc_loss(logits, np.zeros(logits.shape[:2]), labels,
-                          np.zeros(labels.shape))
-
+    loss_value, _ = ctc_loss(
+        logits, np.zeros(logits.shape[:2]), labels, np.zeros(labels.shape)
+    )
     self.assertAlmostEqual(loss_value, jax.numpy.array([result]), places=6)
 
   @parameterized.named_parameters(
       dict(
           testcase_name='single_batch',
           logits=np.array([[0.1, 0.8, 0.1], [0.1, 0.1, 0.8]]),
-          targets=np.array([[1., 2., 3.], [4., 5., 6.]]),
-          result=3.166667))
+          targets=np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+          result=3.166667,
+      )
+  )
   def test_weighted_mean_absolute_error(self, logits, targets, result):
     """Tests computing MAE."""
     mae = losses.get_loss_fn('mean_absolute_error')
+    mae = wrap_loss(mae)
     loss_value = mae(logits, targets)
 
     self.assertAlmostEqual(loss_value, jax.numpy.array([result]))

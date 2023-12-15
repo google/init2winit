@@ -103,10 +103,9 @@ def update(
 
   if axis_name is not None:
     if optimizer_utils.requires_gradient_aggregation(optimizer_update_fn):
-      cost_value, grad = lax.pmean((cost_value, grad), axis_name=axis_name)
+      grad = lax.pmean((grad), axis_name=axis_name)
     else:
-      # Skip gradient aggregation, only aggregate the cost value.
-      cost_value = lax.pmean(cost_value, axis_name=axis_name)
+      # Skip gradient aggregationas it'll be handled in gradient_accumulator.
       if grad_clip:
         # Calculating the gradient norm requires cross-device aggregation,
         # performed, in this case, inside the optimizer. Calculating it again

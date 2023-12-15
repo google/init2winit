@@ -107,13 +107,17 @@ def sigmoid_binary_cross_entropy(logits, targets, weights=None):
   else:
     normalization = weights.sum()
 
-  return jnp.sum(
-      unnormalized_sigmoid_binary_cross_entropy(logits, targets,
-                                                weights)) / normalization
+  return (
+      jnp.sum(
+          unnormalized_sigmoid_binary_cross_entropy(logits, targets, weights)
+      ),
+      normalization,
+  )
 
 
 def unnormalized_bi_tempered_sigmoid_binary_cross_entropy(
-    logits, targets, weights=None, t1=1.0, t2=1.0):
+    logits, targets, weights=None, t1=1.0, t2=1.0
+):
   """Computes the bi-tempered sigmoid binary cross entropy per example.
 
   Args:
@@ -172,7 +176,7 @@ def bi_tempered_sigmoid_binary_cross_entropy(hps,
       hps.bi_tempered_loss_t2,
   )
 
-  return jnp.sum(losses) / normalization
+  return jnp.sum(losses), normalization
 
 
 def unnormalized_sigmoid_mean_squared_error(logits, targets, weights=None):
@@ -207,7 +211,7 @@ def sigmoid_mean_squared_error(logits, targets, weights=None):
   unnormalized_sigmoid_mse = unnormalized_sigmoid_mean_squared_error(
       logits, targets, weights)
 
-  return jnp.sum(unnormalized_sigmoid_mse) / normalization
+  return jnp.sum(unnormalized_sigmoid_mse), normalization
 
 
 def rescaled_mean_squared_error(hps, logits, targets, weights=None):
@@ -247,7 +251,7 @@ def rescaled_mean_squared_error(hps, logits, targets, weights=None):
   else:
     normalization = targets.shape[0]
 
-  return jnp.sum(losses) / normalization
+  return jnp.sum(losses), normalization
 
 
 def weighted_unnormalized_cross_entropy(logits, targets, weights=None):
@@ -286,15 +290,15 @@ def weighted_cross_entropy(logits, targets, weights=None):
   else:
     normalization = weights.sum()
   unnormalized_cross_entropy = weighted_unnormalized_cross_entropy(
-      logits, targets, weights)
-  return jnp.sum(unnormalized_cross_entropy) / normalization
+      logits, targets, weights
+  )
+
+  return jnp.sum(unnormalized_cross_entropy), normalization
 
 
-def weighted_unnormalized_bi_tempered_cross_entropy(logits,
-                                                    targets,
-                                                    weights=None,
-                                                    t1=1.0,
-                                                    t2=1.0):
+def weighted_unnormalized_bi_tempered_cross_entropy(
+    logits, targets, weights=None, t1=1.0, t2=1.0
+):
   """Compute weighted bi-tempered loss for log probs and targets.
 
   This computes sum_(x,y) bi_tempered(x, y) for a single, potentially padded
@@ -339,12 +343,16 @@ def weighted_bi_tempered_cross_entropy(hps,
   unnormalized_cross_entropy = weighted_unnormalized_bi_tempered_cross_entropy(
       logits, targets, weights, hps.bi_tempered_loss_t1, hps.bi_tempered_loss_t2
   )
-  return jnp.sum(unnormalized_cross_entropy) / normalization
+  return jnp.sum(unnormalized_cross_entropy), normalization
 
 
-def ctc_loss(logits, logit_paddings, labels, label_paddings, blank_id=0):
-  return optax.ctc_loss(logits, logit_paddings, labels, label_paddings,
-                        blank_id)
+def ctc_loss(logits, logit_paddings, labels, label_paddings):
+  logprobs = nn.log_softmax(logits)
+  per_seq_loss = optax.ctc_loss(logprobs, logit_paddings, labels,
+                                label_paddings)
+  normalizer = jnp.sum(1 - label_paddings)
+
+  return jnp.sum(per_seq_loss), jnp.maximum(normalizer, 1)
 
 
 def weighted_unnormalized_mean_absolute_error(logits,
@@ -390,8 +398,9 @@ def weighted_mean_absolute_error(logits, targets, weights=None):
   else:
     normalization = weights.sum()
   unnormalized_mean_absolute_error = weighted_unnormalized_mean_absolute_error(
-      logits, targets, weights)
-  return jnp.sum(unnormalized_mean_absolute_error) / normalization
+      logits, targets, weights
+  )
+  return jnp.sum(unnormalized_mean_absolute_error), normalization
 
 
 # TODO(cheolmin): add mean_squared_error

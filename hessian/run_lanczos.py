@@ -102,8 +102,19 @@ def eval_checkpoints(
   # hessian eval.
   def batch_loss(params, batch_rng):
     batch, rng = batch_rng
-    return model.training_cost(
-        params, batch, batch_stats=unreplicated_batch_stats, dropout_rng=rng)[0]
+
+    apply_kwargs = {'train': True}
+    apply_kwargs['mutable'] = ['batch_stats']
+    apply_kwargs['rngs'] = {'dropout': rng}
+
+    logits, _ = model.apply_on_batch(
+        params, unreplicated_batch_stats, batch, **apply_kwargs)
+    weights = batch.get('weights')
+    loss_numerator, loss_denominator = model.loss_fn(
+        logits, batch['targets'], weights)
+
+    return (loss_numerator / loss_denominator)
+
   batch_stats = jax_utils.replicate(unreplicated_batch_stats)
 
   if jax.process_index() == 0:
