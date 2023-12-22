@@ -32,7 +32,7 @@ setup(
         'tensorboard',
         'tensorflow-datasets',
         'tensorflow-text==2.5.0-rc0',
-        'tensorflow==2.5.0',
+        'tensorflow==2.11.1',
     ],
     extras_require={},
     classifiers=[
