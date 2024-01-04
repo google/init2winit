@@ -89,6 +89,14 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
 
   opt_init = None
   opt_update = None
+  # When set to True, the optimizer's update function will be called with
+  # "grad_fn_params_tuple=(grad_fn, params)" instead of the `params`
+  # argument, where grad_fn is the result of `jax.value_and_grad(opt_cost)`.
+  optimizer_requires_grad_fn = False
+  # When set to True, the optimizer's update function will be called with
+  # "cost_fn_params_tuple=(cost_fn, params)" instead of the `params`
+  # argument, where cost_fn is the model's cost function.
+  optimizer_requires_cost_fn = False
 
   if hps.optimizer == 'sgd':
     opt_init, opt_update = utils.static_inject_hyperparams(sgd)(
@@ -326,6 +334,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         base_opt_init_fn=opt_init,
         base_opt_update_fn=opt_update,
     )
+    optimizer_requires_grad_fn = True
   elif hps.opt_hparams.get('use_pal', False):
     opt_init, opt_update = parabolic_approximation_line_search.parabolic_approximation_line_search(
         mu=hps.opt_hparams['mu'],
@@ -337,23 +346,29 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         base_opt_init_fn=opt_init,
         base_opt_update_fn=opt_update
     )
+    optimizer_requires_cost_fn = True
 
   if opt_init is None or opt_update is None:
     raise NotImplementedError('Optimizer {} not implemented'.format(
         hps.optimizer))
   return opt_init, _wrap_update_fn(hps.optimizer, opt_update,
-                                   hps.opt_hparams.get('use_sam', False),
-                                   hps.opt_hparams.get('use_pal', False))
+                                   send_grad_fn=optimizer_requires_grad_fn,
+                                   send_cost_fn=optimizer_requires_cost_fn)
 
 
-def _wrap_update_fn(opt_name, opt_update, use_sam=False, use_pal=False):
+def _wrap_update_fn(
+    opt_name, opt_update, send_grad_fn=False, send_cost_fn=False
+):
   """Wraps the optimizer update function to have the same function signiture.
 
   Args:
-    opt_name: the optimizer name.
-    opt_update: the optimizer update function.
-    use_sam: flag to use sharpness aware minimization updates.
-    use_pal: flag to use parabolic approximation line search updates.
+    opt_name: The optimizer name.
+    opt_update: The optimizer update function.
+    send_grad_fn: When set to True will pass `value_and_grad` to the optimizer's
+      update function.
+    send_cost_fn: When set to True will pass `cost_fn` to the optimizer's update
+      function. This must not be set to True if `send_grad_fn` is True (note
+      that grad_fn already returns the cost value).
 
   Returns:
     A wrapped optimizer update function.
@@ -371,10 +386,14 @@ def _wrap_update_fn(opt_name, opt_update, use_sam=False, use_pal=False):
       if batch_stats is not None:
         variables['batch_stats'] = batch_stats
       return opt_update(grads, optimizer_state, params=(variables, batch))
-    if use_sam:
+    if send_grad_fn and send_cost_fn:
+      # Note that `value_and_grad` already returns the cost, so there is no need
+      # to set both send_grad_fn and send_cost_fn to True.
+      raise ValueError('send_grad_fn and send_cost_fn must not both be True.')
+    if send_grad_fn:
       return opt_update(
           grads, optimizer_state, grad_fn_params_tuple=(grad_fn, params))
-    elif use_pal:
+    elif send_cost_fn:
       return opt_update(
           grads, optimizer_state, cost_fn_params_tuple=(cost_fn, params))
     return opt_update(grads, optimizer_state, params=params)
