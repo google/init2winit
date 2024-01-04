@@ -18,6 +18,7 @@
 from absl.testing import absltest
 from init2winit import schedules
 from ml_collections.config_dict import config_dict
+import numpy as np
 import tensorflow.compat.v1 as tf
 
 
@@ -71,6 +72,69 @@ class LearningRateTest(absltest.TestCase):
           hps['end_factor'] * hps['base_lr'],
           power=hps['power'])().numpy()
       self.assertAlmostEqual(lr_fn(step), expected_learning_rate)
+
+  def test_compound_schedule_cosine(self):
+    """Test that compound schedule correctly handles the cosine schedule."""
+    expected_lrs = [
+        2.0,
+        1 + np.cos(0.1 * np.pi),
+        1 + np.cos(0.2 * np.pi),
+        1 + np.cos(0.3 * np.pi),
+        1 + np.cos(0.4 * np.pi),
+        1 + np.cos(0.5 * np.pi),
+        1 + np.cos(0.6 * np.pi),
+        1 + np.cos(0.7 * np.pi),
+        1 + np.cos(0.8 * np.pi),
+        1 + np.cos(0.9 * np.pi),
+        0.0,
+    ]
+    hps = config_dict.ConfigDict(dict(
+        lr_hparams={
+            'schedule': 'compound',
+            'factors': 'constant * cosine',
+            'base_lr': 2,
+        }
+    ))
+    max_training_steps = 11
+    lr_fn = schedules.get_schedule_fn(hps.lr_hparams, max_training_steps)
+    for step in range(max_training_steps):
+      self.assertAlmostEqual(
+          lr_fn(step), expected_lrs[step], places=6, msg=f'{step=}'
+      )
+
+  def test_compound_schedule_cosine_with_warmup(self):
+    """Test that compound schedule correctly handles the cosine schedule."""
+    expected_lrs = [
+        0.0,
+        2.0,
+        4.0,
+        6.0,
+        8.0,
+        4.0 * (1 + np.cos(0.1 * np.pi)),
+        4.0 * (1 + np.cos(0.2 * np.pi)),
+        4.0 * (1 + np.cos(0.3 * np.pi)),
+        4.0 * (1 + np.cos(0.4 * np.pi)),
+        4.0 * (1 + np.cos(0.5 * np.pi)),
+        4.0 * (1 + np.cos(0.6 * np.pi)),
+        4.0 * (1 + np.cos(0.7 * np.pi)),
+        4.0 * (1 + np.cos(0.8 * np.pi)),
+        4.0 * (1 + np.cos(0.9 * np.pi)),
+        0.0,
+    ]
+    hps = config_dict.ConfigDict(dict(
+        lr_hparams={
+            'schedule': 'compound',
+            'factors': 'constant * cosine * linear_warmup',
+            'base_lr': 8,
+            'warmup_steps': 4,
+        }
+    ))
+    max_training_steps = 4 + 11
+    lr_fn = schedules.get_schedule_fn(hps.lr_hparams, max_training_steps)
+    for step in range(max_training_steps):
+      self.assertAlmostEqual(
+          lr_fn(step), expected_lrs[step], places=6, msg=f'{step=}'
+      )
 
   def test_schedule_stretching(self):
     """Test that schedules can be properly stretched."""

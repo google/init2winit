@@ -278,7 +278,8 @@ def compound_schedule(schedule_hparams, max_training_updates):
   Interprets factors in the factors string which can consist of:
   * constant: interpreted as the constant value,
   * linear_warmup: interpreted as linear warmup until warmup_steps,
-  * rsqrt_decay: divide by square root of max(step, warmup_steps)
+  * rsqrt_decay: divide by square root of max(step, warmup_steps),
+  * cosine: multiply by the cosine schedule.
 
   Args:
     schedule_hparams: Relevant schedule_hparams are --- factors - a string with
@@ -287,14 +288,13 @@ def compound_schedule(schedule_hparams, max_training_updates):
       steps to warm up for in the warmup schedule. decay_factor - The amount to
       decay the learning rate by. steps_per_decay - How often to decay the
       learning rate. steps_per_cycle - Steps per cycle when using cosine decay.
-    max_training_updates: This is ignored (needed to match API of other lr
-      functions).
+    max_training_updates: Full number of model updates to be used in training.
+      Only used when 'cosine' factor is requested.
 
   Returns:
     a function learning_rate(step): float -> {'learning_rate': float}, the
     step-dependent lr.
   """
-  del max_training_updates
   factors = [n.strip() for n in schedule_hparams['factors'].split('*')]
   expected_keys = ['schedule', 'factors']
   if 'constant' in factors:
@@ -313,6 +313,11 @@ def compound_schedule(schedule_hparams, max_training_updates):
         ret *= np.minimum(1.0, step / schedule_hparams['warmup_steps'])
       elif name == 'rsqrt_decay':
         ret /= np.sqrt(np.maximum(step, schedule_hparams['warmup_steps']))
+      elif name == 'cosine':
+        warmup_steps = schedule_hparams.get('warmup_steps', 0)
+        shift = np.maximum(0, step - warmup_steps)
+        cosine_steps = max_training_updates - warmup_steps - 1
+        ret *= (1 + np.cos(shift / cosine_steps * np.pi)) * 0.5
       else:
         raise ValueError('Unknown factor %s.' % name)
     return np.asarray(ret, dtype=np.float32)
