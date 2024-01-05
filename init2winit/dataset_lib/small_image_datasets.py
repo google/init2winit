@@ -381,7 +381,7 @@ def _load_deterministic_with_custom_validation(
   data_train = train_ds.shuffle(
       train_size,
       reshuffle_each_iteration=True,
-      seed=int(jax.random.randint(shuffle_rng, [1], 0, 1000)))
+      seed=int(jax.random.randint(shuffle_rng, (), 0, 1000)))
   data_train = data_train.repeat()
   data_train = data_train.batch(per_host_batch_size)
 
