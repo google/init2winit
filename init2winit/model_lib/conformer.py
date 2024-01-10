@@ -529,7 +529,7 @@ class MultiHeadedSelfAttention(nn.Module):
           broadcast_dropout=False,
           attention_fn=attn_fn,
           dropout_rate=config.attention_dropout_rate,
-          deterministic=not train)(inputs, attention_mask)
+          deterministic=not train)(inputs, mask=attention_mask)
 
     result = nn.Dropout(
         rate=config.attention_residual_dropout_rate, deterministic=not train)(
