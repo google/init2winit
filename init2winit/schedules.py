@@ -13,7 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Defines different learning_rate schedules."""
+"""Defines different learning_rate schedules.
+
+Note that everything inside schedules.py should be in terms of number of model
+# updates, not gradient calculations.
+"""
 
 import numpy as np
 
@@ -236,7 +240,6 @@ def piecewise_linear_schedule(schedule_hparams, max_training_updates):
   return lr_fn
 
 
-# TODO(gilmer) Change the code path before open source.
 def mlperf_polynomial_schedule(schedule_hparams, max_training_updates):
   """Polynomial learning rate schedule for LARS optimizer.
 
@@ -407,76 +410,31 @@ def schedule_stretcher(schedule_fn, stretch_factor):
   return _schedule
 
 
-def add_decay_lr_on_plateau(base_schedule_fn, decay_lr_on_plateau_hparams):
-  """LR schedule for automatically reducing learning rate as necessary."""
-
-  class DecayLROnPlateau:
-    """LR schedule for automatically reducing learning rate as necessary."""
-
-    def __init__(self, base_schedule_fn, decay_lr_on_plateau_hparams):
-      self._base_schedule_fn = base_schedule_fn
-      self._decay_lr_on_plateau_hparams = dict(decay_lr_on_plateau_hparams)
-
-      # Grab decay params.
-      self._patience = self._decay_lr_on_plateau_hparams['plateau_patience']
-      self._plateau_decay_factor = self._decay_lr_on_plateau_hparams[
-          'plateau_decay_factor']
-      self._metric_name = self._decay_lr_on_plateau_hparams[
-          'plateau_metric_name']
-      self._mode = self._decay_lr_on_plateau_hparams['plateau_mode']
-
-      self._lr_multiplier = 1.0
-      self._counter = 0
-      self._best_metric_val = None
-
-    def __call__(self, step):
-      return self._lr_multiplier * self._base_schedule_fn(step)
-
-    def decay(self, metrics):
-      """Decay learning rate if validation metric has plateaued."""
-      metric_val = metrics[self._metric_name]
-
-      if not self._best_metric_val:
-        self._best_metric_val = metric_val
-        self._counter = 0
-        return
-
-      if (self._mode == 'lower' and metric_val < self._best_metric_val) or (
-          self._mode == 'higher' and metric_val > self._best_metric_val):
-        self._best_metric_val = metric_val
-        self._counter = 0
-      else:
-        self._counter += 1
-
-      if self._counter == self._patience:
-        self._lr_multiplier /= self._plateau_decay_factor
-        self._counter = 0
-
-      return
-
-  return DecayLROnPlateau(base_schedule_fn, decay_lr_on_plateau_hparams)
-
-
 # Note that everything inside schedules.py should be in terms of number of model
-# updates, not gradient calculations.
+# updates, not gradient calculations. This function will automatically stretch
+# schedules as needed.
 def get_schedule_fn(schedule_hparams, max_training_updates, stretch_factor=1):
-  """Retrieve a schedule function."""
+  """Retrieve a schedule function based on schedule_hparams['schedule'].
 
-  plateau_suffix = '_decay_lr_on_plateau'
-  decay_lr_on_plateau_hparams = None
-  if schedule_hparams['schedule'][-len(plateau_suffix):] == plateau_suffix:
-    schedule_hparams['schedule'] = schedule_hparams[
-        'schedule'][:-len(plateau_suffix)]
+  The schedule name stored in schedule_hparams['schedule'] follows a grammar
+  that allows a concrete schedule name with exactly one suffix. The suffix
+  currently allowed is just '_warmup', which prepends a polynomial warmup.
 
-    # Each schedule expects schedule_hparams to have a specific set of keys. Pop
-    # decay_lr_on_plateau-specific hparams and pass them directly to the decay
-    # lr schedule.
-    decay_lr_on_plateau_hparams = {}
-    schedule_hparams = dict(schedule_hparams)
-    for key in list(schedule_hparams.keys()):  # pylint: disable=g-builtin-op
-      if 'plateau_' in key:
-        decay_lr_on_plateau_hparams[key] = schedule_hparams.pop(key)
+  Args:
+    schedule_hparams: dict-like collection of schedule hparams.
+    max_training_updates: the maximum training budget, measured in number of
+      weight updates.
+    stretch_factor: used to stretch a schedule to handle calling it with a step
+      that counts gradient computations. When gradient accumulation is enabled,
+      all gradient steps corresponding to the same weight update must receive
+      the same learning rate, so the schedule function has to be stretched by
+      repeating each learning rate multiple times since it will always be
+      defined in terms of weight updates.
 
+  Returns:
+    Schedule function mapping step (counting # of weight updates, not gradient
+    computations in the case of gradient accumulation) to learning rate.
+  """
   warmup_suffix = '_warmup'
   if schedule_hparams['schedule'][-len(warmup_suffix):] == warmup_suffix:
     base_name = schedule_hparams['schedule'][:-len(warmup_suffix)]
@@ -488,8 +446,4 @@ def get_schedule_fn(schedule_hparams, max_training_updates, stretch_factor=1):
         schedule_hparams, max_training_updates)
 
   schedule_fn = schedule_stretcher(schedule_fn, stretch_factor)
-
-  if decay_lr_on_plateau_hparams:
-    return add_decay_lr_on_plateau(schedule_fn, decay_lr_on_plateau_hparams)
-  else:
-    return schedule_fn
+  return schedule_fn
