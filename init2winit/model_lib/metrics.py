@@ -20,18 +20,24 @@ return a batch of loss values. This is for safe aggregation across
 different-sized eval batches.
 """
 import functools
-
+from absl import logging
 from clu import metrics
 import flax
 from init2winit import utils
-from init2winit.dataset_lib import spm_tokenizer
-from init2winit.dataset_lib import wpm_tokenizer
 from init2winit.model_lib import losses
 import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.special import expit
 import sklearn.metrics
+
+# pylint: disable=g-import-not-at-top
+try:
+  from init2winit.dataset_lib import spm_tokenizer
+  from init2winit.dataset_lib import wpm_tokenizer
+except ImportError:
+  logging.warning('WPM and SPM tokenizers could not be loaded.')
+# pylint: enable=g-import-not-at-top
 
 
 @flax.struct.dataclass

@@ -14,14 +14,24 @@
 # limitations under the License.
 
 """Librispeech dataset input processing pipeline."""
+
 import functools
 from typing import Dict
 
-from init2winit.dataset_lib import spm_tokenizer
-from init2winit.dataset_lib import wpm_tokenizer
+from absl import logging
 import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
+
+
+# pylint: disable=g-import-not-at-top
+try:
+  from init2winit.dataset_lib import spm_tokenizer
+  from init2winit.dataset_lib import wpm_tokenizer
+except ImportError:
+  logging.warning('WPM and SPM tokenizers could not be loaded.')
+# pylint: enable=g-import-not-at-top
+
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 Features = Dict[str, tf.Tensor]
