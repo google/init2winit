@@ -439,11 +439,10 @@ def ssim(logits, targets, weights=None, mean=None, std=None, volume_max=None):
   # NOTE(dsuo): map NaN ssims to -1.
   ssims = jnp.where(jnp.isnan(ssims), -1, ssims)
 
-  # NOTE(dsuo): map out-of-bounds ssims to -1, the theoretical minimum value
-  # of ssim since we care about maximizing ssim.
-  ssims = jnp.where(
-      jnp.logical_or(ssims > 1, ssims < -1),
-      jnp.ones_like(ssims) * -1, ssims)
+  # NOTE(kasimbeg): map out-of-bounds ssims to 1 and -1, the theoretical
+  # maximum and minimum values of SSIM.
+  ssims = jnp.where(ssims > 1, jnp.ones_like(ssims), ssims)
+  ssims = jnp.where(ssims < -1, jnp.ones_like(ssims) * -1, ssims)
 
   # This step should come after setting NaNs to -1. Otherwise,
   # padding elements with weight value 0 will be set to NaN * 0 = NaN
