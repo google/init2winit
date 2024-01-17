@@ -136,6 +136,55 @@ class LearningRateTest(absltest.TestCase):
           lr_fn(step), expected_lrs[step], places=6, msg=f'{step=}'
       )
 
+  def test_concatenate_out_of_bounds(self):
+    """Test concatenating multiple schedules and going beyond the end."""
+    lengths = [3, 5]
+    lr_hparams_a = config_dict.ConfigDict({
+        'schedule': 'constant',
+        'base_lr': 10.0,
+    })
+    lr_hparams_b = config_dict.ConfigDict({
+        'schedule': 'constant',
+        'base_lr': 7.0,
+    })
+    lr_fn = schedules.concatenate(lengths, lr_hparams_a, lr_hparams_b)
+    # Although the schedule is only defined for sum(lengths), out of bounds
+    # steps should be blithely passed into the final sub-schedule piece so we
+    # test an extra 3 steps.
+    lrs = [lr_fn(t) for t in range(sum(lengths)+3)]
+    expected_lrs = [10.0] * 3 + [7.0] * (5+3)
+    self.assertEqual(lrs, expected_lrs)
+
+  def test_concatenate(self):
+    """Test concatenating multiple schedules."""
+    lengths = [3, 5, 7]
+    lr_hparams_a = config_dict.ConfigDict({
+        'schedule': 'constant_warmup',
+        'base_lr': 10.0,
+        'warmup_steps': 2,
+    })
+    lr_hparams_b = config_dict.ConfigDict({
+        'schedule': 'constant_warmup',
+        'base_lr': 7.0,
+        'warmup_steps': 2,
+    })
+    lr_hparams_c = config_dict.ConfigDict({
+        'schedule': 'constant_warmup',
+        'base_lr': 7.0,
+        'warmup_steps': 5,
+    })
+    lr_fn = schedules.concatenate(
+        lengths, lr_hparams_a, lr_hparams_b, lr_hparams_c)
+    lrs = [lr_fn(t) for t in range(sum(lengths))]
+    lf_fn_a = schedules.get_schedule_fn(lr_hparams_a, lengths[0])
+    lf_fn_b = schedules.get_schedule_fn(lr_hparams_b, lengths[1])
+    lf_fn_c = schedules.get_schedule_fn(lr_hparams_c, lengths[2])
+    expected_lrs_a = [lf_fn_a(t) for t in range(lengths[0])]
+    expected_lrs_b = [lf_fn_b(t) for t in range(lengths[1])]
+    expected_lrs_c = [lf_fn_c(t) for t in range(lengths[2])]
+    expected_lrs = expected_lrs_a + expected_lrs_b + expected_lrs_c
+    self.assertEqual(lrs, expected_lrs)
+
   def test_schedule_stretching(self):
     """Test that schedules can be properly stretched."""
     max_training_steps = 100

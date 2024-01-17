@@ -26,24 +26,67 @@ def _check_schedule_hparams(schedule_hparams, expected_keys):
   if set(schedule_hparams.keys()) != set(expected_keys):
     raise ValueError(
         'Provided schedule_hparams keys are invalid. Recieved: {}, Expected: {}'
-        .format(sorted(schedule_hparams.keys()), sorted(expected_keys)))
+        .format(sorted(schedule_hparams.keys()), sorted(expected_keys))
+    )
 
 
 def constant_schedule(schedule_hparams, max_training_updates):
   del max_training_updates
-  _check_schedule_hparams(schedule_hparams,
-                          ['schedule', 'base_lr'])
+  _check_schedule_hparams(schedule_hparams, ['schedule', 'base_lr'])
   return lambda t: schedule_hparams['base_lr']
 
 
 def cosine_schedule(schedule_hparams, max_training_updates):
-  _check_schedule_hparams(schedule_hparams,
-                          ['schedule', 'base_lr'])
+  _check_schedule_hparams(schedule_hparams, ['schedule', 'base_lr'])
 
   def lr_fn(t):
     decay_factor = (1 + np.cos(t / max_training_updates * np.pi)) * 0.5
     return schedule_hparams['base_lr'] * decay_factor
+
   return lr_fn
+
+
+def cosine_echo_schedule(schedule_hparams, max_training_updates):
+  """Two cosine decay schedules with the second echoing the first one.
+
+  The first piece is a normal cosine schedule with a length of echo_fraction
+  times max_training_updates. The second piece uses the remaining steps and
+  multiplies the first peak learning rate by echo_attenuation. The second piece
+  also starts with a linear warmup using up internal_warmup_fraction of the
+  length of the second piece.
+
+  Args:
+    schedule_hparams: Relevant hparams are base_lr, echo_fraction,
+      echo_attenuation, internal_warmup_fraction.
+    max_training_updates: used along with echo_fraction to determine the lengths
+      of the two pieces. The first piece ends at echo_fraction times
+      max_training_updates.
+
+  Returns:
+    lr_fn: A function mapping global_step to lr.
+  """
+  _check_schedule_hparams(
+      schedule_hparams,
+      [
+          'schedule',
+          'base_lr',
+          'echo_fraction',
+          'echo_attenuation',
+          'internal_warmup_fraction',
+      ],
+  )
+  lengths = [round(max_training_updates * schedule_hparams['echo_fraction'])]
+  lengths.append(max_training_updates - lengths[0])
+  base_lr = schedule_hparams['base_lr']
+  first_part_hparams = {'schedule': 'cosine', 'base_lr': base_lr}
+  second_part_hparams = {
+      'schedule': 'cosine_warmup',
+      'base_lr': schedule_hparams['echo_attenuation'] * base_lr,
+      'warmup_steps': round(
+          schedule_hparams['internal_warmup_fraction'] * lengths[1]
+      ),
+  }
+  return concatenate(lengths, first_part_hparams, second_part_hparams)
 
 
 # code based on
@@ -328,6 +371,31 @@ def compound_schedule(schedule_hparams, max_training_updates):
   return lr_fn
 
 
+def concatenate(lengths, *schedule_hparams):
+  """Concatenate multiple schedules."""
+  if len(lengths) != len(schedule_hparams):
+    raise ValueError(
+        f'Received {len(schedule_hparams)} schedule_hparams but '
+        f'{len(lengths)} lengths.')
+  if any(length < 0 for length in lengths):
+    raise ValueError(f'Received negative lengths: {lengths}')
+
+  parts = [get_schedule_fn(hparams, length)
+           for length, hparams in zip(lengths, schedule_hparams)]
+  left_bounds = np.hstack([[0], np.cumsum(lengths)[:-1]])
+  def _get_part(t):
+    # All t >= sum(lengths) silently map to the last part. This matches behavior
+    #   of most schedules when they receive an out of bounds global_step value.
+    return np.nonzero(t >= left_bounds)[0].max()
+
+  def lr_fn(t):
+    i = _get_part(t)
+    offset = left_bounds[i]
+    return parts[i](t - offset)
+
+  return lr_fn
+
+
 def prepend_polynomial_warmup(schedule_hparams, max_training_updates,
                               base_lr_schedule):
   """Models the base_lr_schedule to include a warmup phase.
@@ -387,6 +455,7 @@ def warmup_then_piecewise_constant_schedule(schedule_hparams,
 lr_fn_dict = {
     'constant': constant_schedule,
     'cosine': cosine_schedule,
+    'cosine_echo': cosine_echo_schedule,
     'piecewise_linear': piecewise_linear_schedule,
     'piecewise_constant': piecewise_constant_schedule,
     'polynomial': polynomial_schedule,
