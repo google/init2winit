@@ -446,12 +446,6 @@ def prepend_polynomial_warmup(schedule_hparams, max_training_updates,
   return lr_fn
 
 
-def warmup_then_piecewise_constant_schedule(schedule_hparams,
-                                            max_training_updates):
-  return prepend_polynomial_warmup(schedule_hparams, max_training_updates,
-                                   piecewise_constant_schedule)
-
-
 lr_fn_dict = {
     'constant': constant_schedule,
     'cosine': cosine_schedule,
@@ -461,7 +455,6 @@ lr_fn_dict = {
     'polynomial': polynomial_schedule,
     'mlperf_polynomial': mlperf_polynomial_schedule,
     'compound': compound_schedule,
-    'warmup_then_piecewise_constant': warmup_then_piecewise_constant_schedule,
     'rsqrt_normalized_decay': rsqrt_normalized_decay,
     't2t_rsqrt_normalized_decay': t2t_rsqrt_normalized_decay,
     'transformer_schedule': transformer_schedule,
