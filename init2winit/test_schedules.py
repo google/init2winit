@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2023 The init2winit Authors.
+# Copyright 2024 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -101,6 +101,33 @@ class LearningRateTest(absltest.TestCase):
       self.assertAlmostEqual(
           lr_fn(step), expected_lrs[step], places=6, msg=f'{step=}'
       )
+
+  def test_warmup_fraction(self):
+    """Test that the _warmup suffix works with warmup_fraction."""
+    lr_hparams_a = config_dict.ConfigDict({
+        'schedule': 'constant_warmup',
+        'base_lr': 10.0,
+        'warmup_steps': 2,
+    })
+    lr_hparams_b = config_dict.ConfigDict({
+        'schedule': 'constant_warmup',
+        'base_lr': 10.0,
+        'warmup_fraction': 0.2,
+    })
+    lf_fn_a = schedules.get_schedule_fn(lr_hparams_a, 10)
+    lf_fn_b = schedules.get_schedule_fn(lr_hparams_b, 10)
+    lrs_a = [lf_fn_a(t) for t in range(10)]
+    lrs_b = [lf_fn_b(t) for t in range(10)]
+    self.assertEqual(lrs_a, lrs_b)
+
+    lr_hparams_malformed = config_dict.ConfigDict({
+        'schedule': 'constant_warmup',
+        'base_lr': 10.0,
+        'warmup_fraction': 0.2,
+        'warmup_steps': 2,
+    })
+    with self.assertRaises(ValueError):
+      schedules.get_schedule_fn(lr_hparams_malformed, 10)
 
   def test_compound_schedule_cosine_with_warmup(self):
     """Test that compound schedule correctly handles the cosine schedule."""

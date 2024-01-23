@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2023 The init2winit Authors.
+# Copyright 2024 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -400,6 +400,13 @@ def prepend_polynomial_warmup(schedule_hparams, max_training_updates,
                               base_lr_schedule):
   """Models the base_lr_schedule to include a warmup phase.
 
+  The length of the warmup period can be specified *either* using warmup_steps
+  or warmup_fraction. The latter represents the fraction of max_training_updates
+  to use for warmup and should be between 0 and 1.
+
+  Using warmup_fraction should be preferred when running experiments using a
+  search space that is shared across multiple workloads.
+
   The returned schedule will have the following form:
 
   if step < hps.warmup_steps:
@@ -417,12 +424,14 @@ def prepend_polynomial_warmup(schedule_hparams, max_training_updates,
 
   Args:
     schedule_hparams: Must include all required hparams needed in
-      base_lr_schedule. Additionally we require warmup_steps, warmup_power to
-      be added.
+      base_lr_schedule. Additionally we require warmup_steps, warmup_power to be
+      added. Alternatively, warmup_steps can be replaced with warmup_fraction
+      which indicates a number of warmup steps as a fraction (on [0,1]) of the
+      total number of training steps.
     max_training_updates: Full number of model updates to be used in training.
-    base_lr_schedule: One of the schedule functions defined in this module.
-      Must satisfy the API of -
-      base_lr_schedule(schedule_hparams, max_training_updates) -> returns lr_fn.
+    base_lr_schedule: One of the schedule functions defined in this module. Must
+      satisfy the API of - base_lr_schedule(schedule_hparams,
+      max_training_updates) -> returns lr_fn.
 
   Returns:
     A function mapping global_step to learning rate.
@@ -430,7 +439,14 @@ def prepend_polynomial_warmup(schedule_hparams, max_training_updates,
 
   # grab warmup hparams
   schedule_hparams = dict(schedule_hparams)  # convert to dict so we can pop
-  warmup_steps = schedule_hparams.pop('warmup_steps')
+  if ('warmup_steps' in schedule_hparams and
+      'warmup_fraction' in schedule_hparams):
+    raise ValueError('Only one of warmup_steps and warmup_fraction can be set.')
+  if 'warmup_steps' in schedule_hparams:
+    warmup_steps = schedule_hparams.pop('warmup_steps')
+  else:
+    warmup_fraction = schedule_hparams.pop('warmup_fraction')
+    warmup_steps = round(warmup_fraction * max_training_updates)
   warmup_power = schedule_hparams.pop('warmup_power', 1)
   base_lr = schedule_hparams['base_lr']
 
