@@ -102,8 +102,8 @@ class LearningRateTest(absltest.TestCase):
           lr_fn(step), expected_lrs[step], places=6, msg=f'{step=}'
       )
 
-  def test_warmup_fraction(self):
-    """Test that the _warmup suffix works with warmup_fraction."""
+  def test_warmup_steps_fraction(self):
+    """Test that the _warmup suffix works with warmup_steps_fraction."""
     lr_hparams_a = config_dict.ConfigDict({
         'schedule': 'constant_warmup',
         'base_lr': 10.0,
@@ -112,7 +112,7 @@ class LearningRateTest(absltest.TestCase):
     lr_hparams_b = config_dict.ConfigDict({
         'schedule': 'constant_warmup',
         'base_lr': 10.0,
-        'warmup_fraction': 0.2,
+        'warmup_steps_fraction': 0.2,
     })
     lf_fn_a = schedules.get_schedule_fn(lr_hparams_a, 10)
     lf_fn_b = schedules.get_schedule_fn(lr_hparams_b, 10)
@@ -123,7 +123,7 @@ class LearningRateTest(absltest.TestCase):
     lr_hparams_malformed = config_dict.ConfigDict({
         'schedule': 'constant_warmup',
         'base_lr': 10.0,
-        'warmup_fraction': 0.2,
+        'warmup_steps_fraction': 0.2,
         'warmup_steps': 2,
     })
     with self.assertRaises(ValueError):
