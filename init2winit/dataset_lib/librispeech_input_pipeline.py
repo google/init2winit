@@ -27,16 +27,15 @@ import tensorflow_datasets as tfds
 # pylint: disable=g-import-not-at-top
 try:
   from init2winit.dataset_lib import spm_tokenizer
-  from init2winit.dataset_lib import wpm_tokenizer
 except ImportError:
-  logging.warning('WPM and SPM tokenizers could not be loaded.')
+  logging.warning('SPM tokenizer could not be loaded.')
 # pylint: enable=g-import-not-at-top
 
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 Features = Dict[str, tf.Tensor]
 
-ALLOWED_TOKENIZERS = ['WPM', 'SPM', 'RAW']
+ALLOWED_TOKENIZERS = ['SPM', 'RAW']
 
 
 class CharacterTokenizer():
@@ -137,28 +136,12 @@ def _preprocess_output(features, tokenizer, hps):
     hps: hyperparameters for the dataset pipeline set upstream, this is used to
       extract flags controlling which tokenizer is used.
       Uses sentence piece tokenizer if hps.use_spm_tokenizer = True.
-      Uses word piece tokenizer if hps.use_wpm_tokenizer=True.
       Uses simple character level tokenizer if hps.use_character_tokenizer=True.
 
   Returns:
     outputs tf data features with tokenized transcripts.
   """
-  if hps.tokenizer_type == 'WPM':
-    tokenizer_input = features['targets'][tf.newaxis, ...]
-
-    def cpu_tokenizer_fn(*args, **kwargs):
-      # Try not to annoy TPUs when tokenizers are depending on TF.
-      with tf.device('/cpu:0'):
-        return tokenizer.strings_to_ids(*args, **kwargs)
-
-    tokens, token_paddings = tf.numpy_function(
-        func=cpu_tokenizer_fn,
-        inp=[tokenizer_input],
-        Tout=[tf.int32, tf.float32])
-
-    features['targets'] = tokens[0, :]
-    features['target_paddings'] = token_paddings[0, :]
-  elif hps.tokenizer_type == 'SPM':
+  if hps.tokenizer_type == 'SPM':
     features['targets'] = tokenizer.tokenize(features['targets'])
     features['target_paddings'] = tf.zeros_like(
         features['targets'], dtype=tf.float32)
@@ -232,12 +215,10 @@ def preprocess_data(
   if hps.tokenizer_type not in ALLOWED_TOKENIZERS:
     raise ValueError(
         'Passed in tokenizer_type value does not correspond to currently '
-        'supported tokenizers, make sure one of WPM, SPM or RAW is set'
+        'supported tokenizers, make sure one of SPM or RAW is set'
         ' as tokenizer_type flag.')
 
-  if hps.tokenizer_type == 'WPM':
-    tokenizer = wpm_tokenizer.WpmTokenizer(hps.tokenizer_vocab_path)
-  elif hps.tokenizer_type == 'SPM':
+  if hps.tokenizer_type == 'SPM':
     tokenizer = spm_tokenizer.load_tokenizer(hps.tokenizer_vocab_path)
   elif hps.tokenizer_type == 'RAW':
     tokenizer = CharacterTokenizer()

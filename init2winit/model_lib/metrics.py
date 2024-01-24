@@ -34,9 +34,8 @@ import sklearn.metrics
 # pylint: disable=g-import-not-at-top
 try:
   from init2winit.dataset_lib import spm_tokenizer
-  from init2winit.dataset_lib import wpm_tokenizer
 except ImportError:
-  logging.warning('WPM and SPM tokenizers could not be loaded.')
+  logging.warning('SPM tokenizers could not be loaded.')
 # pylint: enable=g-import-not-at-top
 
 
@@ -492,23 +491,7 @@ def compute_wer(decoded,
   word_errors = 0.0
   num_words = 0.0
 
-  if tokenizer_type == 'WPM':
-    decoded_sentences = tokenizer.ids_to_strings(decoded, decoded_paddings)
-    target_sentences = tokenizer.ids_to_strings(targets, target_paddings)
-
-    if len(decoded_sentences) != len(target_sentences):
-      raise ValueError('WER computation failed due to unequal lengths of'
-                       ' decoded and target sentences : {} vs {}'.format(
-                           len(decoded_sentences), len(target_sentences)))
-
-    for decoded_sentence, target_sentence in zip(decoded_sentences,
-                                                 target_sentences):
-      target_num_words = len(target_sentence.split())
-
-      word_errors += utils.edit_distance(decoded_sentence, target_sentence)
-      num_words += target_num_words
-
-  elif tokenizer_type == 'SPM':
+  if tokenizer_type == 'SPM':
     decoded_lengths = np.sum(decoded_paddings == 0.0, axis=-1)
     target_lengths = np.sum(target_paddings == 0.0, axis=-1)
 
@@ -545,13 +528,11 @@ def wer(hps):
     clu.Metric computing word error rate.
   """
 
-  if hps.tokenizer_type == 'WPM':
-    tokenizer = wpm_tokenizer.WpmTokenizer(hps.tokenizer_vocab_path)
-  elif hps.tokenizer_type == 'SPM':
+  if hps.tokenizer_type == 'SPM':
     tokenizer = spm_tokenizer.load_tokenizer(hps.tokenizer_vocab_path)
   else:
     raise ValueError(
-        'WER computation is currently supported for WPM and SPM tokenizers.')
+        'WER computation is currently only supported for SPM tokenizer.')
 
   @flax.struct.dataclass
   class WER(

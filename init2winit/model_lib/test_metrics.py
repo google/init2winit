@@ -21,7 +21,6 @@ from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
-from init2winit.dataset_lib import wpm_tokenizer
 from init2winit.model_lib import metrics
 import jax.numpy as jnp
 import numpy as np
@@ -147,36 +146,6 @@ class MetricsTest(parameterized.TestCase):
     result = metrics.structural_similarity(jim1, jim2, data_range=1.0).item()
 
     self.assertAlmostEqual(expected, result)
-
-  def test_wer_wpm(self):
-    """Tests word error rate metric implementation with SPM tokenizer."""
-
-    source_sentence = "Let's start      praying this test passes!"
-    decoded_sentence = source_sentence
-
-    tokenizer = wpm_tokenizer.WpmTokenizer(testing_mode=True)
-    tokenizer_type = 'WPM'
-
-    with mock.patch.object(
-        tokenizer, 'strings_to_ids', return_value=[1, 2, 3], autospec=True):
-      with mock.patch.object(
-          tokenizer,
-          'ids_to_strings',
-          return_value=[source_sentence],
-          autospec=True):
-        source_tokens = tokenizer.strings_to_ids(source_sentence)
-        source_paddings = jnp.array([0.0, 0.0, 0.0], dtype=jnp.float32)
-
-        decoded_tokens = tokenizer.strings_to_ids(decoded_sentence)
-        decoded_paddings = jnp.array([0.0, 0.0, 0.0], dtype=jnp.float32)
-
-        word_errors, num_words = metrics.compute_wer(decoded_tokens,
-                                                     decoded_paddings,
-                                                     source_tokens,
-                                                     source_paddings, tokenizer,
-                                                     tokenizer_type)
-        self.assertEqual(word_errors, 0)
-        self.assertEqual(num_words, 6.0)
 
   def test_wer_spm(self):
     """Tests word error rate metric implementation with SPM tokenizer."""
