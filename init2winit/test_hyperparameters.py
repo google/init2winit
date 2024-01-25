@@ -51,6 +51,32 @@ class HyperParameterTest(absltest.TestCase):
         ),
     )
 
+  def test_unrecognized_override(self):
+    """Test overriding with unrecognized hparams."""
+    # Sadly, if we try 'lr_hparams.base_lrTYPO' no exception will be raised.
+    # We currently do not detect issues nested inside the lr_hparams or other
+    # nested hparam overrides.
+    hps_overrides = {'lr_hparamsTYPO.base_lr': 77.0}
+    with self.assertRaises(KeyError):
+      hyperparameters.build_hparams(
+          model_name='transformer',
+          initializer_name='noop',
+          dataset_name='lm1b_v2',
+          hparam_file=None,
+          hparam_overrides=hps_overrides,
+          allow_unrecognized_hparams=False,
+      )
+    merged_hps = hyperparameters.build_hparams(
+        model_name='transformer',
+        initializer_name='noop',
+        dataset_name='lm1b_v2',
+        hparam_file=None,
+        hparam_overrides=hps_overrides,
+        allow_unrecognized_hparams=True,
+    )
+    expected_added_field = {'base_lr': 77.0}
+    self.assertEqual(merged_hps.lr_hparamsTYPO.to_dict(), expected_added_field)
+
   def test_dot_override(self):
     """Test overriding lr_hparams.base_lr works correctly."""
     hps_overrides = {'lr_hparams.base_lr': 77.0}
