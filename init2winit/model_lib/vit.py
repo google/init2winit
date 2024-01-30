@@ -46,7 +46,6 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         lr_hparams={
             'base_lr': 1e-3,
             'schedule': 'cosine_warmup',
-            'warmup_steps': 10_000
         },
         optimizer='adam',
         opt_hparams={
