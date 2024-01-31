@@ -55,11 +55,11 @@ To cite this repository:
 
 ```
 @software{init2winit2021github,
-  author = {Justin M. Gilmer and George E. Dahl and Zachary Nado},
+  author = {Justin M. Gilmer and George E. Dahl and Zachary Nado and Priya Kasimbeg and Sourabh Medapati},
   title = {{init2winit}: a JAX codebase for initialization, optimization, and tuning research},
   url = {http://github.com/google/init2winit},
-  version = {0.0.1},
-  year = {2021},
+  version = {0.0.2},
+  year = {2023},
 }
 ```
 
@@ -76,8 +76,17 @@ Contributors (past and present):
 - George E. Dahl
 - Justin M. Gilmer
 - Michal Badura
+- Priya Kasimbeg
 - Rohan Anil
+- Sourabh Medapati
 - Sneha Kudugunta
 - Varun Godbole
 - Zachary Nado
+- Vlad Feinberg
+- Derrick Xin
+- Naman Agarwal
+- Daniel Suo
+- Bilal Khan
+- Jeremy Cohen
+- Kacper Krasowiak
 
