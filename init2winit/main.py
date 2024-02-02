@@ -136,9 +136,10 @@ flags.DEFINE_string(
     'hparam_file', None, 'Optional path to hparam json file for overriding '
     'hyperparameters. Hyperparameters are loaded before '
     'applying --hparam_overrides.')
-flags.DEFINE_bool(
-    'allow_unrecognized_hparams', False,
-    'Downgrades unrecognized hparam override keys from an error to a warning.')
+flags.DEFINE_list(
+    'allowed_unrecognized_hparams', [],
+    'Downgrades unrecognized hparam override keys from an error to a warning '
+    'for the supplied list of keys.')
 flags.DEFINE_string(
     'training_metrics_config', '',
     'JSON representation of the training metrics config.')
@@ -189,7 +190,7 @@ def _run(
     early_stopping_min_steps,
     eval_steps,
     hparam_file,
-    allow_unrecognized_hparams,
+    allowed_unrecognized_hparams,
     hparam_overrides,
     initializer_name,
     model_name,
@@ -221,7 +222,7 @@ def _run(
       hparam_file=hparam_file,
       hparam_overrides=hparam_overrides,
       input_pipeline_hps=input_pipeline_hps,
-      allow_unrecognized_hparams=allow_unrecognized_hparams)
+      allowed_unrecognized_hparams=allowed_unrecognized_hparams)
 
   # Note that one should never tune an RNG seed!!! The seed is only included in
   # the hparams for convenience of running hparam trials with multiple seeds per
@@ -349,7 +350,7 @@ def main(unused_argv):
         early_stopping_min_steps=FLAGS.early_stopping_min_steps,
         eval_steps=eval_steps,
         hparam_file=FLAGS.hparam_file,
-        allow_unrecognized_hparams=FLAGS.allow_unrecognized_hparams,
+        allowed_unrecognized_hparams=FLAGS.allowed_unrecognized_hparams,
         hparam_overrides=FLAGS.hparam_overrides,
         initializer_name=FLAGS.initializer,
         model_name=FLAGS.model,

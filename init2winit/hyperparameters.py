@@ -102,7 +102,7 @@ def build_hparams(model_name,
                   hparam_file,
                   hparam_overrides,
                   input_pipeline_hps=None,
-                  allow_unrecognized_hparams=False):
+                  allowed_unrecognized_hparams=None):
   """Build experiment hyperparameters.
 
   Args:
@@ -115,11 +115,12 @@ def build_hparams(model_name,
       string encoding of this hyperparameter override dict. Note that this is
       applied after the hyperparameter file overrides.
     input_pipeline_hps: a dict of hyperparameters for performance tuning.
-    allow_unrecognized_hparams: if set, hparam overrides are allowed to
-      introduce new hparam keys that will most likely be ignored. Downgrading
-      unrecognized hparams from an error to a warning can be useful when trying
-      to tune using a shared search space over multiple workloads that don't all
-      support the same set of hyperparameters.
+    allowed_unrecognized_hparams: An optional list of hparam keys that hparam
+      overrides are allowed to introduce. There is no guaranteed these new
+      hparam keys will be ignored. Downgrading an explicit list of unrecognized
+      hparams from an error to a warning can be useful when trying to tune using
+      a shared search space over multiple workloads that don't all support the
+      same set of hyperparameters.
 
   Returns:
     A ConfigDict of experiment hyperparameters.
@@ -186,10 +187,13 @@ def build_hparams(model_name,
         merged['optimizer'] != hparam_overrides['optimizer']):
       merged['opt_hparams'] = {}
     hparam_overrides = expand_dot_keys(hparam_overrides)
-    if allow_unrecognized_hparams:
+    if allowed_unrecognized_hparams:
       new_keys = [k for k in hparam_overrides if k not in merged]
       if new_keys:
         logging.warning('Unrecognized top-level hparams: %s', new_keys)
+      if any(k not in allowed_unrecognized_hparams for k in new_keys):
+        raise ValueError(
+            f'Unrecognized top-level hparams not in allowlist: {new_keys}')
       with merged.unlocked():
         merged.update(hparam_overrides)
     else:

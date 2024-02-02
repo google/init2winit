@@ -64,7 +64,7 @@ class HyperParameterTest(absltest.TestCase):
           dataset_name='lm1b_v2',
           hparam_file=None,
           hparam_overrides=hps_overrides,
-          allow_unrecognized_hparams=False,
+          allowed_unrecognized_hparams=[],
       )
     merged_hps = hyperparameters.build_hparams(
         model_name='transformer',
@@ -72,7 +72,7 @@ class HyperParameterTest(absltest.TestCase):
         dataset_name='lm1b_v2',
         hparam_file=None,
         hparam_overrides=hps_overrides,
-        allow_unrecognized_hparams=True,
+        allowed_unrecognized_hparams=['lr_hparamsTYPO'],
     )
     expected_added_field = {'base_lr': 77.0}
     self.assertEqual(merged_hps.lr_hparamsTYPO.to_dict(), expected_added_field)
