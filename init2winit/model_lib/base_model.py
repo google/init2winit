@@ -139,6 +139,7 @@ class BaseModel(object):
   def __init__(self, hps, dataset_meta_data, loss_name, metrics_name):
     self.hps = hps
     self.dataset_meta_data = dataset_meta_data
+    self._loss_name = loss_name
     self.loss_fn = losses.get_loss_fn(loss_name, hps)
     self.output_activation_fn = losses.get_output_activation_fn(loss_name)
     self.metrics_bundle = metrics.get_metrics(metrics_name, hps)
@@ -284,26 +285,31 @@ class BaseModel(object):
 
     Returns:
       A training objective value.
-
     """
     if self.dataset_meta_data['apply_one_hot_in_loss']:
       targets = jax.nn.one_hot(targets, logits.shape[-1])
-    # Optionally apply label smoothing.
-    if self.hps.get('label_smoothing') is not None:
+    # Optionally apply label smoothing only if the loss used
+    # is multi-class cross-entropy.
+    label_smoothing = self.hps.get('label_smoothing')
+    if self._loss_name == 'cross_entropy' and label_smoothing is not None:
       targets = model_utils.apply_label_smoothing(
-          targets, self.hps.get('label_smoothing'))
+          targets, label_smoothing
+      )
 
     objective_numerator, objective_denominator = self.loss_fn(
-        logits, targets, weights)
+        logits, targets, weights
+    )
 
     (objective_numerator, objective_denominator) = jax.lax.psum(
-        (objective_numerator, objective_denominator), axis_name='batch')
+        (objective_numerator, objective_denominator), axis_name='batch'
+    )
 
     # epsilon added to handle empty batch case if we encounter one.
-    objective_value = (objective_numerator / (objective_denominator + 1e-9))
+    objective_value = objective_numerator / (objective_denominator + 1e-9)
     if self.hps.get('l2_decay_factor'):
-      l2_loss = model_utils.l2_regularization(params,
-                                              self.hps.l2_decay_rank_threshold)
+      l2_loss = model_utils.l2_regularization(
+          params, self.hps.l2_decay_rank_threshold
+      )
       objective_value += 0.5 * self.hps.l2_decay_factor * l2_loss
 
     return objective_value
