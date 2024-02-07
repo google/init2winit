@@ -1292,7 +1292,7 @@ def scale_by_adaprop(
         lambda p: jnp.zeros_like(p, dtype=quantized_dtype), params
     )
     gain = jax.tree_map(
-        lambda p: jnp.ones_like(p, dtype=quantized_dtype), params
+        lambda p: jnp.zeros_like(p, dtype=quantized_dtype), params
     )
 
     return ScaleByAdapropState(
@@ -1788,7 +1788,7 @@ def project_parameters_by_norm(
   Args:
     projection_radius: The norm of the projected parameters.
     order: Order of the norm used for projection. Default is None, i.e. 2.
-    axis: Axes along which the projection happens. 
+    axis: Axes along which the projection happens.
           Default is None, i.e. the entire parameter is projected.
     flip_update_sign:
 
