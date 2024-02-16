@@ -21,6 +21,7 @@ from init2winit.model_lib.model_utils import ParameterType  # pylint: disable=g-
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import online_newton_step
+from init2winit.optimizer_lib import parabolic_approximation_line_search
 from init2winit.optimizer_lib import pax_adafactor
 from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib import sharpness_aware_minimization
@@ -29,6 +30,7 @@ from init2winit.optimizer_lib.hessian_free import CGIterationTrackingMethod
 from init2winit.optimizer_lib.hessian_free import hessian_free
 import jax
 import optax
+
 
 
 
