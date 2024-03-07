@@ -18,12 +18,14 @@
 from absl import logging
 import flax
 from init2winit.model_lib.model_utils import ParameterType  # pylint: disable=g-importing-member
+from init2winit.optimizer_lib import bandeddiag_optimizers
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
 from init2winit.optimizer_lib import online_newton_step
 from init2winit.optimizer_lib import pax_adafactor
 from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib import sharpness_aware_minimization
+from init2winit.optimizer_lib import tridiag_optimizers
 from init2winit.optimizer_lib import utils
 from init2winit.optimizer_lib.hessian_free import CGIterationTrackingMethod
 from init2winit.optimizer_lib.hessian_free import hessian_free
