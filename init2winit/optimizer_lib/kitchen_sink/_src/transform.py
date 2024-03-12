@@ -61,6 +61,16 @@ def _update_moment(updates, moments, decay, order):
   )
 
 
+def _update_preconditioner_moment(updates, moments, decay, order):
+  """Compute the exponential moving average of the `order-th` moment."""
+  assert order >= 1 and order <= 2
+  moment_func = lambda x: jnp.power(jnp.abs(x), order)
+  return jax.tree_map(
+      lambda g, t: (1 - decay) * moment_func(g) + decay * t,
+      updates, moments
+  )
+
+
 def _update_first_moment_variance_preserved(updates, moments, decay):
   """Applies variance preserved EMA.
 
@@ -1254,24 +1264,26 @@ class ScaleByAdapropState(NamedTuple):
 
 
 def scale_by_adaprop(
-    alpha: float = 1.0,
     b1: float = 0.9,
+    b2: float = 0.999,
     b3: float = 1.0,
     b4: float = 0.9,
     eps: float = 1e-8,
-    use_nesterov: str = 'False',
+    power: float = 2.0,
+    use_nesterov: str = 'True',
     quantized_dtype: jnp.dtype = jnp.float32,
 ) -> optax.GradientTransformation:
   """Rescale updates according to the AdaProp algorithm.
 
   Args:
-    alpha: upper bound on bet.
     b1: decay rate for the exponentially weighted average of grads.
-    # b2: decay rate for the exponentially weighted average of absolute grads
-    #     is omitted because it is calculated from alpha and b1.
+    b2: decay rate for the exponentially weighted average of absolute grads
+        is omitted because it is calculated from alpha and b1.
     b3: decay rate for the exponentially weighted average of max grads.
     b4: decay rate for the exponentially weighted average of reward.
     eps: term added to the denominator to improve numerical stability.
+    power: the power to use in the preconditioner (the value determines the
+      power to which the absolute value of the grads are raised).
     use_nesterov: Whether to use Nesterov-style update.
     quantized_dtype: type of the quantized input. Allowed options are
       jnp.bfloat16 and jnp.float32. If floating-point type is specified,
@@ -1280,6 +1292,9 @@ def scale_by_adaprop(
   Returns:
     An (init_fn, update_fn) tuple.
   """
+  raise_power = (
+      jnp.sqrt if power == 2.0 else lambda x: jnp.power(x, 1.0 / power)
+  )
 
   def init_fn(params):
     prev_params = jax.tree_map(
@@ -1305,19 +1320,18 @@ def scale_by_adaprop(
 
   def update_fn(updates, state, params):
     new_count = optax.safe_int32_increment(state.count)
-    b2 = 1.0 - (1.0 - b1)/alpha
-    mu = jax.tree_map(lambda g, t: (1-b1)*g + b1*t, updates, state.mu)
+    mu = _update_moment(updates, state.mu, b1, 1)
     if use_nesterov == 'True':
-      mu2 = jax.tree_map(lambda g, t: (1-b1)*g + b1*t, updates, mu)
+      mu2 = _update_moment(updates, mu, b1, 1)
       mu_hat = _bias_correction(mu2, b1, new_count)
     else:
       mu_hat = _bias_correction(mu, b1, new_count)
-    nu = jax.tree_map(lambda g, t: (1-b2)*jnp.abs(g) + b2*t, updates, state.nu)
+    nu = _update_preconditioner_moment(updates, state.nu, b2, power)
     nu_hat = _bias_correction(nu, b2, new_count)
-    pp = jax.tree_map(lambda p, t: (1-b4)*p + b4*t, params, state.pp)
+    pp = _update_moment(params, state.pp, b4, 1)
     pp_hat = _bias_correction(pp, b4, new_count)
     param_change = jax.tree_map(lambda p, i: p - i, params, pp_hat)
-    g_max = jax.tree_map(lambda g, n: jnp.maximum(jnp.abs(g), n),
+    g_max = jax.tree_map(lambda g, n: jnp.maximum(jnp.abs(g), raise_power(n)),
                          updates, nu_hat)
     gain = jax.tree_map(
         lambda r, p, g, x: jnp.maximum(b3*r - p*g/(x + eps), 0.0),
@@ -1325,7 +1339,7 @@ def scale_by_adaprop(
     wealth = jax.tree_map(lambda g: 1.0 + g, gain)
 
     bet_factor = jax.tree_map(
-        lambda m, n: m / (n + eps),
+        lambda m, n: m / (raise_power(n) + eps),
         mu_hat,
         nu_hat,
     )
@@ -1484,7 +1498,7 @@ def scale_by_nadam(
     eps: float = 1e-8,
     eps_root: float = 0.0,
     debias: bool = True,
-    power: float = 0.5,
+    power: float = 2.0,
 ) -> optax.GradientTransformation:
   """Rescale updates according to the NAdam algorithm.
 
@@ -1504,12 +1518,15 @@ def scale_by_nadam(
     eps_root: term added to the denominator inside the square-root to improve
       numerical stability when backpropagating gradients through the rescaling.
     debias: whether to use bias correction.
-    power: the power to use in the preconditioner (0.5 in default adam).
+    power: the power to use in the preconditioner (the value determines the
+      power to which the absolute value of the grads are raised).
 
   Returns:
     An (init_fn, update_fn) tuple.
   """
-  raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
+  raise_power = (
+      jnp.sqrt if power == 2.0 else lambda x: jnp.power(x, 1.0 / power)
+  )
 
   def init_fn(params):
     mu = jax.tree_map(jnp.zeros_like, params)  # First moment
@@ -1519,7 +1536,7 @@ def scale_by_nadam(
   def update_fn(updates, state, params=None):
     del params
     mu = _update_moment(updates, state.mu, b1, 1)
-    nu = _update_moment(updates, state.nu, b2, 2)
+    nu = _update_preconditioner_moment(updates, state.nu, b2, power)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     mu_hat = _update_moment(updates, mu, b1, 1)
     mu_hat = mu_hat if not debias else _bias_correction(mu_hat, b1, count)

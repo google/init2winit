@@ -16,6 +16,7 @@
 """Kitchen Sink: decomposing optimizers in JAX."""
 
 from init2winit.optimizer_lib.kitchen_sink._src.alias import adapropw
+from init2winit.optimizer_lib.kitchen_sink._src.alias import nadampw
 from init2winit.optimizer_lib.kitchen_sink._src.alias import nadamw
 from init2winit.optimizer_lib.kitchen_sink._src.core import kitchen_sink
 from init2winit.optimizer_lib.kitchen_sink._src.transform import add_decayed_weights
@@ -51,6 +52,7 @@ __version__ = '0.0.1'
 
 __all__ = (
     'nadamw',
+    'nadampw',
     'adapropw',
     'kitchen_sink',
     'bias_correction',
