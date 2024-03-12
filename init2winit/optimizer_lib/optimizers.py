@@ -97,6 +97,9 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
   # "cost_fn_params_tuple=(cost_fn, params)" instead of the `params`
   # argument, where cost_fn is the model's cost function.
   optimizer_requires_cost_fn = False
+  # When set to True, the optimizer's update function will be called with
+  # an extra keyword argument value=cost_fn(params).
+  optimizer_requires_value = False
 
   if hps.optimizer == 'sgd':
     opt_init, opt_update = utils.static_inject_hyperparams(sgd)(
@@ -353,11 +356,16 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         hps.optimizer))
   return opt_init, _wrap_update_fn(hps.optimizer, opt_update,
                                    send_grad_fn=optimizer_requires_grad_fn,
-                                   send_cost_fn=optimizer_requires_cost_fn)
+                                   send_cost_fn=optimizer_requires_cost_fn,
+                                   send_value=optimizer_requires_value)
 
 
 def _wrap_update_fn(
-    opt_name, opt_update, send_grad_fn=False, send_cost_fn=False
+    opt_name,
+    opt_update,
+    send_grad_fn=False,
+    send_cost_fn=False,
+    send_value=False,
 ):
   """Wraps the optimizer update function to have the same function signiture.
 
@@ -369,6 +377,8 @@ def _wrap_update_fn(
     send_cost_fn: When set to True will pass `cost_fn` to the optimizer's update
       function. This must not be set to True if `send_grad_fn` is True (note
       that grad_fn already returns the cost value).
+    send_value: When set to True will pass the current value to the optimizer's
+      update function.
 
   Returns:
     A wrapped optimizer update function.
@@ -380,7 +390,8 @@ def _wrap_update_fn(
                 batch=None,
                 batch_stats=None,
                 cost_fn=None,
-                grad_fn=None):
+                grad_fn=None,
+                value=None):
     if opt_name == 'hessian_free':
       variables = {'params': params}
       if batch_stats is not None:
@@ -396,6 +407,15 @@ def _wrap_update_fn(
     elif send_cost_fn:
       return opt_update(
           grads, optimizer_state, cost_fn_params_tuple=(cost_fn, params))
+    elif send_value:
+      return opt_update(
+          grads,
+          optimizer_state,
+          params=params,
+          value=value,
+          value_fn=cost_fn,
+          grad=grad_fn,
+      )
     return opt_update(grads, optimizer_state, params=params)
 
   if not utils.requires_gradient_aggregation(opt_update):
