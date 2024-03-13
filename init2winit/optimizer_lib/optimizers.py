@@ -350,7 +350,16 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         base_opt_update_fn=opt_update
     )
     optimizer_requires_cost_fn = True
-
+  elif hps.opt_hparams.get('use_mechanic', False):
+    opt_init, opt_update = mechanic.mechanize(
+        weight_decay=hps.opt_hparams['mech_weight_decay'],
+        eps=hps.opt_hparams['eps'],
+        s_init=hps.opt_hparams['s_init'],
+        num_betas=hps.opt_hparams['num_betas'],
+        base_optimizer=optax.GradientTransformationExtraArgs(
+            opt_init, opt_update
+        )
+    )
   if opt_init is None or opt_update is None:
     raise NotImplementedError('Optimizer {} not implemented'.format(
         hps.optimizer))
