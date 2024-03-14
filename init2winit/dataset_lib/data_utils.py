@@ -30,7 +30,7 @@ Dataset = collections.namedtuple('Dataset', [
 
 def iterator_as_numpy(iterator):
   for x in iterator:
-    yield jax.tree_map(lambda y: y._numpy(), x)  # pylint: disable=protected-access
+    yield jax.tree.map(lambda y: y._numpy(), x)  # pylint: disable=protected-access
 
 
 def image_iterator(data,
@@ -127,7 +127,7 @@ def maybe_pad_batch(batch,
 
   # Most batches will not need padding so we quickly return to avoid slowdown.
   if batch_pad == 0:
-    new_batch = jax.tree_map(lambda x: x, batch)
+    new_batch = jax.tree.map(lambda x: x, batch)
     return new_batch
 
   def zero_pad(ar, pad_axis):
@@ -167,17 +167,17 @@ def shard(batch, n_devices=None):
     assert all(len(v) == n_devices for v in batch.values())
     # transpose a dict of lists to a list of dicts
     shards = [{k: v[i] for (k, v) in batch.items()} for i in range(n_devices)]
-    return jax.tree_map(lambda *vals: np.stack(vals, axis=0), shards[0],
+    return jax.tree.map(lambda *vals: np.stack(vals, axis=0), shards[0],
                         *shards[1:])
 
   # Otherwise, the entries are arrays, so just reshape them.
   def _shard_array(array):
     return array.reshape((n_devices, -1) + array.shape[1:])
 
-  return jax.tree_map(_shard_array, batch)
+  return jax.tree.map(_shard_array, batch)
 
 
 def tf_to_numpy(tfds_data):
   # Safe because we won't mutate. Avoids an extra copy from tfds.
   convert_data = lambda x: x._numpy()  # pylint: disable=protected-access
-  return jax.tree_map(convert_data, tfds_data)
+  return jax.tree.map(convert_data, tfds_data)
