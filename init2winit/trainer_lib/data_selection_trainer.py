@@ -146,7 +146,7 @@ def update(
 
   batch = {key: batch[key][idxs] for key in batch}
 
-  trainer_utils.inject_learning_rate(optimizer_state, lr)
+  optimizer_state = trainer_utils.inject_learning_rate(optimizer_state, lr)
 
   def opt_cost(params):
     return training_cost(
@@ -362,7 +362,7 @@ class DataSelectionTrainer(base_trainer.BaseTrainer):
                self._metrics_state, batch, self._global_step, lr, rng,
                self._local_device_indices, self._sum_train_cost)
           self._global_step += 1
-          lr = self._optimizer_state.hyperparams['learning_rate'][0]
+          lr = trainer_utils.fetch_learning_rate(self._optimizer_state)
           # TODO(gdahl, gilmer): consider moving this test up.
           # NB: Since this test is after we increment self._global_step, having
           # 0 in eval_steps does nothing.
@@ -509,7 +509,7 @@ class DataSelectionTrainer(base_trainer.BaseTrainer):
              self._local_device_indices, self._sum_train_cost,
              self._data_selection_params, self._data_selection_batch_stats)
         self._global_step += 1
-        lr = self._optimizer_state.hyperparams['learning_rate'][0]
+        lr = trainer_utils.fetch_learning_rate(self._optimizer_state)
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.

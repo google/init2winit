@@ -90,7 +90,7 @@ def update(
   rng = jax.random.fold_in(rng, step)
   rng = jax.random.fold_in(rng, local_device_index)
 
-  trainer_utils.inject_learning_rate(optimizer_state, lr)
+  optimizer_state = trainer_utils.inject_learning_rate(optimizer_state, lr)
 
   def opt_cost(params):
     return training_cost(
