@@ -65,7 +65,7 @@ def accumulate_gradients(
     base_opt_init_fn: optax.TransformInitFn,
     base_opt_update_fn: optax.TransformUpdateFn,
     batch_axis_name: Optional[str] = None,
-) -> optax.GradientTransformation:
+) -> optax.GradientTransformationExtraArgs:
   """Accumulate gradients.
 
   Note that we only sync gradients when we are about to update the model, in
@@ -112,7 +112,7 @@ def accumulate_gradients(
         accumulations=jax.tree_map(jnp.zeros_like, params))
 
   @optimizer_utils.no_cross_device_gradient_aggregation
-  def update_fn(updates, state, params=None):
+  def update_fn(updates, state, params=None, **extra_args):
     zeros_params = jax.tree_map(jnp.zeros_like, state.accumulations)
 
     def total_batch_update(total_gradients, params, state):
@@ -131,7 +131,7 @@ def accumulate_gradients(
             total_gradients, axis_name=batch_axis_name)
 
       updates, updated_base_state = base_opt_update_fn(
-          total_gradients, state.base_state, params=params)
+          total_gradients, state.base_state, params=params, **extra_args)
       reset_state = GradientAccumulatorState(
           base_state=updated_base_state,
           hyperparams=updated_base_state.hyperparams,
