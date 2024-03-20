@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Utility functions related to training."""
+from collections.abc import Mapping
 import time
 
 from absl import logging
@@ -219,62 +220,35 @@ def evaluate(
   return metrics
 
 
-def _filtering(path, _) -> bool:
-  """Filter to ensure that we inject/fetch lrs from 'InjectHyperparamsState'-like states."""
-  if (
-      (len(path) > 1)
-      and isinstance(path[-2], jax.tree_util.GetAttrKey)
-      and path[-2].name == 'hyperparams'
-  ):
-    return True
-  else:
-    return False
-
-
 def inject_learning_rate(optimizer_state, lr):
-  """Inject the given LR into any optimizer state that will accept it.
-
-  We require that the optimizer state exposes an 'InjectHyperparamsState'-like
-  interface, i.e., it should contain a `hyperparams` dictionary with a
-  'learning_rate' key where the learning rate can be set. We need to do this
-  to allow arbitrary (non-jittable) LR schedules.
-
-  Args:
-    optimizer_state: optimizer state returned by an optax optimizer
-    lr: learning rate to inject
-
-  Returns:
-    new_optimizer_state
-      optimizer state with the same structure as the input. The learning_rate
-      entry in the state has been set to lr.
-  """
-  return optax.tree_utils.tree_set(
-      optimizer_state, _filtering, learning_rate=lr
-  )
-
-
-def fetch_learning_rate(optimizer_state):
-  """Fetch the LR from any optimizer state."""
-  # The learning rate is an array of dimension 1 in init2winit.
-  # Hence we take lr[0] and not just lr.
-  lrs_with_path = optax.tree_utils.tree_get_all_with_path(
-      optimizer_state, 'learning_rate', _filtering
-  )
-  if not lrs_with_path:
-    raise ValueError(f'No learning rate found in {optimizer_state}.')
+  """Inject the given LR into any optimizer state that will accept it."""
+  # We require that the optimizer state exposes an 'InjectHyperparamsState'-like
+  # interface, i.e., it should contain a `hyperparams` dictionary with a
+  # 'learning_rate' key where the learning rate can be set. We need to do this
+  # to allow arbitrary (non-jittable) LR schedules.
   if isinstance(optimizer_state, optax.MultiTransformState):
-    all_equal = all(lr == lrs_with_path[0][1] for _, lr in lrs_with_path)
-    if not all_equal:
-      raise ValueError(
-          "All learning rates in an 'optax.MultiTransformState' must be the"
-          f' same. Found {lrs_with_path} in {optimizer_state}.'
-      )
-    else:
-      return lrs_with_path[0][1]
+    for v in optimizer_state.inner_states.values():
+      inject_learning_rate(v.inner_state, lr)
+  elif (
+      hasattr(optimizer_state, 'hyperparams')
+      and isinstance(optimizer_state.hyperparams, Mapping)
+      and 'learning_rate' in optimizer_state.hyperparams
+  ):
+    optimizer_state.hyperparams['learning_rate'] = lr
   else:
-    return optax.tree_utils.tree_get(
-        optimizer_state, 'learning_rate', filtering=_filtering
-    )[0]
+    raise ValueError(
+        'Unsupported optimizer_state type given when trying to inject the '
+        'learning rate:\n\n{}.'.format(optimizer_state))
+  if (
+      hasattr(optimizer_state, 'base_state')
+      and hasattr(optimizer_state.base_state, 'hyperparams')
+      and isinstance(optimizer_state.base_state.hyperparams, Mapping)
+      and 'learning_rate' in optimizer_state.base_state.hyperparams
+  ):
+    # In case the optimizer did not map the hyperparams of the base state to the
+    # hyperparams of the outer state we set the learning_rate here. For most
+    # scenarios this should be a no-op.
+    optimizer_state.base_state.hyperparams['learning_rate'] = lr
 
 
 def _merge_and_apply_prefix(d1, d2, prefix):

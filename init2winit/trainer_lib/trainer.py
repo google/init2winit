@@ -91,7 +91,7 @@ def update(
   rng = jax.random.fold_in(rng, step)
   rng = jax.random.fold_in(rng, local_device_index)
 
-  optimizer_state = trainer_utils.inject_learning_rate(optimizer_state, lr)
+  trainer_utils.inject_learning_rate(optimizer_state, lr)
 
   def opt_cost(params):
     return training_cost(
@@ -244,7 +244,7 @@ class Trainer(base_trainer.BaseTrainer):
         if self._global_step in self._checkpoint_steps:
           self._save(self._checkpoint_dir, max_to_keep=None)
 
-        lr = trainer_utils.fetch_learning_rate(self._optimizer_state)
+        lr = self._optimizer_state.hyperparams['learning_rate'][0]
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.
