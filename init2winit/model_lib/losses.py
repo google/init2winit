@@ -111,7 +111,7 @@ def sigmoid_binary_cross_entropy(logits, targets, weights=None):
       jnp.sum(
           unnormalized_sigmoid_binary_cross_entropy(logits, targets, weights)
       ),
-      normalization,
+      jnp.array(normalization, float),
   )
 
 
@@ -168,6 +168,7 @@ def bi_tempered_sigmoid_binary_cross_entropy(hps,
   else:
     normalization = weights.sum()
 
+  normalization = jnp.array(normalization, float)
   losses = unnormalized_bi_tempered_sigmoid_binary_cross_entropy(
       logits,
       targets,
@@ -208,6 +209,7 @@ def sigmoid_mean_squared_error(logits, targets, weights=None):
   else:
     normalization = weights.sum()
 
+  normalization = jnp.array(normalization, float)
   unnormalized_sigmoid_mse = unnormalized_sigmoid_mean_squared_error(
       logits, targets, weights)
 
@@ -250,6 +252,7 @@ def rescaled_mean_squared_error(hps, logits, targets, weights=None):
     losses *= weights
   else:
     normalization = targets.shape[0]
+  normalization = jnp.array(normalization, float)
 
   return jnp.sum(losses), normalization
 
@@ -289,6 +292,7 @@ def weighted_cross_entropy(logits, targets, weights=None):
     normalization = targets.shape[0]
   else:
     normalization = weights.sum()
+  normalization = jnp.array(normalization, float)
   unnormalized_cross_entropy = weighted_unnormalized_cross_entropy(
       logits, targets, weights
   )
@@ -340,6 +344,7 @@ def weighted_bi_tempered_cross_entropy(hps,
     normalization = targets.shape[0]
   else:
     normalization = weights.sum()
+  normalization = jnp.array(normalization, float)
   unnormalized_cross_entropy = weighted_unnormalized_bi_tempered_cross_entropy(
       logits, targets, weights, hps.bi_tempered_loss_t1, hps.bi_tempered_loss_t2
   )
@@ -400,6 +405,7 @@ def weighted_mean_absolute_error(logits, targets, weights=None):
   unnormalized_mean_absolute_error = weighted_unnormalized_mean_absolute_error(
       logits, targets, weights
   )
+  normalization = jnp.array(normalization, float)
   return jnp.sum(unnormalized_mean_absolute_error), normalization
 
 
