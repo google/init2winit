@@ -23,6 +23,7 @@ from init2winit import utils
 from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
 import jax
+import jax.numpy as jnp
 import numpy as np
 import optax
 
@@ -260,7 +261,9 @@ def fetch_learning_rate(optimizer_state):
   )
   if not lrs_with_path:
     raise ValueError(f'No learning rate found in {optimizer_state}.')
-  all_equal = all(lr == lrs_with_path[0][1] for _, lr in lrs_with_path)
+  all_equal = all(
+      jnp.array_equal(lr, lrs_with_path[0][1]) for _, lr in lrs_with_path
+  )
   if all_equal:
     lr_array = lrs_with_path[0][1]
     return lr_array[0]
