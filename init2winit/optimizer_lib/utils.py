@@ -14,18 +14,18 @@
 # limitations under the License.
 
 """Optimizer utilities."""
+
 import functools
 import inspect
-from typing import Callable
-from typing import Iterable
-from typing import Union
+from typing import Callable, Iterable, Union
 
+import jax.numpy as jnp
 import optax
 
 
 def static_inject_hyperparams(
     inner_factory: Callable[..., optax.GradientTransformation],
-    injectable_args: Union[str, Iterable[str]] = ('learning_rate',)
+    injectable_args: Union[str, Iterable[str]] = ('learning_rate',),
 ) -> Callable[..., optax.GradientTransformation]:
   """Wrapper for `optax.inject_hyperparams` making all args static by default.
 
@@ -48,8 +48,11 @@ def static_inject_hyperparams(
     schedules for the args listed in `injectable_args`.
   """
 
-  injectable_args = ({injectable_args} if isinstance(injectable_args, str) else
-                     set(injectable_args))
+  injectable_args = (
+      {injectable_args}
+      if isinstance(injectable_args, str)
+      else set(injectable_args)
+  )
   inner_signature = inspect.signature(inner_factory)
 
   @functools.wraps(inner_factory)
@@ -149,3 +152,117 @@ def requires_gradient_aggregation(
     update function, False otherwise.
   """
   return getattr(update_fn, 'init2winit_requires_gradient_aggregation', True)
+
+
+def overwrite_hparam_names(
+    base_opt: optax.GradientTransformationExtraArgs,
+    **hparam_names_to_aliases: dict[str, str]
+) -> optax.GradientTransformationExtraArgs:
+  """Create aliases for hyperparams of an optimizer defined by inject_hyperparams.
+
+  Enables access to some hyperparams through an alias. In particular, if an
+  optimizer called its learning rate say 'lr' we can use this utility to create
+  an alias 'learning_rate' for 'lr' such that injecting learning rate can be
+  done through the 'learning_rate' key of the state (so all optimizers, even
+  the ones defined outside init2winit can comply with the manual injection
+  of learning rates).
+
+  Example:
+    >>> import optax
+    >>> opt = optax.inject_hyperparams(optax.sgd)(learning_rate=0.)
+    >>> opt = overwrite_hparam_names(opt, learning_rate='lr')
+    >>> params = jnp.array([1., 2., 3.])
+    >>> state = opt.init(params)
+    >>> # We set the learning rate via lr
+    >>> state = optax.tree_utils.tree_set(state, lr=0.5)
+    >>> updates, state = opt.update(params, state)
+    >>> # The resulting update used the learning rate set via lr
+    >>> print(updates)
+    [-0.5 -1.  -1.5]
+
+  Args:
+    base_opt: base ``optax.GradientTransformationExtraArgs`` to transform. Its
+      state must be 'InjectHyperparamsState'-like such that a hyperparams
+      attribute is present in its state.
+    **hparam_names_to_aliases: keyword-value argument detailing how to replace
+      hyperparameter names by new aliases.
+
+  Returns:
+    new_opt: new ``optax.GradientTransformationExtraArgs`` with updated
+      hyperparams attribute in its state that can be fecthed and modified
+      through the given aliases.
+
+  .. warning::
+    Changing manually the hyperparam with some of its old names won't have any
+    effect anymore.
+  """
+  init_fn, update_fn = base_opt
+
+  def new_init_fn(params):
+    state = init_fn(params)
+    for hparam_name, alias in hparam_names_to_aliases.items():
+      state.hyperparams[alias] = state.hyperparams[hparam_name]
+    return state
+
+  def new_update_fn(updates, state, params=None, **extra_args):
+    for hparam_name, alias in hparam_names_to_aliases.items():
+      state.hyperparams[hparam_name] = state.hyperparams[alias]
+      del state.hyperparams[alias]
+    updates, state = update_fn(updates, state, params, **extra_args)
+    for hparam_name, alias in hparam_names_to_aliases.items():
+      state.hyperparams[alias] = state.hyperparams[hparam_name]
+    return updates, state
+
+  return optax.GradientTransformationExtraArgs(new_init_fn, new_update_fn)
+
+
+def append_hparam_name(
+    base_opt: optax.GradientTransformationExtraArgs,
+    hparam_name: str,
+    default_value: float = 0.,
+) -> optax.GradientTransformationExtraArgs:
+  """Create artificicial hparam name to comply with pipeline.
+
+  Some optimizers may not have a ``learning_rate`` entry in their input
+  arguments (this happens naturally for some learning-rate free optimizers).
+  The init2winit pipeline requires the optimizer to have a ``learning_rate``
+  entry. This utility adds such an entry in the hyperparams of an optimizer
+  that won't affect the optimizer while making it fit the pipeline.
+
+  Examples:
+    >>> import optax
+    >>> opt = optax.inject_hyperparams(optax.sgd)(learning_rate=0.5)
+    >>> new_opt = utils.append_hparam_name(opt, 'foo')
+    >>> optax.tree_utils.tree_set(state, foo=2.)
+    >>> foo = optax.tree_utils.tree_get(state, 'foo')
+    >>> print(foo)
+    2.0
+
+  Args:
+    base_opt: base ``optax.GradientTransformationExtraArgs`` to transform. Its
+      state must be 'InjectHyperparamsState'-like such that a hyperparams
+      attribute is present in its state.
+    hparam_name: hyperparameter name to add.
+    default_value: default value for the new hyperparameter
+      (never used, simply there to fill the entry)
+
+  Returns:
+    new_opt: new ``optax.GradientTransformationExtraArgs`` with new
+      ``hparam_name`` in the keys of the ``hyperparams`` entry of its state.
+  """
+  init_fn, update_fn = base_opt
+
+  def new_init_fn(params):
+    state = init_fn(params)
+    # Mimics the behavior of inject_hyperparams initialization
+    # such that the parameter is converted to an array.
+    state.hyperparams[hparam_name] = jnp.asarray(default_value)
+    return state
+
+  def new_update_fn(updates, state, params=None, **extra_args):
+    del state.hyperparams[hparam_name]
+    updates, state = update_fn(updates, state, params, **extra_args)
+    state.hyperparams[hparam_name] = jnp.asarray(default_value)
+    return updates, state
+
+  return optax.GradientTransformationExtraArgs(new_init_fn, new_update_fn)
