@@ -305,6 +305,16 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         # straightforward.
         weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
     )
+  elif hps.optimizer == 'polyak_sgd':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        self_tuning.polyak_sgd
+    )(
+        learning_rate=0.0,
+        f_min=hps.opt_hparams['f_min'],
+        max_learning_rate=hps.opt_hparams['max_learning_rate'],
+        eps=hps.opt_hparams['eps'],
+    )
+    optimizer_requires_value = True
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
         kitchen_sink.kitchen_sink)(
