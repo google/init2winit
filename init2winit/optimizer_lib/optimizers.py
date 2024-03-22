@@ -315,6 +315,15 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         eps=hps.opt_hparams['eps'],
     )
     optimizer_requires_value = True
+  elif hps.optimizer == 'cocob':
+    base_opt = utils.static_inject_hyperparams(
+        optax.contrib.cocob
+    )(
+        alpha=hps.opt_hparams['alpha'],
+        eps=hps.opt_hparams['eps'],
+    )
+    opt_init, opt_update = utils.append_hparam_name(base_opt, 'learning_rate')
+
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
         kitchen_sink.kitchen_sink)(
