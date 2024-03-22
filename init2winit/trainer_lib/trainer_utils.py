@@ -224,7 +224,7 @@ def _filtering(path, _) -> bool:
   """Filter to ensure that we inject/fetch lrs from 'InjectHyperparamsState'-like states."""
   if (
       (len(path) > 1)
-      and isinstance(path[-2], jax.tree_util.GetAttrKey)
+      and isinstance(path[-2], optax.tree_utils.NamedTupleKey)
       and path[-2].name == 'hyperparams'
   ):
     return True
