@@ -549,7 +549,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     )
 
     if self._eval_use_ema:
-      if isinstance(self._optimizer_state, optax.InjectHyperparamsState):
+      if isinstance(
+          self._optimizer_state, optax.InjectStatefulHyperparamsState
+      ):
         eval_params = self._optimizer_state.inner_state[0][0].ema
       elif isinstance(
           self._optimizer_state, gradient_accumulator.GradientAccumulatorState
