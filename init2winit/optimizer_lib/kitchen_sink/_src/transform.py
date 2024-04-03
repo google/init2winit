@@ -1499,6 +1499,7 @@ def scale_by_nadam(
     eps_root: float = 0.0,
     debias: bool = True,
     power: float = 2.0,
+    use_nesterov: bool = True,
 ) -> optax.GradientTransformation:
   """Rescale updates according to the NAdam algorithm.
 
@@ -1520,6 +1521,8 @@ def scale_by_nadam(
     debias: whether to use bias correction.
     power: the power to use in the preconditioner (the value determines the
       power to which the absolute value of the grads are raised).
+    use_nesterov: whether to use nesterov update.
+
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -1538,7 +1541,12 @@ def scale_by_nadam(
     mu = _update_moment(updates, state.mu, b1, 1)
     nu = _update_preconditioner_moment(updates, state.nu, b2, power)
     count = state.count + jnp.array(1, dtype=jnp.int32)
-    mu_hat = _update_moment(updates, mu, b1, 1)
+
+    if use_nesterov:
+      mu_hat = _update_moment(updates, mu, b1, 1)
+    else:
+      mu_hat = mu
+
     mu_hat = mu_hat if not debias else _bias_correction(mu_hat, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
     updates = jax.tree_map(
