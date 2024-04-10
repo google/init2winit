@@ -332,6 +332,17 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         estim_lr0=hps.opt_hparams['estim_lr0'],
         weight_decay=hps.opt_hparams['weight_decay'],
     )
+  elif hps.optimizer == 'prodigy':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        optax.contrib.prodigy
+    )(
+        learning_rate=0.0,
+        betas=hps.opt_hparams['betas'],
+        eps=hps.opt_hparams['eps'],
+        estim_lr0=hps.opt_hparams['estim_lr0'],
+        estim_lr_coef=hps.opt_hparams['estim_lr_coef'],
+        weight_decay=hps.opt_hparams['weight_decay'],
+    )
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
         kitchen_sink.kitchen_sink)(
