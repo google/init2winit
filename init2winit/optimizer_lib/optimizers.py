@@ -308,13 +308,18 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
     )
   elif hps.optimizer == 'polyak_sgd':
-    opt_init, opt_update = utils.static_inject_hyperparams(
-        self_tuning.polyak_sgd
+    base_opt = utils.static_inject_hyperparams(
+        optax.polyak_sgd, injectable_args=('scaling',)
     )(
-        learning_rate=0.0,
+        scaling=0.0,  # Manually injected on each train step.
         f_min=hps.opt_hparams['f_min'],
         max_learning_rate=hps.opt_hparams['max_learning_rate'],
         eps=hps.opt_hparams['eps'],
+    )
+    # Enables modifying scaling through learning_rate to comply with the
+    # fetching/injecting semantics of init2winit pipeline
+    opt_init, opt_update = utils.overwrite_hparam_names(
+        base_opt, scaling='learning_rate'
     )
     optimizer_requires_value = True
   elif hps.optimizer == 'kitchen_sink':
