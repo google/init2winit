@@ -151,10 +151,28 @@ def replicate_and_maybe_restore_checkpoint(
     # is that some of the fields in the training metrics state are arrays of
     # shape [num_train_steps].  In the future we may want to handle these
     # arrays explicitly, in order to avoid this crash.
-    ckpt_to_return = load_checkpoint(external_checkpoint_path,
-                                     target=unreplicated_checkpoint_state,
-                                     orbax_checkpointer=orbax_checkpointer)
+    logging.info(
+        'Restoring checkpoint from external_checkpoint_path %s',
+        external_checkpoint_path,
+    )
+    ckpt_to_return = load_checkpoint(
+        external_checkpoint_path,
+        target=unreplicated_checkpoint_state,
+        orbax_checkpointer=orbax_checkpointer,
+    )
     is_restored = False  # We don't want trainer to increment preemption_count.
+
+    # Handle failure to load from external_checkpoint_path.
+    if ckpt_to_return['global_step'] == -1:
+      return (
+          jax_utils.replicate(unreplicated_optimizer_state),
+          jax_utils.replicate(unreplicated_params),
+          jax_utils.replicate(unreplicated_batch_stats),
+          jax_utils.replicate(unreplicated_training_metrics_state),
+          0,  # global_step
+          jax_utils.replicate(0),  # sum_train_cost
+          0,  # preemption_count
+          False)  # is_restored
   else:  # Else, don't restore from any checkpoint.
     return (
         jax_utils.replicate(unreplicated_optimizer_state),
