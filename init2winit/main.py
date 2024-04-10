@@ -47,6 +47,10 @@ gfile = tf.io.gfile
 # For internal compatibility reasons, we need to pull this function out.
 makedirs = tf.io.gfile.makedirs
 
+# Setting jax default prng implementation to protect against jax defaults
+# change.
+jax.config.update('jax_default_prng_impl', 'threefry2x32')
+jax.config.update('jax_threefry_partitionable', True)
 
 # Enable flax xprof trace labelling.
 os.environ['FLAX_PROFILE'] = 'true'
