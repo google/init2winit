@@ -136,6 +136,8 @@ def adamw_generic(
     weight_decay: float = 0.0,
     weight_decay_mask: Optional[Union[Any, Callable[[optax.Params],
                                                     Any]]] = None,
+    disable_multiply_wd_by_base_lr: bool = False,
+    base_lr_multiplier: float = 1.0,
 ) -> optax.GradientTransformation:
   """Rescale updates according to the NAdam algorithm.
 
@@ -170,10 +172,16 @@ def adamw_generic(
       The leaves should be booleans, `True` for leaves/subtrees you want to
       apply the weight decay to, and `False` for those you want to skip. Note
       that the Nadam gradient transformations are applied to all parameters.
+    disable_multiply_wd_by_base_lr: if True, disable the multiplication of the
+      weight decay by the base learning rate.
+    base_lr_multiplier: multiplier for the base learning rate.
 
   Returns:
     An (init_fn, update_fn) tuple.
   """
+  if disable_multiply_wd_by_base_lr:
+    weight_decay = weight_decay / base_lr_multiplier
+
   if disable_preconditioning:
     return optax.chain(
         optax.trace(decay=b1, nesterov=nesterov),
