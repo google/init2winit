@@ -215,6 +215,8 @@ def load_split_grain(
   ]
 
   if split == 'train' and hps.use_mixup:
+    # Is this an inappropriate reuse of shuffle_rng given grain.load_from_tfds
+    # also receives it?
     mixup_rng = tf.convert_to_tensor(shuffle_rng, dtype=tf.int32)
     mixup_rng = multihost_utils.broadcast_one_to_all(
         mixup_rng, is_source=jax.process_index() == 0
@@ -350,8 +352,7 @@ def load_split(
   if split == 'train':
     ds = ds.shuffle(
         16 * per_host_batch_size,
-        # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
-        seed=jax.random.key_data(shuffle_rng)[0],
+        seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng),
         reshuffle_each_iteration=True,
     )
     ds = ds.repeat()

@@ -19,6 +19,7 @@ import functools
 from typing import Dict
 
 from absl import logging
+from init2winit.dataset_lib import data_utils as utils
 import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -263,16 +264,19 @@ def preprocess_data(
   return dataset
 
 
-def get_librispeech_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
-                             shuffle_rng):
+def get_librispeech_datasets(
+    hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng
+):
   """Helper method to get train, eval and test sets for librispeech data."""
   train_ds_builder = tfds.builder('librispeech')
 
-  # TODO(b/280322542): should have here
-  # rng1, rng2 = jax.random.split(shuffle_rng)
-  train_data = get_raw_dataset(train_ds_builder, hps.train_split,
-                               # TODO(b/280322542): use jax.random.bits(rng1)
-                               jax.random.key_data(shuffle_rng)[0])
+  file_shuffle_seed, data_shuffle_seed = jax.random.split(shuffle_rng, 2)
+
+  train_data = get_raw_dataset(
+      train_ds_builder,
+      hps.train_split,
+      utils.convert_jax_to_tf_random_seed(file_shuffle_seed),
+  )
   eval_data = get_raw_dataset(train_ds_builder, hps.eval_split)
   test_data = get_raw_dataset(train_ds_builder, hps.test_split)
 
@@ -281,8 +285,7 @@ def get_librispeech_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
       train=True,
       batch_size=per_host_batch_size,
       hps=hps,
-      # TODO(b/280322542): use jax.random.bits(rng2)
-      shuffle_seed=jax.random.key_data(shuffle_rng)[1])
+      shuffle_seed=utils.convert_jax_to_tf_random_seed(data_shuffle_seed))
 
   eval_ds = preprocess_data(
       eval_data,

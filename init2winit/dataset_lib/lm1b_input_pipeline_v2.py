@@ -24,8 +24,8 @@ from typing import Dict, List, Optional, Union
 
 from absl import logging
 from clu import deterministic_data
+from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import spm_tokenizer
-import jax
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
@@ -353,8 +353,7 @@ def get_lm1b_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
       pack_examples=hps.pack_examples,
       batch_size=per_host_batch_size,
       max_length=hps.max_target_length,
-      # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
-      shuffle_seed=jax.random.key_data(shuffle_rng)[0])
+      shuffle_seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng))
 
   eval_ds, _ = preprocess_data(
       eval_data,

@@ -15,7 +15,7 @@
 
 """Data generators for init2winit."""
 
-from init2winit.dataset_lib.data_utils import Dataset
+from init2winit.dataset_lib import data_utils
 import jax.random
 from ml_collections.config_dict import config_dict
 import numpy as np
@@ -66,17 +66,17 @@ def get_nqm_noise(shuffle_rng, batch_size, eval_batch_size, hps=None):
   def train_iterator_fn():
     while True:
       yield {
-          'inputs':
-              train_rng.normal(
-                  size=(per_host_batch_size, *hps.input_shape))
+          'inputs': train_rng.normal(
+              size=(per_host_batch_size, *hps.input_shape)
+          )
       }
 
   def eval_train_epoch(num_batches):
     for _ in range(num_batches):
       yield {
-          'inputs':
-              eval_rng.normal(
-                  size=(per_host_batch_size, *hps.input_shape))
+          'inputs': eval_rng.normal(
+              size=(per_host_batch_size, *hps.input_shape)
+          )
       }
 
   # pylint: disable=unreachable
@@ -93,6 +93,9 @@ def get_nqm_noise(shuffle_rng, batch_size, eval_batch_size, hps=None):
     del kwargs
     return
     yield  # This yield is needed to make this a valid (null) iterator.
+
   # pylint: enable=unreachable
 
-  return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
+  return data_utils.Dataset(
+      train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch
+  )

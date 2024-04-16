@@ -101,8 +101,7 @@ def get_wikitext2(
       train_batch_size=batch_size,
       valid_batch_size=eval_batch_size,
       test_batch_size=eval_batch_size,
-      # TODO(b/280322542): this should be jax.random.bits(data_rng)
-      shuffle_seed=jax.random.key_data(data_rng)[0],
+      shuffle_seed=data_utils.convert_jax_to_tf_random_seed(data_rng),
   )
 
   def train_iterator_fn():

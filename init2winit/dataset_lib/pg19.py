@@ -29,12 +29,15 @@ This module implements a preprocessed PG-19 dataset from TFRecords. The PG-19
 textfiles were tokenized and encoded with SubwordTextEncoder and aggregated into
 tensors of maximum lenght of 8192.
 """
+
 import functools
 import itertools
 import logging
 import os
 from typing import Dict, Optional, Tuple
+
 from init2winit.dataset_lib import spm_tokenizer
+from init2winit.dataset_lib.data_utils import convert_jax_to_tf_random_seed
 from init2winit.dataset_lib.data_utils import Dataset
 from init2winit.dataset_lib.data_utils import maybe_pad_batch
 from init2winit.dataset_lib.data_utils import tf_to_numpy
@@ -42,6 +45,7 @@ import jax
 from ml_collections.config_dict import config_dict
 import tensorflow as tf
 import tensorflow_datasets as tfds
+
 
 exists = tf.io.gfile.exists
 makedirs = tf.io.gfile.makedirs
@@ -423,8 +427,7 @@ def get_pg19_datasets(
       hps=hps,
       repeat=True,
       shuffle=True,
-      # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
-      shuffle_rng=jax.random.key_data(shuffle_rng)[0],
+      shuffle_rng=convert_jax_to_tf_random_seed(shuffle_rng),
       drop_remainder=True,
       process_count=process_count)
   eval_ds = get_dataset(

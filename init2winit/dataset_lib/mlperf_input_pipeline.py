@@ -17,7 +17,9 @@
 
 import os
 
+from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import imagenet_preprocessing
+
 import jax
 import tensorflow as tf
 
@@ -124,8 +126,7 @@ def load_split(batch_size,
     dataset = dataset.cache()  # cache compressed JPEGs instead
     dataset = dataset.shuffle(
         shuffle_size, reshuffle_each_iteration=True,
-        # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
-        seed=jax.random.key_data(shuffle_rng)[0]).repeat()
+        seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng)).repeat()
     dataset = dataset.enumerate().map(dataset_parser, 64)
   else:
     dataset = dataset.map(dataset_parser, 64)

@@ -242,9 +242,8 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
 
   def process_example(example_index, example):
     if split == 'train':
-      process_rng = tf.cast(jax.random.fold_in(shuffle_rng, 0), tf.int64)
       process_rng = tf.random.experimental.stateless_fold_in(
-          process_rng, example_index)
+          shuffle_rng, example_index)
     else:
       # NOTE(dsuo): we use fixed randomness for eval.
       process_rng = tf.cast(jax.random.PRNGKey(hps.eval_seed), tf.int64)
@@ -256,9 +255,9 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
   if split == 'train':
     ds = ds.shuffle(
         16 * per_host_batch_size,
-        # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
-        seed=jax.random.key_data(shuffle_rng)[0],
-        reshuffle_each_iteration=True)
+        seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng),
+        reshuffle_each_iteration=True,
+    )
     ds = ds.repeat()
 
   ds = ds.batch(per_host_batch_size, drop_remainder=False)

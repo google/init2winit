@@ -118,10 +118,14 @@ def criteo_tsv_reader(
   if split not in ['train', 'eval_train', 'validation', 'test']:
     raise ValueError(f'Invalid split name {split}.')
   is_training = split == 'train'
+  file_shuffle_seed, data_shuffle_seed = jax.random.split(shuffle_rng, 2)
+  file_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(file_shuffle_seed)
+  data_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(data_shuffle_seed)
+
   if is_training:
     file_shuffle_seed = multihost_utils.broadcast_one_to_all(
-        # TODO(b/280322542): use jax.random.bits(shuffle_prng)
-        jax.random.key_data(shuffle_rng)[0], is_source=jax.process_index() == 0
+        file_shuffle_seed,
+        is_source=jax.process_index() == 0
     )
   else:
     file_shuffle_seed = None
@@ -139,8 +143,7 @@ def criteo_tsv_reader(
       num_parallel_calls=128,
       deterministic=False)
   if is_training:
-    # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
-    ds = ds.shuffle(buffer_size=524_288 * 100, seed=jax.random.key_data(shuffle_rng)[1])
+    ds = ds.shuffle(buffer_size=524_288 * 100, seed=data_shuffle_seed)
   ds = ds.batch(batch_size, drop_remainder=is_training)
   parse_fn = functools.partial(_parse_example_fn, num_dense_features)
   ds = ds.map(parse_fn, num_parallel_calls=16)

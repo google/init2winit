@@ -301,8 +301,7 @@ def _process_small_tfds_image_ds(
   data_train = data_train.shuffle(
       train_size,
       reshuffle_each_iteration=True,
-      # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
-      seed=jax.random.key_data(shuffle_rng)[0])
+      seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng))
   data_train = data_train.repeat()
   data_train = data_train.batch(per_host_batch_size)
 

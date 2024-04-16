@@ -181,3 +181,10 @@ def tf_to_numpy(tfds_data):
   # Safe because we won't mutate. Avoids an extra copy from tfds.
   convert_data = lambda x: x._numpy()  # pylint: disable=protected-access
   return jax.tree.map(convert_data, tfds_data)
+
+
+# See b/280322542 for context.
+def convert_jax_to_tf_random_seed(jax_prng_key: jax.random.PRNGKey) -> int:
+  tf_seed = jax.random.bits(jax_prng_key)
+  return tf_seed
+  

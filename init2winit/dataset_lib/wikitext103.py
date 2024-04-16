@@ -103,8 +103,7 @@ def get_wikitext103(
           train_batch_size=batch_size,
           valid_batch_size=eval_batch_size,
           test_batch_size=eval_batch_size,
-          # TODO(b/280322542): this should be jax.random.bits(shuffle_rng)
-          shuffle_seed=jax.random.key_data(shuffle_rng)[0],
+          shuffle_seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng),
       )
   )
 
