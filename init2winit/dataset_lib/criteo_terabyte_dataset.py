@@ -117,18 +117,20 @@ def criteo_tsv_reader(
   """
   if split not in ['train', 'eval_train', 'validation', 'test']:
     raise ValueError(f'Invalid split name {split}.')
-  is_training = split == 'train'
-  file_shuffle_seed, data_shuffle_seed = jax.random.split(shuffle_rng, 2)
-  file_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(file_shuffle_seed)
-  data_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(data_shuffle_seed)
+  file_shuffle_seed = None
+  data_shuffle_seed = None
 
+  is_training = split == 'train'
   if is_training:
+    file_shuffle_seed, data_shuffle_seed = jax.random.split(shuffle_rng, 2)
+    file_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(file_shuffle_seed)
+    data_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(data_shuffle_seed)
+
     file_shuffle_seed = multihost_utils.broadcast_one_to_all(
         file_shuffle_seed,
         is_source=jax.process_index() == 0
     )
-  else:
-    file_shuffle_seed = None
+
   ds = tf.data.Dataset.list_files(
       file_path, shuffle=is_training, seed=file_shuffle_seed)
   index = jax.process_index()
