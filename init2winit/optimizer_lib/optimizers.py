@@ -343,6 +343,15 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         estim_lr_coef=hps.opt_hparams['estim_lr_coef'],
         weight_decay=hps.opt_hparams['weight_decay'],
     )
+  elif hps.optimizer == 'cocob':
+    base_opt = utils.static_inject_hyperparams(
+        optax.contrib.cocob
+    )(
+        alpha=hps.opt_hparams['alpha'],
+        eps=hps.opt_hparams['eps'],
+    )
+    opt_init, opt_update = utils.append_hparam_name(base_opt, 'learning_rate')
+
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
         kitchen_sink.kitchen_sink)(
