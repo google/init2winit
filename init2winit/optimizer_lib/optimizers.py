@@ -351,6 +351,30 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         eps=hps.opt_hparams['eps'],
     )
     opt_init, opt_update = utils.append_hparam_name(base_opt, 'learning_rate')
+  elif hps.optimizer == 'momo':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        optax.contrib.momo
+    )(
+        learning_rate=0.0,
+        beta=hps.opt_hparams['beta'],
+        lower_bound=hps.opt_hparams['lower_bound'],
+        weight_decay=hps.opt_hparams['weight_decay'],
+        adapt_lower_bound=hps.opt_hparams['adapt_lower_bound'],
+    )
+    optimizer_requires_value = True
+  elif hps.optimizer == 'momo_adam':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        optax.contrib.momo_adam
+    )(
+        learning_rate=0.0,
+        b1=hps.opt_hparams['b1'],
+        b2=hps.opt_hparams['b2'],
+        eps=hps.opt_hparams['eps'],
+        lower_bound=hps.opt_hparams['lower_bound'],
+        weight_decay=hps.opt_hparams['weight_decay'],
+        adapt_lower_bound=hps.opt_hparams['adapt_lower_bound'],
+    )
+    optimizer_requires_value = True
 
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
