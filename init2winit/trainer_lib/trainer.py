@@ -177,24 +177,10 @@ class Trainer(base_trainer.BaseTrainer):
       trainer_utils.log_message(
           'Starting training!', self._logging_pool, self._xm_work_unit)
 
-    # Start at the resumed step and continue until we have finished the number
-    # of training steps. If building a dataset iterator using a tf.data.Dataset,
-    # in the case of a batch size that does not evenly divide the training
-    # dataset size, if using `ds.batch(..., drop_remainer=True)` on the training
-    # dataset then the final batch in this iterator will be a partial batch.
-    # However, if `drop_remainer=False`, then this iterator will always return
-    # batches of the same size, and the final batch will have elements from the
-    # start of the (num_epochs + 1)-th epoch.
-    if self._hps.get('use_grain'):
-      train_iter = itertools.islice(
-          self._dataset.train_iterator_fn(), self._num_train_steps
-      )
-    else:
-      train_iter = itertools.islice(
-          self._dataset.train_iterator_fn(),
-          self._global_step,
-          self._num_train_steps,
-      )
+    train_iter = itertools.islice(
+        self._dataset.train_iterator_fn(),
+        self._num_train_steps,
+    )
 
 
     train_iter = trainer_utils.prefetch_input_pipeline(
