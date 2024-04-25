@@ -344,13 +344,14 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         weight_decay=hps.opt_hparams['weight_decay'],
     )
   elif hps.optimizer == 'cocob':
-    base_opt = utils.static_inject_hyperparams(
+    opt_init, opt_update = utils.static_inject_hyperparams(
         optax.contrib.cocob
     )(
+        learning_rate=0.0,
+        weight_decay=hps.opt_hparams['weight_decay'],
         alpha=hps.opt_hparams['alpha'],
         eps=hps.opt_hparams['eps'],
     )
-    opt_init, opt_update = utils.append_hparam_name(base_opt, 'learning_rate')
   elif hps.optimizer == 'momo':
     opt_init, opt_update = utils.static_inject_hyperparams(
         optax.contrib.momo
