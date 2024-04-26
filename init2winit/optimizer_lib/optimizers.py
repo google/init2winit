@@ -376,6 +376,23 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         adapt_lower_bound=hps.opt_hparams['adapt_lower_bound'],
     )
     optimizer_requires_value = True
+  elif hps.optimizer == 'dog':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        optax.contrib.dog
+    )(
+        learning_rate=0.0,
+        reps_rel=hps.opt_hparams['reps_rel'],
+        eps=hps.opt_hparams['eps'],
+        weight_decay=hps.opt_hparams['weight_decay'],
+    )
+  elif hps.optimizer == 'dowg':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        optax.contrib.dowg
+    )(
+        learning_rate=0.0,
+        eps=hps.opt_hparams['eps'],
+        weight_decay=hps.opt_hparams['weight_decay'],
+    )
 
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
