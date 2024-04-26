@@ -330,7 +330,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         betas=hps.opt_hparams['betas'],
         eps=hps.opt_hparams['eps'],
         estim_lr0=hps.opt_hparams['estim_lr0'],
-        weight_decay=hps.opt_hparams['weight_decay'],
+        weight_decay=weight_decay,
     )
   elif hps.optimizer == 'prodigy':
     opt_init, opt_update = utils.static_inject_hyperparams(
@@ -341,14 +341,14 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         eps=hps.opt_hparams['eps'],
         estim_lr0=hps.opt_hparams['estim_lr0'],
         estim_lr_coef=hps.opt_hparams['estim_lr_coef'],
-        weight_decay=hps.opt_hparams['weight_decay'],
+        weight_decay=weight_decay,
     )
   elif hps.optimizer == 'cocob':
     opt_init, opt_update = utils.static_inject_hyperparams(
         optax.contrib.cocob
     )(
         learning_rate=0.0,
-        weight_decay=hps.opt_hparams['weight_decay'],
+        weight_decay=weight_decay,
         alpha=hps.opt_hparams['alpha'],
         eps=hps.opt_hparams['eps'],
     )
@@ -359,7 +359,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         learning_rate=0.0,
         beta=hps.opt_hparams['beta'],
         lower_bound=hps.opt_hparams['lower_bound'],
-        weight_decay=hps.opt_hparams['weight_decay'],
+        weight_decay=weight_decay,
         adapt_lower_bound=hps.opt_hparams['adapt_lower_bound'],
     )
     optimizer_requires_value = True
@@ -372,7 +372,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         b2=hps.opt_hparams['b2'],
         eps=hps.opt_hparams['eps'],
         lower_bound=hps.opt_hparams['lower_bound'],
-        weight_decay=hps.opt_hparams['weight_decay'],
+        weight_decay=weight_decay,
         adapt_lower_bound=hps.opt_hparams['adapt_lower_bound'],
     )
     optimizer_requires_value = True
