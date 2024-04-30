@@ -342,6 +342,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         estim_lr0=hps.opt_hparams['estim_lr0'],
         estim_lr_coef=hps.opt_hparams['estim_lr_coef'],
         weight_decay=weight_decay,
+        safeguard_warmup=hps.opt_hparams['safeguard_warmup'],
     )
   elif hps.optimizer == 'cocob':
     opt_init, opt_update = utils.static_inject_hyperparams(
