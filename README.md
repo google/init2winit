@@ -53,7 +53,7 @@ See the [`dataset_lib`](https://github.com/google/init2winit/tree/master/init2wi
 ## Citing
 To cite this repository:
 
-```
+```bibtex
 @software{init2winit2021github,
   author = {Justin M. Gilmer and George E. Dahl and Zachary Nado and Priya Kasimbeg and Sourabh Medapati},
   title = {{init2winit}: a JAX codebase for initialization, optimization, and tuning research},

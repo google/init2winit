@@ -3,17 +3,19 @@
 ## Datasets
 
 ### CIFAR-10 and CIFAR-100
-```
+
+```bibtex
 @techreport{cifarKrizhevsky09learningmultiple,
-    author = {Alex Krizhevsky},
-    title = {Learning multiple layers of features from tiny images},
-    institution = {University of Toronto},
-    year = {2009}
+  author = {Alex Krizhevsky},
+  title = {Learning multiple layers of features from tiny images},
+  institution = {University of Toronto},
+  year = {2009},
 }
 ```
 
 ### ImageNet
-```
+
+```bibtex
 @article{imagenet,
   Author = {Olga Russakovsky and Jia Deng and Hao Su and Jonathan Krause and Sanjeev Satheesh and Sean Ma and Zhiheng Huang and Andrej Karpathy and Aditya Khosla and Michael Bernstein and Alexander C. Berg and Li Fei-Fei},
   Title = {{ImageNet Large Scale Visual Recognition Challenge}},
@@ -21,22 +23,24 @@
   journal = {International Journal of Computer Vision (IJCV)},
   volume = {115},
   number = {3},
-  pages = {211-252}
+  pages = {211-252},
 }
 ```
 
 ### MNIST
-```
+
+```bibtex
 @article{mnist,
   author = {LeCun, Yann and Cortes, Corinna},
   title = {{MNIST} handwritten digit database},
   url = {http://yann.lecun.com/exdb/mnist/},
-  year = 2010
+  year = 2010,
 }
 ```
 
 ### ogbg_molpcba
-```
+
+```bibtex
 @inproceedings{ogbg_molpcba,
   author    = {Weihua Hu and
                Matthias Fey and
@@ -59,28 +63,28 @@
   url       = {https://proceedings.neurips.cc/paper/2020/hash/fb60d411a5c5b72b2e7d3527cfc84fd0-Abstract.html},
   timestamp = {Tue, 19 Jan 2021 15:57:06 +0100},
   biburl    = {https://dblp.org/rec/conf/nips/HuFZDRLCL20.bib},
-  bibsource = {dblp computer science bibliography, https://dblp.org}
+  bibsource = {dblp computer science bibliography, https://dblp.org},
 }
 ```
 
 ### Fashion MNIST
 
-```
+```bibtex
 @article{fashionMNIST,
-  author       = {Han Xiao and Kashif Rasul and Roland Vollgraf},
-  title        = {Fashion-{MNIST}: a Novel Image Dataset for Benchmarking Machine Learning Algorithms},
-  date         = {2017-08-28},
-  year         = {2017},
-  journal   = {CoRR},
-  volume    = {cs.LG/1708.07747},
-  url       = {http://arxiv.org/abs/1708.07747},
-  primaryClass  = {cs.LG},
+  author = {Han Xiao and Kashif Rasul and Roland Vollgraf},
+  title = {Fashion-{MNIST}: a Novel Image Dataset for Benchmarking Machine Learning Algorithms},
+  date = {2017-08-28},
+  year = {2017},
+  journal = {CoRR},
+  volume = {cs.LG/1708.07747},
+  url = {http://arxiv.org/abs/1708.07747},
+  primaryClass = {cs.LG},
 }
 ```
 
 ### SVHN
 
-```
+```bibtex
 @inproceedings{svhn,
   author = {Netzer, Yuval and Wang, Tao and Coates, Adam and Bissacco, Alessandro and Wu, Bo and Ng, Andrew Y.},
   title = {Reading Digits in Natural Images with Unsupervised Feature Learning},
@@ -92,7 +96,7 @@
 
 ### LM1B
 
-```
+```bibtex
 @article{lm1b,
   author    = {Ciprian Chelba and
                Tomas Mikolov and
@@ -124,7 +128,7 @@ Information and access information are available at
 [fastMRI](https://fastmri.org/)'s webpage. Of note, the data input pipeline
 we replicate consists of the knee single-coil challenge only.
 
-```
+```bibtex
 @article{doi:10.1148/ryai.2020190007,
   author = {Knoll, Florian and Zbontar, Jure and Sriram, Anuroop and Muckley, Matthew J. and Bruno, Mary and Defazio, Aaron and Parente, Marc and Geras, Krzysztof J. and Katsnelson, Joe and Chandarana, Hersh and Zhang, Zizhao and Drozdzalv, Michal and Romero, Adriana and Rabbat, Michael and Vincent, Pascal and Pinkerton, James and Wang, Duo and Yakubova, Nafissa and Owens, Erich and Zitnick, C. Lawrence and Recht, Michael P. and Sodickson, Daniel K. and Lui, Yvonne W.},
   title = {fastMRI: A Publicly Available Raw k-Space and DICOM Dataset of Knee Images for Accelerated MR Image Reconstruction Using Machine Learning},
@@ -140,38 +144,38 @@ we replicate consists of the knee single-coil challenge only.
 }
 
 @inproceedings{zbontar2018fastMRI,
-  title={{fastMRI}: An Open Dataset and Benchmarks for Accelerated {MRI}},
-  author={Jure Zbontar and Florian Knoll and Anuroop Sriram and Tullie Murrell and Zhengnan Huang and Matthew J. Muckley and Aaron Defazio and Ruben Stern and Patricia Johnson and Mary Bruno and Marc Parente and Krzysztof J. Geras and Joe Katsnelson and Hersh Chandarana and Zizhao Zhang and Michal Drozdzal and Adriana Romero and Michael Rabbat and Pascal Vincent and Nafissa Yakubova and James Pinkerton and Duo Wang and Erich Owens and C. Lawrence Zitnick and Michael P. Recht and Daniel K. Sodickson and Yvonne W. Lui},
+  title = {{fastMRI}: An Open Dataset and Benchmarks for Accelerated {MRI}},
+  author = {Jure Zbontar and Florian Knoll and Anuroop Sriram and Tullie Murrell and Zhengnan Huang and Matthew J. Muckley and Aaron Defazio and Ruben Stern and Patricia Johnson and Mary Bruno and Marc Parente and Krzysztof J. Geras and Joe Katsnelson and Hersh Chandarana and Zizhao Zhang and Michal Drozdzal and Adriana Romero and Michael Rabbat and Pascal Vincent and Nafissa Yakubova and James Pinkerton and Duo Wang and Erich Owens and C. Lawrence Zitnick and Michael P. Recht and Daniel K. Sodickson and Yvonne W. Lui},
   journal = {ArXiv e-prints},
   archivePrefix = "arXiv",
   eprint = {1811.08839},
-  year={2018}
+  year = {2018},
 }
 ```
 
 ### PG-19
 
-```
+```bibtex
 @article{raecompressive2019,
-author = {Rae, Jack W and Potapenko, Anna and Jayakumar, Siddhant M and
-          Hillier, Chloe and Lillicrap, Timothy P},
-title = {Compressive Transformers for Long-Range Sequence Modelling},
-journal = {arXiv preprint},
-url = {https://arxiv.org/abs/1911.05507},
-year = {2019},
+  author = {Rae, Jack W and Potapenko, Anna and Jayakumar, Siddhant M and
+            Hillier, Chloe and Lillicrap, Timothy P},
+  title = {Compressive Transformers for Long-Range Sequence Modelling},
+  journal = {arXiv preprint},
+  url = {https://arxiv.org/abs/1911.05507},
+  year = {2019},
 }
 ```
 
 ### Librispeech
 
-```
+```bibtex
 @inproceedings{panayotov2015librispeech,
-  title={Librispeech: an {ASR} corpus based on public domain audio books},
-  author={Panayotov, Vassil and Chen, Guoguo and Povey, Daniel and Khudanpur, Sanjeev},
-  booktitle={Acoustics, Speech and Signal Processing (ICASSP), 2015 IEEE International Conference on},
-  pages={5206--5210},
-  year={2015},
-  organization={IEEE}
+  title = {Librispeech: an {ASR} corpus based on public domain audio books},
+  author = {Panayotov, Vassil and Chen, Guoguo and Povey, Daniel and Khudanpur, Sanjeev},
+  booktitle = {Acoustics, Speech and Signal Processing (ICASSP), 2015 IEEE International Conference on},
+  pages = {5206--5210},
+  year = {2015},
+  organization = {IEEE},
 }
 ```
 
@@ -179,55 +183,59 @@ year = {2019},
 ## Models
 
 ### Residual Networks
-```
 
-@INPROCEEDINGS{heResnet2016,
-  author={He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
-  booktitle={2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
-  title={Deep Residual Learning for Image Recognition}, 
-  year={2016},
-  pages={770-778},
-  doi={10.1109/CVPR.2016.90}
+```bibtex
+@inproceedings{heResnet2016,
+  author = {He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
+  booktitle = {2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  title = {Deep Residual Learning for Image Recognition},
+  year = {2016},
+  pages = {770-778},
+  doi = {10.1109/CVPR.2016.90},
 }
 
 @misc{resnetArxiv,
-  title={Deep residual learning for image recognition. CoRR abs/1512.03385 (2015)},
-  author={He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
-  year={2015}
+  title = {Deep residual learning for image recognition. CoRR abs/1512.03385 (2015)},
+  author = {He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
+  year = {2015},
 }
 ```
 
 ### Wide ResNet
-```
+
+```bibtex
 @article{zagoruyko2016wide,
-  title={Wide residual networks},
-  author={Zagoruyko, Sergey and Komodakis, Nikos},
-  journal={arXiv preprint arXiv:1605.07146},
-  year={2016}
+  title = {Wide residual networks},
+  author = {Zagoruyko, Sergey and Komodakis, Nikos},
+  journal = {arXiv preprint arXiv:1605.07146},
+  year = {2016},
 }
 ```
 
 ### Vision Transformers (ViT)
-```
+
+```bibtex
 @article{dosovitskiy2020vit,
-  title={An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale},
-  author={Dosovitskiy, Alexey and Beyer, Lucas and Kolesnikov, Alexander and Weissenborn, Dirk and Zhai, Xiaohua and Unterthiner, Thomas and  Dehghani, Mostafa and Minderer, Matthias and Heigold, Georg and Gelly, Sylvain and Uszkoreit, Jakob and Houlsby, Neil},
-  journal={ICLR},
-  year={2021}
+  title = {An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale},
+  author = {Dosovitskiy, Alexey and Beyer, Lucas and Kolesnikov, Alexander and Weissenborn, Dirk and Zhai, Xiaohua and Unterthiner, Thomas and  Dehghani, Mostafa and Minderer, Matthias and Heigold, Georg and Gelly, Sylvain and Uszkoreit, Jakob and Houlsby, Neil},
+  journal = {ICLR},
+  year = {2021},
 }
 
 @article{steiner2021train,
-  title={How to train your ViT? data, augmentation, and regularization in vision transformers},
-  author={Steiner, Andreas and Kolesnikov, Alexander and Zhai, Xiaohua and Wightman, Ross and Uszkoreit, Jakob and Beyer, Lucas},
-  journal={arXiv preprint arXiv:2106.10270},
-  year={2021}
+  title = {How to train your ViT? data, augmentation, and regularization in vision transformers},
+  author = {Steiner, Andreas and Kolesnikov, Alexander and Zhai, Xiaohua and Wightman, Ross and Uszkoreit, Jakob and Beyer, Lucas},
+  journal = {arXiv preprint arXiv:2106.10270},
+  year = {2021},
 }
 ```
 
 ### U-Net
+
 We implement a U-Net replicating the code provided [here](https://github.com/facebookresearch/fastMRI/blob/main/fastmri_examples/unet/train_unet_demo.py)
 as part of the fastMRI workload cited below.
-```
+
+```bibtex
 @inproceedings{zbontar2018fastMRI,
     title={{fastMRI}: An Open Dataset and Benchmarks for Accelerated {MRI}},
     author={Jure Zbontar and Florian Knoll and Anuroop Sriram and Tullie Murrell and Zhengnan Huang and Matthew J. Muckley and Aaron Defazio and Ruben Stern and Patricia Johnson and Mary Bruno and Marc Parente and Krzysztof J. Geras and Joe Katsnelson and Hersh Chandarana and Zizhao Zhang and Michal Drozdzal and Adriana Romero and Michael Rabbat and Pascal Vincent and Nafissa Yakubova and James Pinkerton and Duo Wang and Erich Owens and C. Lawrence Zitnick and Michael P. Recht and Daniel K. Sodickson and Yvonne W. Lui},
@@ -239,49 +247,50 @@ as part of the fastMRI workload cited below.
 ```
 
 Below is the citation for the original U-Net paper.
-```
+
+```bibtex
 @inproceedings{ronneberger2015u,
-  title={U-net: Convolutional networks for biomedical image segmentation},
-  author={Ronneberger, Olaf and Fischer, Philipp and Brox, Thomas},
-  booktitle={International Conference on Medical image computing and computer-assisted intervention},
-  pages={234--241},
-  year={2015},
-  organization={Springer}
+  title = {U-net: Convolutional networks for biomedical image segmentation},
+  author = {Ronneberger, Olaf and Fischer, Philipp and Brox, Thomas},
+  booktitle = {International Conference on Medical image computing and computer-assisted intervention},
+  pages = {234--241},
+  year = {2015},
+  organization = {Springer},
 }
 ```
 
 ### Graph network
-```
+
+```bibtex
 @article{graphnetwork,
-title = {Relational inductive biases, deep learning, and graph networks},
-author  = {Peter Battaglia and Jessica Blake Chandler Hamrick and Victor Bapst and Alvaro Sanchez and Vinicius Zambaldi and Mateusz Malinowski and Andrea Tacchetti and David Raposo and Adam Santoro and Ryan Faulkner and Caglar Gulcehre and Francis Song and Andy Ballard and Justin Gilmer and George E. Dahl and Ashish Vaswani and Kelsey Allen and Charles Nash and Victoria Jayne Langston and Chris Dyer and Nicolas Heess and Daan Wierstra and Pushmeet Kohli and Matt Botvinick and Oriol Vinyals and Yujia Li and Razvan Pascanu},
-year  = {2018},
-URL = {https://arxiv.org/pdf/1806.01261.pdf},
-journal = {arXiv}
+  title = {Relational inductive biases, deep learning, and graph networks},
+  author  = {Peter Battaglia and Jessica Blake Chandler Hamrick and Victor Bapst and Alvaro Sanchez and Vinicius Zambaldi and Mateusz Malinowski and Andrea Tacchetti and David Raposo and Adam Santoro and Ryan Faulkner and Caglar Gulcehre and Francis Song and Andy Ballard and Justin Gilmer and George E. Dahl and Ashish Vaswani and Kelsey Allen and Charles Nash and Victoria Jayne Langston and Chris Dyer and Nicolas Heess and Daan Wierstra and Pushmeet Kohli and Matt Botvinick and Oriol Vinyals and Yujia Li and Razvan Pascanu},
+  year  = {2018},
+  URL = {https://arxiv.org/pdf/1806.01261.pdf},
+  journal = {arXiv},
 }
 ```
 
-```
-@inproceedings{
-xu2018how,
-title={How Powerful are Graph Neural Networks?},
-author={Keyulu Xu and Weihua Hu and Jure Leskovec and Stefanie Jegelka},
-booktitle={International Conference on Learning Representations},
-year={2019},
-url={https://openreview.net/forum?id=ryGs6iA5Km},
+```bibtex
+@inproceedings{xu2018how,
+  title = {How Powerful are Graph Neural Networks?},
+  author = {Keyulu Xu and Weihua Hu and Jure Leskovec and Stefanie Jegelka},
+  booktitle = {International Conference on Learning Representations},
+  year = {2019},
+  url = {https://openreview.net/forum?id=ryGs6iA5Km},
 }
 ```
 
 ### Local attention transformer
 
-```
+```bibtex
 @article{roy2021efficient,
-  title={Efficient content-based sparse attention with routing transformers},
-  author={Roy, Aurko and Saffar, Mohammad and Vaswani, Ashish and Grangier, David},
-  journal={Transactions of the Association for Computational Linguistics},
-  volume={9},
-  pages={53--68},
-  year={2021},
-  publisher={MIT Press}
+  title = {Efficient content-based sparse attention with routing transformers},
+  author = {Roy, Aurko and Saffar, Mohammad and Vaswani, Ashish and Grangier, David},
+  journal = {Transactions of the Association for Computational Linguistics},
+  volume = {9},
+  pages = {53--68},
+  year = {2021},
+  publisher = {MIT Press},
 }
 ```
