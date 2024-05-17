@@ -99,7 +99,7 @@ class KitchenSinkMaskTest(absltest.TestCase):
     optimizer = kitchen_sink({
         '0': {
             'element': 'nesterov',
-            'mask': lambda p: jax.tree_map(lambda x: x.ndim != 1, p)
+            'mask': lambda p: jax.tree.map(lambda x: x.ndim != 1, p)
         }
     })
     params = {'w': jnp.array([1, 2, 3])}
@@ -113,7 +113,7 @@ class KitchenSinkMaskTest(absltest.TestCase):
     optimizer = kitchen_sink({
         '0': {
             'element': 'nesterov',
-            'mask': lambda p: jax.tree_map(lambda x: x.ndim != 1, p)
+            'mask': lambda p: jax.tree.map(lambda x: x.ndim != 1, p)
         }
     })
     params = {'w': jnp.array([1, 2, 3]), 'b': jnp.ones((2, 2))}
@@ -292,9 +292,9 @@ class GraftCombinatorTest(chex.TestCase):
       u_d, s_d = d.update(grad, s_d)
       u_g, s_g = g.update(grad, s_g)
 
-      u_m_n = jax.tree_map(jnp.linalg.norm, u_m)
-      u_d_n = jax.tree_map(jnp.linalg.norm, u_d)
-      u_g2 = jax.tree_map(lambda m, d, dn: -lr * d / (dn + 1e-6) * m, u_m_n,
+      u_m_n = jax.tree.map(jnp.linalg.norm, u_m)
+      u_d_n = jax.tree.map(jnp.linalg.norm, u_d)
+      u_g2 = jax.tree.map(lambda m, d, dn: -lr * d / (dn + 1e-6) * m, u_m_n,
                           u_d, u_d_n)
 
       chex.assert_trees_all_close(u_g, u_g2)

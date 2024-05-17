@@ -27,13 +27,13 @@ import optax
 
 def total_tree_sum(pytree):
   """Compute the overall sum of a pytree."""
-  sums = jax.tree_map(jnp.sum, pytree)
+  sums = jax.tree.map(jnp.sum, pytree)
   return jax.tree_util.tree_reduce(operator.add, sums, 0)
 
 
 def tree_norm_sql2(pytree):
   """Compute the param-wise squared L2 norm of a pytree."""
-  return jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1)) ** 2, pytree)
+  return jax.tree.map(lambda x: jnp.linalg.norm(x.reshape(-1)) ** 2, pytree)
 
 
 def total_tree_norm_sql2(pytree):

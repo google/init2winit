@@ -274,8 +274,8 @@ class TwistedAdamTest(chex.TestCase):
 
       def init_fn(params):
         return State(
-            nu=jax.tree_map(jnp.zeros_like, params),
-            trace=jax.tree_map(jnp.zeros_like, params),
+            nu=jax.tree.map(jnp.zeros_like, params),
+            trace=jax.tree.map(jnp.zeros_like, params),
             count=jnp.zeros([], jnp.int32))
 
       def update_fn(updates, state, params=None):
@@ -343,8 +343,8 @@ class AMSGradTest(chex.TestCase):
         prev_nu = state.nu
         _, state = adam.update(updates, state, params)
         curr_nu = state.nu
-        nu_hat = jax.tree_map(jnp.maximum, curr_nu, prev_nu)
-        updates = jax.tree_map(lambda m, v: m / (jnp.sqrt(v + 0.0) + 1e-8),
+        nu_hat = jax.tree.map(jnp.maximum, curr_nu, prev_nu)
+        updates = jax.tree.map(lambda m, v: m / (jnp.sqrt(v + 0.0) + 1e-8),
                                state.mu, nu_hat)
 
         return updates, optax.ScaleByAdamState(

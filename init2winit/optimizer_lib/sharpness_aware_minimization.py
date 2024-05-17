@@ -45,7 +45,7 @@ def dual_vector(y: jnp.ndarray) -> jnp.ndarray:
   """
   gradient_norm = jnp.sqrt(
       sum([jnp.sum(jnp.square(e)) for e in jax.tree_util.tree_leaves(y)]))
-  normalized_gradient = jax.tree_map(lambda x: x / gradient_norm, y)
+  normalized_gradient = jax.tree.map(lambda x: x / gradient_norm, y)
   return normalized_gradient
 
 
@@ -97,7 +97,7 @@ def sharpness_aware_minimization(
 
     updates_norm = jnp.sqrt(model_utils.l2_regularization(updates, 0))
     if grad_clip:
-      scaled_updates = jax.tree_map(
+      scaled_updates = jax.tree.map(
           lambda x: x / (updates_norm + _GRAD_CLIP_EPS) * grad_clip, updates)
       updates = jax.lax.cond(updates_norm > grad_clip, lambda _: scaled_updates,
                              lambda _: updates, None)

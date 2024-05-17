@@ -56,7 +56,7 @@ def _canonicalize_dtype(dtype):
 
 def _update_moment(updates, moments, decay, order):
   """Compute the exponential moving average of the `order-th` moment."""
-  return jax.tree_map(
+  return jax.tree.map(
       lambda g, t: (1 - decay) * (g**order) + decay * t, updates, moments
   )
 
@@ -65,7 +65,7 @@ def _update_preconditioner_moment(updates, moments, decay, order):
   """Compute the exponential moving average of the `order-th` moment."""
   assert order >= 1 and order <= 2
   moment_func = lambda x: jnp.power(jnp.abs(x), order)
-  return jax.tree_map(
+  return jax.tree.map(
       lambda g, t: (1 - decay) * moment_func(g) + decay * t,
       updates, moments
   )
@@ -85,7 +85,7 @@ def _update_first_moment_variance_preserved(updates, moments, decay):
   Returns:
     Variance Preserved EMA.
   """
-  return jax.tree_map(
+  return jax.tree.map(
       lambda g, t: ((1 - decay**2) ** 0.5) * g + decay * t,
       updates,
       moments,
@@ -95,7 +95,7 @@ def _update_first_moment_variance_preserved(updates, moments, decay):
 def _bias_correction(moment, decay, count):
   """Perform bias correction. This becomes a no-op as count goes to infinity."""
   beta = 1 - decay**count
-  return jax.tree_map(lambda t: t / beta.astype(t.dtype), moment)
+  return jax.tree.map(lambda t: t / beta.astype(t.dtype), moment)
 
 
 # TODO(namanagarwal): make this count generic
@@ -115,7 +115,7 @@ def _variance_correction(moment, decay, count):
     Variance-normalized decay.
   """
   beta = (((1 - decay) / (1 + decay)) * (1 - decay ** (2 * count))) ** 0.5
-  return jax.tree_map(lambda t: t / beta.astype(t.dtype), moment)
+  return jax.tree.map(lambda t: t / beta.astype(t.dtype), moment)
 
 
 def _bias_corrected_decay(decay, count):
@@ -192,7 +192,7 @@ def compute_params_ema_for_eval(
 
   def init_fn(params):
     return optax.EmaState(
-        count=jnp.array(0, dtype=jnp.int32), ema=jax.tree_map(jnp.copy, params))
+        count=jnp.array(0, dtype=jnp.int32), ema=jax.tree.map(jnp.copy, params))
 
   def update_fn(updates, state, params):
     if params is None:
@@ -212,7 +212,7 @@ def compute_params_ema_for_eval(
       else:
         return old_v - (1.0 - ema_decay) * (old_v - new_v)
 
-    new_ema = jax.tree_map(update_func, state.ema, params)
+    new_ema = jax.tree.map(update_func, state.ema, params)
     count_inc = state.count + jnp.array(1, jnp.int32)
 
     return updates, optax.EmaState(count=count_inc, ema=new_ema)
@@ -246,7 +246,7 @@ def normalized_first_moment_ema(
 
   def init_fn(params):
     return optax.EmaState(
-        count=jnp.zeros([], jnp.int32), ema=jax.tree_map(jnp.zeros_like, params)
+        count=jnp.zeros([], jnp.int32), ema=jax.tree.map(jnp.zeros_like, params)
     )
 
   def update_fn(updates, state, params=None):
@@ -257,7 +257,7 @@ def normalized_first_moment_ema(
     new_ema = new_ema if not debias else _bias_correction(new_ema, decay, count)
 
     scale_factor = (1 + decay) / (1 - decay) ** 0.5
-    updates = jax.tree_map(lambda x: x * scale_factor, new_ema)
+    updates = jax.tree.map(lambda x: x * scale_factor, new_ema)
 
     return updates, optax.EmaState(count=count, ema=new_ema)
 
@@ -279,14 +279,14 @@ def nesterovpp(
   """
 
   def init_fn(params):
-    return optax.TraceState(trace=jax.tree_map(jnp.zeros_like, params))
+    return optax.TraceState(trace=jax.tree.map(jnp.zeros_like, params))
 
   def update_fn(updates, state, params=None):
     del params
     f_moment = lambda g, t: g + moment_decay * t
     f_update = lambda g, t: g + update_decay * t
-    new_trace = jax.tree_map(f_moment, updates, state.trace)
-    updates = jax.tree_map(f_update, updates, new_trace)
+    new_trace = jax.tree.map(f_moment, updates, state.trace)
+    updates = jax.tree.map(f_update, updates, new_trace)
     return updates, optax.TraceState(trace=new_trace)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -308,7 +308,7 @@ def ema_nesterov(
   """
 
   def init_fn(params):
-    return optax.TraceState(trace=jax.tree_map(jnp.zeros_like, params))
+    return optax.TraceState(trace=jax.tree.map(jnp.zeros_like, params))
 
   def update_fn(updates, state, params=None):
     del params
@@ -317,8 +317,8 @@ def ema_nesterov(
       f_update = lambda g, t: (1 - update_decay) * g + update_decay * t
     else:
       f_update = lambda g, t: (1 - moment_decay) * g + moment_decay * t
-    new_trace = jax.tree_map(f_moment, updates, state.trace)
-    updates = jax.tree_map(f_update, updates, new_trace)
+    new_trace = jax.tree.map(f_moment, updates, state.trace)
+    updates = jax.tree.map(f_update, updates, new_trace)
     return updates, optax.TraceState(trace=new_trace)
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -363,7 +363,7 @@ def precondition_by_rms(
 
   def init_fn(params):
     return PreconditionBySecondMomentCoordinateWiseState(
-        count=jnp.zeros([], jnp.int32), nu=jax.tree_map(jnp.zeros_like, params)
+        count=jnp.zeros([], jnp.int32), nu=jax.tree.map(jnp.zeros_like, params)
     )
 
   def update_fn(updates, state, params=None):
@@ -371,7 +371,7 @@ def precondition_by_rms(
     nu = _update_moment(updates, state.nu, decay, 2)
     count = state.count + jnp.array(1, dtype=jnp.int32)
     nu_hat = nu if not debias else _bias_correction(nu, decay, count)
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda u, v: u / (raise_power(v + eps_root) + eps), updates, nu_hat
     )
     return updates, PreconditionBySecondMomentCoordinateWiseState(
@@ -411,21 +411,21 @@ def precondition_by_yogi(
 
   def init_fn(params):
     value_like = lambda p: jnp.full_like(p, initial_accumulator_value)
-    nu = jax.tree_map(value_like, params)  # Second Central moment
+    nu = jax.tree.map(value_like, params)  # Second Central moment
     return PreconditionBySecondMomentCoordinateWiseState(
         count=jnp.zeros([], jnp.int32), nu=nu
     )
 
   def update_fn(updates, state, params=None):
     del params
-    nu = jax.tree_map(
+    nu = jax.tree.map(
         lambda g, v: v - (1 - b2) * jnp.sign(v - g**2) * (g**2),
         updates,
         state.nu,
     )
     count = state.count + jnp.array(1, dtype=jnp.int32)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda u, v: u / (jnp.sqrt(v + eps_root) + eps), updates, nu_hat
     )
     return updates, PreconditionBySecondMomentCoordinateWiseState(
@@ -458,15 +458,15 @@ def precondition_by_amsgrad(
 
   def init_fn(params):
     return PreconditionBySecondMomentCoordinateWiseState(
-        count=jnp.zeros([], jnp.int32), nu=jax.tree_map(jnp.zeros_like, params)
+        count=jnp.zeros([], jnp.int32), nu=jax.tree.map(jnp.zeros_like, params)
     )
 
   def update_fn(updates, state, params=None):
     del params
     nu = _update_moment(updates, state.nu, b2, 2)
     count = state.count + jnp.array(1, dtype=jnp.int32)
-    nu_hat = jax.tree_map(jnp.maximum, nu, state.nu)
-    updates = jax.tree_map(
+    nu_hat = jax.tree.map(jnp.maximum, nu, state.nu)
+    updates = jax.tree.map(
         lambda m, v: m / (jnp.sqrt(v + eps_root) + eps), updates, nu_hat
     )
     return updates, PreconditionBySecondMomentCoordinateWiseState(
@@ -509,18 +509,18 @@ def scale_by_amsgrad(
   """
 
   def init_fn(params):
-    mu = jax.tree_map(  # First moment
+    mu = jax.tree.map(  # First moment
         lambda t: jnp.zeros_like(t, dtype=mu_dtype), params
     )
-    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    nu = jax.tree.map(jnp.zeros_like, params)  # Second moment
     return ScaleByAMSGradState(mu=mu, nu=nu)
 
   def update_fn(updates, state, params=None):
     del params
     mu = _update_moment(updates, state.mu, b1, 1)
     nu = _update_moment(updates, state.nu, b2, 2)
-    nu_hat = jax.tree_map(jnp.maximum, nu, state.nu)
-    updates = jax.tree_map(
+    nu_hat = jax.tree.map(jnp.maximum, nu, state.nu)
+    updates = jax.tree.map(
         lambda m, v: m / (jnp.sqrt(v + eps_root) + eps), mu, nu_hat
     )
     return updates, ScaleByAMSGradState(mu=mu, nu=nu)
@@ -582,8 +582,8 @@ def scale_by_adaptive_gd(
   """
 
   def init_fn(params):
-    init_params = jax.tree_map(jnp.copy, params)  # x0
-    prev_update = jax.tree_map(
+    init_params = jax.tree.map(jnp.copy, params)  # x0
+    prev_update = jax.tree.map(
         jnp.zeros_like, params
     )  # previous update with step-size/lr included
     return ScaleBy_Adaptive_GD_State(
@@ -596,7 +596,7 @@ def scale_by_adaptive_gd(
 
   def update_fn(updates, state, params):
     # we can use layer-wise distances later for a layer-wise variant
-    layer_wise_curr_distance_squared = jax.tree_map(
+    layer_wise_curr_distance_squared = jax.tree.map(
         lambda x_t, x_0: jnp.sum((x_t - x_0) ** 2), params, state.init_params
     )
     curr_distance_norm_squared = utils.total_tree_sum(
@@ -604,7 +604,7 @@ def scale_by_adaptive_gd(
     )
     # curr_r_squared plays the role of r_t^2 here
     curr_r_squared = jnp.maximum(state.r_squared, curr_distance_norm_squared)
-    new_updates = jax.tree_map(
+    new_updates = jax.tree.map(
         lambda g, g_prev: g - state.lambda_prev * g_prev,
         updates,
         state.prev_update,
@@ -618,10 +618,10 @@ def scale_by_adaptive_gd(
         - state.lambda_sum
     )
     lambda_sum_new = state.lambda_sum + lambda_new
-    new_updates_with_lr = jax.tree_map(
+    new_updates_with_lr = jax.tree.map(
         lambda u: u / lambda_sum_new, new_updates
     )
-    negative_new_updates_with_lr = jax.tree_map(
+    negative_new_updates_with_lr = jax.tree.map(
         lambda u: -u, new_updates_with_lr
     )
     return new_updates_with_lr, ScaleBy_Adaptive_GD_State(
@@ -648,53 +648,53 @@ def scale_by_layerwise_adaptive_gd(
   """
 
   def init_fn(params):
-    init_params = jax.tree_map(jnp.copy, params)  # x0
-    prev_update = jax.tree_map(
+    init_params = jax.tree.map(jnp.copy, params)  # x0
+    prev_update = jax.tree.map(
         jnp.zeros_like, params
     )  # previous update with step-size/lr included
     return ScaleBy_Adaptive_GD_State(
-        r_squared=jax.tree_map(
+        r_squared=jax.tree.map(
             lambda x: init_r_squared * jnp.ones([], jnp.float64), params
         ),
-        lambda_prev=jax.tree_map(lambda x: jnp.zeros([], jnp.float64), params),
-        lambda_sum=jax.tree_map(lambda x: jnp.zeros([], jnp.float64), params),
+        lambda_prev=jax.tree.map(lambda x: jnp.zeros([], jnp.float64), params),
+        lambda_sum=jax.tree.map(lambda x: jnp.zeros([], jnp.float64), params),
         init_params=init_params,
         prev_update=prev_update,
     )
 
   def update_fn(updates, state, params):
-    layer_wise_curr_distance_squared = jax.tree_map(
+    layer_wise_curr_distance_squared = jax.tree.map(
         lambda x_t, x_0: jnp.sum((x_t - x_0) ** 2), params, state.init_params
     )
     curr_distance_norm_squared = layer_wise_curr_distance_squared
     # curr_r_squared plays the role of r_t^2 here
-    curr_r_squared = jax.tree_map(
+    curr_r_squared = jax.tree.map(
         jnp.maximum,
         state.r_squared,
         curr_distance_norm_squared,
     )
-    new_updates = jax.tree_map(
+    new_updates = jax.tree.map(
         lambda g, g_prev, l_prev: g - l_prev * g_prev,
         updates,
         state.prev_update,
         state.lambda_prev,
     )
-    new_update_norm_squared = jax.tree_map(
+    new_update_norm_squared = jax.tree.map(
         lambda u: jnp.sum(u ** 2), new_updates
     )
-    lambda_new = jax.tree_map(
+    lambda_new = jax.tree.map(
         lambda l, g, r: 0.5 * (jnp.sqrt(l**2 + jnp.divide(g, r)) - l),
         state.lambda_sum,
         new_update_norm_squared,
         curr_r_squared,
     )
-    lambda_sum_new = jax.tree_map(
+    lambda_sum_new = jax.tree.map(
         lambda l1, l2: l1 + l2, state.lambda_sum, lambda_new
     )
-    new_updates_with_lr = jax.tree_map(
+    new_updates_with_lr = jax.tree.map(
         lambda u, l: u / l, new_updates, lambda_sum_new
     )
-    negative_new_updates_with_lr = jax.tree_map(
+    negative_new_updates_with_lr = jax.tree.map(
         lambda u: -u, new_updates_with_lr
     )
     return new_updates_with_lr, ScaleBy_Adaptive_GD_State(
@@ -721,52 +721,52 @@ def scale_by_coordinate_wise_adaptive_gd(
   """
 
   def init_fn(params):
-    init_params = jax.tree_map(jnp.copy, params)  # x0
-    prev_update = jax.tree_map(
+    init_params = jax.tree.map(jnp.copy, params)  # x0
+    prev_update = jax.tree.map(
         jnp.zeros_like, params
     )  # previous update with step-size/lr included
     return ScaleBy_Adaptive_GD_State(
-        r_squared=jax.tree_map(
+        r_squared=jax.tree.map(
             lambda x: init_r_squared * jnp.ones_like(x) / jnp.size(x),
             params,
         ),
-        lambda_prev=jax.tree_map(jnp.zeros_like, params),
-        lambda_sum=jax.tree_map(jnp.zeros_like, params),
+        lambda_prev=jax.tree.map(jnp.zeros_like, params),
+        lambda_sum=jax.tree.map(jnp.zeros_like, params),
         init_params=init_params,
         prev_update=prev_update,
     )
 
   def update_fn(updates, state, params):
-    curr_distance_norm_squared = jax.tree_map(
+    curr_distance_norm_squared = jax.tree.map(
         lambda x_t, x_0: jnp.square(x_t - x_0), params, state.init_params
     )
-    curr_r_squared = jax.tree_map(
+    curr_r_squared = jax.tree.map(
         jnp.maximum,
         state.r_squared,
         curr_distance_norm_squared,
     )
-    new_updates = jax.tree_map(
+    new_updates = jax.tree.map(
         lambda g, g_prev, l_prev: g - jnp.multiply(l_prev, g_prev),
         updates,
         state.prev_update,
         state.lambda_prev,
     )
-    new_update_norm_squared = jax.tree_map(
+    new_update_norm_squared = jax.tree.map(
         jnp.square, new_updates
     )
-    lambda_new = jax.tree_map(
+    lambda_new = jax.tree.map(
         lambda l, g, r: 0.5 * (jnp.sqrt(jnp.square(l) + jnp.divide(g, r)) - l),
         state.lambda_sum,
         new_update_norm_squared,
         curr_r_squared,
     )
-    lambda_sum_new = jax.tree_map(
+    lambda_sum_new = jax.tree.map(
         lambda l1, l2: l1 + l2, state.lambda_sum, lambda_new
     )
-    new_updates_with_lr = jax.tree_map(
+    new_updates_with_lr = jax.tree.map(
         jnp.divide, new_updates, lambda_sum_new
     )
-    negative_new_updates_with_lr = jax.tree_map(
+    negative_new_updates_with_lr = jax.tree.map(
         lambda u: -u, new_updates_with_lr
     )
     return new_updates_with_lr, ScaleBy_Adaptive_GD_State(
@@ -801,7 +801,7 @@ def scale_by_adaptive_gd_simple(
   """
 
   def init_fn(params):
-    init_params = jax.tree_map(jnp.copy, params)  # x0
+    init_params = jax.tree.map(jnp.copy, params)  # x0
     return ScaleBy_Adaptive_GD_Simple_State(
         r_squared=init_r_squared * jnp.ones([], jnp.float64),
         mu_sum=jnp.zeros([], jnp.float64),
@@ -810,7 +810,7 @@ def scale_by_adaptive_gd_simple(
 
   def update_fn(updates, state, params):
     # we can use layer-wise distances later for a layer-wise variant
-    layer_wise_curr_distance_squared = jax.tree_map(
+    layer_wise_curr_distance_squared = jax.tree.map(
         lambda x_t, x_0: jnp.sum((x_t - x_0) ** 2), params, state.init_params
     )
     curr_distance_norm_squared = utils.total_tree_sum(
@@ -825,7 +825,7 @@ def scale_by_adaptive_gd_simple(
         )
         + state.mu_sum
     )
-    new_updates_with_lr = jax.tree_map(
+    new_updates_with_lr = jax.tree.map(
         lambda u: u / mu_sum_new, updates
     )
     return new_updates_with_lr, ScaleBy_Adaptive_GD_Simple_State(
@@ -852,34 +852,34 @@ def scale_by_layerwise_adaptive_gd_simple(
   """
 
   def init_fn(params):
-    init_params = jax.tree_map(jnp.copy, params)  # x0
+    init_params = jax.tree.map(jnp.copy, params)  # x0
     return ScaleBy_Adaptive_GD_Simple_State(
-        r_squared=jax.tree_map(
+        r_squared=jax.tree.map(
             lambda x: init_r_squared * jnp.ones([], jnp.float64), params
         ),
-        mu_sum=jax.tree_map(lambda x: eps * jnp.ones([], jnp.float64), params),
+        mu_sum=jax.tree.map(lambda x: eps * jnp.ones([], jnp.float64), params),
         init_params=init_params,
     )
 
   def update_fn(updates, state, params):
-    curr_distance_norm_squared = jax.tree_map(
+    curr_distance_norm_squared = jax.tree.map(
         lambda x_t, x_0: jnp.sum((x_t - x_0) ** 2), params, state.init_params
     )
-    curr_r_squared = jax.tree_map(
+    curr_r_squared = jax.tree.map(
         jnp.maximum,
         state.r_squared,
         curr_distance_norm_squared,
     )
-    update_norm_squared = jax.tree_map(
+    update_norm_squared = jax.tree.map(
         lambda u: jnp.sum(u ** 2), updates
     )
-    mu_sum_new = jax.tree_map(
+    mu_sum_new = jax.tree.map(
         lambda l, g, r: 0.5 * (jnp.sqrt(l**2 + 4 * jnp.divide(g, r)) + l),
         state.mu_sum,
         update_norm_squared,
         curr_r_squared,
     )
-    new_updates_with_lr = jax.tree_map(
+    new_updates_with_lr = jax.tree.map(
         lambda u, l: u / l, updates, mu_sum_new
     )
     return new_updates_with_lr, ScaleBy_Adaptive_GD_Simple_State(
@@ -906,36 +906,36 @@ def scale_by_coordinate_wise_adaptive_gd_simple(
   """
 
   def init_fn(params):
-    init_params = jax.tree_map(jnp.copy, params)  # x0
+    init_params = jax.tree.map(jnp.copy, params)  # x0
     return ScaleBy_Adaptive_GD_Simple_State(
-        r_squared=jax.tree_map(
+        r_squared=jax.tree.map(
             lambda x: init_r_squared*jnp.ones_like(x), params
         ),
-        mu_sum=jax.tree_map(
+        mu_sum=jax.tree.map(
             lambda x: eps*jnp.ones_like(x), params
         ),
         init_params=init_params,
     )
 
   def update_fn(updates, state, params):
-    curr_distance_norm_squared = jax.tree_map(
+    curr_distance_norm_squared = jax.tree.map(
         lambda x_t, x_0: jnp.square(x_t - x_0), params, state.init_params
     )
-    curr_r_squared = jax.tree_map(
+    curr_r_squared = jax.tree.map(
         jnp.maximum,
         state.r_squared,
         curr_distance_norm_squared,
     )
-    update_norm_squared = jax.tree_map(
+    update_norm_squared = jax.tree.map(
         jnp.square, updates
     )
-    mu_sum_new = jax.tree_map(
+    mu_sum_new = jax.tree.map(
         lambda l, g, r: 0.5*(jnp.sqrt(jnp.square(l) + 4*jnp.divide(g, r)) + l),
         state.mu_sum,
         update_norm_squared,
         curr_r_squared,
     )
-    new_updates_with_lr = jax.tree_map(
+    new_updates_with_lr = jax.tree.map(
         jnp.divide, updates, mu_sum_new
     )
     return new_updates_with_lr, ScaleBy_Adaptive_GD_Simple_State(
@@ -981,8 +981,8 @@ def scale_by_adam(
   raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
-    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
-    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    mu = jax.tree.map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree.map(jnp.zeros_like, params)  # Second moment
     return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
 
   def update_fn(updates, state, params=None):
@@ -993,7 +993,7 @@ def scale_by_adam(
     count = state.count + jnp.array(1, dtype=jnp.int32)
     mu_hat = mu if not debias else _bias_correction(mu, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
     )
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
@@ -1030,8 +1030,8 @@ def scale_by_adam_plus(
   raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
-    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
-    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    mu = jax.tree.map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree.map(jnp.zeros_like, params)  # Second moment
     return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
 
   def update_fn(updates, state, params=None):
@@ -1042,14 +1042,14 @@ def scale_by_adam_plus(
     count = state.count + jnp.array(1, dtype=jnp.int32)
     mu_hat = mu if not debias else _bias_correction(mu, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates_rms = jax.tree_map(
+    updates_rms = jax.tree.map(
         lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
     )
 
     mu_hat_2 = mu_hat
     # rescale un-preconditioned update if rescale is True
     if rescale:
-      mu_hat_2 = jax.tree_map(lambda m: m / (1.0 - b1), mu_hat)
+      mu_hat_2 = jax.tree.map(lambda m: m / (1.0 - b1), mu_hat)
     updates = _update_moment(mu_hat_2, updates_rms, b3, 1)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
 
@@ -1081,8 +1081,8 @@ def scale_by_normalized_adam(
   raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
-    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
-    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    mu = jax.tree.map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree.map(jnp.zeros_like, params)  # Second moment
     return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
 
   def update_fn(updates, state, params=None):
@@ -1096,7 +1096,7 @@ def scale_by_normalized_adam(
 
     scale_factor = (1 + b1) / (1 - b1) ** 0.5
 
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda m, v: scale_factor * (m / (raise_power(v + eps_root) + eps)),
         mu_hat,
         nu_hat,
@@ -1133,8 +1133,8 @@ def scale_by_normalized_adam_plus(
   raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
-    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
-    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    mu = jax.tree.map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree.map(jnp.zeros_like, params)  # Second moment
     return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
 
   def update_fn(updates, state, params=None):
@@ -1148,7 +1148,7 @@ def scale_by_normalized_adam_plus(
 
     scale_factor = (1 + b1) / (1 - b1) ** 0.5
 
-    updates_rms = jax.tree_map(
+    updates_rms = jax.tree.map(
         lambda m, v: scale_factor * (m / (raise_power(v + eps_root) + eps)),
         mu_hat,
         nu_hat,
@@ -1183,8 +1183,8 @@ def scale_by_iteration_dependent_norm_adam(
   raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
-    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
-    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    mu = jax.tree.map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree.map(jnp.zeros_like, params)  # Second moment
     return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
 
   def update_fn(updates, state, params=None):
@@ -1195,7 +1195,7 @@ def scale_by_iteration_dependent_norm_adam(
     count = state.count + jnp.array(1, dtype=jnp.int32)
     mu_hat = _variance_correction(mu, b1, count)
     nu_hat = _bias_correction(nu, b2, count)
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
     )
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
@@ -1230,8 +1230,8 @@ def scale_by_adam_var_preserved(
   raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
-    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
-    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    mu = jax.tree.map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree.map(jnp.zeros_like, params)  # Second moment
     return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
 
   def update_fn(updates, state, params=None):
@@ -1244,7 +1244,7 @@ def scale_by_adam_var_preserved(
     mu_hat = mu if not debias else _bias_correction(mu, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
 
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda m, v: (m / (raise_power(v + eps_root) + eps)),
         mu_hat,
         nu_hat,
@@ -1297,16 +1297,16 @@ def scale_by_adaprop(
   )
 
   def init_fn(params):
-    prev_params = jax.tree_map(
+    prev_params = jax.tree.map(
         lambda p: jnp.zeros_like(p, dtype=quantized_dtype), params
     )
-    mu = jax.tree_map(
+    mu = jax.tree.map(
         lambda p: jnp.zeros_like(p, dtype=quantized_dtype), params
     )
-    nu = jax.tree_map(
+    nu = jax.tree.map(
         lambda p: jnp.zeros_like(p, dtype=quantized_dtype), params
     )
-    gain = jax.tree_map(
+    gain = jax.tree.map(
         lambda p: jnp.zeros_like(p, dtype=quantized_dtype), params
     )
 
@@ -1330,20 +1330,20 @@ def scale_by_adaprop(
     nu_hat = _bias_correction(nu, b2, new_count)
     pp = _update_moment(params, state.pp, b4, 1)
     pp_hat = _bias_correction(pp, b4, new_count)
-    param_change = jax.tree_map(lambda p, i: p - i, params, pp_hat)
-    g_max = jax.tree_map(lambda g, n: jnp.maximum(jnp.abs(g), raise_power(n)),
+    param_change = jax.tree.map(lambda p, i: p - i, params, pp_hat)
+    g_max = jax.tree.map(lambda g, n: jnp.maximum(jnp.abs(g), raise_power(n)),
                          updates, nu_hat)
-    gain = jax.tree_map(
+    gain = jax.tree.map(
         lambda r, p, g, x: jnp.maximum(b3*r - p*g/(x + eps), 0.0),
         state.gain, param_change, updates, g_max)
-    wealth = jax.tree_map(lambda g: 1.0 + g, gain)
+    wealth = jax.tree.map(lambda g: 1.0 + g, gain)
 
-    bet_factor = jax.tree_map(
+    bet_factor = jax.tree.map(
         lambda m, n: m / (raise_power(n) + eps),
         mu_hat,
         nu_hat,
     )
-    new_updates = jax.tree_map(lambda b, w: b * w,
+    new_updates = jax.tree.map(lambda b, w: b * w,
                                bet_factor, wealth)
     return new_updates, ScaleByAdapropState(
         count=new_count,
@@ -1384,17 +1384,17 @@ def precondition_by_rss(
   raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
-    sum_of_squares = jax.tree_map(
+    sum_of_squares = jax.tree.map(
         lambda t: jnp.full_like(t, initial_accumulator_value), params
     )
     return PreconditionByRssState(sum_of_squares=sum_of_squares)
 
   def update_fn(updates, state, params=None):
     del params
-    sum_of_squares = jax.tree_map(
+    sum_of_squares = jax.tree.map(
         lambda g, t: jnp.square(g) + t, updates, state.sum_of_squares
     )
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda scale, g: g / (raise_power(scale + eps_root) + eps),
         sum_of_squares,
         updates,
@@ -1428,7 +1428,7 @@ def sanitize_values(replacement=0.0):
   def update_fn(updates, state, params=None):
     del params
 
-    updates = jax.tree_map(lambda x: _sanitize_values(x, replacement), updates)
+    updates = jax.tree.map(lambda x: _sanitize_values(x, replacement), updates)
     return updates, state
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -1486,7 +1486,7 @@ def clip_updates(clip_threshold=1.0):
   def update_fn(updates, state, params=None):
     del params
 
-    updates = jax.tree_map(lambda x: _clip_update(x, clip_threshold), updates)
+    updates = jax.tree.map(lambda x: _clip_update(x, clip_threshold), updates)
     return updates, state
 
   return optax.GradientTransformation(init_fn, update_fn)
@@ -1532,8 +1532,8 @@ def scale_by_nadam(
   )
 
   def init_fn(params):
-    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
-    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    mu = jax.tree.map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree.map(jnp.zeros_like, params)  # Second moment
     return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
 
   def update_fn(updates, state, params=None):
@@ -1549,7 +1549,7 @@ def scale_by_nadam(
 
     mu_hat = mu_hat if not debias else _bias_correction(mu_hat, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
     )
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
@@ -1586,8 +1586,8 @@ def scale_by_nadam_plus(
   raise_power = jnp.sqrt if power == 0.5 else lambda x: jnp.power(x, power)
 
   def init_fn(params):
-    mu = jax.tree_map(jnp.zeros_like, params)  # First moment
-    nu = jax.tree_map(jnp.zeros_like, params)  # Second moment
+    mu = jax.tree.map(jnp.zeros_like, params)  # First moment
+    nu = jax.tree.map(jnp.zeros_like, params)  # Second moment
     return ScaleByAdamState(count=jnp.zeros([], jnp.int32), mu=mu, nu=nu)
 
   def update_fn(updates, state, params=None):
@@ -1598,7 +1598,7 @@ def scale_by_nadam_plus(
     mu_hat = _update_moment(updates, mu, b1, 1)
     mu_hat = mu_hat if not debias else _bias_correction(mu_hat, b1, count)
     nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates_rms = jax.tree_map(
+    updates_rms = jax.tree.map(
         lambda m, v: m / (raise_power(v + eps_root) + eps), mu_hat, nu_hat
     )
 
@@ -1606,7 +1606,7 @@ def scale_by_nadam_plus(
     if rescale:
       # Note: The rescaling factor is different here than Adam because Nadam
       # uses double momentum.
-      mu_hat_2 = jax.tree_map(lambda m: m / (1.0 - (b1**2)), mu_hat)
+      mu_hat_2 = jax.tree.map(lambda m: m / (1.0 - (b1**2)), mu_hat)
     updates = _update_moment(mu_hat_2, updates_rms, b3, 1)
     return updates, ScaleByAdamState(count=count, mu=mu, nu=nu)
 
@@ -1653,11 +1653,11 @@ def precondition_by_layered_adaptive_rms(
 
   def init_fn(params):
     count = jnp.zeros([], jnp.int32)
-    nu = jax.tree_map(jnp.zeros_like, params)
-    beta_array = jax.tree_map(
+    nu = jax.tree.map(jnp.zeros_like, params)
+    beta_array = jax.tree.map(
         lambda x: _generate_per_parameter_array(decays, x), params
     )
-    scale_array = jax.tree_map(
+    scale_array = jax.tree.map(
         lambda x: _generate_per_parameter_array(scales, x), params
     )
 
@@ -1705,7 +1705,7 @@ def precondition_by_layered_adaptive_rms(
 
   def update_fn(updates, state, params=None):
     del params
-    nu = jax.tree_map(
+    nu = jax.tree.map(
         lambda g, t, b: _update_moment_general(g, t, b, 2),
         updates,
         state.nu,
@@ -1714,7 +1714,7 @@ def precondition_by_layered_adaptive_rms(
     count = state.count + jnp.array(1, dtype=jnp.int32)
     # Decide what to do with bias correction
     # nu_hat = nu if not debias else _bias_correction(nu, b2, count)
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda m, v, s: s * (m / (jnp.sqrt(v + eps_root) + eps)),
         updates,
         nu,
@@ -1751,7 +1751,7 @@ def polyak_averaging(decay: float = 0.999) -> optax.GradientTransformation:
   """
 
   def init_fn(params):
-    return Polyak_AveragingState(ema=jax.tree_map(jnp.zeros_like, params))
+    return Polyak_AveragingState(ema=jax.tree.map(jnp.zeros_like, params))
 
   def update_fn(updates, state, params):
     new_ema = _update_moment(params, state.ema, decay, 1)
@@ -1879,7 +1879,7 @@ def scale_by_pytree(pytree_scales: Any) -> optax.GradientTransformation:
 
   def update_fn(updates, state, params):
     del params
-    return jax.tree_map(lambda x, y: x * y, updates, state.pytree_scales), state
+    return jax.tree.map(lambda x, y: x * y, updates, state.pytree_scales), state
 
   return optax.GradientTransformation(init_fn, update_fn)
 

@@ -109,11 +109,11 @@ def accumulate_gradients(
         base_state=base_state,
         hyperparams=base_state.hyperparams,
         num_per_step_batches=jnp.zeros([], jnp.int32),
-        accumulations=jax.tree_map(jnp.zeros_like, params))
+        accumulations=jax.tree.map(jnp.zeros_like, params))
 
   @optimizer_utils.no_cross_device_gradient_aggregation
   def update_fn(updates, state, params=None, **extra_args):
-    zeros_params = jax.tree_map(jnp.zeros_like, state.accumulations)
+    zeros_params = jax.tree.map(jnp.zeros_like, state.accumulations)
 
     def total_batch_update(total_gradients, params, state):
       # Enough example gradients have been accumulated to represent the total
@@ -122,7 +122,7 @@ def accumulate_gradients(
       # the case for our default cross entropy. This also does not take into
       # account any example weighting, which is rarely used for training
       # batches.
-      total_gradients = jax.tree_map(
+      total_gradients = jax.tree.map(
           lambda x: x / steps_per_update, total_gradients)
       if batch_axis_name:
         # We only sync gradients when we are about to update the model, in order
@@ -147,7 +147,7 @@ def accumulate_gradients(
           accumulations=updated_accumulations)
       return zeros_params, updated_state
 
-    updated_accumulations = jax.tree_map(lambda g, acc: g + acc, updates,
+    updated_accumulations = jax.tree.map(lambda g, acc: g + acc, updates,
                                          state.accumulations)
     updates, state = jax.lax.cond(
         state.num_per_step_batches == steps_per_update - 1,

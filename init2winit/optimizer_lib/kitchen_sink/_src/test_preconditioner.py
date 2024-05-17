@@ -42,7 +42,7 @@ class GradTransformTest(parameterized.TestCase):
       actual_power = [actual_power]
 
     actual_grads = {
-        str(int(o)): jax.tree_map(lambda x: x**o, grads['updates'])  # pylint: disable=cell-var-from-loop
+        str(int(o)): jax.tree.map(lambda x: x**o, grads['updates'])  # pylint: disable=cell-var-from-loop
         for o in actual_power
     }
     nth_grads, _ = preconditioner.nth_power(power).update(grads, None)
@@ -75,12 +75,12 @@ class AccumulatorTest(parameterized.TestCase):
       grads, _ = nth_grads.update(grads, None)
       updates, state = accumulator.update(grads, state)
 
-      actual = jax.tree_map(lambda g, t: (1 - decay) * g + decay * t,
+      actual = jax.tree.map(lambda g, t: (1 - decay) * g + decay * t,
                             grads['variables'], moments)
       if debias:
         count += jnp.array(1, dtype=jnp.int32)
         beta = jnp.array(1, dtype=jnp.int32) - decay ** count
-        actual = jax.tree_map(lambda t: t / beta.astype(t.dtype), actual)  # pylint: disable=cell-var-from-loop
+        actual = jax.tree.map(lambda t: t / beta.astype(t.dtype), actual)  # pylint: disable=cell-var-from-loop
 
       chex.assert_trees_all_close(updates['moments'], actual)
 

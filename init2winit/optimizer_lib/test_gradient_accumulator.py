@@ -191,7 +191,7 @@ class GradientAccumulatorTest(absltest.TestCase):
         start_index = 0
         end_index = int(total_batch_size / num_sub_batches)
         for bi in range(num_sub_batches):
-          yield jax.tree_map(lambda x: x[start_index:end_index], total_batch)  # pylint: disable=cell-var-from-loop
+          yield jax.tree.map(lambda x: x[start_index:end_index], total_batch)  # pylint: disable=cell-var-from-loop
           start_index = end_index
           end_index = int(total_batch_size * (bi + 2) / num_sub_batches)
 
@@ -229,7 +229,7 @@ class GradientAccumulatorTest(absltest.TestCase):
         opt_init=sgd_opt_init,
         opt_update=sgd_opt_update)
 
-    diffs_params = jax.tree_map(lambda a, b: jnp.mean(jnp.abs(a - b)),
+    diffs_params = jax.tree.map(lambda a, b: jnp.mean(jnp.abs(a - b)),
                                 grad_acc_params, params)
 
     def batch_stats_reduce(a, b):
@@ -239,7 +239,7 @@ class GradientAccumulatorTest(absltest.TestCase):
       # The gradient accumulator counters are scalars.
       return a - b
 
-    diffs_batch_stats = jax.tree_map(batch_stats_reduce, grad_acc_batch_stats,
+    diffs_batch_stats = jax.tree.map(batch_stats_reduce, grad_acc_batch_stats,
                                      batch_stats)
     # We sometimes get small floating point errors in the gradients, so we
     # cannot test for the values being exactly the same.

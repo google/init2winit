@@ -441,7 +441,7 @@ class HessianFreeTest(absltest.TestCase):
     expected = ggn_matrix @ np.ones(d)
 
     ones = tm.Vector(
-        jax.tree_map(lambda x: jnp.ones(x.shape), variables['params']))
+        jax.tree.map(lambda x: jnp.ones(x.shape), variables['params']))
     # Test the gvp function
     self.assertAlmostEqual(
         jnp.linalg.norm(

@@ -125,7 +125,7 @@ def nth_power(
       if p == 1:
         updates['variables'][str(int(p))] = updates['updates']
       else:
-        gradients = jax.tree_map(lambda x: x**p, updates['updates'])  # pylint: disable=cell-var-from-loop
+        gradients = jax.tree.map(lambda x: x**p, updates['updates'])  # pylint: disable=cell-var-from-loop
         updates['variables'][str(int(p))] = gradients
 
     return updates, state
@@ -138,7 +138,7 @@ def ema_accumulator(decay: float = 0.999,
   """Create accumulator that computes EMA on all updates."""
 
   def init(params: optax.Params) -> optax.OptState:
-    return (jax.tree_map(jnp.zeros_like, params), jnp.array(0, dtype=jnp.int32))
+    return (jax.tree.map(jnp.zeros_like, params), jnp.array(0, dtype=jnp.int32))
 
   def update(
       updates: optax.Updates,
@@ -149,11 +149,11 @@ def ema_accumulator(decay: float = 0.999,
 
     moments, count = state
     update_fn = lambda g, t: (1 - decay) * g + decay * t
-    moments = jax.tree_map(update_fn, updates['variables'], moments)
+    moments = jax.tree.map(update_fn, updates['variables'], moments)
 
     count = count + jnp.array(1, dtype=jnp.int32)
     beta = jnp.array(1, dtype=jnp.int32) - decay**count
-    updates['moments'] = moments if not debias else jax.tree_map(
+    updates['moments'] = moments if not debias else jax.tree.map(
         lambda t: t / beta.astype(t.dtype), moments)
 
     return updates, (moments, count)
@@ -170,7 +170,7 @@ def yogi_accumulator(b2: float = 0.999,
   """Create yogi accumulator."""
 
   def init(params: optax.Params) -> optax.OptState:
-    return (jax.tree_map(lambda p: jnp.full_like(p, initial_accumulator_value),
+    return (jax.tree.map(lambda p: jnp.full_like(p, initial_accumulator_value),
                          params), jnp.zeros([], dtype=jnp.int32))
 
   def update(updates, state, params=None):
@@ -178,11 +178,11 @@ def yogi_accumulator(b2: float = 0.999,
     moments, count = state
 
     update_fn = lambda g, v: v - (1 - b2) * jnp.sign(v - g) * g
-    moments = jax.tree_map(update_fn, updates['variables'], moments)
+    moments = jax.tree.map(update_fn, updates['variables'], moments)
 
     count = count + jnp.array(1, dtype=jnp.int32)
     beta = jnp.array(1, dtype=jnp.float32) - b2**count
-    updates['moments'] = moments if not debias else jax.tree_map(
+    updates['moments'] = moments if not debias else jax.tree.map(
         lambda t: t / beta.astype(t.dtype), moments)
 
     return updates, (moments, count)
@@ -212,7 +212,7 @@ def rexp_updater(
     grads = updates['updates'] if not use_accumulated_gradient else updates[
         'moments']['1']
 
-    updates['output'] = jax.tree_map(
+    updates['output'] = jax.tree.map(
         lambda u, v: u / (jnp.power(v + eps_root, exponent) + eps), grads,
         updates['moments'][str(moment)])
 

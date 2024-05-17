@@ -87,11 +87,11 @@ def join(by: Union[str, Callable[[optax.GradientTransformation, ...],
 
 
 def _grafting_helper(chain, use_global_norm=False):
-  norm = jax.tree_map(jnp.linalg.norm, chain)
+  norm = jax.tree.map(jnp.linalg.norm, chain)
   if use_global_norm:
     global_norm = jax.tree_util.tree_reduce(lambda x, y: jnp.sqrt(x**2 + y**2),
                                             norm)
-    norm = jax.tree_map(lambda x: global_norm, norm)
+    norm = jax.tree.map(lambda x: global_norm, norm)
   return norm
 
 
@@ -116,8 +116,8 @@ def combine_by_grafting(eps: float = 0.0, use_global_norm: bool = False):
 
   def init(params, *args, **kwargs):
     del args, kwargs
-    mag_norm = jax.tree_map(lambda x: 0.0, params)
-    dir_norm = jax.tree_map(lambda x: 0.0, params)
+    mag_norm = jax.tree.map(lambda x: 0.0, params)
+    dir_norm = jax.tree.map(lambda x: 0.0, params)
 
     return GraftingState(mag_norm=mag_norm, dir_norm=dir_norm)
 
@@ -126,7 +126,7 @@ def combine_by_grafting(eps: float = 0.0, use_global_norm: bool = False):
     mag_norm = _grafting_helper(mag_chain, use_global_norm=use_global_norm)
     dir_norm = _grafting_helper(dir_chain, use_global_norm=use_global_norm)
 
-    updates = jax.tree_map(
+    updates = jax.tree.map(
         lambda dir, dirn, magn: dir / (dirn + eps) * magn,
         dir_chain,
         dir_norm,

@@ -132,7 +132,7 @@ def get_termination_criterion_fn(criterion_name):
 @partial(tm.unwrap, vector_argnames=['x'])
 def tree_slice(x, idx):
   """Slices the pytree using the given index."""
-  return jax.tree_map(lambda x: x[idx], x)
+  return jax.tree.map(lambda x: x[idx], x)
 
 
 def generate_updated_variables(variables, params):
@@ -251,7 +251,7 @@ def mf_conjgrad_solver(
 
   ## CG iteration best-tracking
   # an iterate with the best objective is tracked with its objective value
-  x_best = jax.tree_map(lambda x: jnp.array([]), x)
+  x_best = jax.tree.map(lambda x: jnp.array([]), x)
   x_best_obj = 0.0
   if iter_tracking_method == CGIterationTrackingMethod.BEST_TRACKING:
     x_best = x0
@@ -264,14 +264,14 @@ def mf_conjgrad_solver(
   # be saved. ceil(log(max_iter / initial_track_step, gamma)) is the max number
   # of copies. this amounts to 10/13/16/19/28 for 50/100/200/500/5000 max_iter
   # when initial_track_step = 5 and next_tracking_step_multiplier = 1.3.
-  x_arr = jax.tree_map(lambda x: jnp.array([]), x)
+  x_arr = jax.tree.map(lambda x: jnp.array([]), x)
   x_arr_idx = -1  # index to track the last saved element in x_arr
   if iter_tracking_method == CGIterationTrackingMethod.BACK_TRACKING:
     max_save_size = math.ceil(
         math.log(max_iter / initial_tracking_step,
                  next_tracking_step_multiplier)) + 1
     # define a pytree to save iterates for backtracking
-    x_arr = jax.tree_map(lambda x: jnp.zeros((max_save_size, *x.shape)), x)
+    x_arr = jax.tree.map(lambda x: jnp.zeros((max_save_size, *x.shape)), x)
 
   next_tracking_step = initial_tracking_step
 
@@ -304,7 +304,7 @@ def mf_conjgrad_solver(
 
   @partial(tm.unwrap, vector_argnames=['orig', 'new'])
   def conditional_tree_index_update(orig, new, idx, condition):
-    return jax.tree_map(lambda x, y: jnp.where(condition, x.at[idx].set(y), x),
+    return jax.tree.map(lambda x, y: jnp.where(condition, x.at[idx].set(y), x),
                         orig, new)
 
   def _one_step_conjgrad(x, x_best, x_best_obj, x_arr, x_arr_idx,
@@ -414,7 +414,7 @@ def gvp(variables, outputs, damping, forward_fn, loss_fn, v):
            [generate_updated_variables(variables, v)])[1]
   hjv = hvp(loss_fn, outputs, jv)
   gvp_fn = vjp(forward_fn, variables)[1]
-  return jax.tree_map(lambda x, y: x + damping * y, gvp_fn(hjv)[0]['params'], v)
+  return jax.tree.map(lambda x, y: x + damping * y, gvp_fn(hjv)[0]['params'], v)
 
 
 @partial(tm.unwrap, vector_argnames=['updates'], out_vectors=False)
@@ -476,7 +476,7 @@ def cg_backtracking(p_arr, p_arr_idx, obj_fn, variables):
     keep_backtracking = jnp.greater_equal(obj_val, obj_val_prev)
 
     # Update p and obj_val if obj_val >= obj_val_prev.
-    p = jax.tree_map(lambda x, y: jnp.where(keep_backtracking, x, y), p_prev, p)
+    p = jax.tree.map(lambda x, y: jnp.where(keep_backtracking, x, y), p_prev, p)
     obj_val = jnp.where(keep_backtracking, obj_val_prev, obj_val)
 
     return p, obj_val, idx - 1, keep_backtracking
@@ -621,7 +621,7 @@ def hessian_free(
   def init_fn(params):
     """Initializes the HessianFreeState object for Hessian-free updates."""
     return HessianFreeState(
-        p0=jax.tree_map(jnp.zeros_like, params),
+        p0=jax.tree.map(jnp.zeros_like, params),
         final_lr=jnp.zeros([]),
         damping=jnp.array(init_damping),
         total_cg_steps=jnp.zeros([], jnp.int32))
