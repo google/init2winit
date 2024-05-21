@@ -40,14 +40,14 @@ def _calculate_adam_preconditioner(gradients, beta2, epsilon,
   Returns:
     preconditioner: (pytree) The Adam preconditioner.
   """
-  nu = jax.tree_map(lambda x: 0.0, gradients[0])
+  nu = jax.tree.map(lambda x: 0.0, gradients[0])
   for gradient in gradients:
-    gradient_sq = jax.tree_map(jnp.square, gradient)
-    nu = jax.tree_map(lambda nu, g: beta2*nu + (1 - beta2)*g, nu, gradient_sq)
+    gradient_sq = jax.tree.map(jnp.square, gradient)
+    nu = jax.tree.map(lambda nu, g: beta2*nu + (1 - beta2)*g, nu, gradient_sq)
   if bias_correct:
-    nu = jax.tree_map(lambda nu: nu / (1 - beta2**(len(gradients))), nu)
+    nu = jax.tree.map(lambda nu: nu / (1 - beta2**(len(gradients))), nu)
 
-  return jax.tree_map(lambda nu: jnp.sqrt(nu) + epsilon, nu)
+  return jax.tree.map(lambda nu: jnp.sqrt(nu) + epsilon, nu)
 
 
 class RunPreconditionTest(absltest.TestCase):

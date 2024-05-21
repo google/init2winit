@@ -93,7 +93,7 @@ class ModelDebugCallback:
         model.apply_on_batch,
         capture_activation_norms=True,
         sown_collection_names=callback_config.get('sown_collection_names'))
-    batch_stats = jax.tree_map(lambda x: x[:][0], batch_stats)
+    batch_stats = jax.tree.map(lambda x: x[:][0], batch_stats)
     grad_fn = functools.partial(
         get_grad,
         batch_stats=batch_stats,
@@ -138,7 +138,7 @@ class ModelDebugCallback:
     """
     del optimizer_state
     del batch_stats
-    p_norms = jax.tree_map(lambda x: jnp.linalg.norm(x[0].reshape(-1))**2,
+    p_norms = jax.tree.map(lambda x: jnp.linalg.norm(x[0].reshape(-1))**2,
                            params)
 
     self.debugger.full_eval(

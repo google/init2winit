@@ -554,7 +554,7 @@ class GenericRNNSequenceEncoder(nn.Module):
     _, (cell_states, outputs) = self.unroll_cell(initial_state, inputs,
                                                  recurrent_dropout_mask,
                                                  deterministic)
-    final_state = jax.tree_map(
+    final_state = jax.tree.map(
         lambda x: x[jnp.arange(inputs.shape[0]), lengths - 1], cell_states)
 
     if reverse:

@@ -103,9 +103,9 @@ class InitializersTest(parameterized.TestCase):
 
     rng = jax.random.PRNGKey(0)
     flax_module, params, input_shape, _ = _load_model(model_name)
-    norms = jax.tree_map(lambda node: jnp.linalg.norm(node.reshape(-1)),
+    norms = jax.tree.map(lambda node: jnp.linalg.norm(node.reshape(-1)),
                          params)
-    normalized_params = jax.tree_map(meta_init.normalize,
+    normalized_params = jax.tree.map(meta_init.normalize,
                                      params)
     loss_name = 'cross_entropy'
     loss_fn = losses.get_loss_fn(loss_name)

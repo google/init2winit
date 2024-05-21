@@ -183,7 +183,7 @@ def _convert_to_numpy_iterator_fn(
       batch = next(iterator)
     except StopIteration:
       if zeros_batch is None:
-        zeros_batch = jax.tree_map(
+        zeros_batch = jax.tree.map(
             lambda x: np.zeros_like(x, dtype=x.dtype), batch)
       yield zeros_batch
       continue

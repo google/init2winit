@@ -45,7 +45,7 @@ class TrainingDivergedError(Exception):
 
 def tree_norm_sql2(pytree):
   """Compute the param-wise squared L2 norm of a pytree."""
-  return jax.tree_map(lambda x: jnp.linalg.norm(x.reshape(-1)) ** 2, pytree)
+  return jax.tree.map(lambda x: jnp.linalg.norm(x.reshape(-1)) ** 2, pytree)
 
 
 def total_tree_norm_sql2(pytree):
@@ -61,7 +61,7 @@ def total_tree_norm_l2(pytree):
 
 def total_tree_sum(pytree):
   """Compute the overall sum of a pytree."""
-  sums = jax.tree_map(jnp.sum, pytree)
+  sums = jax.tree.map(jnp.sum, pytree)
   return jax.tree_util.tree_reduce(operator.add, sums, 0)
 
 
@@ -318,15 +318,15 @@ def log_pytree_shape_and_statistics(pytree, json_path=None):
     return
 
   if json_path:
-    shape_dict = flax.core.pretty_repr(jax.tree_map(lambda x: x.shape, pytree))
+    shape_dict = flax.core.pretty_repr(jax.tree.map(lambda x: x.shape, pytree))
     with gfile.GFile(json_path, 'w') as json_file:
       json_file.write(shape_dict)
 
   absl_logging.info('Printing model param shapes.')
-  shape_dict = jax.tree_map(_summary_str, pytree)
+  shape_dict = jax.tree.map(_summary_str, pytree)
   absl_logging.info(flax.core.pretty_repr(shape_dict))
   total_params = jax.tree_util.tree_reduce(
-      operator.add, jax.tree_map(lambda x: x.size, pytree))
+      operator.add, jax.tree.map(lambda x: x.size, pytree))
   absl_logging.info('Total params: %d', total_params)
 
 

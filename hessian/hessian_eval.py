@@ -217,7 +217,7 @@ def _additive_update(params, update):
 
 
 def _unreplicate(sharded_array):
-  temp = jax.tree_map(lambda x: x[0], sharded_array)
+  temp = jax.tree.map(lambda x: x[0], sharded_array)
   return jax.device_get(temp)
 
 
@@ -232,11 +232,11 @@ def _compute_update(
 
 def _tree_normalize(tree):
   """Normalizes a pytree by its l_2 norm."""
-  norm_vec = jax.tree_map(lambda x: np.linalg.norm(x) ** 2, tree)
+  norm_vec = jax.tree.map(lambda x: np.linalg.norm(x) ** 2, tree)
   norm_vec, _ = jax.tree_util.tree_flatten(norm_vec)
   norm = np.sqrt(np.sum(norm_vec))
   norm_fn = lambda x: x / norm
-  return jax.tree_map(norm_fn, tree)
+  return jax.tree.map(norm_fn, tree)
 
 
 def precondition_mvp_fn(mvp_fn, p_diag):
@@ -545,7 +545,7 @@ class CurvatureEvaluator:
     if count == 0:
       raise ValueError('Provided generator did not yield any data.')
     # Compute the full-batch counterparts
-    full_grad = jax.tree_map(lambda x: x / count, full_grad)
+    full_grad = jax.tree.map(lambda x: x / count, full_grad)
     gdirs.append(_unreplicate(full_grad))
     full_batch_update = compiled_update(
         params, optimizer_state, full_grad)
@@ -625,7 +625,7 @@ class CurvatureEvaluator:
     Returns:
       A scalar corresponding to the average full-batch loss.
     """
-    update_dir = jax.tree_map(lambda x: x * eta, update_dir)
+    update_dir = jax.tree.map(lambda x: x * eta, update_dir)
     update_dir = jax_utils.replicate(update_dir)
     new_params = self.update_model(params, update_dir)
 
@@ -653,7 +653,7 @@ class CurvatureEvaluator:
       if count < self.eval_config['num_eval_draws']:
         count += 1.0
         full_grad = compiled_tree_sum(full_grad, avg_grad)
-    full_grad = jax.tree_map(lambda x: x / count, full_grad)
+    full_grad = jax.tree.map(lambda x: x / count, full_grad)
     full_grad = _unreplicate(full_grad)
     return full_grad
 
@@ -722,7 +722,7 @@ class CurvatureEvaluator:
         # Compute the breakdown of the max eigenvector across variables in the
         # model (shown promise in localizing issues causing large curvature).
         max_evec = self.unravel(hess_evecs[-1])
-        row['max_evec_decomp'] = jax.tree_map(lambda x: jnp.linalg.norm(x)**2,
+        row['max_evec_decomp'] = jax.tree.map(lambda x: jnp.linalg.norm(x)**2,
                                               max_evec)
 
     if self.eval_config['eval_hess_grad_overlap']:

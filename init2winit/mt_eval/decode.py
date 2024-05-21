@@ -143,7 +143,7 @@ def gather_beams(nested, beam_indices, batch_size, new_beam_size,
       return x[:, :, batch_indices, beam_indices]
     else:
       return x[:, :, :, batch_indices, beam_indices]
-  return jax.tree_map(gather_fn, nested)
+  return jax.tree.map(gather_fn, nested)
 
 
 def gather_topk_beams(nested, score_or_log_prob, batch_size, new_beam_size):
@@ -219,7 +219,7 @@ def beam_init(batch_size,
       (batch_size, beam_size, max_decode_len), jnp.int32)
   finished_flags0 = jnp.zeros((batch_size, beam_size), jnp.bool_)
   # add beam dimension to attention cache pytree elements
-  beam_cache0 = jax.tree_map(lambda x: add_beam_dim(x, beam_size, offset),
+  beam_cache0 = jax.tree.map(lambda x: add_beam_dim(x, beam_size, offset),
                              cache)
   return BeamState(cur_index=cur_index0,
                    live_logprobs=live_logprobs0,
@@ -243,7 +243,7 @@ def sampling_init(batch_size: int,
                              jnp.int32)
   finished_flags0 = jnp.zeros((batch_size, sample_size), jnp.bool_)
   # add sample dimension to attention cache pytree elements
-  sample_cache0 = jax.tree_map(lambda x: add_beam_dim(x, sample_size), cache)
+  sample_cache0 = jax.tree.map(lambda x: add_beam_dim(x, sample_size), cache)
 
   return SamplingState(
       cur_index=cur_index0,
@@ -328,7 +328,7 @@ def beam_search(inputs,
                           (batch_size, beam_size, 1)))
     # Flatten beam dimension into batch to be compatible with model.
     # {[batch, beam, ...], ...} --> {[batch * beam, ...], ...}
-    flat_cache = jax.tree_map(functools.partial(flatten_beam_dim,
+    flat_cache = jax.tree.map(functools.partial(flatten_beam_dim,
                                                 offset=offset), state.cache)
 
     # Call fast-decoder model on current tokens to get next-position logits.
@@ -344,7 +344,7 @@ def beam_search(inputs,
     def unflatten_beam_dim_in_cache(x):
       return unflatten_beam_dim(x, batch_size, beam_size, offset=offset)
 
-    new_cache = jax.tree_map(unflatten_beam_dim_in_cache, new_flat_cache)
+    new_cache = jax.tree.map(unflatten_beam_dim_in_cache, new_flat_cache)
 
     # Gather log probabilities from logits
     candidate_log_probs = jax.nn.log_softmax(logits)
@@ -515,7 +515,7 @@ def sampling(inputs: jax.Array,
                           (batch_size, sample_size, 1)))
     # Flatten sample dimension into batch to be compatible with model.
     # {[batch, sample, ...], ...} --> {[batch * sample, ...], ...}
-    flat_cache = jax.tree_map(flatten_beam_dim, state.cache)
+    flat_cache = jax.tree.map(flatten_beam_dim, state.cache)
 
     # Call fast-decoder model on current tokens to get next-position logits.
     # --> [batch * sample, vocab]
@@ -523,7 +523,7 @@ def sampling(inputs: jax.Array,
 
     # Unflatten sample dimension in attention cache arrays
     # {[batch * sample, ...], ...} --> {[batch, sample, ...], ...}
-    new_cache = jax.tree_map(
+    new_cache = jax.tree.map(
         lambda x: unflatten_beam_dim(x, batch_size, sample_size),
         new_flat_cache)
 

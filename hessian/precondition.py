@@ -34,7 +34,7 @@ def _maybe_bias_correct(ema, decay, count, debias):
   """
   if debias:
     bias_correction_factor = 1 - decay**count
-    return jax.tree_map(lambda x: x / bias_correction_factor, ema)
+    return jax.tree.map(lambda x: x / bias_correction_factor, ema)
   else:
     return ema
 
@@ -51,7 +51,7 @@ def _make_inv_power_preconditioner(diag, eps, eps_root=0.0, power=0.5):
   Returns:
     (pytree) The preconditioner, as a pytree.
   """
-  return jax.tree_map(lambda v: jnp.power(v + eps_root, power) + eps, diag)
+  return jax.tree.map(lambda v: jnp.power(v + eps_root, power) + eps, diag)
 
 
 # KS transforms for which preconditioning is implemented.

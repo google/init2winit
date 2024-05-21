@@ -50,11 +50,11 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
 
 def _count_params(tree):
   return jax.tree_util.tree_reduce(operator.add,
-                                   jax.tree_map(lambda x: x.size, tree))
+                                   jax.tree.map(lambda x: x.size, tree))
 
 
 def scale_params(params, scalars):
-  return jax.tree_map(lambda w, scale: w * scale, params, scalars)
+  return jax.tree.map(lambda w, scale: w * scale, params, scalars)
 
 
 def meta_loss(params_to_loss, scalars, normalized_params, epsilon):
@@ -96,7 +96,7 @@ def meta_loss(params_to_loss, scalars, normalized_params, epsilon):
     ratio = (g-hgp) / (g + epsilon * jax.lax.stop_gradient(2*(g >= 0) - 1))
     return jnp.sum(jnp.abs(ratio - 1))
 
-  return jax.tree_util.tree_reduce(operator.add, jax.tree_map(
+  return jax.tree_util.tree_reduce(operator.add, jax.tree.map(
       meta_term, g, hgp)) / nparams
 
 
@@ -200,7 +200,7 @@ def meta_optimize_scales(loss_fn,
     grad_fn = jax.value_and_grad(_meta_loss, has_aux=False)
     loss, grads = grad_fn(meta_params)
     grads = model_utils.cross_device_avg(grads)
-    grads = jax.tree_map(jnp.sign, grads)
+    grads = jax.tree.map(jnp.sign, grads)
     meta_updates, new_meta_optimizer_state = meta_opt_update_fn(
         grads, optimizer_state, params=meta_params)
     new_meta_params = optax.apply_updates(meta_params, meta_updates)
@@ -232,7 +232,7 @@ def meta_optimize_scales(loss_fn,
 
 
 def _log_shape_and_norms(pytree, metrics_logger, key):
-  shape_and_norms = jax.tree_map(
+  shape_and_norms = jax.tree.map(
       lambda x: (str(x.shape), str(np.linalg.norm(x.reshape(-1)))),
       unfreeze(pytree))
   logging.info(json.dumps(shape_and_norms, sort_keys=True, indent=4))
@@ -272,10 +272,10 @@ def meta_init(loss_fn,
     _log_shape_and_norms(params, metrics_logger, key='init_norms')
     # First grab the norms of all weights and rescale params to have norm 1.
     logging.info('Running meta init')
-  norms = jax.tree_map(lambda node: jnp.linalg.norm(node.reshape(-1)),
+  norms = jax.tree.map(lambda node: jnp.linalg.norm(node.reshape(-1)),
                        params)
 
-  normalized_params = jax.tree_map(normalize, params)
+  normalized_params = jax.tree.map(normalize, params)
 
   learned_norms, _ = meta_optimize_scales(
       loss_fn,

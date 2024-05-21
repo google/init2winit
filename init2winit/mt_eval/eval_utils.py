@@ -85,11 +85,11 @@ def average_checkpoints(checkpoint_paths, params):
   for checkpoint_path in checkpoint_paths[1:]:
     params_update = _load_checkpoint(checkpoint_path, params, replicate=False)
     # TODO(dxin): Make this averaging process more numerically stable.
-    params = jax.tree_map(
+    params = jax.tree.map(
         lambda x, y: x + y, params, params_update)
 
   # Average checkpoints.
-  params = jax.tree_map(lambda x: x / float(len(checkpoint_paths)), params)
+  params = jax.tree.map(lambda x: x / float(len(checkpoint_paths)), params)
   return params
 
 

@@ -117,7 +117,7 @@ def maybe_pad_batch(batch,
 
   # Most batches will not need padding so we quickly return to avoid slowdown.
   if batch_pad == 0:
-    new_batch = jax.tree_map(lambda x: x, batch)
+    new_batch = jax.tree.map(lambda x: x, batch)
     return new_batch
 
   def zero_pad(ar, pad_axis):

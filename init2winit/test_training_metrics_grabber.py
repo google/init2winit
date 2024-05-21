@@ -73,10 +73,10 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     self.num_train_steps = 5
 
     # Simulate running GD with step size 1.
-    self.mock_params1 = jax.tree_map(lambda p, g: p - self.step_size * g,
+    self.mock_params1 = jax.tree.map(lambda p, g: p - self.step_size * g,
                                      self.mock_params0,
                                      self.mock_grad1)
-    self.mock_params2 = jax.tree_map(lambda p, g: p - self.step_size * g,
+    self.mock_params2 = jax.tree.map(lambda p, g: p - self.step_size * g,
                                      self.mock_params1,
                                      self.mock_grad2)
 
@@ -86,9 +86,9 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
   def test_init(self):
     """Test the training metrics initializer."""
 
-    zeros_like_params = jax.tree_map(jnp.zeros_like, self.mock_params0)
+    zeros_like_params = jax.tree.map(jnp.zeros_like, self.mock_params0)
     zeros_timeseries = jnp.zeros(self.num_train_steps)
-    zeros_timeseries_like_params = jax.tree_map(
+    zeros_timeseries_like_params = jax.tree.map(
         lambda x: jnp.zeros(self.num_train_steps), self.mock_params0)
 
     # Test init with everything disabled.
@@ -369,7 +369,7 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
     self.assertTrue(
         pytree_equal(
             updated_metrics_state['grad_ema'],
-            jax.tree_map(
+            jax.tree.map(
                 lambda x, y, z: 0.25 * x + 0.25 * y + 0.5 * z,
                 self.mock_zeros,
                 self.mock_grad1,
@@ -456,12 +456,12 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
 
     pre0 = make_diag_preconditioner(optimizer, opt_hparams,
                                     self.mock_optimizer_state0, ConfigDict({}))
-    semip_grad_0 = jax.tree_map(lambda g, p: g / (p**0.5), self.mock_grad1,
+    semip_grad_0 = jax.tree.map(lambda g, p: g / (p**0.5), self.mock_grad1,
                                 pre0)
 
     pre1 = make_diag_preconditioner(optimizer, opt_hparams,
                                     self.mock_optimizer_state1, ConfigDict({}))
-    semip_grad_1 = jax.tree_map(lambda g, p: g / (p**0.5), self.mock_grad2,
+    semip_grad_1 = jax.tree.map(lambda g, p: g / (p**0.5), self.mock_grad2,
                                 pre1)
 
     self.assertEqual(updated_metrics_state['preconditioner_normsq'][0],

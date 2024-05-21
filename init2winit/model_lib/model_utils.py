@@ -209,7 +209,7 @@ def sync_batchnorm_stats(state):
 
 
 def cross_device_avg(pytree):
-  return jax.tree_map(lambda x: lax.pmean(x, 'batch'), pytree)
+  return jax.tree.map(lambda x: lax.pmean(x, 'batch'), pytree)
 
 
 def l2_regularization(params, l2_decay_rank_threshold):
@@ -230,7 +230,7 @@ def l2_regularization(params, l2_decay_rank_threshold):
   Returns:
     weight_l2: the squared l2 norm of all params matching the threshold.
   """
-  weight_penalty_params = jax.tree_leaves(params)
+  weight_penalty_params = jax.tree.leaves(params)
   weight_l2 = sum([
       jnp.sum(x**2)
       for x in weight_penalty_params
@@ -308,7 +308,7 @@ class ShapeTuple:
 
 
 def param_shapes(params):
-  return jax.tree_map(lambda x: ShapeTuple(x.shape), flax.core.unfreeze(params))
+  return jax.tree.map(lambda x: ShapeTuple(x.shape), flax.core.unfreeze(params))
 
 
 class ParameterType(enum.Enum):

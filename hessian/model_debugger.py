@@ -110,7 +110,7 @@ def pmap_then_unreplicate(leaf_fn, axis_name='batch'):
   p_leaf_fn = jax.pmap(leaf_fn, axis_name=axis_name)
   def tree_fn(*args):
     vals = p_leaf_fn(*args)
-    vals_on_host = jax.tree_map(lambda x: x[0], vals)
+    vals_on_host = jax.tree.map(lambda x: x[0], vals)
     return vals_on_host
   return tree_fn
 
@@ -135,9 +135,9 @@ def append_pytree_leaves(full_pytree, to_append):
        leaves of full_pytree.
   """
   if not full_pytree:
-    return jax.tree_map(lambda x: np.expand_dims(x, axis=0), to_append)
+    return jax.tree.map(lambda x: np.expand_dims(x, axis=0), to_append)
 
-  return jax.tree_map(lambda x, y: array_append(y, x), to_append, full_pytree)
+  return jax.tree.map(lambda x, y: array_append(y, x), to_append, full_pytree)
 
 
 def create_forward_pass_stats_fn(apply_fn,
@@ -187,9 +187,9 @@ def create_forward_pass_stats_fn(apply_fn,
       forward_pass_statistics.pop('batch_stats')
     if 'intermediates' in forward_pass_statistics:
       # This calculation corresponds to the average q-value across the batch.
-      forward_pass_statistics['intermediate_qvalue'] = jax.tree_map(
+      forward_pass_statistics['intermediate_qvalue'] = jax.tree.map(
           qvalue, forward_pass_statistics['intermediates'])
-      forward_pass_statistics['intermediate_cvalue'] = jax.tree_map(
+      forward_pass_statistics['intermediate_cvalue'] = jax.tree.map(
           cvalue, forward_pass_statistics['intermediates'])
 
       # Don't want to store the full activations.
@@ -210,7 +210,7 @@ def _maybe_remove_tuple(x):
 
 
 def remove_leaf_tuples(tree):
-  return jax.tree_map(_maybe_remove_tuple, tree, is_leaf=_check_tuple)
+  return jax.tree.map(_maybe_remove_tuple, tree, is_leaf=_check_tuple)
 
 
 #### Utilities for the skip anlysis
@@ -372,7 +372,7 @@ class ModelDebugger:
       if norm_tree_sql2:
         metrics_dict['{}_norms_sql2'.format(key)] = norm_tree_sql2
         metrics_dict['global_{}_norm_sql2'.format(key)] = sum(
-            jax.tree_leaves(norm_tree_sql2))
+            jax.tree.leaves(norm_tree_sql2))
 
     return metrics_dict
 

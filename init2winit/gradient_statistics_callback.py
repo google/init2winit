@@ -92,8 +92,8 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
     )
     unreplicated_params = flax.jax_utils.unreplicate(params)
 
-    grad_sum = jax.tree_map(jnp.zeros_like, unreplicated_params)
-    grad_squared_sum = jax.tree_map(jnp.zeros_like, unreplicated_params)
+    grad_sum = jax.tree.map(jnp.zeros_like, unreplicated_params)
+    grad_squared_sum = jax.tree.map(jnp.zeros_like, unreplicated_params)
     self.num_updates = 0
 
     for batch in train_iter:

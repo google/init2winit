@@ -35,7 +35,7 @@ def set_up_hessian_eval(model, params, batch_stats, dataset,
   # forward pass in the hessian eval because we always run the model in training
   # However, we need to provide batch_stats for the model.training_cost API.
   # The copy is needed b/c the trainer will modify underlying arrays.
-  batch_stats = jax.tree_map(lambda x: x[:][0], batch_stats)
+  batch_stats = jax.tree.map(lambda x: x[:][0], batch_stats)
   def batch_loss(params, batch_rng):
     batch, rng = batch_rng
 

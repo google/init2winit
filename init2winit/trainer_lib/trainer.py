@@ -118,7 +118,7 @@ def update(
   grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
   # TODO(znado): move to inside optax gradient clipping.
   if grad_clip:
-    scaled_grad = jax.tree_map(
+    scaled_grad = jax.tree.map(
         lambda x: x / (grad_norm + _GRAD_CLIP_EPS) * grad_clip, grad)
     grad = jax.lax.cond(grad_norm > grad_clip, lambda _: scaled_grad,
                         lambda _: grad, None)
