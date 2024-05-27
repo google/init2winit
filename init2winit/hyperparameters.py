@@ -152,6 +152,7 @@ def build_hparams(model_name,
     merged_dict['label_smoothing'] *= num_classes / float(num_classes - 1)
 
   merged = config_dict.ConfigDict(merged_dict)
+  merged['eval_use_ema'] = 'False'
   merged.lock()
 
   # Subconfig "opt_hparams" and "lr_hparams" are allowed to add new fields.
