@@ -327,7 +327,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         optax.contrib.dadapt_adamw
     )(
         learning_rate=0.0,
-        betas=hps.opt_hparams['betas'],
+        betas=(hps.opt_hparams['beta1'], hps.opt_hparams['beta2']),
         eps=hps.opt_hparams['eps'],
         estim_lr0=hps.opt_hparams['estim_lr0'],
         weight_decay=weight_decay,
@@ -337,7 +337,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         optax.contrib.prodigy
     )(
         learning_rate=0.0,
-        betas=hps.opt_hparams['betas'],
+        betas=(hps.opt_hparams['beta1'], hps.opt_hparams['beta2']),
         eps=hps.opt_hparams['eps'],
         estim_lr0=hps.opt_hparams['estim_lr0'],
         estim_lr_coef=hps.opt_hparams['estim_lr_coef'],
