@@ -33,12 +33,15 @@ from init2winit.model_lib import nqm
 from init2winit.model_lib import resnet
 from init2winit.model_lib import simple_cnn
 from init2winit.model_lib import transformer_lm
+from init2winit.model_lib import transformer_stu_lm
+from init2winit.model_lib import transformer_stu_tensordot_lm
 from init2winit.model_lib import unet
 from init2winit.model_lib import vit
 from init2winit.model_lib import wide_resnet
 from init2winit.model_lib import xformer_translate
 from init2winit.model_lib import xformer_translate_binary
 from init2winit.model_lib import xformer_translate_mlc_variant
+
 
 _ALL_MODELS = {
     'fully_connected':
@@ -64,6 +67,14 @@ _ALL_MODELS = {
         (mlperf_resnet.ResnetModelMLPerf, mlperf_resnet.MLPERF_DEFAULT_HPARAMS),
     'transformer':
         (transformer_lm.TransformerLM1B, transformer_lm.DEFAULT_HPARAMS),
+    'transformer_stu': (
+        transformer_stu_lm.TransformerLM1B,
+        transformer_stu_lm.DEFAULT_HPARAMS,
+    ),
+    'transformer_stu_tensordot': (
+        transformer_stu_tensordot_lm.TransformerLM1B,
+        transformer_stu_tensordot_lm.DEFAULT_HPARAMS,
+    ),
     'conformer': (conformer.ConformerModel, conformer.DEFAULT_HPARAMS),
     'mlcommons_conformer': (conformer.MLCommonsConformerModel,
                             conformer.MLCOMMONS_DEFAULT_HPARAMS),

@@ -235,6 +235,20 @@ DATA_HPS = {
         'output_shape': (16,),
         'vocab_size': 16,
     },
+    'transformer_stu': {
+        'input_len': 64,
+        'max_eval_target_length': 64,
+        'max_target_length': 64,
+        'output_shape': (16,),
+        'vocab_size': 16,
+    },
+    'transformer_stu_tensordot': {
+        'input_len': 64,
+        'max_eval_target_length': 64,
+        'max_target_length': 64,
+        'output_shape': (16,),
+        'vocab_size': 16,
+    }
 }
 
 LOSS_NAME = {
@@ -326,6 +340,8 @@ skipped_models = [
     'local_attention_transformer',
     'mlcommons_conformer',
     'mlcommons_deepspeech',
+    'transformer_stu',
+    'transformer_stu_tensordot',
 ]
 # pylint: disable=g-complex-comprehension
 model_init_keys = [
