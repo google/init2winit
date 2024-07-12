@@ -369,8 +369,8 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         optax.contrib.momo_adam
     )(
         learning_rate=0.0,
-        b1=hps.opt_hparams['b1'],
-        b2=hps.opt_hparams['b2'],
+        b1=hps.opt_hparams['beta1'],
+        b2=hps.opt_hparams['beta2'],
         eps=hps.opt_hparams['eps'],
         lower_bound=hps.opt_hparams['lower_bound'],
         weight_decay=weight_decay,
