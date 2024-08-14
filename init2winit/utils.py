@@ -71,6 +71,14 @@ def array_append(full_array, to_append):
   return jnp.concatenate((full_array, to_append))
 
 
+def reduce_to_scalar(value):
+  """Helper function to reduce an numpy array to a scalar by extracting the first element."""
+  if isinstance(value, np.ndarray):
+    if value.shape == (1,):
+      value = value[0]
+  return value
+
+
 def dtype_from_str(dtype_string):
   # We use strings to avoid having to import jnp into the config files.
   if dtype_string == 'float32':
@@ -231,11 +239,7 @@ class MetricLogger(object):
       measurements.to_csv(csv_file, index=False)
 
     if 'global_step' in metrics:
-      if isinstance(metrics['global_step'], np.ndarray):
-        if metrics['global_step'].shape == (1,):
-          metrics['global_step'] = int(metrics['global_step'][0])
-        else:
-          metrics['global_step'] = int(metrics['global_step'])
+      metrics['global_step'] = int(reduce_to_scalar(metrics['global_step']))
 
     if self._xm_work_unit:
       for name, value in metrics.items():
@@ -243,7 +247,8 @@ class MetricLogger(object):
           self._measurements[name] = self._xm_work_unit.get_measurement_series(
               label=name)
         self._measurements[name].create_measurement(
-            objective_value=value, step=metrics['global_step'])
+            objective_value=reduce_to_scalar(value), step=metrics['global_step']
+        )
 
     if self._tb_metric_writer:
       self._tb_metric_writer.write_scalars(
