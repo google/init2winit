@@ -72,11 +72,9 @@ def array_append(full_array, to_append):
 
 
 def reduce_to_scalar(value):
-  """Helper function to reduce an numpy array to a scalar by extracting the first element."""
-  while isinstance(value, np.ndarray) and value.ndim > 0:
-    value = value[0]
-  if isinstance(value, np.ndarray) and value.ndim == 0:
-    value = value.item()
+  """Reduce an numpy array to a scalar by extracting the first element."""
+  if isinstance(value, np.ndarray) or isinstance(value, jnp.ndarray):
+    value = value.item(0)
   return value
 
 
