@@ -20,12 +20,12 @@ import itertools
 
 from absl import logging
 import flax
-from flax import jax_utils
 from flax.core.frozen_dict import unfreeze
 from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import partition_tree
 from init2winit.utils import total_tree_norm_sql2
 import jax
+from jax.experimental import mesh_utils
 import jax.numpy as jnp
 import numpy as np
 import optax
@@ -104,7 +104,7 @@ def block_hessians(params,
       tridiag_hess -> The tridiagonal matrix output by lanczos.
       param_names -> The flattened parameter names in this partitian.
   """
-  unrep_params = flax.jax_utils.unreplicate(params)
+  unrep_params = jax.device_det(params)
   flat_dict = flax.traverse_util.flatten_dict(unrep_params)
 
   sub_param_groups = param_partition_fn(flat_dict)
@@ -126,10 +126,11 @@ def block_hessians(params,
   for key in sub_param_groups:
 
     logging.info('Block Hessian eval on %s', key)
-    sub_params = unfreeze(jax_utils.replicate(sub_param_groups[key]))
+    _, sub_params = unfreeze(
+        data_utils.shard_pytree(sub_param_groups[key]))
 
     hvp_fn, _, n_params = hessian_computation.get_hvp_fn(
-        sub_loss, sub_params, batches_gen, use_pmap=True)
+        sub_loss, sub_params, batches_gen, use_pmap=False)
 
     # This was needed to avoid the lint [cell-var-from-loop] error. Not sure
     # it's needed but to avoid any python weirdness with defining functions in
@@ -176,11 +177,21 @@ def prepare_batches_gen(dataset, eval_config):
   batches = list(train_iter)
   init_rng = jax.random.PRNGKey(eval_config['rng_key'])
   init_rng = jax.random.fold_in(init_rng, jax.process_index())
+
+  mesh_shape = (jax.device_count(),)
+  mesh = jax.sharding.Mesh(
+      mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
+      axis_names=('devices',),
+  )
+
+  make_global_array_fn = functools.partial(
+      data_utils.make_global_array, mesh=mesh
+  )
+
   def training_batches_gen():
     for counter, batch in enumerate(batches):
-      batch = data_utils.shard(batch)
+      batch = jax.tree_util.tree_map(make_global_array_fn, batch)
       rng = jax.random.fold_in(init_rng, counter)
-      rng = jax_utils.replicate(rng)
       yield (batch, rng)
   return training_batches_gen
 
@@ -217,8 +228,7 @@ def _additive_update(params, update):
 
 
 def _unreplicate(sharded_array):
-  temp = jax.tree.map(lambda x: x[0], sharded_array)
-  return jax.device_get(temp)
+  return jax.device_get(sharded_array)
 
 
 def _compute_update(
@@ -388,41 +398,43 @@ class CurvatureEvaluator:
 
     def avg_loss(params, batch, loss_fn):
       loss_val = loss_fn(params, batch)
-      loss_val = jax.lax.pmean(loss_val, axis_name='batch')
       return loss_val
 
     def avg_grad(params, batch, loss_fn):
       grad_loss = jax.grad(loss_fn)(params, batch)
-      grad_loss = jax.lax.pmean(grad_loss, axis_name='batch')
       return grad_loss
 
-    self.grad_loss = jax.pmap(functools.partial(avg_grad, loss_fn=loss),
-                              axis_name='batch')
+    self.grad_loss = jax.jit(functools.partial(avg_grad, loss_fn=loss))
     self.avg_loss = functools.partial(avg_loss, loss_fn=loss)
-    self.p_avg_loss = jax.pmap(
-        functools.partial(avg_loss, loss_fn=loss), axis_name='batch')
+    self.p_avg_loss = jax.jit(functools.partial(avg_loss, loss_fn=loss))
 
     which_matrix = eval_config.get('matrix', 'hessian')
     if which_matrix == 'hessian':
       self.hvp_fn, self.unravel, self.n_params = hessian_computation.get_hvp_fn(
-          loss, params, self.batches_gen, use_pmap=True)
+          loss, params, self.batches_gen, use_pmap=False
+      )
     elif which_matrix == 'gauss_newton':
       if 'loss' not in eval_config:
         raise ValueError('for GN computation, need to specify loss')
       if output_fn is None:
         raise ValueError('for GN computation, need to specify output_fn')
-      (self.hvp_fn, self.unravel,
-       self.n_params) = hessian_computation.get_gnvp_fn(
-           output_fn, params, self.batches_gen, eval_config['loss'],
-           use_pmap=True, weights_fn=weights_fn)
+      (self.hvp_fn, self.unravel, self.n_params) = (
+          hessian_computation.get_gnvp_fn(
+              output_fn,
+              params,
+              self.batches_gen,
+              eval_config['loss'],
+              use_pmap=False,
+              weights_fn=weights_fn,
+          )
+      )
 
     self.update_model = jax.pmap(_additive_update)
-    self.gvp_fn, _, n_params = hessian_computation.get_gradient_covariance_vp_fn(
-        loss,
-        params,
-        self.batches_gen,
-        use_pmap=True,
-        average_hosts=eval_config['average_hosts'])
+    self.gvp_fn, _, n_params = (
+        hessian_computation.get_gradient_covariance_vp_fn(
+            loss, params, self.batches_gen, use_pmap=False, average_hosts=False
+        )
+    )
     assert self.n_params == n_params
     if jax.process_index() == 0:
       logging.info('CurvatureEvaluator build with config: %r', eval_config)
@@ -525,11 +537,11 @@ class CurvatureEvaluator:
     """
     gdirs = []
     udirs = []
-    compiled_tree_sum = jax.pmap(_tree_sum, axis_name='batch')
-    compiled_tree_zeros_like = jax.pmap(_tree_zeros_like, axis_name='batch')
+    compiled_tree_sum = jax.jit(_tree_sum)
+    compiled_tree_zeros_like = jax.jit(_tree_zeros_like)
     update_fn = functools.partial(
         _compute_update, optimizer_update_fn=optimizer_update_fn)
-    compiled_update = jax.pmap(update_fn, axis_name='batch')
+    compiled_update = jax.jit(update_fn)
     count = 0.0
     full_grad = compiled_tree_zeros_like(params)
     for batch in self.batches_gen():
@@ -625,8 +637,14 @@ class CurvatureEvaluator:
     Returns:
       A scalar corresponding to the average full-batch loss.
     """
+    mesh_shape = (jax.device_count(),)
+    mesh = jax.sharding.Mesh(
+        mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
+        axis_names=('devices',),
+    )
+
     update_dir = jax.tree.map(lambda x: x * eta, update_dir)
-    update_dir = jax_utils.replicate(update_dir)
+    _, update_dir = data_utils.shard_pytree(update_dir, mesh)
     new_params = self.update_model(params, update_dir)
 
     count = 0.0
@@ -642,8 +660,8 @@ class CurvatureEvaluator:
 
   def _full_batch_grad(self, params):
     """Compute full batch gradient."""
-    compiled_tree_sum = jax.pmap(_tree_sum)
-    compiled_tree_zeros_like = jax.pmap(_tree_zeros_like)
+    compiled_tree_sum = jax.jit(_tree_sum)
+    compiled_tree_zeros_like = jax.jit(_tree_zeros_like)
 
     count = 0.0
     full_grad = compiled_tree_zeros_like(params)

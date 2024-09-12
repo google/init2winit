@@ -24,10 +24,10 @@ import tempfile
 
 from absl import flags
 from absl.testing import absltest
-from flax import jax_utils
 from flax import linen as nn
 from init2winit import checkpoint
 from init2winit import hyperparameters
+from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import datasets
 from init2winit.hessian import hessian_eval
 from init2winit.hessian import run_lanczos
@@ -35,6 +35,7 @@ from init2winit.init_lib import initializers
 from init2winit.model_lib import models
 from init2winit.trainer_lib import trainer
 from jax import config as jax_config
+from jax.experimental import mesh_utils
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import jax.random
@@ -43,6 +44,7 @@ import numpy as np
 import optax
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
+
 
 FLAGS = flags.FLAGS
 
@@ -65,7 +67,7 @@ CONFIG = {
     'compute_interps': True,
     'num_lanczos_steps': 40,
     'hparam_overrides': {},
-    'average_hosts': True,
+    'average_hosts': False,
     'num_eigens': 3}
 
 
@@ -175,19 +177,27 @@ class TrainerTest(absltest.TestCase):
     self.beta = self.beta.reshape((self.feature_dim, 1))
     self.beta = self.beta.astype(np.float32)
 
-    optimizer_init_fn, self.optimizer_update_fn = optax.sgd(1.0)
-    self.optimizer_state = jax_utils.replicate(optimizer_init_fn(params))
-    self.params = jax_utils.replicate(params)
+    mesh_shape = (jax.device_count(),)
+    mesh = jax.sharding.Mesh(
+        mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
+        axis_names=('devices',),
+    )
 
-    data_class, self.feature, self.y = _get_synth_data(num_examples,
-                                                       self.feature_dim,
-                                                       num_outputs,
-                                                       self.batch_size)
+    optimizer_init_fn, self.optimizer_update_fn = optax.sgd(1.0)
+    _, self.optimizer_state = data_utils.shard_pytree(
+        optimizer_init_fn(params), mesh
+    )
+    _, self.params = data_utils.shard_pytree(params, mesh)
+
+    data_class, self.feature, self.y = _get_synth_data(
+        num_examples, self.feature_dim, num_outputs, self.batch_size
+    )
     self.evaluator = hessian_eval.CurvatureEvaluator(
         self.params,
         CONFIG,
         dataset=data_class(),
-        loss=functools.partial(_batch_square_loss, flax_module))
+        loss=functools.partial(_batch_square_loss, flax_module),
+    )
     # Computing the exact full-batch quantities from the linear model
     num_obs = CONFIG['num_batches'] * self.batch_size
     xb = self.feature[:num_obs, :]
@@ -572,7 +582,12 @@ class TrainerTest(absltest.TestCase):
     params = init_dict['params']
 
     # replicate
-    replicated_params = jax_utils.replicate(params)
+    mesh_shape = (jax.device_count(),)
+    mesh = jax.sharding.Mesh(
+        mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
+        axis_names=('devices',),
+    )
+    _, replicated_params = data_utils.shard_pytree(params, mesh)
 
     curve_eval = hessian_eval.CurvatureEvaluator(
         replicated_params,

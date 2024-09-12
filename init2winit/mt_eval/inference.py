@@ -14,6 +14,7 @@
 # limitations under the License.
 
 r"""BLEU evaluator container class."""
+
 import copy
 import dataclasses
 import functools
@@ -21,9 +22,7 @@ import os
 from typing import Any, Sequence
 
 from absl import logging
-from flax import jax_utils
-from flax.training import common_utils
-from init2winit import utils
+from init2winit.dataset_lib import data_utils as utils
 from init2winit.dataset_lib import mt_tokenizer
 from init2winit.mt_eval import decode
 from init2winit.mt_eval import eval_utils
@@ -32,7 +31,6 @@ import jax.numpy as jnp
 import numpy as np
 from tensorflow.io import gfile
 
-glob = gfile.glob
 
 DEFAULT_EVAL_CONFIG = {
     'eval_batch_size': 16,
@@ -68,6 +66,7 @@ class InferenceManager(object):
     if kwargs['mode'] not in ['offline', 'online']:
       raise ValueError('BLEU score computation only support online or '
                        'offline modes.')
+    self.mesh = kwargs['mesh']
     if kwargs['mode'] == 'offline':
       self.init_offline_evaluator(*args)
     else:
@@ -168,12 +167,12 @@ class InferenceManager(object):
     params = init_dict['params']
     self.flax_module = model.flax_module
     self.params = params
-    self.pmapped_init_cache = jax.pmap(
+    self.init_cache = jax.jit(
         functools.partial(
             self.initialize_cache,
             max_length=self.max_length,
             params_rng=params_rng,
-            dropout_rng=dropout_rng), axis_name='gather')
+            dropout_rng=dropout_rng))
 
   def initialize_cache(self, inputs, max_length, params_rng, dropout_rng):
     """Initialize a cache for a given input shape and max decode length."""
@@ -217,7 +216,7 @@ class InferenceManager(object):
           eos_id=self.eos_id,
           beam_size=self.mt_eval_config.get('beam_size'),
           offset=self.mt_eval_config.get('scan_over_layers_offset', 0))
-    self.pmapped_predictor = jax.pmap(decoder, static_broadcasted_argnums=())
+    self.predictor = jax.jit(decoder)
 
   def translate_and_calculate_bleu(self):
     """Iterate over all checkpoints and calculate BLEU."""
@@ -233,7 +232,7 @@ class InferenceManager(object):
       params = eval_utils.average_checkpoints(
           checkpoint_paths=ckpt_paths,
           params=self.params)
-      params_replicated = jax_utils.replicate(params)
+      _, params_replicated = utils.shard_pytree(params, self.mesh)
       decoding_output = self.translate_and_calculate_bleu_single_model(
           params_replicated, self.eval_split)
       logging.info('Sacre bleu score at step %d: %f', step,
@@ -246,20 +245,23 @@ class InferenceManager(object):
     self.build_predictor()
     decode_output = DecodingOutput()
     logging.info('Starting decoding..')
-    for batch in self.get_ds_iter(eval_split):
-      pred_batch = common_utils.shard(batch)
-      cache = self.pmapped_init_cache(pred_batch['inputs'])
-      predicted = utils.data_gather(
-          self.pmapped_predictor(pred_batch, params, cache),
-          axis_name='gather')
-      inputs = utils.data_gather(pred_batch['inputs'], axis_name='gather')
-      targets = utils.data_gather(pred_batch['targets'], axis_name='gather')
-      weights = utils.data_gather(pred_batch['weights'], axis_name='gather')
 
-      predicted = utils.combine_gathered(np.array(predicted))
-      inputs = utils.combine_gathered(np.array(inputs))
-      targets = utils.combine_gathered(np.array(targets))
-      weights = utils.combine_gathered(np.array(weights))
+    make_global_array_fn = functools.partial(
+        utils.make_global_array, mesh=self.mesh
+    )
+
+    for batch in self.get_ds_iter(eval_split):
+      pred_batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+      cache = self.init_cache(pred_batch['inputs'])
+      predicted = self.predictor(pred_batch, params, cache)
+      inputs = pred_batch['inputs']
+      targets = pred_batch['targets']
+      weights = pred_batch['weights']
+
+      predicted = np.array(predicted)
+      inputs = np.array(inputs)
+      targets = np.array(targets)
+      weights = np.array(weights)
       current_batch_size = int(weights[:, 0].sum())
       if self.mt_eval_config.get('decoding_type') == 'beam_search':
         self.process_beam_search_output(inputs, targets, predicted,
