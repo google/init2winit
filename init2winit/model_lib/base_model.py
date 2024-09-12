@@ -67,8 +67,8 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
 
   # We don't use CLU's `mask` argument here, we handle it ourselves through
   # `weights`.
-  return metrics_bundle.gather_from_model_output(
-      logits=logits, targets=targets, weights=weights, axis_name='batch')
+  return metrics_bundle.single_from_model_output(
+      logits=logits, targets=targets, weights=weights)
 
 
 class BaseModel(object):
@@ -298,10 +298,6 @@ class BaseModel(object):
 
     objective_numerator, objective_denominator = self.loss_fn(
         logits, targets, weights
-    )
-
-    (objective_numerator, objective_denominator) = jax.lax.psum(
-        (objective_numerator, objective_denominator), axis_name='batch'
     )
 
     # epsilon added to handle empty batch case if we encounter one.
