@@ -161,7 +161,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._checkpoint_steps = checkpoint_steps
     self._orbax_checkpointer = orbax_checkpoint.AsyncCheckpointer(
         orbax_checkpoint.PyTreeCheckpointHandler(use_ocdbt=False),
-        timeout_secs=600
+        timeout_secs=600,
+        file_options=orbax_checkpoint.checkpoint_manager.FileOptions(
+            path_permission_mode=0o775),
     )
     self._early_stopping_target_name = early_stopping_target_name
     self._early_stopping_target_value = early_stopping_target_value
