@@ -247,7 +247,7 @@ def _run(
   meta_data = {'worker_id': worker_id, 'status': 'incomplete'}
   if jax.process_index() == 0:
     logging.info('rng: %s', rng)
-    makedirs(trial_dir)
+    makedirs(trial_dir, mode=0o775)
     # Set up the metric loggers for host 0.
     metrics_logger, init_logger = utils.set_up_loggers(trial_dir, xm_work_unit)
     hparams_fname = os.path.join(trial_dir, 'hparams.json')
@@ -318,9 +318,9 @@ def main(unused_argv):
   checkpoint_steps = [int(s.strip()) for s in FLAGS.checkpoint_steps]
   eval_steps = [int(s.strip()) for s in FLAGS.eval_steps]
   if jax.process_index() == 0:
-    makedirs(experiment_dir)
+    makedirs(experiment_dir, mode=0o775)
   log_dir = os.path.join(experiment_dir, 'r=3/')
-  makedirs(log_dir)
+  makedirs(log_dir, mode=0o775)
   log_path = os.path.join(
       log_dir, 'worker{}_{}.log'.format(FLAGS.worker_id, jax.process_index()))
   with gfile.GFile(log_path, 'a') as logfile:
