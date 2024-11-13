@@ -918,7 +918,7 @@ class TrainerTest(parameterized.TestCase):
   @parameterized.parameters(False, True)
   def test_early_stopping(self, min_steps):
     """Test training early stopping on MNIST with a small model."""
-    rng = jax.random.PRNGKey(0)
+    rng = jax.random.PRNGKey(5)
 
     # Set the numpy seed to make the fake data deterministc. mocking.mock_data
     # ultimately calls numpy.random.
@@ -1022,14 +1022,14 @@ class TrainerTest(parameterized.TestCase):
       # With min steps, we should've run an extra 10 steps.
       self.assertLen(epoch_reports, 4)
       epoch_reports.pop()
-    # TODO(b/373692442)
-    # self.assertLen(epoch_reports, 3)
-    # self.assertGreater(
-    #     epoch_reports[-2][early_stopping_target_name],
-    #     early_stopping_target_value)
-    # self.assertLess(
-    #     epoch_reports[-1][early_stopping_target_name],
-    #     early_stopping_target_value)
+    self.assertGreaterEqual(len(epoch_reports), 2)
+    if not min_steps:
+      self.assertGreater(
+          epoch_reports[-2][early_stopping_target_name],
+          early_stopping_target_value)
+    self.assertLess(
+        epoch_reports[-1][early_stopping_target_name],
+        early_stopping_target_value)
 
 
 if __name__ == '__main__':
