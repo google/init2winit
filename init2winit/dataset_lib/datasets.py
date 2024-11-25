@@ -26,6 +26,7 @@ from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import librispeech
 from init2winit.dataset_lib import lm1b_v2
 from init2winit.dataset_lib import mlperf_imagenet_dataset
+from init2winit.dataset_lib import mlperf_imagenet_dataset_grain
 from init2winit.dataset_lib import nqm_noise
 from init2winit.dataset_lib import ogbg_molpcba
 from init2winit.dataset_lib import proteins
@@ -87,6 +88,10 @@ _ALL_DATASETS = {
                  mlperf_imagenet_dataset.DEFAULT_HPARAMS,
                  mlperf_imagenet_dataset.METADATA,
                  mlperf_imagenet_dataset.get_fake_batch),
+    'mlperf_imagenet_grain':
+        _Dataset(mlperf_imagenet_dataset_grain.get_mlperf_imagenet,
+                 mlperf_imagenet_dataset_grain.DEFAULT_HPARAMS,
+                 mlperf_imagenet_dataset_grain.METADATA, None),
     'svhn_no_extra':
         _Dataset(small_image_datasets.get_svhn_no_extra,
                  small_image_datasets.SVHN_NO_EXTRA_DEFAULT_HPARAMS,
