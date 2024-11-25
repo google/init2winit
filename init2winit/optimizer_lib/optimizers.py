@@ -394,6 +394,44 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         eps=hps.opt_hparams['eps'],
         weight_decay=hps.opt_hparams['weight_decay'],
     )
+  elif hps.optimizer == 'schedule_free_adam':
+    base_opt = utils.static_inject_hyperparams(optax.adamw)(
+        learning_rate=0.0,
+        b1=0.,
+        b2=hps.opt_hparams['beta2'],
+        eps=hps.opt_hparams['epsilon'],
+        weight_decay=hps.opt_hparams['weight_decay'],
+    )
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        optax.contrib.schedule_free
+    )(
+        learning_rate=0.0,
+        base_optimizer=base_opt,
+        b1=hps.opt_hparams['beta1'],
+        weight_lr_power=hps.opt_hparams['weight_lr_power'],
+    )
+  elif hps.optimizer == 'schedule_free_nadam':
+    base_opt = utils.static_inject_hyperparams(kitchen_sink.nadamw)(
+        learning_rate=0.0,
+        b1=0.0,
+        b2=hps.opt_hparams['beta2'],
+        eps=hps.opt_hparams['epsilon'],
+        eps_root=hps.opt_hparams.get('epsilon_root', 0.0),
+        debias=hps.opt_hparams.get('debias', True),
+        weight_decay=weight_decay,
+        # NOTE(dsuo): we provide this wiring, but specifying a weight decay
+        # mask in a config file / serializing properly is not completely
+        # straightforward.
+        weight_decay_mask=hps.opt_hparams.get('weight_decay_mask', None),
+    )
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        optax.contrib.schedule_free
+    )(
+        learning_rate=0.0,
+        base_optimizer=base_opt,
+        b1=hps.opt_hparams['beta1'],
+        weight_lr_power=hps.opt_hparams['weight_lr_power'],
+    )
 
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
