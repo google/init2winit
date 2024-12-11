@@ -23,7 +23,7 @@ import dataclasses
 import os
 import tempfile
 import time
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Tuple, Union
 
 from absl import logging
 import jax
@@ -68,7 +68,7 @@ def _dump_chars_to_textfile(
   return outfp.name, char_count
 
 
-def _train_sentencepiece(dataset: tf.data.Dataset,
+def _train_sentencepiece(dataset: Union[tf.data.Dataset, str],
                          *,
                          vocab_size: int,
                          maxchars: int = int(1e7),
@@ -79,7 +79,7 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
   """Train SentencePiece tokenizer from subset of tf dataset.
 
   Args:
-    dataset: tf.dataset
+    dataset: tf.dataset or string path to dataset.
     vocab_size: int: size of vocab tokens to train.
     maxchars: int: number of characters to use for sentencepiece training.
     model_path: str: path of model file to save vocab model to.
@@ -96,8 +96,12 @@ def _train_sentencepiece(dataset: tf.data.Dataset,
     abs_model_path = model_path
   else:
     abs_model_path = os.path.abspath(os.path.expanduser(model_path))
-  fname, _ = _dump_chars_to_textfile(
-      dataset, maxchars=maxchars, data_keys=data_keys)
+
+  if isinstance(dataset, tf.data.Dataset):
+    fname, _ = _dump_chars_to_textfile(
+        dataset, maxchars=maxchars, data_keys=data_keys)
+  else:
+    fname = dataset
   with tempfile.NamedTemporaryFile(
       delete=False, prefix='/tmp/sp_tmp') as model_fp:
     pass  # we just want a prefix'd tmp-filename
@@ -133,7 +137,7 @@ def load_tokenizer(model_path: str,
   return sp_tokenizer
 
 
-def load_or_train_tokenizer(dataset: tf.data.Dataset,
+def load_or_train_tokenizer(dataset: Union[tf.data.Dataset, str],
                             *,
                             vocab_path: str,
                             vocab_size: int,
