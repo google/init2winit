@@ -13,17 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Module containing hyperparameters, metadata and dataset getter for Wikitext-2 dataset."""
+"""Module containing hyperparameters, metadata and dataset getter for Wikitext-103 dataset."""
 
 import itertools
 
 from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import wikitext103_input_pipeline as input_pipeline
-from init2winit.dataset_lib.data_utils import Dataset
-from init2winit.dataset_lib.wikitext2_input_pipeline import PAD_ID
+from init2winit.dataset_lib import wikitext2_input_pipeline
 import jax
 from ml_collections.config_dict import config_dict
 import numpy as np
+
+PAD_ID = wikitext2_input_pipeline.PAD_ID
+Dataset = data_utils.Dataset
 
 VOCAB_SIZE = 267735
 
@@ -34,9 +36,11 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         max_eval_target_length=128,
         eval_sequence_length=128,
         input_shape=(128,),
-        output_shape=(VOCAB_SIZE,),
-        vocab_size=VOCAB_SIZE,
+        output_shape=(input_pipeline.WORD_VOCAB_SIZE,),
         train_size=800210,  # Number of sequences.
+        tokenizer='word',
+        tokenizer_vocab_path=None,
+        vocab_size=input_pipeline.WORD_VOCAB_SIZE,
     ))
 
 

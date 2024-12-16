@@ -32,6 +32,7 @@ from init2winit.dataset_lib import proteins
 from init2winit.dataset_lib import small_image_datasets
 from init2winit.dataset_lib import translate_wmt
 from init2winit.dataset_lib import wikitext103
+from init2winit.dataset_lib import wikitext103_spm
 from init2winit.dataset_lib import wikitext2
 
 _Dataset = collections.namedtuple(
@@ -106,6 +107,10 @@ _ALL_DATASETS = {
     'wikitext103':
         _Dataset(wikitext103.get_wikitext103, wikitext103.DEFAULT_HPARAMS,
                  wikitext2.METADATA, None),
+    'wikitext103_spm':
+        _Dataset(wikitext103_spm.get_wikitext103,
+                 wikitext103_spm.DEFAULT_HPARAMS,
+                 wikitext103_spm.METADATA, None),
 }
 
 

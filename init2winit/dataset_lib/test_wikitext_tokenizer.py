@@ -27,8 +27,8 @@ class TestWikitextTokenizer(absltest.TestCase):
   def test_tokenizer_vocab_size(self):
     """Test vocab size.
 
-    Vocab size should be number of unique words in text file + 1 for the <eos>
-    token which gets added at the end of each new line.
+    Vocab size should be number of unique words in text file + 2 for the <eos>
+    and <unk> tokens.
     """
     # Get number of unique tokens from tokenizer.
     text_dataset = tf.data.TextLineDataset(file_name)
@@ -50,7 +50,7 @@ class TestWikitextTokenizer(absltest.TestCase):
     words = data.split(' ')
     num_unique_words = len(set(words))
 
-    self.assertEqual(num_unique_tokens, num_unique_words + 1)
+    self.assertEqual(num_unique_tokens, num_unique_words + 2)
 
 if __name__ == '__main__':
   absltest.main()

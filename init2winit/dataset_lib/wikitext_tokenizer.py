@@ -56,6 +56,7 @@ class Tokenizer:
 
   Attributes:
     dictionary: Dictionary containing word-to-id and id-to-word mappings
+    lookup_table: tf.lookup.StaticHashTable for looking up token ids from words
   """
 
   def __init__(self):
@@ -64,26 +65,34 @@ class Tokenizer:
   def train(self, dataset: tf.data.TextLineDataset):
     """Trains a Tokenizer from a TextLineDataset."""
     # Add words to the dictionary
+    self.dictionary.add_word(UNKNOWN_TOKEN)  # add default unknown token
     for line in dataset:
       words = line.numpy().split() + [EOS_TOKEN]
       for word in words:
         self.dictionary.add_word(word)
+    # Make static vocabulary table for tf.data style tokenization
+    self.lookup_table = tf.lookup.StaticHashTable(
+        tf.lookup.KeyValueTensorInitializer(
+            tf.constant(list(self.dictionary.word2idx.keys()), dtype=tf.string),
+            tf.constant(
+                list(self.dictionary.word2idx.values()), dtype=tf.int32
+            ),
+        ),
+        default_value=self.dictionary.word2idx[UNKNOWN_TOKEN],
+    )
 
-  def tokenize(self, dataset: tf.data.TextLineDataset) -> tf.data.Dataset:
-    """Tokenizes a TextLineDataset."""
-    idss = []
-    for line in dataset:
-      ids = []
-      words = line.numpy().split() + [EOS_TOKEN]
-      for word in words:
-        try:
-          ids.append(self.dictionary.word2idx[word])
-        except KeyError:
-          ids.append(self.dictionary.word2idx[UNKNOWN_TOKEN])
-      idss.append(ids)
-    ids = tf.concat(idss, 0)
+  def tokenize(self, input_tensor: tf.Tensor) -> tf.Tensor:
+    """Tokenizes a tensor of UTF-8 strings.
 
-    tokenized_dataset = tf.data.Dataset.from_tensor_slices(ids)
+    Args:
+      input_tensor: A `RaggedTensor` or `Tensor` of UTF-8 strings with any
+        shape.
 
-    return tokenized_dataset
-  
+    Returns:
+      A `RaggedTensor` or `Tensor` of tokenized text. The returned shape is
+      the shape of the input tensor.
+    """
+    eos_tensor = tf.constant([EOS_TOKEN], dtype=tf.string)
+    input_tensor_split = tf.strings.split(input_tensor)
+    input_tensor_extended = tf.concat([input_tensor_split, eos_tensor], axis=-1)
+    return self.lookup_table.lookup(input_tensor_extended)
