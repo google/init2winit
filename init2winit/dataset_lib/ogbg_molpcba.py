@@ -208,8 +208,7 @@ def _get_batch_iterator(dataset_iter,
     num_shards: How many devices we should be able to shard the batch into.
 
   Yields:
-    Batch in the init2winit format. Each field is a list of num_shards separate
-    smaller batches.
+    Batch in the init2winit format.
 
   """
   if not num_shards:
@@ -252,9 +251,9 @@ def _get_batch_iterator(dataset_iter,
 
     if count == num_shards:
       yield {
-          'inputs': graphs_shards,
-          'targets': labels_shards,
-          'weights': weights_shards
+          'inputs': jraph.batch(graphs_shards),
+          'targets': np.vstack(labels_shards),
+          'weights': np.vstack(weights_shards)
       }
 
       count = 0
