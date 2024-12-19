@@ -25,8 +25,6 @@ from init2winit.optimizer_lib import pax_adafactor
 from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib import sharpness_aware_minimization
 from init2winit.optimizer_lib import utils
-from init2winit.optimizer_lib.hessian_free import CGIterationTrackingMethod
-from init2winit.optimizer_lib.hessian_free import hessian_free
 import jax
 import optax
 
@@ -482,6 +480,7 @@ def _wrap_update_fn(
   Returns:
     A wrapped optimizer update function.
   """
+  del opt_name
 
   def update_fn(grads,
                 optimizer_state,
@@ -491,11 +490,7 @@ def _wrap_update_fn(
                 cost_fn=None,
                 grad_fn=None,
                 value=None):
-    if opt_name == 'hessian_free':
-      variables = {'params': params}
-      if batch_stats is not None:
-        variables['batch_stats'] = batch_stats
-      return opt_update(grads, optimizer_state, params=(variables, batch))
+    del batch, batch_stats
     if send_grad_fn and send_cost_fn:
       # Note that `value_and_grad` already returns the cost, so there is no need
       # to set both send_grad_fn and send_cost_fn to True.
