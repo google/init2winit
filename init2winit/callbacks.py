@@ -16,13 +16,11 @@
 """Registry for the available callbacks."""
 
 from init2winit import gradient_statistics_callback
-from init2winit.hessian import hessian_callback
 from init2winit.hessian import model_debugger_callback
 from init2winit.mt_eval import mt_callback
 
 
 _ALL_CALLBACKS = {
-    'hessian': hessian_callback.HessianCallback,
     'mt': mt_callback.MTEvaluationCallback,
     'model_debugger': model_debugger_callback.ModelDebugCallback,
     'gradient_statistics': (
