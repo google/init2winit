@@ -14,14 +14,14 @@
 # limitations under the License.
 
 """Utility functions related to training."""
+
+import functools
 import time
 
 from absl import logging
-
 from flax import jax_utils
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
-from init2winit.model_lib import model_utils
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -89,20 +89,6 @@ def maybe_log_training_metrics(metrics_state,
                                 prefix='metrics_state')
 
 
-def maybe_sync_batchnorm_stats(batch_stats):
-  """Sync batch_stats across devices."""
-  # We first check that batch_stats is used (pmap will throw an error if
-  # it's a non batch norm model). If batch norm is not used then
-  # batch_stats = None. Note that, in the case of using our implementation of
-  # virtual batch norm, this will also handle synchronizing the multiple moving
-  # averages on each device before doing a cross-host sync.
-  if batch_stats:
-    batch_stats = jax.pmap(
-        model_utils.sync_batchnorm_stats, axis_name='batch')(
-            batch_stats)
-  return batch_stats
-
-
 def should_eval(global_step, eval_frequency, eval_steps):
   on_step = eval_steps and global_step in eval_steps
   on_freq = (global_step % eval_frequency == 0)
@@ -141,30 +127,12 @@ def check_for_early_stopping(
       )
 
 
-def prefetch_input_pipeline(ds, n_prefetch=0, devices=None):
-  """Modify input pipeline to prefetch from host to device.
-
-  Args:
-    ds: tf.data pipeline
-    n_prefetch: number of items to prefetch
-    devices: devices to prefetch to
-
-  Returns:
-    prefetching ds
-
-  """
-  it = iter(ds)
-  it = (data_utils.shard(x) for x in it)
-  if n_prefetch > 0:
-    it = jax_utils.prefetch_to_device(it, n_prefetch, devices=devices)
-  return it
-
-
 def evaluate(
     params,
     batch_stats,
     batch_iter,
-    evaluate_batch_pmapped):
+    evaluate_batch_jitted,
+    mesh):
   """Compute aggregated metrics on the given data iterator.
 
   WARNING: The caller is responsible for synchronizing the batch norm statistics
@@ -184,25 +152,27 @@ def evaluate(
       {'batch_stats': batch_stats} into flax_module.apply().
     batch_iter: Generator which yields batches. Must support the API
       for b in batch_iter:
-    evaluate_batch_pmapped: A function with API
-       evaluate_batch_pmapped(params, batch_stats, batch). Returns a dictionary
-       mapping keys to the metric values across the sharded batch.
+    evaluate_batch_jitted: A function with API evaluate_batch_jitted(params,
+      batch_stats, batch). Returns a dictionary mapping keys to the metric
+      values across the sharded batch.
+    mesh: Mesh specification to use for sharding.
 
   Returns:
     A dictionary of aggregated metrics. The keys will match the keys returned by
-    evaluate_batch_pmapped.
+    evaluate_batch_jitted.
   """
   metrics = None
+  make_global_array_fn = functools.partial(
+      data_utils.make_global_array, mesh=mesh
+  )
+
   for batch in batch_iter:
-    batch = data_utils.shard(batch)
+    batch = jax.tree_util.tree_map(make_global_array_fn, batch)
     # Returns a clu.metrics.Collection object. We assume that
-    # `evaluate_batch_pmpapped` calls CLU's `gather_from_model_outputs`,
-    # which includes an `all_gather` to replicate the values on all devices.
-    # We need to `unreplicate` before merging the results across batches to
-    # accommodate CollectingMetric, which concatenates the values across the
-    # leading dimension, so we need to remove the leading shard dimension first.
-    computed_metrics = evaluate_batch_pmapped(
-        params=params, batch_stats=batch_stats, batch=batch).unreplicate()
+    # `evaluate_batch_jitted` calls CLU's `single_from_model_outputs`.
+    computed_metrics = evaluate_batch_jitted(
+        params=params, batch_stats=batch_stats, batch=batch
+    )
     if metrics is None:
       metrics = computed_metrics
     else:
@@ -266,7 +236,7 @@ def fetch_learning_rate(optimizer_state):
   )
   if all_equal:
     lr_array = lrs_with_path[0][1]
-    return lr_array[0]
+    return lr_array
   else:
     raise ValueError(
         'All learning rates in the optimizer state must be the same.'
@@ -284,7 +254,7 @@ def _merge_and_apply_prefix(d1, d2, prefix):
 @utils.timed
 def eval_metrics(params, batch_stats, dataset, eval_num_batches,
                  test_num_batches, eval_train_num_batches,
-                 evaluate_batch_pmapped):
+                 evaluate_batch_jitted, mesh):
   """Evaluates the given network on the train, validation, and test sets.
 
   WARNING: we assume that `batch_stats` has already been synchronized across
@@ -307,7 +277,8 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
       sets. Set to None to evaluate on the whole test set.
     eval_train_num_batches: (int) The batch size used for evaluating on train
       set. Set to None to evaluate on the whole training set.
-    evaluate_batch_pmapped: Computes the metrics on a sharded batch.
+    evaluate_batch_jitted: Computes the metrics on a sharded batch.
+    mesh: Mesh specification to use for sharding.
 
   Returns:
     A dictionary of all computed metrics.
@@ -320,7 +291,7 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
   for split_iter, split_name in zip([train_iter, valid_iter, test_iter],
                                     ['train', 'valid', 'test']):
     split_metrics = evaluate(params, batch_stats, split_iter,
-                             evaluate_batch_pmapped)
+                             evaluate_batch_jitted, mesh)
     # Metrics are None if the dataset doesn't have that split
     if split_metrics is not None:
       metrics = _merge_and_apply_prefix(metrics, split_metrics,

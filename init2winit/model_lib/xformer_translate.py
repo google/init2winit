@@ -1045,7 +1045,7 @@ class TransformerTranslate(base_model.BaseModel):
       targets = one_hot(batch['targets'], logits.shape[-1])
 
     # Add log-perplexity metric.
-    return self.metrics_bundle.gather_from_model_output(
+    return self.metrics_bundle.single_from_model_output(
         logits=logits, targets=targets, weights=weights, axis_name='batch')
 
   def apply_on_batch(self,
@@ -1101,8 +1101,8 @@ class TransformerTranslate(base_model.BaseModel):
     (total_loss, total_weight) = self.loss_fn(
         logits, targets, weights)
 
-    (total_loss, total_weight) = lax.psum(
-        (total_loss, total_weight), axis_name='batch')
+    # (total_loss, total_weight) = lax.psum(
+    #     (total_loss, total_weight), axis_name='batch')
 
     total_loss = (total_loss / total_weight)
 

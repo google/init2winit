@@ -117,10 +117,9 @@ class OgbgMolpcbaTest(tf.test.TestCase):
     dataset = _get_dataset(jax.random.PRNGKey(0))
 
     batch = next(dataset.valid_epoch())
-    inputs = batch['inputs'][0]
+    inputs = batch['inputs']
 
     # The first two graphs are in the first batch
-    self.assertLen(batch['inputs'], 1)
     self.assertNDArrayNear(inputs.n_node[:2], np.array(NUMS_NODES[:2]), 1e-3)
 
     # The graphs are padded to the right size
@@ -130,9 +129,9 @@ class OgbgMolpcbaTest(tf.test.TestCase):
     self.assertEqual(np.sum(inputs.n_edge), BATCH_SIZE * EDGES_SIZE_MULTIPLIER)
 
     # Weights are zero at NaN labels and in padded examples
-    self.assertNDArrayNear(batch['weights'][0],
+    self.assertNDArrayNear(batch['weights'],
                            np.array([[1, 1], [0, 1], [0, 0]]), 1e-3)
-    self.assertFalse(np.any(np.isnan(batch['targets'][0])))
+    self.assertFalse(np.any(np.isnan(batch['targets'])))
 
   def test_train_shuffle_is_deterministic(self):
     """Tests that shuffling of the train split is deterministic."""
@@ -144,19 +143,18 @@ class OgbgMolpcbaTest(tf.test.TestCase):
     batch_same = next(dataset_same.train_iterator_fn())
     batch_different = next(dataset_different.train_iterator_fn())
 
-    self.assertAllClose(batch['inputs'][0], batch_same['inputs'][0])
-    self.assertNotAllClose(batch['inputs'][0], batch_different['inputs'][0])
+    self.assertAllClose(batch['inputs'], batch_same['inputs'])
+    self.assertNotAllClose(batch['inputs'], batch_different['inputs'])
 
   def test_add_virtual_node(self):
     """Tests that adding a virtual node works correctly."""
     dataset = _get_dataset(jax.random.PRNGKey(0), {'add_virtual_node': True})
 
     batch = next(dataset.valid_epoch())
-    inputs = batch['inputs'][0]
+    inputs = batch['inputs']
     num_nodes = np.array(NUMS_NODES[0])
     num_edges = np.array(NUMS_EDGES[0])
 
-    self.assertLen(batch['inputs'], 1)
     self.assertNDArrayNear(
         inputs.n_node[0], np.array(num_nodes + 1), 1e-3)
     self.assertNDArrayNear(
@@ -173,11 +171,10 @@ class OgbgMolpcbaTest(tf.test.TestCase):
         jax.random.PRNGKey(0), {'add_bidirectional_edges': True})
 
     batch = next(dataset.valid_epoch())
-    inputs = batch['inputs'][0]
+    inputs = batch['inputs']
     num_nodes = np.array(NUMS_NODES[0])
     num_edges = np.array(NUMS_EDGES[0])
 
-    self.assertLen(batch['inputs'], 1)
     self.assertNDArrayNear(
         inputs.n_node[0], np.array(num_nodes), 1e-3)
     self.assertNDArrayNear(
@@ -188,11 +185,10 @@ class OgbgMolpcbaTest(tf.test.TestCase):
     dataset = _get_dataset(jax.random.PRNGKey(0), {'add_self_loops': True})
 
     batch = next(dataset.valid_epoch())
-    inputs = batch['inputs'][0]
+    inputs = batch['inputs']
     num_nodes = np.array(NUMS_NODES[0])
     num_edges = np.array(NUMS_EDGES[0])
 
-    self.assertLen(batch['inputs'], 1)
     self.assertNDArrayNear(
         inputs.n_node[0], np.array(num_nodes), 1e-3)
     self.assertNDArrayNear(
