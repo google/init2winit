@@ -16,7 +16,6 @@
 """Unit tests for trainer.py."""
 
 import copy
-import functools
 import itertools
 import os
 import shutil
@@ -25,10 +24,10 @@ import tempfile
 from absl import flags
 from absl.testing import absltest
 from absl.testing import parameterized
-from flax import jax_utils
 from flax import linen as nn
 from init2winit import hyperparameters
 from init2winit import utils
+from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import datasets
 from init2winit.dataset_lib.small_image_datasets import Dataset
 from init2winit.init_lib import initializers
@@ -37,6 +36,8 @@ from init2winit.model_lib import metrics
 from init2winit.model_lib import models
 from init2winit.trainer_lib import trainer
 from init2winit.trainer_lib import trainer_utils
+import jax
+from jax.experimental import mesh_utils
 import jax.numpy as jnp
 import jax.random
 import jraph
@@ -45,6 +46,8 @@ import numpy as np
 import pandas
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
+
+
 FLAGS = flags.FLAGS
 
 _VOCAB_SIZE = 4
@@ -196,25 +199,25 @@ def _get_fake_dlrm_dataset(batch_size, eval_num_batches, hps):
 
   def train_iterator_fn():
     while True:
-      yield batch
+      yield copy.deepcopy(batch)
 
   def eval_train_epoch(num_batches=None):
     if num_batches is None:
       num_batches = eval_num_batches
     for _ in range(num_batches):
-      yield batch
+      yield copy.deepcopy(batch)
 
   def valid_epoch(num_batches=None):
     if num_batches is None:
       num_batches = eval_num_batches
     for _ in range(num_batches):
-      yield batch
+      yield copy.deepcopy(batch)
 
   def test_epoch(num_batches=None):
     if num_batches is None:
       num_batches = eval_num_batches
     for _ in range(num_batches):
-      yield batch
+      yield copy.deepcopy(batch)
 
   meta_data = {
       'apply_one_hot_in_loss': False,
@@ -303,7 +306,12 @@ class TrainerTest(parameterized.TestCase):
         rngs={'params': params_rng, 'dropout': dropout_rng},
         x=None,
         train=False)
-    params = jax_utils.replicate(init_dict['params'])
+    mesh_shape = (jax.device_count(),)
+    mesh = jax.sharding.Mesh(
+        mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
+        axis_names=('devices',),
+    )
+    _, params = data_utils.shard_pytree(init_dict['params'], mesh)
     batch_stats = init_dict.get('batch_stats', {})
 
     # 4 evaluation batches of size 4.
@@ -336,18 +344,22 @@ class TrainerTest(parameterized.TestCase):
         yield batch
 
     # pylint: disable=protected-access
-    eval_fn = functools.partial(
-        base_model._evaluate_batch,
-        flax_module=fake_flax_module,
-        metrics_bundle=metrics.get_metrics('classification_metrics'),
-        apply_one_hot_in_loss=True)
-    evaluate_batch_pmapped = jax.pmap(eval_fn, axis_name='batch')
+    eval_fn = lambda params, batch_stats, batch: base_model._evaluate_batch(
+        fake_flax_module,
+        params,
+        batch_stats,
+        batch,
+        metrics.get_metrics('classification_metrics'),
+        True)
+
+    evaluate_batch_jitted = jax.jit(eval_fn)
     # pylint: enable=protected-access
     evaluated_metrics = trainer_utils.evaluate(
         params,
         batch_stats,
         fake_batches_gen(),
-        evaluate_batch_pmapped)
+        evaluate_batch_jitted,
+        mesh)
 
     def batch_ce_loss(logits, targets):
       one_hot_targets = np.eye(4)[targets]
@@ -890,7 +902,7 @@ class TrainerTest(parameterized.TestCase):
       del params, batch_stats
       metrics_bundle = metrics.get_metrics(metrics_name)
 
-      return metrics_bundle.gather_from_model_output(
+      return metrics_bundle.single_from_model_output(
           logits=batch.get('logits'),
           targets=batch.get('targets'),
           weights=batch.get('weights'))
@@ -906,11 +918,18 @@ class TrainerTest(parameterized.TestCase):
         'weights': ws
     } for ls, ts, ws in zip(logits, targets, weights)]
 
+    mesh_shape = (jax.device_count(),)
+    mesh = jax.sharding.Mesh(
+        mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
+        axis_names=('devices',),
+    )
+
     result = trainer_utils.evaluate(
         params=None,
         batch_stats=None,
         batch_iter=batch_iter,
-        evaluate_batch_pmapped=jax.pmap(mock_evaluate_batch, axis_name='batch'))
+        evaluate_batch_jitted=jax.jit(mock_evaluate_batch),
+        mesh=mesh)
 
     for metric, val in zip(test_metric_names, test_metric_vals):
       self.assertAlmostEqual(result[metric], val, places=5)

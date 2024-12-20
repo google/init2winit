@@ -64,7 +64,6 @@ def accumulate_gradients(
     virtual_batch_size: Optional[int],
     base_opt_init_fn: optax.TransformInitFn,
     base_opt_update_fn: optax.TransformUpdateFn,
-    batch_axis_name: Optional[str] = None,
 ) -> optax.GradientTransformationExtraArgs:
   """Accumulate gradients.
 
@@ -80,9 +79,6 @@ def accumulate_gradients(
       generate updates given the total gradient.
     base_opt_update_fn: The update function for the base optimizer used to
       generate updates given the total gradient.
-    batch_axis_name: the name of the axis to pmap over. Used to run a pmean
-      before applying the optimizer update.
-
   Returns:
     An (init_fn, update_fn) tuple.
   """
@@ -124,11 +120,6 @@ def accumulate_gradients(
       # batches.
       total_gradients = jax.tree.map(
           lambda x: x / steps_per_update, total_gradients)
-      if batch_axis_name:
-        # We only sync gradients when we are about to update the model, in order
-        # to avoid unnecessary cross replica communications.
-        total_gradients = jax.lax.pmean(
-            total_gradients, axis_name=batch_axis_name)
 
       updates, updated_base_state = base_opt_update_fn(
           total_gradients, state.base_state, params=params, **extra_args)

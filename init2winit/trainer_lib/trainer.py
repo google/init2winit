@@ -14,17 +14,17 @@
 # limitations under the License.
 
 """Standard trainer for the init2winit project."""
+import functools
 import itertools
 import time
 
 from absl import logging
 from init2winit import utils
+from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
-from init2winit.optimizer_lib import utils as optimizer_utils
 from init2winit.trainer_lib import base_trainer
 from init2winit.trainer_lib import trainer_utils
 import jax
-from jax import lax
 import jax.numpy as jnp
 import optax
 
@@ -40,16 +40,14 @@ def update(
     step,
     lr,
     rng,
-    local_device_index,
     running_train_cost,
     training_cost,
     grad_clip,
     optimizer_update_fn,
-    metrics_update_fn,
-    axis_name='batch'):
+    metrics_update_fn):
   """Single step of the training loop.
 
-  This function will later be pmapped so we keep it outside of the Trainer class
+  This function will later be jitted so we keep it outside of the Trainer class
   to avoid the temptation to introduce side-effects.
 
   Args:
@@ -67,9 +65,6 @@ def update(
     lr: the floating point learning rate for this step.
     rng: the RNG used for calling the model. `step` and `local_device_index`
       will be folded into this to produce a unique per-device, per-step RNG.
-    local_device_index: an integer that is unique to this device amongst all
-      devices on this host, usually in the range [0, jax.local_device_count()].
-      It is folded in to `rng` to produce a unique per-device, per-step RNG.
     running_train_cost: the cumulative train cost over some past number of train
       steps. Reset at evaluation time.
     training_cost: a function used to calculate the training objective that will
@@ -80,7 +75,6 @@ def update(
       value g / ||g||_2 * grad_clip. If None, then no clipping will be applied.
     optimizer_update_fn: the optimizer update function.
     metrics_update_fn: the training metrics update function.
-    axis_name: axis_name used by pmap.
 
   Returns:
     A tuple of the new optimizer, the new batch stats, the scalar training cost,
@@ -89,7 +83,6 @@ def update(
   # `jax.random.split` is very slow outside the train step, so instead we do a
   # `jax.random.fold_in` here.
   rng = jax.random.fold_in(rng, step)
-  rng = jax.random.fold_in(rng, local_device_index)
 
   optimizer_state = trainer_utils.inject_learning_rate(optimizer_state, lr)
 
@@ -100,20 +93,6 @@ def update(
   grad_fn = jax.value_and_grad(opt_cost, has_aux=True)
   (cost_value, new_batch_stats), grad = grad_fn(params)
   new_batch_stats = new_batch_stats.get('batch_stats', None)
-
-  if axis_name is not None:
-    if optimizer_utils.requires_gradient_aggregation(optimizer_update_fn):
-      grad = lax.pmean((grad), axis_name=axis_name)
-    else:
-      # Skip gradient aggregationas it'll be handled in gradient_accumulator.
-      if grad_clip:
-        # Calculating the gradient norm requires cross-device aggregation,
-        # performed, in this case, inside the optimizer. Calculating it again
-        # at this point may be inefficient.
-        raise NotImplementedError(
-            'Gradient clipping is not supported when gradient aggregation is'
-            ' performed internally by the optimizer.'
-        )
 
   grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
   # TODO(znado): move to inside optax gradient clipping.
@@ -183,9 +162,6 @@ class Trainer(base_trainer.BaseTrainer):
     )
 
 
-    train_iter = trainer_utils.prefetch_input_pipeline(
-        train_iter, self._hps.num_device_prefetches)
-
     if self._data_selector:
       train_iter = self._data_selector(
           train_iter,
@@ -207,25 +183,40 @@ class Trainer(base_trainer.BaseTrainer):
     if self._global_step in self._checkpoint_steps:
       self._save(self._checkpoint_dir, max_to_keep=None)
 
+    make_global_array_fn = functools.partial(
+        data_utils.make_global_array, mesh=self._mesh
+    )
+
     for _ in range(start_step, self._num_train_steps):
-      with jax.profiler.StepTraceAnnotation('train',
-                                            step_num=self._global_step):
+      with jax.profiler.StepTraceAnnotation(
+          'train', step_num=self._global_step
+      ):
         # NOTE(dsuo): to properly profile each step, we must include batch
         # creation in the StepTraceContext (as opposed to putting `train_iter`
         # directly in the top-level for loop).
         batch = next(train_iter)
+        batch = jax.tree_util.tree_map(make_global_array_fn, batch)
 
         lr = self._lr_fn(self._global_step)
         # It looks like we are reusing an rng key, but we aren't.
-        # TODO(gdahl): Make it more obvious that passing rng is safe.
-        # TODO(gdahl,gilmer,znado): investigate possibly merging the member
-        # variable inputs/outputs of this function into a named tuple.
-        (self._optimizer_state, self._params, self._batch_stats,
-         self._sum_train_cost,
-         self._metrics_state, self._grad_norm) = self._update_pmapped(
-             self._optimizer_state, self._params, self._batch_stats,
-             self._metrics_state, batch, self._global_step, lr, rng,
-             self._local_device_indices, self._sum_train_cost)
+        (
+            self._optimizer_state,
+            self._params,
+            self._batch_stats,
+            self._sum_train_cost,
+            self._metrics_state,
+            self._grad_norm,
+        ) = self._update_jitted(
+            self._optimizer_state,
+            self._params,
+            self._batch_stats,
+            self._metrics_state,
+            batch,
+            self._global_step,
+            lr,
+            rng,
+            self._sum_train_cost,
+        )
         self._global_step += 1
         if self._global_step in self._checkpoint_steps:
           self._save(self._checkpoint_dir, max_to_keep=None)

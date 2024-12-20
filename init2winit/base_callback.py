@@ -20,7 +20,7 @@ Callbacks can be stateful, and in trainer are meant to be called as follows:
 
   callback_builder = callbacks.get_callback(config['callback_name'])
   callback = callback_builder(model, params, batch_stats, optimizer_state,
-                              dataset, hps, config, train_dir, rng)
+                              dataset, hps, config, train_dir, rng, mesh)
 
   callback_metrics = callback.run_eval(params, batch_stats,
                                        optimizer_state, global_step).
@@ -39,7 +39,7 @@ class BaseCallBack:
 
   def __init__(self, model, params, batch_stats, optimizer_state,
                optimizer_update_fn, dataset, hps, callback_config, train_dir,
-               rng):
+               rng, mesh):
     """Defines the API for callback construction."""
     pass
 

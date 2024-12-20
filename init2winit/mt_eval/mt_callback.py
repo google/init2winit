@@ -40,13 +40,13 @@ If your decoder uses remat_scan, e.g. an xformer_translate with
 'scan_over_layers_offset' equal to the length of that tuple.
 """
 
+import functools
+
 from absl import logging
 from init2winit import base_callback
 from init2winit import utils
-from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import datasets
 from init2winit.model_lib import models
-
 from init2winit.mt_eval import inference
 import jax
 from ml_collections.config_dict import config_dict
@@ -74,7 +74,8 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
                hps,
                callback_config,
                train_dir,
-               rng):
+               rng,
+               mesh):
     del optimizer_state
     del optimizer_update_fn
     del train_dir
@@ -87,12 +88,14 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     self.callback_config = merged_callback_config
 
     self._validate_callback_config()
-    self.evaluate_batch_pmapped = jax.pmap(
-        model.evaluate_batch, axis_name='batch')
+    self.evaluate_batch_pmapped = jax.jit(
+        model.evaluate_batch, donate_argnums=(2,)
+    )
     self.batch_stats = batch_stats
 
     dataset, dataset_metadata = self._get_dataset(hps, rng)
     self.dataset = dataset
+    self.mesh = mesh
     model_class = models.get_model(callback_config['model_name'])
 
     self.inference_manager = inference.InferenceManager(
@@ -102,7 +105,8 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
         dataset,
         dataset_metadata,
         self.callback_config,
-        mode='online')
+        mode='online',
+        mesh=mesh)
 
   def _validate_callback_config(self):
     assert all(key in self.callback_config for key in _REQUIRED_KEYS), (
@@ -137,7 +141,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
                 params,
                 batch_stats,
                 batch_iter,
-                evaluate_batch_pmapped):
+                evaluate_batch_jitted):
     """Compute aggregated metrics on the given data iterator.
 
     This function is taken as is from trainer.py to avoid circular dependency.
@@ -148,19 +152,25 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       batch_stats: A dict of batch_stats.
       batch_iter: Generator which yields batches. Must support the API
         for b in batch_iter:
-      evaluate_batch_pmapped: A function with API
-       evaluate_batch_pmapped(params, batch_stats, batch). Returns a dictionary
-       mapping keys to the metric values across the sharded batch.
+      evaluate_batch_jitted: A function with API evaluate_batch_jitted(params,
+        batch_stats, batch). Returns a dictionary mapping keys to the metric
+        values across the sharded batch.
 
     Returns:
       A dictionary of aggregated metrics. The keys will match the keys returned
-      by evaluate_batch_pmapped.
+      by evaluate_batch_jitted.
     """
     metrics = None
+    make_global_array_fn = functools.partial(
+        utils.make_global_array, mesh=self.mesh
+    )
+
     for batch in batch_iter:
-      batch = data_utils.shard(batch)
-      computed_metrics = evaluate_batch_pmapped(
-          params=params, batch_stats=batch_stats, batch=batch)
+      batch = utils.maybe_remove_leading_dimension(batch)
+      batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+      computed_metrics = evaluate_batch_jitted(
+          params=params, batch_stats=batch_stats, batch=batch
+      )
       if metrics is None:
         metrics = computed_metrics
       else:
@@ -169,7 +179,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     # For data splits with no data (e.g. Imagenet no test set) no values
     # will appear for that split.
     if metrics is not None:
-      metrics = metrics.unreplicate().compute()
+      metrics = metrics.compute()
       for key, val in metrics.items():
         if np.isnan(val):
           raise utils.TrainingDivergedError('NaN detected in {}'.format(key))
@@ -191,7 +201,8 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       d1[prefix+key] = d2[key]
     return d1
 
-  def run_eval(self, params, batch_stats, optimizer_state, global_step):
+  def run_eval(
+      self, params, batch_stats, optimizer_state, global_step):
     """Runs the MT models to evals specified by MT model.
 
     Args:
@@ -230,7 +241,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
             self.inference_manager.translate_and_calculate_bleu_single_model(
                 params, split_name))
         split_metrics = self._evaluate(params, batch_stats, split_iter,
-                                       self.evaluate_batch_pmapped)
+                                       self.evaluate_batch_jitted)
         split_metrics['bleu_score'] = decoding_output.bleu_score
 
         metrics = self._merge_and_apply_prefix(

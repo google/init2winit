@@ -21,7 +21,6 @@ import os.path
 import time
 
 from absl import logging
-from flax import jax_utils
 from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import schedules
@@ -31,9 +30,12 @@ from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
+from jax.experimental import mesh_utils
 import numpy as np
 import optax
 import orbax.checkpoint as orbax_checkpoint
+
+NamedSharding = jax.sharding.NamedSharding
 
 
 class BaseTrainer(metaclass=abc.ABCMeta):
@@ -200,12 +202,19 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # During eval, we can donate the 'batch' buffer. We don't donate the
     # 'params' and 'batch_stats' buffers as we don't re-assign those values in
     # eval, we do that only in train.
-    self._evaluate_batch_pmapped = jax.pmap(
-        self._model.evaluate_batch, axis_name='batch', donate_argnums=(2,))
+    self._evaluate_batch_jitted = jax.jit(
+        self._model.evaluate_batch, donate_argnums=(2,))
 
     # Numpy array of range(0, local_device_count) to send to each device to be
     # folded into the RNG inside each train step to get a unique per-device RNG.
     self._local_device_indices = np.arange(jax.local_device_count())
+
+    # Creates a 1-d mesh with all devices available globally.
+    mesh_shape = (jax.device_count(),)
+    self._mesh = jax.sharding.Mesh(
+        mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
+        axis_names=('devices',),
+    )
 
   def wait_until_orbax_checkpointer_finished(self):
     self._orbax_checkpointer.wait_until_finished()
@@ -224,7 +233,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       data_rng: the jax PRNGKey used for dataset randomness. Should be
         *different* across hosts!
       trainer_update_fn: the function for updating the model. If None, this will
-        skip pmapping the update function.
+        skip jitting the update function.
 
     Returns:
       A long tuple of the following:
@@ -232,10 +241,14 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         optimizer_update_fn: the optax update fn.
         metrics_update_fn: the optional metrics update fn.
         metrics_summary_fn: the optional metrics summary fn.
-        optimizer_state: the replicated optimizer state.
-        params: the replicated model parameters.
-        batch_stats: the replicated (optional) model batch statistics.
-        metrics_state: the replicated metric states.
+        (optimizer_state_sharding, optimizer_state): the replicated optimizer
+        state and corresponding sharding annotations.
+        (params_sharding, params): the replicated model parameters and
+        corresponding sharding annotations.
+        (batch_stats_sharding, batch_stats): the replicated (optional) model
+        batch statistics and corresponding sharding annotations.
+        (metrics_state_sharding, metrics_state) : the replicated metric states
+        and corresponding sharding annotations.
         global_step: the global step to start training at.
         sum_train_cost: the sum of the train costs.
         preemption_count: the number of times training has been preempted.
@@ -299,10 +312,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
                                                    unreplicated_batch_stats)
 
     (
-        optimizer_state,
-        params,
-        batch_stats,
-        metrics_state,
+        (optimizer_state_sharding, optimizer_state),
+        (params_sharding, params),
+        (batch_stats_sharding, batch_stats),
+        (metrics_state_sharding, metrics_state),
         global_step,
         sum_train_cost,
         preemption_count,
@@ -312,6 +325,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         unreplicated_params,
         unreplicated_batch_stats,
         unreplicated_metrics_state,
+        self._mesh,
         train_dir=self._train_dir,
         external_checkpoint_path=self._external_checkpoint_path,
         orbax_checkpointer=self._orbax_checkpointer,
@@ -360,6 +374,12 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           hps=self._hps,
       )
 
+    if self._hps.get('grad_clip') and self._hps.get('total_accumulated_batch_size'):  # pylint: disable=line-too-long
+      raise NotImplementedError(
+          'Gradient clipping is not supported when gradient accumulation is'
+          ' performed internally by the optimizer.'
+      )
+
     if trainer_update_fn is not None:
       update_fn = functools.partial(
           trainer_update_fn,
@@ -367,31 +387,32 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           grad_clip=self._hps.get('grad_clip'),
           optimizer_update_fn=optimizer_update_fn,
           metrics_update_fn=metrics_update_fn)
-      # in_axes = (
-      #     optimizer_state = 0,
-      #     params = 0,
-      #     batch_stats = 0,
-      #     metrics_state = 0,
-      #     batch = 0,
-      #     step = None,
-      #     lr = None,
-      #     rng = None,
-      #     local_device_index = 0,
-      #     running_train_cost = 0,
-      #     training_cost,
-      #     grad_clip,
-      #     optimizer_update_fn,
-      #     metrics_state_update_fn)
-      # Also, we can donate buffers for 'optimizer', 'batch_stats',
-      # 'batch' and 'training_metrics_state' for update's pmapped computation.
-      update_pmapped = jax.pmap(
+
+      # We donate optimizer_state, params and batch_stats in jitted computation.
+      # This helps reduce memory usage as outputs corresponding to these inputs
+      # arguments can re-use the memory.
+      update_jitted = jax.jit(
           update_fn,
-          axis_name='batch',
-          in_axes=(0, 0, 0, 0, 0, None, None, None, 0, 0),
-          donate_argnums=(0, 1, 2, 8),
+          donate_argnums=(0, 1, 2),
+          in_shardings=(
+              optimizer_state_sharding,
+              params_sharding,
+              batch_stats_sharding,
+              metrics_state_sharding,
+              NamedSharding(self._mesh, jax.sharding.PartitionSpec('devices')),
+              None, None, None, None
+          ),
+          out_shardings=(
+              optimizer_state_sharding,
+              params_sharding,
+              batch_stats_sharding,
+              None,
+              metrics_state_sharding,
+              None
+          ),
       )
     else:
-      update_pmapped = None
+      update_jitted = None
 
     return (
         lr_fn,
@@ -399,14 +420,18 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         metrics_update_fn,
         metrics_summary_fn,
         optimizer_state,
+        optimizer_state_sharding,
         params,
+        params_sharding,
         batch_stats,
+        batch_stats_sharding,
         metrics_state,
+        metrics_state_sharding,
         global_step,
         sum_train_cost,
         preemption_count,
         dataset,
-        update_pmapped)
+        update_jitted)
 
   def _setup_and_maybe_restore(
       self, init_rng, data_rng, callback_rng, trainer_update_fn):
@@ -425,7 +450,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       - initializing and maybe restoring self._sum_train_cost.
       - initializing and maybe restoring self._preemption_count.
       - setting self._dataset
-      - setting self._update_pmapped
+      - setting self._update_jitted
       - setting self._eval_callbacks
 
     Args:
@@ -436,21 +461,25 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       callback_rng: the jax PRNGKey used for eval callbacks. Should be
         *different* across hosts!
       trainer_update_fn: the function for updating the model. If None, this will
-        skip pmapping the update function.
+        skip jitting the update function.
     """
     (self._lr_fn,
      self._optimizer_update_fn,
      self._metrics_update_fn,
      self._metrics_summary_fn,
      self._optimizer_state,
+     self._optimizer_state_sharding,
      self._params,
+     self._params_sharding,
      self._batch_stats,
+     self._batch_stats_sharding,
      self._metrics_state,
+     self._metrics_state_sharding,
      self._global_step,
      self._sum_train_cost,
      self._preemption_count,
      self._dataset,
-     self._update_pmapped) = self.setup_and_maybe_restore(
+     self._update_jitted) = self.setup_and_maybe_restore(
          init_rng, data_rng, trainer_update_fn)
     self._eval_callbacks = self._setup_eval_callbacks(callback_rng)
 
@@ -482,7 +511,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       eval_callback = callbacks.get_callback(config['callback_name'])(
           self._model, self._params, self._batch_stats, self._optimizer_state,
           self._optimizer_update_fn, self._dataset, self._hps, config,
-          self._train_dir, rng)
+          self._train_dir, rng, self._mesh)
       eval_callbacks.append(eval_callback)
     return eval_callbacks
 
@@ -546,9 +575,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     """
     time_since_last_eval = time.time() - self._time_at_prev_eval_end
-    self._batch_stats = trainer_utils.maybe_sync_batchnorm_stats(
-        self._batch_stats
-    )
 
     if self._eval_use_ema:
       if isinstance(
@@ -574,7 +600,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._eval_num_batches,
         self._test_num_batches,
         self._eval_train_num_batches,
-        self._evaluate_batch_pmapped)
+        self._evaluate_batch_jitted,
+        self._mesh)
     self._run_eval_callbacks(report)
     if save:
       self._save(self._train_dir)
@@ -583,10 +610,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     run_time = time.time() - self._time_at_prev_eval_end
     steps_per_sec = steps_since_last_eval / run_time
 
-    mean_train_cost = jax.lax.pmean(self._sum_train_cost, axis_name=[])[
-        0
-    ].item() / max(1, self._global_step - self._prev_eval_step)
-    self._sum_train_cost = jax_utils.replicate(0.0)
+    mean_train_cost = self._sum_train_cost / max(
+        1, self._global_step - self._prev_eval_step
+    )
+    self._sum_train_cost = 0.0
     epoch = self._global_step * self._hps.batch_size // self._hps.train_size
     overall_steps_per_sec = self._get_step_frequency(
         self._global_step, start_step, start_time)

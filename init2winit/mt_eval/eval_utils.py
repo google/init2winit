@@ -57,7 +57,7 @@ def save_evals(ckpt_dir, ckpt_step, eval_split, bleu_score):
     f.write(str(bleu_score))
 
 
-def _load_checkpoint(checkpoint_path, params, replicate=True):
+def _load_checkpoint(checkpoint_path, params):
   """Load model (and batch stats) from checkpoint."""
   target = dict(
       params=params,
@@ -68,12 +68,7 @@ def _load_checkpoint(checkpoint_path, params, replicate=True):
       checkpoint_path,
       target=target,
   )
-  results = checkpoint.replicate_checkpoint(
-      ckpt,
-      pytree_keys=['params'],
-      replicate=replicate,
-  )
-  params = results[0]['params']
+  params = ckpt['params']
   return params
 
 
@@ -81,12 +76,13 @@ def average_checkpoints(checkpoint_paths, params):
   """Averages a set of checkpoints in input checkpoints."""
   assert len(checkpoint_paths) >= 1
   # Sum parameters of separate models together.
-  params = _load_checkpoint(checkpoint_paths[0], params, replicate=False)
+  params = _load_checkpoint(checkpoint_paths[0], params)
   for checkpoint_path in checkpoint_paths[1:]:
-    params_update = _load_checkpoint(checkpoint_path, params, replicate=False)
+    params_update = _load_checkpoint(
+        checkpoint_path, params
+    )
     # TODO(dxin): Make this averaging process more numerically stable.
-    params = jax.tree.map(
-        lambda x, y: x + y, params, params_update)
+    params = jax.tree.map(lambda x, y: x + y, params, params_update)
 
   # Average checkpoints.
   params = jax.tree.map(lambda x: x / float(len(checkpoint_paths)), params)

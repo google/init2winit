@@ -218,66 +218,9 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
     )
 
   elif hps.optimizer == 'distributed_shampoo':
-    if hps.opt_hparams.get('frequent_directions', False):
-      statistics_compute_steps = hps.opt_hparams[
-          'preconditioning_compute_steps']
-    else:
-      statistics_compute_steps = hps.opt_hparams['statistics_compute_steps']
-    # pylint: disable=line-too-long
-    opt_init, opt_update = utils.static_inject_hyperparams(
-        distributed_shampoo.distributed_shampoo
-    )(
-        learning_rate=0.0,
-        block_size=hps.opt_hparams['block_size'],
-        beta1=hps.opt_hparams['beta1'],
-        beta2=hps.opt_hparams['beta2'],
-        diagonal_epsilon=hps.opt_hparams['diagonal_epsilon'],
-        matrix_epsilon=hps.opt_hparams['matrix_epsilon'],
-        weight_decay=hps.opt_hparams['weight_decay'],
-        start_preconditioning_step=hps
-        .opt_hparams['start_preconditioning_step'],
-        preconditioning_compute_steps=hps
-        .opt_hparams['preconditioning_compute_steps'],
-        decay_preconditioning_compute_steps=hps
-        .opt_hparams.get('decay_preconditioning_compute_steps', False),
-        end_preconditioning_compute_steps=hps
-        .opt_hparams.get('end_preconditioning_compute_steps', None),
-        statistics_compute_steps=statistics_compute_steps,
-        best_effort_shape_interpretation=hps
-        .opt_hparams['best_effort_shape_interpretation'],
-        nesterov=hps.opt_hparams['nesterov'],
-        exponent_override=hps.opt_hparams['exponent_override'],
-        batch_axis_name=batch_axis_name,
-        graft_type=hps.opt_hparams['graft_type'],
-        num_devices_for_pjit=hps.opt_hparams['num_devices_for_pjit'],
-        shard_optimizer_states=hps.opt_hparams['shard_optimizer_states'],
-        best_effort_memory_usage_reduction=hps
-        .opt_hparams['best_effort_memory_usage_reduction'],
-        inverse_failure_threshold=hps.opt_hparams['inverse_failure_threshold'],
-        moving_average_for_momentum=hps
-        .opt_hparams['moving_average_for_momentum'],
-        skip_preconditioning_dim_size_gt=hps
-        .opt_hparams['skip_preconditioning_dim_size_gt'],
-        relative_matrix_epsilon=hps.opt_hparams.get('relative_matrix_epsilon',
-                                                    True),
-        clip_by_scaled_gradient_norm=hps
-        .opt_hparams['clip_by_scaled_gradient_norm'],
-        merge_small_dims_block_size=hps.opt_hparams.get(
-            'merge_small_dims_block_size', 4096),
-        generate_fd_metrics=hps.opt_hparams.get('generate_fd_metrics', False),
-        compression_rank=hps.opt_hparams.get('compression_rank', 0),
-        frequent_directions=hps.opt_hparams.get('frequent_directions', False),
-        average_grad=hps.opt_hparams.get('average_grad', False),
-        eigh=hps.opt_hparams.get('eigh', False),
-        skip_preconditioning_rank_lt=hps.opt_hparams.get(
-            'skip_preconditioning_rank_lt', 1),
-        decoupled_learning_rate=hps.opt_hparams.get('decoupled_learning_rate',
-                                                    True),
-        decoupled_weight_decay=hps.opt_hparams.get('decoupled_weight_decay',
-                                                   False),
-        generate_training_metrics=hps.opt_hparams.get(
-            'generate_training_metrics', True),
-        reuse_preconditioner=hps.opt_hparams.get('reuse_preconditioner', False),
+    raise ValueError(
+        'distributed_shampoo implementation is broken in init2winit after we'
+        ' migrated to jit, do not use it for the time being.'
     )
     # pylint: enable=line-too-long
   elif hps.optimizer == 'adam':
@@ -414,8 +357,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         total_batch_size=hps.total_accumulated_batch_size,
         virtual_batch_size=virtual_batch_size,
         base_opt_init_fn=opt_init,
-        base_opt_update_fn=opt_update,
-        batch_axis_name=batch_axis_name)
+        base_opt_update_fn=opt_update)
 
   if hps.opt_hparams.get('use_sam', False):
     opt_init, opt_update = sharpness_aware_minimization.sharpness_aware_minimization(

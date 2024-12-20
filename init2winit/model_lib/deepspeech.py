@@ -405,10 +405,6 @@ class BatchNorm(nn.Module):
       count_v = jnp.sum(
           jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=True)
 
-      if self.enable_synced_batchnorm:
-        sum_v = jax.lax.psum(sum_v, axis_name='batch')
-        count_v = jax.lax.psum(count_v, axis_name='batch')
-
       count_v = jnp.maximum(count_v, 1.0)
       mean = sum_v / count_v
 
@@ -416,9 +412,6 @@ class BatchNorm(nn.Module):
           (inputs - mean) * (inputs - mean) * mask,
           axis=reduce_over_dims,
           keepdims=True)
-
-      if self.enable_synced_batchnorm:
-        sum_vv = jax.lax.psum(sum_vv, axis_name='batch')
 
       var = sum_vv / count_v
 
@@ -959,20 +952,16 @@ class DeepSpeechModel(base_model.BaseModel):
     (objective_numerator, objective_denominator) = self.loss_fn(
         logits, logit_paddings, labels, label_paddings)
 
-    (objective_numerator, objective_denominator) = jax.lax.psum(
-        (objective_numerator, objective_denominator), axis_name='batch')
-
     # epsilon added to handle empty batch case if we encounter one.
     normalized_loss = (objective_numerator / (objective_denominator + 1e-9))
     hyps, hyp_paddings = self.greedy_decode(logits, logit_paddings)
 
-    return self.metrics_bundle.gather_from_model_output(
+    return self.metrics_bundle.single_from_model_output(
         normalized_loss=normalized_loss,
         hyps=hyps,
         hyp_paddings=hyp_paddings,
         targets=labels,
-        target_paddings=label_paddings,
-        axis_name='batch')
+        target_paddings=label_paddings)
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return CTC loss."""
@@ -995,9 +984,6 @@ class DeepSpeechModel(base_model.BaseModel):
 
     (objective_numerator, objective_denominator) = self.loss_fn(
         outputs, output_paddings, labels, label_paddings)
-
-    (objective_numerator, objective_denominator) = jax.lax.psum(
-        (objective_numerator, objective_denominator), axis_name='batch')
 
     objective_value = (objective_numerator / (objective_denominator))
     return objective_value, new_batch_stats

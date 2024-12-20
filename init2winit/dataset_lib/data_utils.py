@@ -16,9 +16,13 @@
 """Common code used by different models."""
 
 import collections
+
+import flax.linen as nn
 import jax
 from jax.nn import one_hot
+from jax.sharding import PartitionSpec as P
 import numpy as np
+
 
 Dataset = collections.namedtuple('Dataset', [
     'train_iterator_fn',
@@ -143,40 +147,6 @@ def maybe_pad_batch(batch,
   return padded_batch
 
 
-def shard(batch, n_devices=None):
-  """Prepares the batch for pmap by adding a leading n_devices dimension.
-
-  If all the entries are lists, assume they are already divided into n_devices
-  smaller arrays and stack them for pmapping. If all the entries are arrays,
-  assume they have leading dimension divisible by n_devices and reshape.
-
-  Args:
-    batch: A dict of arrays or lists of arrays
-    n_devices: If None, this will be set to jax.local_device_count().
-
-  Returns:
-    Sharded data.
-  """
-  if n_devices is None:
-    n_devices = jax.local_device_count()
-
-  # TODO(mbadura): Specify a sharding function per dataset instead
-  # If entries in the batch dict are lists, then the data is already divided
-  # into n_devices chunks, so we need to stack them.
-  if all((isinstance(v, list) for v in batch.values())):
-    assert all(len(v) == n_devices for v in batch.values())
-    # transpose a dict of lists to a list of dicts
-    shards = [{k: v[i] for (k, v) in batch.items()} for i in range(n_devices)]
-    return jax.tree.map(lambda *vals: np.stack(vals, axis=0), shards[0],
-                        *shards[1:])
-
-  # Otherwise, the entries are arrays, so just reshape them.
-  def _shard_array(array):
-    return array.reshape((n_devices, -1) + array.shape[1:])
-
-  return jax.tree.map(_shard_array, batch)
-
-
 def tf_to_numpy(tfds_data):
   # Safe because we won't mutate. Avoids an extra copy from tfds.
   convert_data = lambda x: x._numpy()  # pylint: disable=protected-access
@@ -187,4 +157,32 @@ def tf_to_numpy(tfds_data):
 def convert_jax_to_tf_random_seed(jax_prng_key: jax.random.PRNGKey) -> int:
   tf_seed = jax.random.bits(jax_prng_key)
   return tf_seed
-  
+
+
+def make_global_array(local_data, mesh):
+  """Util to combine per-host batches into a global batch array.
+
+  Args:
+    local_data: local data batch on host. 
+    mesh: mesh specification to shard the data.
+
+  Returns:
+    global_array: global data batch.
+  """
+  global_shape = (
+      local_data.shape[0] * jax.process_count(),
+      *local_data.shape[1:],
+  )
+  sharding = jax.NamedSharding(mesh, P('devices'))
+
+  global_array = jax.make_array_from_process_local_data(
+      sharding, local_data, global_shape
+  )
+  return global_array
+
+
+def shard_pytree(pytree, mesh):
+  shardings = nn.get_sharding(pytree, mesh)
+  pytree = jax.device_put(pytree, shardings)
+
+  return shardings, pytree

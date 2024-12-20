@@ -855,19 +855,15 @@ class ConformerModel(base_model.BaseModel):
     (objective_numerator, objective_denominator) = self.loss_fn(
         logits, logit_paddings, labels, label_paddings)
 
-    (objective_numerator, objective_denominator) = jax.lax.psum(
-        (objective_numerator, objective_denominator), axis_name='batch')
-
     normalized_loss = (objective_numerator / (objective_denominator))
     hyps, hyp_paddings = self.greedy_decode(logits, logit_paddings)
 
-    return self.metrics_bundle.gather_from_model_output(
+    return self.metrics_bundle.single_from_model_output(
         normalized_loss=normalized_loss,
         hyps=hyps,
         hyp_paddings=hyp_paddings,
         targets=labels,
-        target_paddings=label_paddings,
-        axis_name='batch')
+        target_paddings=label_paddings)
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return CTC loss."""
@@ -890,9 +886,6 @@ class ConformerModel(base_model.BaseModel):
 
     (objective_numerator, objective_denominator) = self.loss_fn(
         outputs, output_paddings, labels, label_paddings)
-
-    (objective_numerator, objective_denominator) = jax.lax.psum(
-        (objective_numerator, objective_denominator), axis_name='batch')
 
     # epsilon added to handle empty batch case if we encounter one.
     objective_value = (objective_numerator / (objective_denominator + 1e-9))
