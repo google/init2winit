@@ -45,6 +45,7 @@ import functools
 from absl import logging
 from init2winit import base_callback
 from init2winit import utils
+from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import datasets
 from init2winit.model_lib import models
 from init2winit.mt_eval import inference
@@ -88,7 +89,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     self.callback_config = merged_callback_config
 
     self._validate_callback_config()
-    self.evaluate_batch_pmapped = jax.jit(
+    self.evaluate_batch_jitted = jax.jit(
         model.evaluate_batch, donate_argnums=(2,)
     )
     self.batch_stats = batch_stats
@@ -162,11 +163,10 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     """
     metrics = None
     make_global_array_fn = functools.partial(
-        utils.make_global_array, mesh=self.mesh
+        data_utils.make_global_array, mesh=self.mesh
     )
 
     for batch in batch_iter:
-      batch = utils.maybe_remove_leading_dimension(batch)
       batch = jax.tree_util.tree_map(make_global_array_fn, batch)
       computed_metrics = evaluate_batch_jitted(
           params=params, batch_stats=batch_stats, batch=batch
