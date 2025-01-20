@@ -185,7 +185,7 @@ class BinarizeOps:
     scale = jnp.divide(1.0, self.bound)
     x = jnp.multiply(x, scale)
     clip_bound = 1.0 - self.epsilon
-    x = jnp.clip(x, a_min=-clip_bound, a_max=clip_bound).astype(self.dtype)
+    x = jnp.clip(x, min=-clip_bound, max=clip_bound).astype(self.dtype)
     x = floor_with_gradient(x) + 0.5  # x is either -0.5 or +0.5
     x = jnp.divide(x, scale)
     return x.astype(self.dtype)
