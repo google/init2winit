@@ -75,24 +75,16 @@ def dot_interact(concat_features, keep_diags=True):
   Returns:
     activations: Array representing interacted features.
   """
-  batch_size = concat_features.shape[0]
-
-  # Interact features, select upper or lower-triangular portion, and re-shape.
+  # Interact features, select upper.
   xactions = jnp.matmul(
-      concat_features, jnp.transpose(concat_features, [0, 2, 1]))
+      concat_features, jnp.transpose(concat_features, [0, 2, 1])
+  )
   feature_dim = xactions.shape[-1]
 
-  if keep_diags:
-    indices = jnp.array(jnp.triu_indices(feature_dim, k=0))
-  else:
-    indices = jnp.array(jnp.tril_indices(feature_dim, k=0))
-  num_elems = indices.shape[1]
-  indices = jnp.tile(indices, [1, batch_size])
-  indices0 = jnp.reshape(jnp.tile(jnp.reshape(
-      jnp.arange(batch_size), [-1, 1]), [1, num_elems]), [1, -1])
-  indices = tuple(jnp.concatenate((indices0, indices), 0))
-  activations = xactions[indices]
-  activations = jnp.reshape(activations, [batch_size, -1])
+  rows, cols = jnp.array(
+      jnp.triu_indices(feature_dim, k=0 if keep_diags else 1)
+  )
+  activations = xactions[:, rows, cols]
   return activations
 
 

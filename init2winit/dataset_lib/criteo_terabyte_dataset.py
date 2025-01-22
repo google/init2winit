@@ -96,7 +96,8 @@ def criteo_tsv_reader(
     shuffle_rng,
     file_path,
     num_dense_features,
-    batch_size):
+    batch_size,
+    num_batches_to_prefetch):
   """Input reader fn for pre-processed Criteo data.
 
   Raw Criteo data is assumed to be preprocessed in the following way:
@@ -112,6 +113,7 @@ def criteo_tsv_reader(
     file_path: filepath to the criteo dataset.
     num_dense_features: number of dense features.
     batch_size: per-host batch size.
+    num_batches_to_prefetch: number of batches to prefetch.
   Returns:
     A tf.data.Dataset object.
   """
@@ -149,7 +151,7 @@ def criteo_tsv_reader(
   ds = ds.batch(batch_size, drop_remainder=is_training)
   parse_fn = functools.partial(_parse_example_fn, num_dense_features)
   ds = ds.map(parse_fn, num_parallel_calls=16)
-  ds = ds.prefetch(tf.data.AUTOTUNE)
+  ds = ds.prefetch(num_batches_to_prefetch)
   return ds
 
 
@@ -213,20 +215,24 @@ def get_criteo1tb(shuffle_rng,
   validation_file_path = os.path.join(
       RAW_CRITEO1TB_FILE_PATH, 'val_set_second_half_of_day23_not_used/*')
   test_file_path = os.path.join(RAW_CRITEO1TB_FILE_PATH, 'eval/day_23/*')
+  num_batches_to_prefetch = (hps.num_tf_data_prefetches
+                             if hps.num_tf_data_prefetches > 0 else tf.data.AUTOTUNE)
 
   train_dataset = criteo_tsv_reader(
       split='train',
       shuffle_rng=shuffle_rng,
       file_path=train_file_path,
       num_dense_features=hps.num_dense_features,
-      batch_size=per_host_batch_size)
+      batch_size=per_host_batch_size,
+      num_batches_to_prefetch=num_batches_to_prefetch)
   train_iterator_fn = lambda: tfds.as_numpy(train_dataset)
   eval_train_dataset = criteo_tsv_reader(
       split='eval_train',
       shuffle_rng=None,
       file_path=train_file_path,
       num_dense_features=hps.num_dense_features,
-      batch_size=per_host_eval_batch_size)
+      batch_size=per_host_eval_batch_size,
+      num_batches_to_prefetch=num_batches_to_prefetch)
   eval_train_iterator_fn = functools.partial(
       _convert_to_numpy_iterator_fn,
       per_host_eval_batch_size=per_host_eval_batch_size,
@@ -237,7 +243,8 @@ def get_criteo1tb(shuffle_rng,
       shuffle_rng=None,
       file_path=validation_file_path,
       num_dense_features=hps.num_dense_features,
-      batch_size=per_host_eval_batch_size)
+      batch_size=per_host_eval_batch_size,
+      num_batches_to_prefetch=num_batches_to_prefetch)
   validation_iterator_fn = functools.partial(
       _convert_to_numpy_iterator_fn,
       per_host_eval_batch_size=per_host_eval_batch_size,
@@ -248,7 +255,8 @@ def get_criteo1tb(shuffle_rng,
       shuffle_rng=None,
       file_path=test_file_path,
       num_dense_features=hps.num_dense_features,
-      batch_size=per_host_eval_batch_size)
+      batch_size=per_host_eval_batch_size,
+      num_batches_to_prefetch=num_batches_to_prefetch)
   test_iterator_fn = functools.partial(
       _convert_to_numpy_iterator_fn,
       per_host_eval_batch_size=per_host_eval_batch_size,
