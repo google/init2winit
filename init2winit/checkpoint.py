@@ -24,7 +24,6 @@ import sys
 from absl import flags
 from absl import logging
 from flax.training import checkpoints as flax_checkpoints
-from init2winit.dataset_lib import data_utils
 import jax
 
 FLAGS = flags.FLAGS
@@ -43,16 +42,15 @@ def load_pytree(pytree_file, orbax_checkpointer=None):
   return None
 
 
-def replicate_and_maybe_restore_checkpoint(
+def maybe_restore_checkpoint(
     unreplicated_optimizer_state,
     unreplicated_params,
     unreplicated_batch_stats,
     unreplicated_training_metrics_state,
-    mesh,
     train_dir,
     external_checkpoint_path=None,
     orbax_checkpointer=None):
-  """Replicates everything, and optionally restores from a checkpoint.
+  """Optionally restores from a checkpoint.
 
   The checkpoint logic is as follows: if there is a checkpoint in `train_dir`,
   restore it.  Else, if `external_checkpoint_path` is set, restore the
@@ -60,15 +58,11 @@ def replicate_and_maybe_restore_checkpoint(
   return the passed-in optimizer_state, params, batch_stats, and
   metrics_grabber.
 
-  This function is also responsible for replicating the optimizer_state, params,
-  batch_stats, and training_metrics_grabber across multiple devices.
-
   Args:
     unreplicated_optimizer_state: unreplicated optimizer state
     unreplicated_params: unreplicated params
     unreplicated_batch_stats: unreplicated batch stats
     unreplicated_training_metrics_state: unreplicated metrics state
-    mesh: Mesh specification to use for sharding.
     train_dir: (str) The training directory where we will look for a checkpoint.
     external_checkpoint_path: (str) If this argument is set, then we will load
     the external checkpoint stored there.
@@ -130,30 +124,30 @@ def replicate_and_maybe_restore_checkpoint(
     # Handle failure to load from external_checkpoint_path.
     if ckpt_to_return['global_step'] == -1:
       return (
-          data_utils.shard_pytree(unreplicated_optimizer_state, mesh),
-          data_utils.shard_pytree(unreplicated_params, mesh),
-          data_utils.shard_pytree(unreplicated_batch_stats, mesh),
-          data_utils.shard_pytree(unreplicated_training_metrics_state, mesh),
+          unreplicated_optimizer_state,
+          unreplicated_params,
+          unreplicated_batch_stats,
+          unreplicated_training_metrics_state,
           0,  # global_step
           0,  # sum_train_cost
           0,  # preemption_count
           False)  # is_restored
   else:  # Else, don't restore from any checkpoint.
     return (
-        data_utils.shard_pytree(unreplicated_optimizer_state, mesh),
-        data_utils.shard_pytree(unreplicated_params, mesh),
-        data_utils.shard_pytree(unreplicated_batch_stats, mesh),
-        data_utils.shard_pytree(unreplicated_training_metrics_state, mesh),
+        unreplicated_optimizer_state,
+        unreplicated_params,
+        unreplicated_batch_stats,
+        unreplicated_training_metrics_state,
         0,  # global_step
         0,  # sum_train_cost
         0,  # preemption_count
         False)  # is_restored
 
   return (
-      data_utils.shard_pytree(ckpt_to_return['optimizer_state'], mesh),
-      data_utils.shard_pytree(ckpt_to_return['params'], mesh),
-      data_utils.shard_pytree(ckpt_to_return['batch_stats'], mesh),
-      data_utils.shard_pytree(ckpt_to_return['training_metrics_grabber'], mesh),
+      ckpt_to_return['optimizer_state'],
+      ckpt_to_return['params'],
+      ckpt_to_return['batch_stats'],
+      ckpt_to_return['training_metrics_grabber'],
       ckpt_to_return['global_step'],  # global_step
       ckpt_to_return['sum_train_cost'],
       ckpt_to_return['preemption_count'],  # preemption_count

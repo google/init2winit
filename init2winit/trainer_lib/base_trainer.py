@@ -25,6 +25,7 @@ from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import schedules
 from init2winit import utils
+from init2winit.dataset_lib import data_utils
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
@@ -300,24 +301,33 @@ class BaseTrainer(metaclass=abc.ABCMeta):
                                                    unreplicated_batch_stats)
 
     (
-        (optimizer_state_sharding, optimizer_state),
-        (params_sharding, params),
-        (batch_stats_sharding, batch_stats),
-        (metrics_state_sharding, metrics_state),
-        global_step,
-        sum_train_cost,
-        preemption_count,
-        is_restored,
-    ) = checkpoint.replicate_and_maybe_restore_checkpoint(
         unreplicated_optimizer_state,
         unreplicated_params,
         unreplicated_batch_stats,
         unreplicated_metrics_state,
-        self._mesh,
+        global_step,
+        sum_train_cost,
+        preemption_count,
+        is_restored,
+    ) = checkpoint.maybe_restore_checkpoint(
+        unreplicated_optimizer_state,
+        unreplicated_params,
+        unreplicated_batch_stats,
+        unreplicated_metrics_state,
         train_dir=self._train_dir,
         external_checkpoint_path=self._external_checkpoint_path,
         orbax_checkpointer=self._orbax_checkpointer,
     )
+
+    optimizer_state_sharding, optimizer_state = data_utils.shard_pytree(
+        unreplicated_optimizer_state, self._mesh)
+    params_sharding, params = data_utils.shard_pytree(
+        unreplicated_params, self._mesh)
+    batch_stats_sharding, batch_stats = data_utils.shard_pytree(
+        unreplicated_batch_stats, self._mesh)
+    metrics_state_sharding, metrics_state = data_utils.shard_pytree(
+        unreplicated_metrics_state, self._mesh)
+
     if is_restored:
       preemption_count += 1
 

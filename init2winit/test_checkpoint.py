@@ -27,7 +27,6 @@ from absl.testing import parameterized
 from init2winit import checkpoint
 from init2winit.model_lib import models
 from init2winit.shared_test_utilities import pytree_equal
-from jax.experimental import mesh_utils
 import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
@@ -63,12 +62,6 @@ class CheckpointTest(parameterized.TestCase):
     self.orbax_checkpointer = orbax_checkpoint.AsyncCheckpointer(
         orbax_checkpoint.PyTreeCheckpointHandler(), timeout_secs=60)
     self.params = init_dict['params']
-
-    mesh_shape = (jax.device_count(),)
-    self.mesh = jax.sharding.Mesh(
-        mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
-        axis_names=('devices',),
-    )
 
   def tearDown(self):
     shutil.rmtree(self.test_dir)
@@ -154,36 +147,35 @@ class CheckpointTest(parameterized.TestCase):
         max_to_keep=1)
 
     (
-        (_, ret_state),
-        (_, ret_params),
-        (_, ret_batch_stats),
-        (_, ret_training_metrics),
+        ret_state,
+        ret_params,
+        ret_batch_stats,
+        ret_training_metrics,
         ret_global_step,
         ret_sum_train_cost,
         ret_preemption_count,
         ret_is_restored,
-    ) = checkpoint.replicate_and_maybe_restore_checkpoint(
+    ) = checkpoint.maybe_restore_checkpoint(
         initial_optimizer_state,
         initial_params,
         initial_batch_stats,
         initial_training_metrics,
-        self.mesh,
         fresh_train_dir,
         orbax_checkpointer=self.orbax_checkpointer,
     )
 
     assert pytree_equal(
-        jax.device_get(ret_state), saved_optimizer_state
+        ret_state, saved_optimizer_state
     )
     assert pytree_equal(
-        jax.device_get(ret_params), saved_params
+        ret_params, saved_params
     )
     assert pytree_equal(
-        jax.device_get(ret_batch_stats),
+        ret_batch_stats,
         saved_batch_stats,
     )
     assert pytree_equal(
-        jax.device_get(ret_training_metrics),
+        ret_training_metrics,
         saved_training_metrics,
     )
     self.assertEqual(ret_sum_train_cost, sum_train_cost)
@@ -193,7 +185,7 @@ class CheckpointTest(parameterized.TestCase):
 
     shutil.rmtree(fresh_train_dir)
 
-  def test_replicate_and_maybe_restore_from_checkpoint_logic(self):
+  def test_maybe_restore_from_checkpoint_logic(self):
     """Test that the right checkpoint is returned.
 
       1.  If no external_checkpoint_path was passed, and if there is no
@@ -238,13 +230,13 @@ class CheckpointTest(parameterized.TestCase):
     def maybe_restore_checkpoint(params, train_dir, external_checkpoint_path):
       """Helper function to replicate_and_maybe_restore a checkpoint."""
 
-      (_, (_, ret_params), _, _,
+      (_, ret_params, _, _,
        ret_global_step, ret_sum_train_cost, ret_preemption_count,
-       ret_is_restored) = checkpoint.replicate_and_maybe_restore_checkpoint(
-           {}, params, {}, {}, self.mesh, train_dir, external_checkpoint_path,
+       ret_is_restored) = checkpoint.maybe_restore_checkpoint(
+           {}, params, {}, {}, train_dir, external_checkpoint_path,
            orbax_checkpointer=self.orbax_checkpointer)
 
-      ret_params_unrep = jax.device_get(ret_params)
+      ret_params_unrep = ret_params
 
       return (ret_params_unrep, ret_global_step, ret_sum_train_cost,
               ret_preemption_count, ret_is_restored)
