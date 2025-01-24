@@ -192,8 +192,11 @@ class BaseModel(object):
     # function will convert the train Python bool to a jax boolean, which will
     # mess up Pythonic boolean statements like `not train` inside the model
     # construction.
+    # We initialize model params on host to avoid memory issues.
+    cpu_device = jax.devices('cpu')[0]
     model_init_fn = jax.jit(
-        functools.partial(self.flax_module.init, train=False))
+        functools.partial(self.flax_module.init, train=False),
+        device=cpu_device)
     init_dict = model_init_fn({'params': params_rng, 'dropout': dropout_rng},
                               *fake_input_batch)
     # Trainable model parameters.

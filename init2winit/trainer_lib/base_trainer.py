@@ -289,18 +289,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._hps, self._model, batch_axis_name='batch')
     unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
 
-    # Move to host to avoid OOM as restoring from a checkpoint will
-    # keep around these buffers on the Device(s). We use numpy instead of
-    # jax.device_get for 3 benefits: 1) avoid possible OOM / compilation errors,
-    # 2) easier to use if one adds model partitioning, 3) faster eager execution
-    # on CPU.
-    logging.info('Moving initial data to Host RAM')
-    unreplicated_params = jax.tree_util.tree_map(np.array, unreplicated_params)
-    unreplicated_batch_stats = jax.tree_util.tree_map(np.array,
-                                                      unreplicated_batch_stats)
-    unreplicated_optimizer_state = jax.tree_util.tree_map(
-        np.array, unreplicated_optimizer_state)
-
     unreplicated_metrics_state = None
     metrics_update_fn = None
     metrics_summary_fn = None
