@@ -183,6 +183,12 @@ def make_global_array(local_data, mesh):
 
 def shard_pytree(pytree, mesh):
   shardings = nn.get_sharding(pytree, mesh)
-  pytree = jax.device_put(pytree, shardings)
+  pytree = jax.tree_util.tree_map(
+      lambda arr, sharding: jax.make_array_from_process_local_data(
+          sharding, arr
+      ),
+      pytree,
+      shardings,
+  )
 
   return shardings, pytree
