@@ -21,7 +21,7 @@ pip install "git+https://github.com/google/init2winit.git#egg=init2winit"
 pip install --upgrade jax jaxlib==0.1.66+cuda111 -f https://storage.googleapis.com/jax-releases/jax_releases.html
 ```
 
-where `cuda111` corresponds to the installed version of CUDA. For more Jax install information see the [Jax README](https://github.com/google/jax#installation).
+where `cuda111` corresponds to the installed version of CUDA. For more Jax install information see the [Jax README](https://github.com/jax-ml/jax#installation).
 
 ## Usage
 
