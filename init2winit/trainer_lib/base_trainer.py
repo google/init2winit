@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Abstract parent class for all trainers."""
+
 import abc
 import functools
 import multiprocessing
@@ -36,7 +37,9 @@ import numpy as np
 import optax
 import orbax.checkpoint as orbax_checkpoint
 
+
 NamedSharding = jax.sharding.NamedSharding
+P = jax.sharding.PartitionSpec
 
 
 class BaseTrainer(metaclass=abc.ABCMeta):
@@ -220,6 +223,45 @@ class BaseTrainer(metaclass=abc.ABCMeta):
   def wait_until_orbax_checkpointer_finished(self):
     self._orbax_checkpointer.wait_until_finished()
 
+  def shard(self,
+            unreplicated_params,
+            unreplicated_optimizer_state,
+            unreplicated_batch_stats,
+            unreplicated_metrics_state,
+            optimizer_init_fn):
+    """Shards the training state pytrees and returns the sharded pytrees."""
+    params_sharding = self._model.get_sharding(unreplicated_params, self._mesh)
+
+    _, params = data_utils.shard_pytree(
+        unreplicated_params, self._mesh, params_sharding
+    )
+
+    # Because we always store checkpoint without sharding annotations, we
+    # restore it on host and then shard it. In order to propagate
+    # annotations from params to the optimizer state, we need to initialize the
+    # optimizer state with the sharded params and then device_put
+    # the unreplicated_optimizer_state using the resulting annotations.
+    optimizer_state_sharding = jax.tree_util.tree_map(
+        lambda x: x.sharding
+        if isinstance(x.sharding, NamedSharding)
+        else NamedSharding(self._mesh, P()),
+        optimizer_init_fn(params),
+    )
+
+    _, optimizer_state = data_utils.shard_pytree(
+        unreplicated_optimizer_state, self._mesh, optimizer_state_sharding
+    )
+
+    batch_stats_sharding, batch_stats = data_utils.shard_pytree(
+        unreplicated_batch_stats, self._mesh)
+    metrics_state_sharding, metrics_state = data_utils.shard_pytree(
+        unreplicated_metrics_state, self._mesh)
+
+    return (params, params_sharding,
+            optimizer_state, optimizer_state_sharding,
+            batch_stats, batch_stats_sharding,
+            metrics_state, metrics_state_sharding)
+
   def setup_and_maybe_restore(self, init_rng, data_rng, trainer_update_fn):
     """Set up member variables for training and maybe Restore training state.
 
@@ -319,14 +361,22 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         orbax_checkpointer=self._orbax_checkpointer,
     )
 
-    optimizer_state_sharding, optimizer_state = data_utils.shard_pytree(
-        unreplicated_optimizer_state, self._mesh)
-    params_sharding, params = data_utils.shard_pytree(
-        unreplicated_params, self._mesh)
-    batch_stats_sharding, batch_stats = data_utils.shard_pytree(
-        unreplicated_batch_stats, self._mesh)
-    metrics_state_sharding, metrics_state = data_utils.shard_pytree(
-        unreplicated_metrics_state, self._mesh)
+    (
+        params,
+        params_sharding,
+        optimizer_state,
+        optimizer_state_sharding,
+        batch_stats,
+        batch_stats_sharding,
+        metrics_state,
+        metrics_state_sharding,
+    ) = self.shard(
+        unreplicated_params,
+        unreplicated_optimizer_state,
+        unreplicated_batch_stats,
+        unreplicated_metrics_state,
+        optimizer_init_fn,
+    )
 
     if is_restored:
       preemption_count += 1

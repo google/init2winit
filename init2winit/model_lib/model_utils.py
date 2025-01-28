@@ -329,64 +329,113 @@ class ParameterType(enum.Enum):
   # We need to split this out because otherwise fused QKV models will have a
   # different number of biases.
   ATTENTION_BIAS = 13
+  LSTM_WEIGHT = 14
+  LSTM_BIAS = 15
+  NQM_PARAM = 16
 
 
 def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
   """Get the ParameterType of each parameter."""
   param_types_dict = {}
   for name, value in shapes.items():
+    original_name = name
     name = name.lower()
     if isinstance(value, dict) or isinstance(value, FrozenDict):
-      param_types_dict[name] = param_types(
+      param_types_dict[original_name] = param_types(
           value, parent_name=parent_name + '/' + name)
     else:
       if 'batchnorm' in parent_name or 'bn' in parent_name:
         if name == 'scale':
-          param_types_dict[name] = ParameterType.BATCH_NORM_SCALE
+          param_types_dict[original_name] = ParameterType.BATCH_NORM_SCALE
         elif name == 'bias':
-          param_types_dict[name] = ParameterType.BATCH_NORM_BIAS
+          param_types_dict[original_name] = ParameterType.BATCH_NORM_BIAS
         else:
           raise ValueError(
               f'Unrecognized batch norm parameter: {parent_name}/{name}.')
-      elif 'layernorm' in parent_name or 'ln' in parent_name:
+      elif 'layernorm' in parent_name or 'ln' in parent_name or 'encoder_norm' in parent_name:
         if name == 'scale':
-          param_types_dict[name] = ParameterType.LAYER_NORM_SCALE
+          param_types_dict[original_name] = ParameterType.LAYER_NORM_SCALE
         elif name == 'bias':
-          param_types_dict[name] = ParameterType.LAYER_NORM_BIAS
+          param_types_dict[original_name] = ParameterType.LAYER_NORM_BIAS
         else:
           raise ValueError(
               f'Unrecognized layer norm parameter: {parent_name}/{name}.')
       elif 'conv' in parent_name:
         if 'bias' in name:
-          param_types_dict[name] = ParameterType.BIAS
+          param_types_dict[original_name] = ParameterType.BIAS
         else:
-          param_types_dict[name] = ParameterType.CONV_WEIGHT
+          param_types_dict[original_name] = ParameterType.CONV_WEIGHT
       # Note that this is exact equality, not contained in, because
       # flax.linen.Embed names the embedding parameter "embedding"
       # https://github.com/google/flax/blob/main/flax/linen/linear.py#L604.
       elif ('embedding' in name or
             ('embedding' in parent_name and name == 'kernel')):
-        param_types_dict[name] = ParameterType.EMBEDDING
+        param_types_dict[original_name] = ParameterType.EMBEDDING
       elif 'attention' in parent_name:
         if 'key' in parent_name and name == 'kernel':
-          param_types_dict[name] = ParameterType.ATTENTION_K
+          param_types_dict[original_name] = ParameterType.ATTENTION_K
         elif 'query' in parent_name and name == 'kernel':
-          param_types_dict[name] = ParameterType.ATTENTION_Q
+          param_types_dict[original_name] = ParameterType.ATTENTION_Q
         elif 'value' in parent_name and name == 'kernel':
-          param_types_dict[name] = ParameterType.ATTENTION_V
+          param_types_dict[original_name] = ParameterType.ATTENTION_V
         elif 'out' in parent_name and name == 'kernel':
-          param_types_dict[name] = ParameterType.ATTENTION_OUT
+          param_types_dict[original_name] = ParameterType.ATTENTION_OUT
         elif name == 'bias':
-          param_types_dict[name] = ParameterType.ATTENTION_BIAS
+          param_types_dict[original_name] = ParameterType.ATTENTION_BIAS
         elif 'scale' in name:
-          param_types_dict[name] = ParameterType.WEIGHT
+          param_types_dict[original_name] = ParameterType.WEIGHT
         elif 'in_proj_weight' in name:
-          param_types_dict[name] = ParameterType.ATTENTION_QKV
+          param_types_dict[original_name] = ParameterType.ATTENTION_QKV
+        else:
+          raise ValueError(
+              f'Unrecognized attention parameter: {parent_name}/{name}.')
+      elif 'lstm' in parent_name:
+        if name == 'kernel':
+          param_types_dict[original_name] = ParameterType.LSTM_WEIGHT
+        elif name == 'bias':
+          param_types_dict[original_name] = ParameterType.LSTM_BIAS
         else:
           raise ValueError(
               f'Unrecognized attention parameter: {parent_name}/{name}.')
       elif 'bias' in name:
-        param_types_dict[name] = ParameterType.BIAS
+        param_types_dict[original_name] = ParameterType.BIAS
+      elif 'kernel' in name:
+        param_types_dict[original_name] = ParameterType.WEIGHT
+      elif 'x' in name:
+        param_types_dict[original_name] = ParameterType.NQM_PARAM
       else:
-        param_types_dict[name] = ParameterType.WEIGHT
+        raise ValueError(
+            f'Unrecognized parameter: {parent_name}/{name}.')
   return param_types_dict
+
+
+def is_shape_compatible_with_sharding(param_shape, sharding, mesh):
+  """Checks if a parameter shape is compatible with a sharding spec. 
+
+  More specifically, checks if the inidvidual dimensions of the parameter shape
+  are divisible by the sharding spec passed in.
+
+  Args:
+    param_shape: The shape of the parameter.
+    sharding: The sharding spec.
+    mesh: The mesh to shard over.
+
+  Returns:
+    True if the parameter shape is compatible with the sharding spec, False
+    otherwise.
+  """
+  param_shape = list(param_shape)
+  mesh_axis_info = {k: v for (k, v) in zip(mesh.axis_names, mesh.axis_sizes)}
+
+  for i, axis in enumerate(sharding.spec):
+    # If the axis is None, it means that dimension is replicated.
+    if axis is None:
+      continue
+
+    if i >= len(param_shape):
+      return False
+
+    if param_shape[i] % mesh_axis_info[axis] != 0:
+      return False
+
+  return True

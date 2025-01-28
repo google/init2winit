@@ -27,6 +27,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+ParameterType = model_utils.ParameterType
+NamedSharding = jax.sharding.NamedSharding
+P = jax.sharding.PartitionSpec
+
 
 def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
                     apply_one_hot_in_loss):
@@ -220,6 +224,75 @@ class BaseModel(object):
     self._param_types = model_utils.param_types(self._param_shapes)
 
     return params, batch_stats
+
+  # Individual models can override this method to specify sharding overrides.
+  def get_sharding_overrides(self, mesh):
+    """Returns the default sharding overrides for the model."""
+    del mesh
+    # Indicates all params are replicated.
+    # Child model classes can override this dict to partition individual layers.
+    param_type_to_sharding = {}
+
+    return param_type_to_sharding
+
+  def _apply_sharding_overrides(
+      self, params, mesh, default_shardings, sharding_overrides
+  ):
+    """Applies the sharding overrides to the default shardings."""
+
+    param_types = model_utils.param_types(params)
+    param_shapes = jax.tree_util.tree_map(lambda arr: arr.shape, params)
+
+    def _apply_override(sharding, param_type, param_shape):
+      if param_type in sharding_overrides:
+        if model_utils.is_shape_compatible_with_sharding(
+            param_shape, sharding_overrides[param_type], mesh
+        ):
+          return sharding_overrides[param_type]
+        else:
+          raise ValueError(
+              f'Param shape {param_shape} is not compatible with sharding'
+              f' {sharding_overrides[param_type]}'
+          )
+      else:
+        return sharding
+
+    overriden_shardings = jax.tree_util.tree_map(
+        _apply_override,
+        default_shardings,
+        param_types,
+        param_shapes,
+    )
+
+    return overriden_shardings
+
+  def get_sharding(self, params, mesh):
+    """Returns the overriden sharding annotations for the model.
+
+    The default sharding strategy is to replicate all layers on all devices.
+    Models can override get_sharding_overrides() to specify sharding overrides
+    for individual layers. The logic for merging the default sharding with the
+    overrides lives in this method so child models only have to deal with
+    get_sharding_overrides() specifying the overrides with a simple dict
+    of the format shown below:
+
+    overrides = {
+        ParameterType.EMBEDDING: NamedSharding(mesh, P(None, 'devices')),
+        ParameterType.WEIGHT: NamedSharding(mesh, P(None, 'devices')),
+    }
+
+    Args:
+      params: The model parameters.
+      mesh: The mesh to shard over.
+    """
+
+    # Replicate all layers on all devices.
+    default_shardings = nn.get_sharding(params, mesh)
+    sharding_overrides = self.get_sharding_overrides(mesh)
+
+    overriden_shardings = self._apply_sharding_overrides(
+        params, mesh, default_shardings, sharding_overrides)
+    return overriden_shardings
 
   def evaluate_batch(self, params, batch_stats, batch):
     """Evaluates metrics under self.metrics_name on the given batch."""

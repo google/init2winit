@@ -20,12 +20,16 @@
 import copy
 import functools
 import itertools
+import os
 
 from absl.testing import absltest
 from absl.testing import parameterized
+import flax.linen as nn
 from init2winit.init_lib import initializers
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
+import jax
+from jax.experimental import mesh_utils
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import jax.tree_util
@@ -316,6 +320,13 @@ METRICS_NAME = {
     'mlcommons_xformer_translate': 'classification_metrics',
     'xformer_translate_mlc_variant': 'classification_metrics',
 }
+
+os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=8'
+
+NamedSharding = jax.sharding.NamedSharding
+P = jax.sharding.PartitionSpec
+
+ParameterType = model_utils.ParameterType
 
 # Automatically test all defined models.
 all_models = models._ALL_MODELS.keys()  # pylint: disable=protected-access
@@ -942,6 +953,75 @@ class ModelsTest(parameterized.TestCase):
         (input_batch_shape[0], input_batch_shape[1], expected_output_size),
     )
 
+  def test_vit_model_get_default_sharding(self):
+    """Test model get sharding."""
+    model_str = 'vit'
+    model_dtype = 'float32'
+    model, init_dict = _initialize_model(model_str, model_dtype)
+
+    params, _ = init_dict
+
+    host_mesh = jax.sharding.Mesh(
+        mesh_utils.create_device_mesh(
+            mesh_shape=(len(jax.devices('cpu')),), devices=jax.devices('cpu')
+        ),
+        ('devices',),
+    )
+
+    params_sharding = model.get_sharding(params, host_mesh)
+    self.assertEqual(params_sharding, nn.get_sharding(params, host_mesh))
+
+  def test_vit_model_apply_sharding_overrides_failure(self):
+    """Test model get sharding."""
+    model_str = 'vit'
+    model_dtype = 'float32'
+    model, init_dict = _initialize_model(model_str, model_dtype)
+
+    params, _ = init_dict
+
+    host_mesh = jax.sharding.Mesh(
+        mesh_utils.create_device_mesh(
+            mesh_shape=(len(jax.devices('cpu')),), devices=jax.devices('cpu')
+        ),
+        ('devices',),
+    )
+
+    # bias is 1d but partition spec is 2d
+    bad_overrides = {
+        ParameterType.BIAS: NamedSharding(host_mesh, P(None, 'devices')),
+    }
+
+    error = None
+
+    # pylint: disable=protected-access
+    try:
+      _ = model._apply_sharding_overrides(
+          params, host_mesh, nn.get_sharding(params, host_mesh), bad_overrides)
+    except ValueError as e:
+      error = e
+
+    self.assertEqual(
+        str(error),
+        'Param shape (1536,) is not compatible with sharding '
+        'NamedSharding(mesh=Mesh(\'devices\': 8), '
+        'spec=PartitionSpec(None, \'devices\'), memory_kind=unpinned_host)',
+    )
+
+    good_overrides = {
+        ParameterType.WEIGHT: NamedSharding(host_mesh, P(None, 'devices')),
+    }
+
+    overriden_shardings = model._apply_sharding_overrides(
+        params, host_mesh, nn.get_sharding(params, host_mesh), good_overrides
+    )
+
+    self.assertEqual(
+        overriden_shardings['Transformer']['encoderblock_0']['MlpBlock_3'][
+            'Dense_0'
+        ]['kernel'],
+        NamedSharding(host_mesh, P(None, 'devices')),
+    )
+
   def test_vit_params_shapes(self):
     """Test model parameter types."""
     model_str = 'vit'
@@ -1015,10 +1095,10 @@ class ModelsTest(parameterized.TestCase):
     model_dtype = 'float32'
     model, _ = _initialize_model(model_str, model_dtype)
     expected = {
-        'transformer': {
+        'Transformer': {
             'encoder_norm': {
-                'bias': model_utils.ParameterType.BIAS,
-                'scale': model_utils.ParameterType.WEIGHT,
+                'bias': model_utils.ParameterType.LAYER_NORM_BIAS,
+                'scale': model_utils.ParameterType.LAYER_NORM_SCALE,
             },
         },
         'conv_patch_extract': {
@@ -1035,25 +1115,25 @@ class ModelsTest(parameterized.TestCase):
         },
     }
     expected_block = {
-        'layernorm_0': {
+        'LayerNorm_0': {
             'bias': model_utils.ParameterType.LAYER_NORM_BIAS,
             'scale': model_utils.ParameterType.LAYER_NORM_SCALE,
         },
-        'layernorm_1': {
+        'LayerNorm_1': {
             'bias': model_utils.ParameterType.LAYER_NORM_BIAS,
             'scale': model_utils.ParameterType.LAYER_NORM_SCALE,
         },
-        'mlpblock_3': {
-            'dense_0': {
+        'MlpBlock_3': {
+            'Dense_0': {
                 'bias': model_utils.ParameterType.BIAS,
                 'kernel': model_utils.ParameterType.WEIGHT,
             },
-            'dense_1': {
+            'Dense_1': {
                 'bias': model_utils.ParameterType.BIAS,
                 'kernel': model_utils.ParameterType.WEIGHT,
             },
         },
-        'multiheaddotproductattention_1': {
+        'MultiHeadDotProductAttention_1': {
             'key': {
                 'bias': model_utils.ParameterType.ATTENTION_BIAS,
                 'kernel': model_utils.ParameterType.ATTENTION_K,
@@ -1073,7 +1153,7 @@ class ModelsTest(parameterized.TestCase):
         },
     }
     for li in range(12):
-      expected['transformer'][f'encoderblock_{li}'] = expected_block
+      expected['Transformer'][f'encoderblock_{li}'] = expected_block
     self.assertEqual(model.params_types, expected)
 
   def test_mlperf_resnet_params_types(self):
@@ -1083,7 +1163,7 @@ class ModelsTest(parameterized.TestCase):
     model, _ = _initialize_model(model_str, model_dtype)
     expected = {
         'conv0': {'kernel': model_utils.ParameterType.CONV_WEIGHT},
-        'dense_0': {
+        'Dense_0': {
             'bias': model_utils.ParameterType.BIAS,
             'kernel': model_utils.ParameterType.WEIGHT,
         },
@@ -1110,13 +1190,13 @@ class ModelsTest(parameterized.TestCase):
         'conv3': {'kernel': model_utils.ParameterType.CONV_WEIGHT},
     }
     for li in range(8):
-      expected[f'residualblock_{li}'] = copy.deepcopy(expected_block)
+      expected[f'ResidualBlock_{li}'] = copy.deepcopy(expected_block)
       if li % 2 == 0:
-        expected[f'residualblock_{li}']['proj_bn'] = {
+        expected[f'ResidualBlock_{li}']['proj_bn'] = {
             'bias': model_utils.ParameterType.BATCH_NORM_BIAS,
             'scale': model_utils.ParameterType.BATCH_NORM_SCALE,
         }
-        expected[f'residualblock_{li}']['proj_conv'] = {
+        expected[f'ResidualBlock_{li}']['proj_conv'] = {
             'kernel': model_utils.ParameterType.CONV_WEIGHT,
         }
     self.assertEqual(model.params_types, expected)
