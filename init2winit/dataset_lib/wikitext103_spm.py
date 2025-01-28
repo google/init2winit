@@ -15,15 +15,15 @@
 
 """Module containing hyperparameters, metadata and dataset getter for Wikitext-103 dataset."""
 
-
+import functools
 from init2winit.dataset_lib import wikitext103
 from init2winit.dataset_lib import wikitext103_input_pipeline
 from ml_collections.config_dict import config_dict
 
 SPM_TOKENIZER_VOCAB_SIZE = wikitext103_input_pipeline.SPM_TOKENIZER_VOCAB_SIZE
 SPM_TOKENIZER_VOCAB_PATH = wikitext103_input_pipeline.SPM_TOKENIZER_VOCAB_PATH
-
-get_wikitext103 = wikitext103.get_wikitext103
+PAD_ID = -1
+get_wikitext103 = functools.partial(wikitext103.get_wikitext103, pad_id=PAD_ID)
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(

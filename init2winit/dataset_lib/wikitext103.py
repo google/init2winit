@@ -70,7 +70,8 @@ def get_wikitext103(
     shuffle_rng,
     batch_size: int,
     eval_batch_size: int = None,
-    hps: config_dict.ConfigDict = None) -> Dataset:
+    hps: config_dict.ConfigDict = None,
+    pad_id: int = PAD_ID) -> Dataset:
   """Returns Wikitext-103 Dataset.
 
   Args:
@@ -78,6 +79,7 @@ def get_wikitext103(
     batch_size: training batch size
     eval_batch_size: validation batch size
     hps: Hyper parameters
+    pad_id: Value for 'inputs' that will have weight 0.
 
   Returns:
     Dataset
@@ -113,19 +115,19 @@ def get_wikitext103(
 
   def train_iterator_fn():
     for batch in train_dataset:
-      yield add_weights_to_batch(data_utils.tf_to_numpy(batch))
+      yield add_weights_to_batch(data_utils.tf_to_numpy(batch), pad_id)
 
   def eval_train_epoch(num_batches=None):
     for batch in itertools.islice(iter(eval_train_dataset), num_batches):
-      yield add_weights_to_batch(data_utils.tf_to_numpy(batch))
+      yield add_weights_to_batch(data_utils.tf_to_numpy(batch), pad_id)
 
   def valid_epoch(num_batches=None):
     for batch in itertools.islice(iter(valid_dataset), num_batches):
-      yield add_weights_to_batch(data_utils.tf_to_numpy(batch))
+      yield add_weights_to_batch(data_utils.tf_to_numpy(batch), pad_id)
 
   def test_epoch(num_batches=None):
     for batch in itertools.islice(iter(test_dataset), num_batches):
-      yield add_weights_to_batch(data_utils.tf_to_numpy(batch))
+      yield add_weights_to_batch(data_utils.tf_to_numpy(batch), pad_id)
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
                  test_epoch)

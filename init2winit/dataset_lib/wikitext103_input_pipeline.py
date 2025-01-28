@@ -27,6 +27,7 @@ TRAIN_FILENAME = 'train.txt'
 VALID_FILENAME = 'valid.txt'
 TEST_FILENAME = 'test.txt'
 
+MAX_CORPUS_CHARS = 1_000_000_000
 SHUFFLE_BUFFER_SIZE = 1_000_000
 SPM_TOKENIZER_VOCAB_SIZE = 10_000
 WORD_VOCAB_SIZE = 267_735
@@ -40,7 +41,7 @@ def get_trained_tokenizer(train_dataset: Union[tf.data.Dataset, str],
                           tokenizer: str,
                           vocab_path: str = SPM_TOKENIZER_VOCAB_PATH,
                           vocab_size: int = SPM_TOKENIZER_VOCAB_SIZE,
-                          max_corpus_chars: int = 10_000_000,
+                          max_corpus_chars: int = MAX_CORPUS_CHARS,
                           ) -> tf.data.Dataset:
   """Returns a tokenizer trained on the train dataset.
 
