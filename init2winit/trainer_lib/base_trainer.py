@@ -27,12 +27,12 @@ from init2winit import checkpoint
 from init2winit import schedules
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
+from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
-from jax.experimental import mesh_utils
 import numpy as np
 import optax
 import orbax.checkpoint as orbax_checkpoint
@@ -214,11 +214,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._local_device_indices = np.arange(jax.local_device_count())
 
     # Creates a 1-d mesh with all devices available globally.
-    mesh_shape = (jax.device_count(),)
-    self._mesh = jax.sharding.Mesh(
-        mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
-        axis_names=('devices',),
-    )
+    self._mesh = model_utils.get_default_mesh()
 
   def wait_until_orbax_checkpointer_finished(self):
     self._orbax_checkpointer.wait_until_finished()

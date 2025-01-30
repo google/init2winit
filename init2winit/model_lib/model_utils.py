@@ -439,3 +439,7 @@ def is_shape_compatible_with_sharding(param_shape, sharding, mesh):
       return False
 
   return True
+
+
+def get_default_mesh():
+  return jax.make_mesh((jax.device_count(),), ('devices',))

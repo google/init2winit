@@ -150,7 +150,7 @@ def criteo_tsv_reader(
     ds = ds.shuffle(buffer_size=524_288 * 100, seed=data_shuffle_seed)
   ds = ds.batch(batch_size, drop_remainder=is_training)
   parse_fn = functools.partial(_parse_example_fn, num_dense_features)
-  ds = ds.map(parse_fn, num_parallel_calls=16)
+  ds = ds.map(parse_fn, num_parallel_calls=256)
   ds = ds.prefetch(num_batches_to_prefetch)
   return ds
 

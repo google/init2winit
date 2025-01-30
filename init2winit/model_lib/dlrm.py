@@ -15,14 +15,18 @@
 
 """A JAX implementation of DLRM."""
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import flax.linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
+
+import jax
 from jax import nn as jnn
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
+
+ParameterType = model_utils.ParameterType
 
 # small hparams used for unit tests
 DEFAULT_HPARAMS = config_dict.ConfigDict(
@@ -88,6 +92,10 @@ def dot_interact(concat_features, keep_diags=True):
   return activations
 
 
+NamedSharding = jax.sharding.NamedSharding
+P = jax.sharding.PartitionSpec
+
+
 class DLRM(nn.Module):
   """Define a DLRM model.
 
@@ -111,8 +119,24 @@ class DLRM(nn.Module):
   embedding_init_multiplier: Optional[float] = None
   normalizer: str = 'none'
 
+  def get_embeddings(self, embedding_table_block, indices_block):
+    """Get embeddings for a block of indices."""
+    embedding_table_block = jax.lax.all_gather(
+        embedding_table_block, 'devices', axis=1, tiled=True)
+    embeddings = jnp.take(embedding_table_block, indices_block, axis=0)
+    return embeddings
+
   @nn.compact
   def __call__(self, x, train):
+    shmapped_get_embeddings = jax.experimental.shard_map.shard_map(
+        self.get_embeddings,
+        mesh=model_utils.get_default_mesh(),
+        in_specs=(
+            P(None, 'devices'),
+            P('devices',),
+        ),
+        out_specs=P('devices',),
+    )
     bot_mlp_input, cat_features = jnp.split(x, [self.num_dense_features], 1)
     cat_features = jnp.asarray(cat_features, dtype=jnp.int32)
 
@@ -139,7 +163,7 @@ class DLRM(nn.Module):
     else:
       embedding_init_multiplier = self.embedding_init_multiplier
     # Embedding table init and lookup for a single unified table.
-    idx_lookup = jnp.reshape(cat_features, [-1]) % self.vocab_size
+    idx_lookup = cat_features % self.vocab_size
     def scaled_init(key, shape, dtype=jnp.float_):
       return base_init_fn(key, shape, dtype) * embedding_init_multiplier
 
@@ -148,9 +172,7 @@ class DLRM(nn.Module):
         scaled_init,
         [self.vocab_size, self.embed_dim])
 
-    embed_features = embedding_table[idx_lookup]
-    embed_features = jnp.reshape(
-        embed_features, [batch_size, -1, self.embed_dim])
+    embed_features = shmapped_get_embeddings(embedding_table, idx_lookup)
     embed_features = normalizer_layer()(embed_features)
     feature_stack = jnp.concatenate([feature_stack, embed_features], axis=1)
     dot_interact_output = dot_interact(
@@ -183,6 +205,15 @@ class DLRM(nn.Module):
 class DLRMModel(base_model.BaseModel):
   """DLRMModel init2winit class."""
 
+  def get_sharding_overrides(self, mesh: Any) -> Any:
+    type_to_sharding = super().get_sharding_overrides(mesh)
+    overrides = {
+        ParameterType.EMBEDDING: NamedSharding(mesh, P(None, 'devices')),
+    }
+
+    type_to_sharding.update(overrides)
+    return type_to_sharding
+
   def build_flax_module(self):
     """DLRM for ad click probability prediction."""
     return DLRM(
@@ -201,8 +232,17 @@ class DLRMModel(base_model.BaseModel):
     """Helper method solely for purpose of initalizing the model."""
     # NOTE(dsuo): hps.input_shape for `criteo_terabyte_input_pipeline` is
     # (39,)
+    fake_batch_size = hps.batch_size
+
+    # If fake batch size is not divisible by the number of devices, we use the
+    # smallest batch size that is divisible by the number of devices.
+    # This is necessary for shard_mapped get_embeddings() to work.
+    # It also makes our fake batch closer to the real batch size.
+    if fake_batch_size % jax.device_count() != 0:
+      fake_batch_size = jax.device_count()
+
     dummy_inputs = [
-        jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
+        jnp.zeros((fake_batch_size, *hps.input_shape), dtype=hps.model_dtype)
     ]
     return dummy_inputs
 
@@ -335,4 +375,3 @@ class DLRMResNetModel(base_model.BaseModel):
         jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
     ]
     return dummy_inputs
-
