@@ -52,7 +52,6 @@ def dual_vector(y: jnp.ndarray) -> jnp.ndarray:
 def sharpness_aware_minimization(
     rho: float,
     grad_clip: Optional[float],
-    batch_axis_name: str,
     base_opt_init_fn,
     base_opt_update_fn,
 ) -> optax.GradientTransformation:
@@ -67,8 +66,6 @@ def sharpness_aware_minimization(
     rho: The size of the neighborhood for the sharpness aware minimization
       gradient updates. Defaults to 0.1.
     grad_clip: The optional value to clip the updates by. Defaults to None.
-    batch_axis_name: the name of the axis to pmap over. Used to run a pmean
-      before applying the optimizer update.
     base_opt_init_fn: The initialization function for the base optimizer used to
       generate updates given the total gradient.
     base_opt_update_fn: The update function for the base optimizer used to
@@ -84,8 +81,8 @@ def sharpness_aware_minimization(
   def update_fn(updates, state, grad_fn_params_tuple):
     (grad_fn, params) = grad_fn_params_tuple
 
-    # Updates here have been pmean-ed across devices in Trainer before being
-    # sent to the optimizer. We again pmean the gradients computed on the noised
+    # Updates here have been averaged across devices in Trainer before being
+    # sent to the optimizer. We obtain gradients computed on the noised
     # parameters in the same order as how Trainer does on the original
     # gradients and with the same 1e-6 epsilon that is used when clipping the
     # gradients.
@@ -93,7 +90,6 @@ def sharpness_aware_minimization(
     noised_params = jax.tree_util.tree_map(lambda p, u: p + rho * u, params,
                                            updates)
     _, updates = grad_fn(noised_params)
-    updates = jax.lax.pmean(updates, axis_name=batch_axis_name)
 
     updates_norm = jnp.sqrt(model_utils.l2_regularization(updates, 0))
     if grad_clip:

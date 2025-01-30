@@ -360,12 +360,13 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         base_opt_update_fn=opt_update)
 
   if hps.opt_hparams.get('use_sam', False):
-    opt_init, opt_update = sharpness_aware_minimization.sharpness_aware_minimization(
-        rho=hps.opt_hparams['rho'],
-        grad_clip=hps.get('grad_clip', None),
-        batch_axis_name=batch_axis_name,
-        base_opt_init_fn=opt_init,
-        base_opt_update_fn=opt_update,
+    opt_init, opt_update = (
+        sharpness_aware_minimization.sharpness_aware_minimization(
+            rho=hps.opt_hparams['rho'],
+            grad_clip=hps.get('grad_clip', None),
+            base_opt_init_fn=opt_init,
+            base_opt_update_fn=opt_update,
+        )
     )
     optimizer_requires_grad_fn = True
   elif hps.opt_hparams.get('use_pal', False):
