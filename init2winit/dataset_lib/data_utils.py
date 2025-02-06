@@ -186,7 +186,7 @@ def shard_pytree(pytree, mesh, shardings=None):
     shardings = nn.get_sharding(pytree, mesh)
   pytree = jax.tree_util.tree_map(
       lambda arr, sharding: jax.make_array_from_process_local_data(
-          sharding, arr
+          sharding, arr, arr.shape
       ),
       pytree,
       shardings,

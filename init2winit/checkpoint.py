@@ -25,6 +25,8 @@ from absl import flags
 from absl import logging
 from flax.training import checkpoints as flax_checkpoints
 import jax
+# pylint: disable=g-importing-member
+from jax.experimental.multihost_utils import process_allgather
 
 FLAGS = flags.FLAGS
 
@@ -167,8 +169,15 @@ def save_unreplicated_checkpoint(
     max_to_keep=1):
   """Saves pytree, step, preemption_count, and sum_train_cost to train_dir."""
   logging.info('Saving checkpoint to ckpt_%d', global_step)
-  unreplicated_optimizer_state = jax.device_get(optimizer_state)
-  unreplicated_params = jax.device_get(params)
+  # jax.device_get doesn't work if jax.Array lives on multiple hosts.
+  # So we first all_gather it to the host and then call jax.device_get
+  if jax.process_count() > 1:
+    unreplicated_optimizer_state = jax.device_get(
+        process_allgather(optimizer_state))
+    unreplicated_params = jax.device_get(process_allgather(params))
+  else:
+    unreplicated_optimizer_state = jax.device_get(optimizer_state)
+    unreplicated_params = jax.device_get(params)
   unreplicated_batch_stats = jax.device_get(batch_stats)
   unreplicated_training_metrics_state = jax.device_get(
       training_metrics_state)
