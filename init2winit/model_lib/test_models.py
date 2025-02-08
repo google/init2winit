@@ -73,6 +73,11 @@ DATA_HPS = {
         'input_shape': (28, 28, 1),
         'output_shape': (784,),
     },
+    'nanodo': {
+        'input_shape': (32,),
+        'output_shape': (32, 32000),
+        'vocab_size': 32000,
+    },
     # TODO(kasimbeg): fix issue with tokenizer_vocab_path
     'conformer': {
         'input_shape': (64,),
@@ -260,6 +265,7 @@ LOSS_NAME = {
     'adabelief_resnet': 'cross_entropy',
     'adabelief_vgg': 'cross_entropy',
     'autoencoder': 'sigmoid_binary_cross_entropy',
+    'nanodo': 'cross_entropy',
     'conformer': 'ctc',
     'mlcommons_conformer': 'ctc',
     'convolutional_autoencoder': 'sigmoid_binary_cross_entropy',
@@ -312,6 +318,7 @@ METRICS_NAME = {
     'resnet': 'classification_metrics',
     'simple_cnn': 'classification_metrics',
     'transformer': 'classification_metrics',
+    'nanodo': 'classification_metrics',
     'unet': 'image_reconstruction_metrics',
     'vit': 'classification_metrics',
     'wide_resnet': 'classification_metrics',

@@ -26,6 +26,7 @@ from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import librispeech
 from init2winit.dataset_lib import lm1b_v2
 from init2winit.dataset_lib import mlperf_imagenet_dataset
+from init2winit.dataset_lib import nanodo_data_loader
 from init2winit.dataset_lib import nqm_noise
 from init2winit.dataset_lib import ogbg_molpcba
 from init2winit.dataset_lib import proteins
@@ -92,6 +93,10 @@ _ALL_DATASETS = {
         _Dataset(small_image_datasets.get_svhn_no_extra,
                  small_image_datasets.SVHN_NO_EXTRA_DEFAULT_HPARAMS,
                  small_image_datasets.SVHN_NO_EXTRA_METADATA, None),
+    'c4': _Dataset(
+        nanodo_data_loader.get_c4,
+        nanodo_data_loader.DEFAULT_HPARAMS,
+        nanodo_data_loader.METADATA, None),
     'nqm_noise':
         _Dataset(nqm_noise.get_nqm_noise, nqm_noise.NQM_HPARAMS,
                  nqm_noise.NQM_METADATA, None),
@@ -134,6 +139,11 @@ def get_dataset_hparams(dataset_name):
       elif dataset_name == 'lm1b_v2':
         max_len = max(hparams.max_target_length, hparams.max_eval_target_length)
         hparams.input_shape = (max_len,)
+      elif dataset_name == 'c4':
+        max_len = max(hparams.max_target_length, hparams.max_eval_target_length)
+
+        hparams.input_shape = (max_len,)
+        hparams.output_shape = (max_len, hparams.vocab_size)
       elif dataset_name == 'translate_wmt':
         max_len = max(hparams.max_target_length, hparams.max_eval_target_length,
                       hparams.max_predict_length)

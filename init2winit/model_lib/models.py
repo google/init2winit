@@ -29,6 +29,7 @@ from init2winit.model_lib import local_attention_transformer
 from init2winit.model_lib import lstm_lm
 from init2winit.model_lib import max_pooling_cnn
 from init2winit.model_lib import mlperf_resnet
+from init2winit.model_lib import nanodo
 from init2winit.model_lib import nqm
 from init2winit.model_lib import resnet
 from init2winit.model_lib import simple_cnn
@@ -85,6 +86,10 @@ _ALL_MODELS = {
     'mlcommons_deepspeech': (deepspeech.MLCommonsDeepSpeechModel,
                              deepspeech.MLCOMMONS_DEFAULT_HPARAMS),
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
+    'nanodo': (
+        nanodo.NanodoModel,
+        nanodo.DEFAULT_HPARAMS,
+    ),
     'xformer_translate': (xformer_translate.TransformerTranslate,
                           xformer_translate.DEFAULT_HPARAMS),
     'mlcommons_xformer_translate':

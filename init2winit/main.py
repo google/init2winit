@@ -24,7 +24,6 @@ import struct
 import sys
 import time
 
-from absl import app
 from absl import flags
 from absl import logging
 
@@ -371,4 +370,5 @@ def main(unused_argv):
 
 if __name__ == '__main__':
   flags.mark_flag_as_required('experiment_dir')
+  jax.config.config_with_absl()
   app.run(main)

@@ -371,7 +371,7 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
       elif ('embedding' in name or
             ('embedding' in parent_name and name == 'kernel')):
         param_types_dict[original_name] = ParameterType.EMBEDDING
-      elif 'attention' in parent_name:
+      elif 'attention' in parent_name or 'causalattn' in parent_name:
         if 'key' in parent_name and name == 'kernel':
           param_types_dict[original_name] = ParameterType.ATTENTION_K
         elif 'query' in parent_name and name == 'kernel':
