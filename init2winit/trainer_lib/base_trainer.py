@@ -452,7 +452,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
               batch_stats_sharding,
               None,
               metrics_state_sharding,
-              None
+              None,
+              None,
           ),
       )
     else:
@@ -665,6 +666,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         learning_rate=float(lr),
         global_step=self._global_step,
         epoch=epoch,
+        update_norm=np.mean(self._update_norm),
         grad_norm=np.mean(self._grad_norm),
         preemption_count=self._preemption_count,
         train_cost=mean_train_cost,

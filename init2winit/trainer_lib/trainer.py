@@ -78,7 +78,7 @@ def update(
 
   Returns:
     A tuple of the new optimizer, the new batch stats, the scalar training cost,
-    the new training metrics state, and the gradient norm.
+    the new training metrics state, the gradient norm, and the update norm.
   """
   # `jax.random.split` is very slow outside the train step, so instead we do a
   # `jax.random.fold_in` here.
@@ -110,6 +110,8 @@ def update(
       cost_fn=opt_cost,
       grad_fn=grad_fn,
       value=cost_value)
+
+  update_norm = jnp.sqrt(model_utils.l2_regularization(model_updates, 0))
   new_params = optax.apply_updates(params, model_updates)
 
   new_metrics_state = None
@@ -119,7 +121,8 @@ def update(
                                           new_batch_stats)
 
   return (new_optimizer_state, new_params, new_batch_stats,
-          running_train_cost + cost_value, new_metrics_state, grad_norm)
+          running_train_cost + cost_value, new_metrics_state,
+          grad_norm, update_norm)
 
 
 class Trainer(base_trainer.BaseTrainer):
@@ -206,6 +209,7 @@ class Trainer(base_trainer.BaseTrainer):
             self._sum_train_cost,
             self._metrics_state,
             self._grad_norm,
+            self._update_norm,
         ) = self._update_jitted(
             self._optimizer_state,
             self._params,

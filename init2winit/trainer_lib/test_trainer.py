@@ -82,6 +82,7 @@ def get_column_names():
       'preemption_count',
       'train_cost',
       'grad_norm',
+      'update_norm',
   ]
   return column_names
 
