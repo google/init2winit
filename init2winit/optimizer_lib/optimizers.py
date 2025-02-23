@@ -15,6 +15,8 @@
 
 """Getter function for selecting optimizers."""
 
+import copy
+
 from absl import logging
 import flax
 from init2winit.model_lib.model_utils import ParameterType  # pylint: disable=g-importing-member
@@ -104,7 +106,50 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
   if hps.optimizer == 'sgd':
     opt_init, opt_update = utils.static_inject_hyperparams(sgd)(
         learning_rate=0.0,  # Manually injected on each train step.
-        weight_decay=weight_decay)
+        weight_decay=weight_decay,
+    )
+  elif hps.optimizer == 'generic_multi_optimizer':
+    param_type_to_optimizer_and_hparams = hps.opt_hparams[
+        'param_type_to_optimizer_and_hparams'
+    ]
+
+    param_type_to_optimizer_and_hparams = {
+        int(k): v for k, v in param_type_to_optimizer_and_hparams.items()
+    }
+
+    if ParameterType.DEFAULT.value not in param_type_to_optimizer_and_hparams:
+      raise ValueError(
+          f'Fallback default optimizer not found in param_type_to_grad_tx.'
+          f' Please add a fallback optimizer to param_type_to_grad_tx ='
+          f' {param_type_to_optimizer_and_hparams}'
+      )
+    param_type_to_grad_tx = {}
+
+    for param_type, opt_hparams in param_type_to_optimizer_and_hparams.items():
+      hps_copy = copy.deepcopy(hps)
+      del hps_copy.opt_hparams['param_type_to_optimizer_and_hparams']
+
+      hps_copy.update(opt_hparams)
+      param_type_to_grad_tx[param_type] = (
+          optax.GradientTransformation(*get_optimizer(hps_copy, model))
+      )
+
+    param_to_type = model.params_types
+    param_to_type = jax.tree_util.tree_map(lambda x: x.value, param_to_type)
+
+    param_types = jax.tree_util.tree_leaves(param_to_type)
+
+    for param_type in param_types:
+      if param_type not in param_type_to_grad_tx:
+        param_type_to_grad_tx[param_type] = param_type_to_grad_tx[
+            ParameterType.DEFAULT.value
+        ]
+
+    del param_type_to_grad_tx[ParameterType.DEFAULT.value]
+
+    opt_init, opt_update = optax.multi_transform(
+        param_type_to_grad_tx, param_labels=param_to_type
+    )
   elif hps.optimizer == 'multiple_optimizer':
     hps_network = hps.opt_hparams['hps_network']
     hps_last_layer = hps.opt_hparams['hps_last_layer']

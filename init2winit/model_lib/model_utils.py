@@ -332,6 +332,7 @@ class ParameterType(enum.Enum):
   LSTM_WEIGHT = 14
   LSTM_BIAS = 15
   NQM_PARAM = 16
+  DEFAULT = 17
 
 
 def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
