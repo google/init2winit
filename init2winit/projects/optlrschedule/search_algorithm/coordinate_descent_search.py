@@ -136,9 +136,12 @@ class CoordinateDescentSearch:
     # Load schedule params, base_lr and metadata to do coordinate descent search
     top_reduced_schedules_and_metadata_df = (
         log_utils.load_schedules_to_evaluate(
-            search_config["xid"],
-            search_config["num_top_schedule_shapes"],
-            "score_median",
+            xid=search_config["xid"],
+            top_k=search_config["num_top_schedule_shapes"],
+            metric="score_median",
+            num_schedule_shapes_for_sampling=search_config[
+                "num_schedule_shapes_for_sampling"
+            ],
             rename_columns=True,
         )
     )
