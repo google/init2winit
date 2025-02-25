@@ -439,6 +439,7 @@ def plot_ecdf_with_legend(
     is_x_log_scale=False,
     is_y_log_scale=False,
     title='',
+    zoom_x_threshold_ratio=None,
     ax=None,
 ) -> plt.Axes:
   """Calculates and plots the ECDF of the values corresponding to key_metric.
@@ -454,6 +455,8 @@ def plot_ecdf_with_legend(
       is_x_log_scale: Whether to use a log scale for the x-axis.
       is_y_log_scale: Whether to use a log scale for the y-axis.
       title: The string to be appended to the plot title.
+      zoom_x_threshold_ratio: If not None, the x-axis will be zoomed to fit the
+        data within a threshold ratio of the range.
       ax: An existing matplotlib Axes. If None, a new one is created.
 
   Returns:
@@ -508,6 +511,15 @@ def plot_ecdf_with_legend(
       bbox_to_anchor=(1.02, 0.5),
       prop={'size': LEGEND_FONT_SIZE},
   )
+
+  if zoom_x_threshold_ratio is not None:
+    all_x = np.concatenate(
+        [np.sort(df[key_metric].tolist()) for df in schedule_df_list]
+    )
+    x_min, x_max = np.min(all_x), np.max(all_x)
+    x_threshold = x_min + zoom_x_threshold_ratio * (x_max - x_min)
+    ax.set_xlim(x_min, x_threshold)
+    ax.set_ylim(0, 0.5)
 
   return ax
 
