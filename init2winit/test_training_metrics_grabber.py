@@ -161,6 +161,46 @@ class TrainingMetricsGrabberTest(absltest.TestCase):
         )
     )
 
+  def test_steps_to_compute_at(self):
+    """Ensure that the train cost is logged correctly."""
+    init_fn, update_fn, _ = make_training_metrics(
+        self.num_train_steps,
+        ConfigDict({}),
+        steps_to_compute_at=[1],
+        enable_train_cost=True,
+    )
+    initial_metrics_state = init_fn(self.mock_params0, self.mock_batch_stats)
+    updated_metrics_state = update_fn(
+        initial_metrics_state,
+        0,
+        self.mock_cost0,
+        self.mock_grad1,
+        self.mock_params0,
+        self.mock_params1,
+        self.mock_optimizer_state0,
+        self.mock_batch_stats,
+    )
+
+    self.assertTrue(pytree_equal(updated_metrics_state, initial_metrics_state))
+
+    updated_metrics_state = update_fn(
+        updated_metrics_state,
+        1,
+        self.mock_cost1,
+        self.mock_grad2,
+        self.mock_params1,
+        self.mock_params2,
+        self.mock_optimizer_state1,
+        self.mock_batch_stats,
+    )
+
+    self.assertTrue(
+        pytree_equal(
+            updated_metrics_state['train_cost'],
+            jnp.array([0.0, self.mock_cost1, 0.0, 0.0, 0.0]),
+        )
+    )
+
   def test_update_param_norm(self):
     """Ensure that the training metrics updater updates param norm correctly."""
 

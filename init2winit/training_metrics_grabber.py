@@ -49,6 +49,7 @@ DEFAULT_CONFIG = ConfigDict({
     'optstate_sum_fields': [],
     'optstate_sum_param_wise_fields': [],
     'enable_grafting_norms': False,
+    'steps_to_compute_at': [],
 })
 
 
@@ -132,11 +133,13 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         a field "semip_grad_normsq" which is a jnp array of length
         num_train_steps containing a time series of the squared L2 norm of the
         "semi-preconditioned" gradient.  Adaptive optimizers only.
-    - enable_grafting_norms (bool): if true, the metrics state will have two 
+    - enable_grafting_norms (bool): if true, the metrics state will have two
         fields "mag_norms" and "dir_norms" which are pytrees in the shape of the
         model params whose leaves are jnp arrays of length num_train_steps. This
-        will only work when you are using the grafting operation through 
+        will only work when you are using the grafting operation through
         the kitchen_sink API.
+    - steps_to_compute_at (list of int): Steps at which to record training
+        metrics.
 
   Args:
     num_train_steps: (int) the number of steps of training.  We use this to
@@ -246,6 +249,38 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
     Returns:
       next_metrics_state: (pytree) The next training metrics state.
     """
+
+    if config['steps_to_compute_at']:
+      steps_to_compute_at = jnp.array(config['steps_to_compute_at'])
+
+      return jax.lax.cond(
+          jnp.isin(step, steps_to_compute_at),
+          lambda: _update_fn(
+              metrics_state,
+              step,
+              train_cost,
+              grad,
+              old_params,
+              new_params,
+              optimizer_state,
+              batch_stats,
+          ),
+          lambda: metrics_state,
+      )
+
+    return _update_fn(
+        metrics_state,
+        step,
+        train_cost,
+        grad,
+        old_params,
+        new_params,
+        optimizer_state,
+        batch_stats,
+    )
+
+  def _update_fn(metrics_state, step, train_cost, grad, old_params, new_params,
+                 optimizer_state, batch_stats):
     param_norm = jax.tree.map(_compute_leaf_norms, old_params)
     grad_norm = jax.tree.map(_compute_leaf_norms, grad)
     batch_stats_norm = jax.tree.map(_compute_leaf_norms, batch_stats)

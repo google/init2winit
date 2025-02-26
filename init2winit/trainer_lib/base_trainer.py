@@ -688,9 +688,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           self._eval_steps,
           eval_time)
       trainer_utils.log_epoch_report(report, self._metrics_logger)
-      trainer_utils.maybe_log_training_metrics(self._metrics_state,
-                                               self._metrics_summary_fn,
-                                               self._metrics_logger)
 
     self._time_at_prev_eval_end = time.time()
     self._prev_eval_step = self._global_step
