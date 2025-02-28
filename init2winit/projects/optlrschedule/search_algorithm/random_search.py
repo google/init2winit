@@ -39,7 +39,7 @@ def sample_log_uniform(
 
   assert min_val > 0
   assert max_val > 0
-  assert min_val < max_val
+  assert min_val < max_val  # off if you run strict cosine
 
   log_min = jnp.log(min_val)
   log_max = jnp.log(max_val)
