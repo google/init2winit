@@ -22,6 +22,7 @@ import flax
 from init2winit.model_lib.model_utils import ParameterType  # pylint: disable=g-importing-member
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
+from init2winit.optimizer_lib import muon
 from init2winit.optimizer_lib import online_newton_step
 from init2winit.optimizer_lib import pax_adafactor
 from init2winit.optimizer_lib import samuel
@@ -107,6 +108,17 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
     opt_init, opt_update = utils.static_inject_hyperparams(sgd)(
         learning_rate=0.0,  # Manually injected on each train step.
         weight_decay=weight_decay,
+    )
+  elif hps.optimizer == 'muon':
+    opt_init, opt_update = utils.static_inject_hyperparams(muon.scale_by_muon)(
+        learning_rate=0.0,  # Manually injected on each train step.
+        weight_decay=hps.opt_hparams.get('weight_decay', 0.01),
+        beta=hps.opt_hparams.get('beta', 0.95),
+        nesterov=hps.opt_hparams.get('nesterov', True),
+        ns_coeffs=hps.opt_hparams.get('ns_coeffs', (3.4445, -4.7750, 2.0315)),
+        ns_steps=hps.opt_hparams.get('ns_steps', 5),
+        eps=hps.opt_hparams.get('eps', 1e-7),
+        bias_correction=hps.opt_hparams.get('bias_correction', False),
     )
   elif hps.optimizer == 'generic_multi_optimizer':
     param_type_to_optimizer_and_hparams = hps.opt_hparams[
