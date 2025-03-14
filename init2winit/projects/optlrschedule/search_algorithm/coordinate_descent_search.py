@@ -139,9 +139,9 @@ class CoordinateDescentSearch:
             xid=search_config["xid"],
             top_k=search_config["num_top_schedule_shapes"],
             metric="score_median",
-            num_schedule_shapes_for_sampling=search_config[
+            num_schedule_shapes_for_sampling=search_config.get(
                 "num_schedule_shapes_for_sampling"
-            ],
+            ),
             rename_columns=True,
         )
     )
