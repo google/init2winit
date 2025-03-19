@@ -333,6 +333,7 @@ class ParameterType(enum.Enum):
   LSTM_BIAS = 15
   NQM_PARAM = 16
   DEFAULT = 17
+  ATTENTION_SCALE = 18
 
 
 def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
@@ -361,6 +362,12 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
         else:
           raise ValueError(
               f'Unrecognized layer norm parameter: {parent_name}/{name}.')
+      elif 'queryscaler' in parent_name:
+        if name == 'scale':
+          param_types_dict[original_name] = ParameterType.ATTENTION_SCALE
+        else:
+          raise ValueError(
+              f'Unrecognized query scaler parameter: {parent_name}/{name}.')
       elif 'conv' in parent_name:
         if 'bias' in name:
           param_types_dict[original_name] = ParameterType.BIAS

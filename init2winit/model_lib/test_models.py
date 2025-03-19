@@ -1010,7 +1010,7 @@ class ModelsTest(parameterized.TestCase):
     self.assertEqual(
         str(error),
         'Param shape (1536,) is not compatible with sharding '
-        'NamedSharding(mesh=Mesh(\'devices\': 8), '
+        'NamedSharding(mesh=Mesh(\'devices\': 8, axis_types=(Auto,)), '
         'spec=PartitionSpec(None, \'devices\'), memory_kind=unpinned_host)',
     )
 
