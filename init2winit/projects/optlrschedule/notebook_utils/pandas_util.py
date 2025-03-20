@@ -16,7 +16,37 @@
 r"""Utility functions for pandas dataframes."""
 
 from typing import Any, Dict, List
+import numpy as np
 import pandas as pd
+from scipy import stats
+
+bootstrap = stats.bootstrap
+
+
+# Compute bootrap standard deviation of sample median
+def med_boot_std(
+    values,
+    method='BCa',
+    n_resamples=1000,
+    return_ci=False,
+    confidence_level=0.95,
+):
+  """Compute bootrap standard deviation of sample median."""
+  boot_obj = bootstrap(
+      (values,),
+      np.median,
+      method=method,
+      n_resamples=n_resamples,
+      confidence_level=confidence_level,
+  )
+  if return_ci:
+    return (
+        boot_obj.standard_error,
+        boot_obj.confidence_interval.low,
+        boot_obj.confidence_interval.high,
+    )
+  else:
+    return boot_obj.standard_error
 
 
 def reduce_to_best_base_lrs(input_df: pd.DataFrame):
@@ -74,11 +104,15 @@ def reduce_to_best_base_lrs(input_df: pd.DataFrame):
   return result.drop(columns=['score_median'])
 
 
-def add_seed_stats_columns(df: pd.DataFrame) -> pd.DataFrame:
+def add_seed_stats_columns(
+    df: pd.DataFrame, ci_config: dict[str, Any] | None = None
+) -> pd.DataFrame:
   """Add seed stats columns to a DataFrame.
 
   Args:
       df (pd.DataFrame): Input DataFrame containing configurations and scores.
+      ci_config (dict): Configuration for bootstrap sample median standard
+        deviation computation. If None, use normal approximation.
 
   Returns:
       pd.DataFrame: DataFrame containing configurations and scores, with
@@ -92,22 +126,54 @@ def add_seed_stats_columns(df: pd.DataFrame) -> pd.DataFrame:
   exclude_cols = {'score', 'rank', 'index', 'generation'}
   param_cols = [col for col in df.columns if col not in exclude_cols]
 
-  # Group by parameter columns and calculate statistics
-  stats_df = (
-      df.groupby(param_cols)
-      .agg(
-          score_mean=('score', 'mean'),
-          score_median=('score', 'median'),
-          score_std=('score', 'std'),
-          score_min=('score', 'min'),
-          score_max=('score', 'max'),
-          group_size=(
-              'score',
-              'size',
-          ),  # Count the number of samples in each group
-      )
-      .reset_index()
+  if ci_config is None:
+    # Group by parameter columns and calculate statistics
+    stats_df = (
+        df.groupby(param_cols)
+        .agg(
+            score_mean=('score', 'mean'),
+            score_median=('score', 'median'),
+            score_std=('score', 'std'),
+            score_min=('score', 'min'),
+            score_max=('score', 'max'),
+            group_size=(
+                'score',
+                'size',
+            ),  # Count the number of samples in each group
+        )
+        .reset_index()
+    )
+  else:
+    # Boostrap standard deviation function
+    def med_boot_std_apply_fn(values):
+      return med_boot_std(values, **ci_config)
+
+    # Group by parameter columns and calculate statistics
+    stats_df = (
+        df.groupby(param_cols)
+        .agg(
+            score_mean=('score', 'mean'),
+            score_median=('score', 'median'),
+            score_median_error=('score', med_boot_std_apply_fn),
+            score_std=('score', 'std'),
+            score_min=('score', 'min'),
+            score_max=('score', 'max'),
+            group_size=(
+                'score',
+                'size',
+            ),  # Count the number of samples in each group
+        )
+        .reset_index()
+    )
+
+  # Alternative computation of median error using normal approximation
+  stats_df['score_median_error_normal'] = (
+      np.sqrt(np.pi / 2)
+      * stats_df['score_std']
+      / np.sqrt(stats_df['group_size'] - 1)
   )
+  if ci_config is None:
+    stats_df['score_median_error'] = stats_df['score_median_error_normal']
   return stats_df
 
 

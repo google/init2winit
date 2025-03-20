@@ -573,7 +573,10 @@ def plot_multiple_schedules_with_metadata(
 
     # Create legend label with schedule number and score
     metrics = metadata.get(key_metric, None)
-    score_std = metadata.get('score_std', None)
+    if key_metric == 'score_median':
+      score_std = metadata.get('score_median_error', None)
+    else:
+      score_std = metadata.get('score_std', None)
     label = (
         f'{legend_names[i]}: {metrics:.4f} ± {score_std:.4f}'
         if metrics is not None
