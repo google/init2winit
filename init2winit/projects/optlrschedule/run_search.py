@@ -133,6 +133,8 @@ def main(argv: Sequence[str]) -> None:
   rng = jax.random.fold_in(rng, worker_id)
   num_param_rngs = search_config['num_param_rngs']
 
+  logging.info('num_generations found before starting loop: %d',
+               search_config['num_generation'])
   for gen_idx in range(search_config['num_generation']):
 
     logging.info('generation: %d', gen_idx)
