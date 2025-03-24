@@ -32,6 +32,10 @@ def is_schedule_param(key_name: str) -> bool:
   return key_name.startswith(_SCHEDULE_PARAM_KEY_PREFIX)
 
 
+def df_contains_schedule_param(df):
+  return any(is_schedule_param(col) for col in df.columns)
+
+
 def add_prefix_to_schedule_param_dict(
     schedule_param_config: Dict[str, Any],
 ) -> Dict[str, Any]:
