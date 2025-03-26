@@ -16,6 +16,7 @@
 r"""Utility functions for pandas dataframes."""
 
 from typing import Any, Dict, List
+from init2winit.projects.optlrschedule.scheduler import base_schedule_family
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -71,16 +72,8 @@ def reduce_to_best_base_lrs(input_df: pd.DataFrame):
     3. Extract from the original DataFrame only the records that match the
     selected (param, base_lr) combination.
   """
-
-  # Exclude columns: 'score' and 'generation' are not used for aggregation.
-  # Note: 'base_lr' is used as a candidate, so it is not excluded.
-  excluded_cols = ['generation', 'score']
-  # param_cols are the parameter columns excluding 'base_lr'
-  param_cols = [
-      col
-      for col in input_df.columns
-      if col not in (excluded_cols + ['base_lr'])
-  ]
+  param_cols = [col for col in input_df.columns
+                if base_schedule_family.is_schedule_param(col)]
 
   # Step 1: Calculate the median score for each (param + base_lr) combination
   candidate_medians = (
