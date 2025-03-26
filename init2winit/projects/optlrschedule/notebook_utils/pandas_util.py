@@ -52,9 +52,9 @@ def med_boot_std(
 def reduce_to_best_base_lrs(input_df: pd.DataFrame):
   """Reduce to the best base_lr for each set of parameters.
 
-  this function retains only the records that have the base_lr with the lowest
-  median score,
-  among the multiple base_lr candidates.
+  This function retains only the records that have the base_lr with the lowest
+  median score, among the multiple base_lr candidates. It does NOT perform any
+  reduction across different seeds for the same (param, base_lr) combination.
 
   Args:
       input_df (pd.DataFrame): Input DataFrame containing configurations and
@@ -100,7 +100,6 @@ def reduce_to_best_base_lrs(input_df: pd.DataFrame):
   # Step 3: Extract from the original DataFrame only the records that match the
   # selected (param, base_lr) combination.
   result = input_df.merge(best_candidates, on=param_cols + ['base_lr'])
-
   return result.drop(columns=['score_median'])
 
 
