@@ -512,6 +512,7 @@ class TestPandasUtil(absltest.TestCase):
             'score_min': 0.25,
             'score_max': 0.30,
             'group_size': 2,
+            'score_std_error': 0.025,
             'score_median_error_normal': 0.03133285343288749,
             'score_median_error': 0.03133285343288748,
         },
