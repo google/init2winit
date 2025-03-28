@@ -114,7 +114,7 @@ class LinearRegression(base_workload.BaseWorkload):
 
   def __init__(self, config: base_workload.ConfigType) -> None:
     """Initializes the linear regression training setup.
-    
+
     Args:
       config: A dictionary containing the following keys and values:
         - batch_size: The batch size for each training step.
@@ -126,6 +126,8 @@ class LinearRegression(base_workload.BaseWorkload):
         - init_z: The initial values of the regression problem.
         - num_data: The number of data points in the regression problem.
         - num_params: The number of parameters in the regression problem.
+        - return_loss_history: Whether to return the loss history. Set to False
+          for compatibility with run_search_decoupled.
         - compute_option: The compute option for the training step.
     """
     super().__init__(config)
@@ -135,6 +137,7 @@ class LinearRegression(base_workload.BaseWorkload):
     self.init_z = config['init_z']
     self.num_data = config['num_data']
     self.num_params = config['num_params']
+    self.return_loss_history = config.get('return_loss_history', False)
 
     assert config['compute_option'] == 'vmap(jit)'
 
@@ -208,7 +211,13 @@ class LinearRegression(base_workload.BaseWorkload):
         mean_squared_error(z)
     )
 
-    return {'loss_history': loss_history[0], 'final_loss': loss_history[0][-1]}
+    if self.return_loss_history:
+      return {
+          'loss_history': loss_history[0],
+          'final_loss': loss_history[0][-1],
+      }
+    else:  # return_loss_history not compatible with run_search_decoupled
+      return {'final_loss': loss_history[0][-1]}
 
   def train_and_evaluate_models(
       self,
