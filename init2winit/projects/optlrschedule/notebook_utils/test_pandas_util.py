@@ -18,6 +18,7 @@
 from absl.testing import absltest
 from init2winit.projects.optlrschedule.notebook_utils import pandas_util
 import pandas as pd
+import pandas.testing as pd_testing
 
 
 class TestPandasUtil(absltest.TestCase):
@@ -241,7 +242,7 @@ class TestPandasUtil(absltest.TestCase):
     ])
     print(reduced_df)
     print(expected_df)
-    self.assertTrue(reduced_df.equals(expected_df))
+    pd_testing.assert_frame_equal(reduced_df, expected_df, check_exact=True)
 
   def test_reduce_to_best_base_lrs_search(self):
     """Test reduce_to_best_base_lrs function on run_search.py-style input."""
@@ -343,7 +344,186 @@ class TestPandasUtil(absltest.TestCase):
             'p.warmup_steps': 209.09278869628906,
         },
     ])
-    self.assertTrue(reduced_df.equals(expected_df))
+    pd_testing.assert_frame_equal(reduced_df, expected_df, check_exact=True)
+
+  def test_get_all_scores_from_param_list(self):
+    """Test get_all_scores_from_param_list function."""
+    df = pd.DataFrame([
+        {
+            'generation': 0,
+            'base_lr': 0.001,
+            'score': 0.26,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.001,
+            'score': 0.31,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.002,
+            'score': 0.25,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.002,
+            'score': 0.14921,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.002,
+            'score': 0.14921,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.003,
+            'score': 0.25,
+            'p.exponent': 0.2534,
+            'p.warmup_steps': 180.93,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.003,
+            'score': 0.30,
+            'p.exponent': 0.2534,
+            'p.warmup_steps': 180.93,
+        },
+        {
+            'generation': 4,
+            'base_lr': 0.1,
+            'score': 0.899,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+        },
+        {
+            'generation': 4,
+            'base_lr': 0.1,
+            'score': 0.543,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+        },
+        {
+            'generation': 4,
+            'base_lr': 0.1,
+            'score': 0.452,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+        },
+    ])
+    # Test without reduction over seeds
+    no_stats_param_df = pd.DataFrame([
+        {
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+        },
+    ])
+    expected_no_stats_df = pd.DataFrame([
+        {
+            'generation': 0,
+            'base_lr': 0.001,
+            'score': 0.26,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.001,
+            'score': 0.31,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.002,
+            'score': 0.25,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.002,
+            'score': 0.14921,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.002,
+            'score': 0.14921,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'generation': 4,
+            'base_lr': 0.1,
+            'score': 0.899,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+        },
+        {
+            'generation': 4,
+            'base_lr': 0.1,
+            'score': 0.543,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+        },
+        {
+            'generation': 4,
+            'base_lr': 0.1,
+            'score': 0.452,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+        },
+    ])
+    extracted_no_stats_df = pandas_util.get_scores_from_schedule_shapes(
+        df, no_stats_param_df, reduce_seeds=False
+    )
+    pd_testing.assert_frame_equal(
+        extracted_no_stats_df, expected_no_stats_df, check_exact=False
+    )
+
+    # Test with reduction over seeds
+    stats_param_df = pd.DataFrame([{
+        'p.exponent': 0.2534,
+        'p.warmup_steps': 180.93,
+    }])
+    expected_with_stats_df = pd.DataFrame([
+        {
+            'base_lr': 0.003,
+            'p.exponent': 0.2534,
+            'p.warmup_steps': 180.93,
+            'score_mean': 0.275,
+            'score_median': 0.275,
+            'score_std': 0.03535533905932736,
+            'score_min': 0.25,
+            'score_max': 0.30,
+            'group_size': 2,
+            'score_median_error_normal': 0.03133285343288749,
+            'score_median_error': 0.03133285343288748,
+        },
+    ])
+    extracted_with_stats_df = pandas_util.get_scores_from_schedule_shapes(
+        df, stats_param_df, reduce_seeds=True
+    )
+    print('Extracted:', extracted_with_stats_df)
+    print('Expected:', expected_with_stats_df)
+    pd_testing.assert_frame_equal(
+        extracted_with_stats_df, expected_with_stats_df, check_exact=False
+    )
 
 
 if __name__ == '__main__':

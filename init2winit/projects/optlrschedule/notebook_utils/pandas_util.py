@@ -125,7 +125,7 @@ def add_seed_stats_columns(
         .agg(
             score_mean=('score', 'mean'),
             score_median=('score', 'median'),
-            score_std=('score', 'std'),
+            score_std=('score', 'std'),  # Sample standard deviation, 1 DDOF
             score_min=('score', 'min'),
             score_max=('score', 'max'),
             group_size=(
@@ -162,7 +162,7 @@ def add_seed_stats_columns(
   stats_df['score_median_error_normal'] = (
       np.sqrt(np.pi / 2)
       * stats_df['score_std']
-      / np.sqrt(stats_df['group_size'] - 1)
+      / np.sqrt(stats_df['group_size'])  # score_std already uses 1 DDOF
   )
   if ci_config is None:
     stats_df['score_median_error'] = stats_df['score_median_error_normal']
@@ -246,3 +246,32 @@ def get_top_n_schedule_params(
   result_dicts = sorted_stats.to_dict('records')
 
   return result_dicts
+
+
+def get_scores_from_schedule_shapes(
+    df: pd.DataFrame,
+    schedule_param_df: pd.DataFrame,
+    reduce_seeds: bool = False,
+    ci_config: dict[str, Any] | None = None,
+):
+  """Get scores for schedule shapes whose parameters are stored in a DataFrame.
+
+  Args:
+      df: DataFrame containing scores from training runs.
+      schedule_param_df: DataFrame containing schedule parameters to select.
+      reduce_seeds: If True, compute statistics over seeds.
+      ci_config: Configuration for computing confidence intervals of median if
+        reduce_seeds is True. If None, use normal approximation.
+
+  Returns:
+      Dataframe containing all scores for the given schedules.
+  """
+
+  scores_df = pd.merge(
+      df, schedule_param_df, how='right', validate='many_to_one'
+  )
+  # Optionally, reduce over seeds
+  if reduce_seeds:
+    scores_df = add_seed_stats_columns(scores_df, ci_config)
+  # Return scores
+  return scores_df.reset_index(drop=True)
