@@ -15,6 +15,8 @@
 
 """Utility functions for plotting data in notebooks."""
 
+from init2winit.projects.optlrschedule.notebook_utils import pandas_util
+from matplotlib import colors as plt_colors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -24,7 +26,7 @@ import pandas as pd
 # globally)
 BAR_TEXT_FONT_SIZE = 16
 BAR_ALPHA = 0.5
-AXIS_LABEL_FONT_SIZE = 16
+AXIS_LABEL_FONT_SIZE = 18
 AXIS_TICK_FONT_SIZE = 16
 TITLE_FONT_SIZE = 20
 LEGEND_FONT_SIZE = 16
@@ -36,6 +38,16 @@ LR_SCHEDULE_NAME_MAP = {
     'twopointslinear': 'Two-Point Linear',
     'twopointsspline': 'Two-Point Spline',
     'smoothnonmonotonic': 'Smooth Non-Monotonic',
+    'sqrt': 'Square Root',
+    'rex': 'Generalized REX',
+}
+
+LR_SCHEDULE_SHORT_NAME_MAP = {
+    'con': 'Constant',
+    'cos': 'Generalized Cosine',
+    'tpl': 'Two-Point Linear',
+    'tps': 'Two-Point Spline',
+    'snm': 'Smooth Non-Monotonic',
     'sqrt': 'Square Root',
     'rex': 'Generalized REX',
 }
@@ -531,6 +543,7 @@ def plot_multiple_schedules_with_metadata(
     key_metric='score_mean',
     title='Learning Rate Schedule Comparison',
     ax=None,
+    notation='floating_point',
 ) -> plt.Axes:
   """Plots multiple learning rate schedules with enhanced line widths and a clear legend.
 
@@ -545,6 +558,7 @@ def plot_multiple_schedules_with_metadata(
       key_metric: Metric to use for the legend ('score_mean' or 'score_median').
       title: Plot title.
       ax: Optional existing axis to plot on.
+      notation: Notation to use for reported scores ('floating_point' or 'sci').
 
   Returns:
       The matplotlib Axes object on which the plot is plotted.
@@ -576,12 +590,23 @@ def plot_multiple_schedules_with_metadata(
     if key_metric == 'score_median':
       score_std = metadata.get('score_median_error', None)
     else:
-      score_std = metadata.get('score_std', None)
-    label = (
-        f'{legend_names[i]}: {metrics:.4f} ± {score_std:.4f}'
-        if metrics is not None
-        else legend_names[i]
-    )
+      score_std = metadata.get('score_std_error', None)
+    if metrics is None:
+      label = legend_names[i]
+    elif score_std is None:
+      if notation == 'floating_point':
+        label = f'{legend_names[i]}: {metrics:.4f}'
+      elif notation == 'sci':
+        label = f'{legend_names[i]}: {metrics:.2e}'
+      else:
+        raise ValueError(f'Unsupported notation: {notation}')
+    else:
+      if notation == 'floating_point':
+        label = f'{legend_names[i]}: {metrics:.4f} ± {score_std:.4f}'
+      elif notation == 'sci':
+        label = f'{legend_names[i]}: {metrics:.2e} ± {score_std:.2e}'
+      else:
+        raise ValueError(f'Unsupported notation: {notation}')
 
     ax.plot(
         np.arange(len(schedule)),
@@ -611,3 +636,128 @@ def plot_multiple_schedules_with_metadata(
   )
 
   return ax
+
+
+def plot_base_lr_heatmap(
+    exp_names,
+    sched_records,
+    score_dfs,
+    base_lrs,
+    fig=None,
+    ax=None,
+    schedules_per_family=1,
+    metric='score_median',
+    plot_config=None,
+    metric_label=None,
+):
+  """Plots a heatmap of scores vs. base_lr values for multiple schedules.
+
+  Assumes that the same base_lr values are used for all schedules.
+
+  Args:
+      exp_names: List of experiment names corresponding to each DataFrame.
+      sched_records: Dictionary of schedule param dfs, keyed by experiment name.
+      score_dfs: Dictionary of score DataFrames, keyed by experiment name.
+      base_lrs: List of base_lr values to plot.
+      fig: Optional existing figure to plot on.
+      ax: Optional existing axis to plot on.
+      schedules_per_family: Number of schedules per family.
+      metric: Metric to use for plotting (default: 'score_median').
+      plot_config: Optional dictionary containing plot configuration parameters.
+        If None, default values are used.
+      metric_label: Optional label for colorbar. If None, the metric name is
+        used.
+
+  Returns:
+      The matplotlib Axes object on which the plot is drawn
+      and matrix of scores.
+  """
+  if plot_config is None:
+    plot_config = {}
+  tick_period = plot_config.get('tick_period', 4)
+  tick_offset = plot_config.get('tick_offset', 1)
+  figsize = plot_config.get('figsize', (8, 5))
+  cmap = plot_config.get('cmap', 'magma_r')
+  cmap_min = plot_config.get('cmap_min', 0.05)
+  cmap_max = plot_config.get('cmap_max', 1.0)
+  cmap_bad_color = plot_config.get('cmap_bad_color', 'black')
+
+  if metric_label is None:
+    metric_label = metric
+  if ax is None:
+    fig, ax = plt.subplots(figsize=figsize)
+
+  # Label schedules
+  if schedules_per_family == 1:
+    sched_names = [exp_name for exp_name in exp_names]
+  else:
+    sched_names_list = [
+        [exp_name + '_' + str(i) for i in range(schedules_per_family)]
+        for exp_name in exp_names
+    ]
+    sched_names = []
+    for sublist in sched_names_list:
+      sched_names.extend(sublist)
+
+  # Extract scores into matrix
+  score_mat = np.zeros((
+      len(exp_names) * schedules_per_family,
+      len(base_lrs),
+  ))
+
+  score_idx = 0
+  for exp_name in exp_names:
+    for i in range(len(sched_records[exp_name])):
+      params = sched_records[exp_name].iloc[[i]]  # Single param set as DF
+      sub_df = pandas_util.get_scores_from_schedule_shapes(
+          score_dfs[exp_name], params
+      )
+      score_mat[score_idx, :] = sub_df.sort_values(by='base_lr')[metric]
+      score_idx += 1
+  # Plot heatmap
+  cmap = plt.get_cmap(cmap)
+  cmap.set_bad(cmap_bad_color)
+  image = ax.imshow(
+      score_mat,
+      norm=plt_colors.LogNorm(vmin=cmap_min, vmax=cmap_max),
+      aspect='auto',
+      cmap=cmap,
+  )
+  ax.grid(False)  # Turn off grid lines on heatmap
+
+  cbar = fig.colorbar(image, ax=ax)
+  cbar.set_label(metric_label)
+
+  ax.set_yticks(np.arange(len(sched_names)))
+  ax.set_yticklabels(sched_names)
+
+  ax.set_xticks(np.arange(tick_offset, len(base_lrs), tick_period))
+  ax.set_xticklabels(
+      [f'{x_val:.1e}' for x_val in base_lrs[tick_offset::tick_period]]
+  )
+
+  plt.xlabel('Base learning rate')
+  plt.ylabel('Schedule')
+
+  return ax, score_mat
+
+
+def canonicalize_dict_keys(d):
+  """Canonicalize schedule dictionary key order."""
+  prefix_order = ['con', 'cos', 'tps', 'tpl', 'sqrt', 'rex', 'snm']
+  d_copy = {}
+  # Add keys in schedule order
+  for pre in prefix_order:
+    for k in d.keys():
+      if pre in k:
+        d_copy[k] = d[k]
+  # Add remaining keys in same order as original dictionary
+  for k in d.keys():
+    new_key = True
+    for pre in prefix_order:
+      if pre in k:
+        new_key = False
+        break
+    if new_key:
+      d_copy[k] = d[k]
+  return d_copy
