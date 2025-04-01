@@ -110,18 +110,15 @@ def add_seed_stats_columns(
       pd.DataFrame: DataFrame containing configurations and scores, with
       additional columns for seed stats.
   """
-  # Ensure no leftover param_tuple column
-  if 'param_tuple' in df.columns:
-    df = df.drop(columns=['param_tuple'])
-
-  # Columns to exclude from parameter analysis
-  exclude_cols = {'score', 'rank', 'index', 'generation'}
-  param_cols = [col for col in df.columns if col not in exclude_cols]
+  param_cols = [
+      col for col in df.columns if base_schedule_family.is_schedule_param(col)
+  ]
+  group_cols = ['base_lr'] + param_cols
 
   if ci_config is None:
     # Group by parameter columns and calculate statistics
     stats_df = (
-        df.groupby(param_cols)
+        df.groupby(group_cols)
         .agg(
             score_mean=('score', 'mean'),
             score_median=('score', 'median'),
@@ -142,7 +139,7 @@ def add_seed_stats_columns(
 
     # Group by parameter columns and calculate statistics
     stats_df = (
-        df.groupby(param_cols)
+        df.groupby(group_cols)
         .agg(
             score_mean=('score', 'mean'),
             score_median=('score', 'median'),
