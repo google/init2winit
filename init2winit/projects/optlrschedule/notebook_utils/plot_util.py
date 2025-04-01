@@ -17,6 +17,7 @@
 
 import collections
 from init2winit.projects.optlrschedule.notebook_utils import pandas_util
+from init2winit.projects.optlrschedule.scheduler import base_schedule_family
 from matplotlib import colors as plt_colors
 import matplotlib.pyplot as plt
 import numpy as np
@@ -92,14 +93,8 @@ def plot_best_base_lr_histgram(
   Returns:
       plt.Axes: The matplotlib Axes object on which the plot is drawn.
   """
-  # Determine parameter columns by excluding specific columns
-  excluded_cols = ['generation', 'base_lr', 'score', 'group_size']
   param_key_list = [
-      col
-      for col in df.columns
-      if col not in excluded_cols
-      and not col.startswith('score')
-      and not col.startswith('original')
+      col for col in df.columns if base_schedule_family.is_schedule_param(col)
   ]
 
   # Compute indices of minimum key_metric values per group
@@ -209,13 +204,8 @@ def plot_multiple_best_base_lr_histgrams(
   # For each DataFrame, compute and plot its best base_lr histogram
   for i, (df, exp_name) in enumerate(zip(df_list, exp_names)):
     # Determine parameter columns by excluding specific columns
-    excluded_cols = ['generation', 'base_lr', 'score', 'group_size']
     param_key_list = [
-        col
-        for col in df.columns
-        if col not in excluded_cols
-        and not col.startswith('score')
-        and not col.startswith('original')
+        col for col in df.columns if base_schedule_family.is_schedule_param(col)
     ]
 
     # Compute indices of minimum key_metric values per group
@@ -326,13 +316,8 @@ def plot_multiple_best_base_lr_distribution(
 
   for i, (df, exp_name) in enumerate(zip(df_list, exp_names)):
     # Exclude specific columns to determine grouping parameters
-    excluded_cols = ['generation', 'base_lr', 'score', 'group_size']
     param_key_list = [
-        col
-        for col in df.columns
-        if col not in excluded_cols
-        and not col.startswith('score')
-        and not col.startswith('original')
+        col for col in df.columns if base_schedule_family.is_schedule_param(col)
     ]
 
     # Compute indices of the minimum key_metric values per group
