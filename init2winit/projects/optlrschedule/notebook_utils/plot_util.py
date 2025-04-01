@@ -15,6 +15,7 @@
 
 """Utility functions for plotting data in notebooks."""
 
+import collections
 from init2winit.projects.optlrschedule.notebook_utils import pandas_util
 from matplotlib import colors as plt_colors
 import matplotlib.pyplot as plt
@@ -742,22 +743,17 @@ def plot_base_lr_heatmap(
   return ax, score_mat
 
 
+def _order_keys_by_prefix(d, prefix_order):
+  """Partially order dict keys based on an ordering over prefixes."""
+  ordered = collections.OrderedDict(d)
+  for prefix in reversed(prefix_order):
+    for k in d:
+      if k.startswith(prefix):
+        ordered.move_to_end(k, last=False)
+  return ordered
+
+
 def canonicalize_dict_keys(d):
   """Canonicalize schedule dictionary key order."""
   prefix_order = ['con', 'cos', 'tps', 'tpl', 'sqrt', 'rex', 'snm']
-  d_copy = {}
-  # Add keys in schedule order
-  for pre in prefix_order:
-    for k in d.keys():
-      if pre in k:
-        d_copy[k] = d[k]
-  # Add remaining keys in same order as original dictionary
-  for k in d.keys():
-    new_key = True
-    for pre in prefix_order:
-      if pre in k:
-        new_key = False
-        break
-    if new_key:
-      d_copy[k] = d[k]
-  return d_copy
+  return _order_keys_by_prefix(d, prefix_order)
