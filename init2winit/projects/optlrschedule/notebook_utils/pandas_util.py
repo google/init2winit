@@ -155,11 +155,15 @@ def add_seed_stats_columns(
         .reset_index()
     )
 
+  # Standard deviation of sample mean
+  stats_df['score_std_error'] = stats_df['score_std'] / np.sqrt(
+      stats_df['group_size']  # score_std already uses 1 DDOF
+  )
+
   # Alternative computation of median error using normal approximation
   stats_df['score_median_error_normal'] = (
       np.sqrt(np.pi / 2)
-      * stats_df['score_std']
-      / np.sqrt(stats_df['group_size'])  # score_std already uses 1 DDOF
+      * stats_df['score_std_error']
   )
   if ci_config is None:
     stats_df['score_median_error'] = stats_df['score_median_error_normal']
@@ -229,6 +233,11 @@ def get_top_n_schedule_params(
           ),  # Count the number of samples in each group
       )
       .reset_index()
+  )
+
+  # Standard deviation of sample mean (score_std already uses 1 DDOF)
+  stats_df['score_std_error'] = stats_df['score_std'] / np.sqrt(
+      stats_df['group_size']
   )
 
   # Determine ranking column
