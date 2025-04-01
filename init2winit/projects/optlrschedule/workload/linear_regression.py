@@ -64,6 +64,28 @@ def generate_ntk_matrix(
     return orthogonal_matrix @ jnp.diag(spectrum) @ orthogonal_matrix.T
 
 
+def get_loss_traj_fn_lax(spectrum, p0, batch_size, num_data):
+  """Finite differences version of theoretical average loss using lax.scan.
+  
+  Args:
+    spectrum: spectrum of NTK matrix
+    p0: initial normalized residuals - eigenmode projection * spectrum**-1
+    batch_size: batch size
+    num_data: number of data points
+  Returns:
+    Function that takes array of learning rates as input, and reurns loss
+    trajectory.
+  """
+  def sing_layer(p, lr):
+    p_next = ((1.-lr*spectrum)**2)*p+(lr**2)*(
+        (1./batch_size-1./num_data)*spectrum*jnp.sum(spectrum*p))
+    return p_next, jnp.mean(spectrum*p_next)/2.
+  def loss_traj_fn(lrs):
+    _, losses = jax.lax.scan(sing_layer, p0, lrs)
+    return losses
+  return loss_traj_fn
+
+
 def initialize_regression(
     param_rng: jax.Array,
     spectrum: jnp.ndarray | None = None,
@@ -114,7 +136,7 @@ class LinearRegression(base_workload.BaseWorkload):
 
   def __init__(self, config: base_workload.ConfigType) -> None:
     """Initializes the linear regression training setup.
-    
+
     Args:
       config: A dictionary containing the following keys and values:
         - batch_size: The batch size for each training step.
@@ -126,6 +148,8 @@ class LinearRegression(base_workload.BaseWorkload):
         - init_z: The initial values of the regression problem.
         - num_data: The number of data points in the regression problem.
         - num_params: The number of parameters in the regression problem.
+        - return_loss_history: Whether to return the loss history. Set to False
+          for compatibility with run_search_decoupled.
         - compute_option: The compute option for the training step.
     """
     super().__init__(config)
@@ -135,6 +159,7 @@ class LinearRegression(base_workload.BaseWorkload):
     self.init_z = config['init_z']
     self.num_data = config['num_data']
     self.num_params = config['num_params']
+    self.return_loss_history = config.get('return_loss_history', False)
 
     assert config['compute_option'] == 'vmap(jit)'
 
@@ -208,7 +233,13 @@ class LinearRegression(base_workload.BaseWorkload):
         mean_squared_error(z)
     )
 
-    return {'loss_history': loss_history[0], 'final_loss': loss_history[0][-1]}
+    if self.return_loss_history:
+      return {
+          'loss_history': loss_history[0],
+          'final_loss': loss_history[0][-1],
+      }
+    else:  # return_loss_history not compatible with run_search_decoupled
+      return {'final_loss': loss_history[0][-1]}
 
   def train_and_evaluate_models(
       self,

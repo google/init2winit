@@ -143,3 +143,92 @@ def sched_gd_update(
   new_sched = sched_fam.get_schedule(sched_params, base_lr)
   new_base_lr = optimize_base_lr(target_sched, new_sched, base_lr)
   return sched_params, new_base_lr
+
+
+def get_filtered_loss_fn(loss_fn, accel_pow=0.0):
+  """Reshape loss function by raising to (1-accel_pow).
+  
+  Args:
+    loss_fn: loss function to be filtered
+    accel_pow: power to which to raise loss function. 0 is no change, values
+      approaching 1 from below limit to log.
+  Returns:
+    Filtered loss function g(x) = f(x)**(1-accel_pow)/(1-accel_pow).
+  """
+  def filtered_loss_fn(*args, **kwargs):
+    return (loss_fn(*args, **kwargs)**(1.-accel_pow))/(1.-accel_pow)
+  return filtered_loss_fn
+
+
+def base_lr_grid_search(lrs,
+                        loss_from_lrs,
+                        grid_steps=5,
+                        lr_fac=4.0,
+                        par=False):
+  """Grid search over base learning rate for given schedule shape.
+  
+  Args:
+    lrs: array of learning rates
+    loss_from_lrs: function that takes array of learning rates as input, and
+      returns final loss
+    grid_steps: number of steps in one direction of grid
+    lr_fac: multiplicative factor for max of search
+    par: if True, loss_from_lrs is alread parallelized over schedules
+  Returns:
+    Base learning rate that minimizes final loss.
+  """
+  log_fac = np.log(lr_fac)
+  base_lrs = np.exp(np.linspace(-log_fac, log_fac, grid_steps*2+1))
+  final_losses = np.zeros(grid_steps)
+  if par:
+    lr_mat = np.outer(base_lrs, lrs)
+    final_losses = loss_from_lrs(lr_mat)
+    min_idx = np.nanargmin(final_losses)
+    return lr_mat[min_idx]
+  else:
+    for i, base_lr in enumerate(base_lrs):
+      final_losses[i] = loss_from_lrs(base_lr * lrs)
+    min_idx = np.nanargmin(final_losses)
+    return base_lrs[min_idx] * lrs
+
+
+def early_base_lr_search(
+    lrs,
+    loss_from_lrs,
+    grid_step_list=(10, 10, 10),
+    lr_facs=(100.0, 2.0, 1.4),
+    par=False,
+):
+  """Base lr grid search procedure for initial schedule search."""
+  for grid_steps, lr_fac in zip(grid_step_list, lr_facs):
+    lrs = base_lr_grid_search(lrs, loss_from_lrs, grid_steps, lr_fac, par)
+  return lrs
+
+
+def schedule_descent_step(
+    sched_lr, lrs, prev_loss, sched_deriv_fn, loss_thresh=1e1, nan_fac=0.3
+):
+  """Single step of schedule descent.
+
+  Args:
+    sched_lr: schedule GD learning rate
+    lrs: current schedule
+    prev_loss: previous loss
+    sched_deriv_fn: function that takes schedule as input and returns derivative
+      of loss function with respect to schedule
+    loss_thresh: upper threshold for loss to detect too large learning rate
+    nan_fac: base learning rate reduction factor for large or negative learning
+      rates
+
+  Returns:
+    Next schedule.
+  """
+  if np.isnan(prev_loss) or prev_loss > loss_thresh:
+    return (1.0 - nan_fac) * lrs
+  else:
+    g_lrs = sched_deriv_fn(lrs)
+    lrs_next = lrs - sched_lr * g_lrs
+    if min(lrs_next) < 0:
+      return (1.0 - nan_fac) * lrs
+    else:
+      return lrs_next
