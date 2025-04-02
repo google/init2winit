@@ -114,46 +114,39 @@ def add_seed_stats_columns(
       col for col in df.columns if base_schedule_family.is_schedule_param(col)
   ]
   group_cols = ['base_lr'] + param_cols
+  if 'xid_history' in df.columns:  # Group on xid history if present
+    group_cols.append('xid_history')
 
   if ci_config is None:
-    # Group by parameter columns and calculate statistics
-    stats_df = (
-        df.groupby(group_cols)
-        .agg(
-            score_mean=('score', 'mean'),
-            score_median=('score', 'median'),
-            score_std=('score', 'std'),  # Sample standard deviation, 1 DDOF
-            score_min=('score', 'min'),
-            score_max=('score', 'max'),
-            group_size=(
-                'score',
-                'size',
-            ),  # Count the number of samples in each group
-        )
-        .reset_index()
+    agg_dict = dict(
+        score_mean=('score', 'mean'),
+        score_median=('score', 'median'),
+        score_std=('score', 'std'),  # Sample standard deviation, 1 DDOF
+        score_min=('score', 'min'),
+        score_max=('score', 'max'),
+        group_size=(
+            'score',
+            'size',
+        ),
     )
   else:
     # Boostrap standard deviation function
     def med_boot_std_apply_fn(values):
       return med_boot_std(values, **ci_config)
 
-    # Group by parameter columns and calculate statistics
-    stats_df = (
-        df.groupby(group_cols)
-        .agg(
-            score_mean=('score', 'mean'),
-            score_median=('score', 'median'),
-            score_median_error=('score', med_boot_std_apply_fn),
-            score_std=('score', 'std'),
-            score_min=('score', 'min'),
-            score_max=('score', 'max'),
-            group_size=(
-                'score',
-                'size',
-            ),  # Count the number of samples in each group
-        )
-        .reset_index()
+    agg_dict = dict(
+        score_mean=('score', 'mean'),
+        score_median=('score', 'median'),
+        score_median_error=('score', med_boot_std_apply_fn),
+        score_std=('score', 'std'),
+        score_min=('score', 'min'),
+        score_max=('score', 'max'),
+        group_size=(
+            'score',
+            'size',
+        ),
     )
+  stats_df = df.groupby(group_cols).agg(**agg_dict).reset_index()
 
   # Standard deviation of sample mean
   stats_df['score_std_error'] = stats_df['score_std'] / np.sqrt(
