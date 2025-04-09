@@ -274,3 +274,73 @@ def get_scores_from_schedule_shapes(
     scores_df = add_seed_stats_columns(scores_df, ci_config)
   # Return scores
   return scores_df.reset_index(drop=True)
+
+
+def extract_sweeps_from_results(
+    df,
+    initial_params_df,
+    ci_config='default',
+):
+  """Process data from coordinate descent experiment into individual sweeps.
+
+  Given a dataframe of scores and a dataframe of initial schedule space
+  parameters, this function computes statistics and organizes dataframes
+  into a list of sweep dictionaries. For the purposes of this code, a sweep is
+  the result of coordinate descent on a single parameter, from a single initial
+  condition, including the median score, a corresponding confidence interval,
+  and the base_lr that achieves the median score. Sweeps are sorted by the swept
+  parameter value.
+
+  The function returns a list where each element corresponds to an initial
+  condition. Each element of the list is a dictionary containing the parameter
+  sweep dataframes for that initial condition, keyed by the parameter name.
+
+  Args:
+    df: Dataframe of scores over all seeds.
+    initial_params_df: Dataframe of initial parameters for each sweep.
+    ci_config: Dictionary of confidence interval configuration parameters.
+      Default value is string 'default', which uses boostrapped 95% CI.
+
+  Returns:
+    stats_df: Dataframe of statistics (no other conditioning).
+    sweep_dfs_per_point: List of dictionaries, one for each initial parameter.
+      Each dictionary maps a parameter name to a sweep dataframe of scores
+      varying that parameter and leaving others fixed. base_lr is
+      optimized for each parameter value.
+  """
+  if ci_config == 'default':
+    ci_config = {
+        'return_ci': True,
+        'confidence_level': 0.95,
+    }
+  if not ci_config.get('return_ci', False):
+    raise ValueError('Median calculation must return CI for plotting.')
+
+  param_list = list(initial_params_df.columns)
+  # Reduce to best base lrs per parameter
+  base_lr_opt_df = reduce_to_best_base_lrs(df)
+  # Reduce over seeds and compute statistics
+  stats_df = add_seed_stats_columns(base_lr_opt_df, ci_config=ci_config)
+
+  # Extract confidence interval to its own column
+  stats_df['ci_lower'] = stats_df['score_median_error'].apply(lambda x: x[1])
+  stats_df['ci_upper'] = stats_df['score_median_error'].apply(lambda x: x[2])
+
+  # For each starting point, return list of sub-frames of coordinate descent
+  sweep_dfs_per_point = []
+  for _, initial_param in initial_params_df.iterrows():
+    # For each point, sweep dataframes are organized into dict by param name
+    sweep_dfs_per_param = {}
+    for param in param_list:
+      fixed_conditions_df = pd.DataFrame([initial_param.drop(param).to_dict()])
+      sweep_dfs_per_param[param] = pd.merge(
+          stats_df, fixed_conditions_df, how='right', validate='many_to_one'
+      )
+      sweep_dfs_per_param[param] = (
+          sweep_dfs_per_param[param]
+          .sort_values(by=param, ascending=True)
+          .reset_index(drop=True)
+      )
+    sweep_dfs_per_point.append(sweep_dfs_per_param)
+
+  return stats_df, sweep_dfs_per_point

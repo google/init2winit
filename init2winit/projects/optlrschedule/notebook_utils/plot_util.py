@@ -742,3 +742,218 @@ def canonicalize_dict_keys(d):
   """Canonicalize schedule dictionary key order."""
   prefix_order = ['con', 'cos', 'tps', 'tpl', 'sqrt', 'rex', 'snm']
   return _order_keys_by_prefix(d, prefix_order)
+
+
+def make_single_descent_plot(
+    sorted_sweep_df, sweep_param, init_param_val, ax=None, plot_config=None
+):
+  """Plot coordinate descent for a single parameter sweep.
+
+  Args:
+    sorted_sweep_df: Dataframe of scores for a single parameter sweep, sorted by
+      the parameter being swept.
+    sweep_param: Name of the parameter being swept.
+    init_param_val: Initial value of the parameter being swept.
+    ax: Optional existing axis to plot on.
+    plot_config: Optional dictionary of plotting configuration parameters. If
+      None, default values are used.
+
+  Returns:
+    The matplotlib Axes object on which the plot is drawn.
+  """
+  # Set up plotting configurations
+  if plot_config is None:
+    plot_config = {}
+  figsize = plot_config.get('figsize', (6, 4))
+  legend_on = plot_config.get('legend_on', False)
+  x_label_fontsize = plot_config.get('x_label_fontsize', 17)
+  y_label_fontsize = plot_config.get('y_label_fontsize', 17)
+  major_tick_size = plot_config.get('major_tick_size', 15)
+  minor_tick_size = plot_config.get('minor_tick_size', 14)
+  title_fontsize = plot_config.get('title_fontsize', 18)
+  legend_fontsize = plot_config.get('legend_fontsize', 11)
+
+  param_name = sweep_param[2:]
+  # New axis if needed
+  if ax is None:
+    _, ax = plt.subplots(figsize=figsize)
+
+  color = 'C0'
+  ax.set_xlabel(param_name, fontsize=x_label_fontsize)
+  ax.set_ylabel('Train error (median)', color=color, fontsize=y_label_fontsize)
+  yerr = [
+      sorted_sweep_df['score_median'] - sorted_sweep_df['ci_lower'],
+      sorted_sweep_df['ci_upper'] - sorted_sweep_df['score_median'],
+  ]
+  ax.errorbar(
+      sorted_sweep_df[sweep_param],
+      sorted_sweep_df['score_median'],
+      yerr=yerr,
+      marker='o',
+      capsize=5,
+      color=color,
+  )
+  ax.tick_params(axis='y', labelcolor=color)
+
+  ax.tick_params(axis='both', which='major', labelsize=major_tick_size)
+  ax.tick_params(axis='both', which='minor', labelsize=minor_tick_size)
+  # Create second y-axis for base_lr
+
+  ax2 = ax.twinx()
+  color = 'C1'
+  ax2.set_ylabel(
+      'Base learning rate',
+      color=color,
+      fontsize=y_label_fontsize,
+  )
+  ax2.tick_params(axis='both', which='major', labelsize=major_tick_size)
+  ax2.tick_params(axis='both', which='minor', labelsize=minor_tick_size)
+  ax2.plot(
+      sorted_sweep_df[sweep_param],
+      sorted_sweep_df['base_lr'],
+      color=color,
+      marker='s',
+      zorder=0,
+  )
+  ax2.tick_params(axis='y', labelcolor=color)
+  ax2.set_yscale('log')
+
+  # Add vertical dashed line at base_param (median of x_param)
+  base_param = init_param_val
+  ax.axvline(
+      x=base_param,
+      color='lime',
+      linestyle='--',
+      linewidth=5,
+      alpha=0.3,
+      label='Original param',
+  )
+
+  # Add legend
+  lines1, labels1 = ax.get_legend_handles_labels()
+  lines2, labels2 = ax2.get_legend_handles_labels()
+  if legend_on:
+    ax.legend(
+        lines1 + lines2,
+        labels1 + labels2,
+        loc='upper right',
+        fontsize=legend_fontsize,
+    )
+
+  # Set title
+  title = f'Coordinate descent on {param_name}'
+
+  ax.set_title(title, fontsize=title_fontsize, y=1.03)
+  ax.grid(True)
+  return ax
+
+
+def make_coordinate_descent_plots(
+    point_df_dict,
+    initial_param_dict,
+    fig=None,
+    plot_config=None,
+    subplot_cols=None,
+):
+  """Plot coordinate descent for all parameter sweeps from one initialization.
+
+  Args:
+    point_df_dict: Dictionary of dataframes of scores for each parameter sweep,
+      keyed by the parameter being swept.
+    initial_param_dict: Dictionary of initial parameter values for each sweep.
+    fig: Optional existing figure to plot on.
+    plot_config: Optional dictionary of plotting configuration parameters. If
+      None, default values are used.
+    subplot_cols: Number of columns for subplots. If None, plots are not
+      subdivided into subplots.
+
+  Returns:
+    If subplot_cols is None (sequence of independent figures), returns a list of
+    matplotlib Axes objects on which
+    the plots are drawn.
+
+    If subplot_cols is not None, returns the matplotlib Figure object on which
+    the grid of subplots is drawn.
+  """
+  if fig is not None and subplot_cols is None:
+    raise ValueError('If fig is provided, subplot_cols must also be provided.')
+  if plot_config is None:
+    single_figsize = (6, 4)
+  else:
+    single_figsize = plot_config.get('single_figsize', (6, 4))
+  param_list = list(initial_param_dict.keys())
+
+  n_cols = subplot_cols
+  ax_list = []  # Use only if subplot_cols is None
+  n_plots = len(param_list)
+
+  if subplot_cols is not None:
+    # Dimensions of subplot
+    n_rows = (n_plots - 1) // n_cols + 1
+    if fig is None:
+      # Create subplots
+      fig, axes = plt.subplots(
+          n_rows,
+          n_cols,
+          figsize=(single_figsize[0] * n_cols, single_figsize[1] * n_rows),
+      )
+    else:
+      axes = fig.subplots(
+          n_rows,
+          n_cols,
+      )
+    axes = np.atleast_2d(axes)  # Ensure 2D array for consistent indexing
+  else:
+    axes = None
+
+  if not param_list:  # No parameters to plot
+    return None
+
+  # One plot per parameter sweep.
+  for plot_idx, sweep_param in enumerate(param_list):
+    init_param_val = initial_param_dict[sweep_param]
+    if subplot_cols is not None:
+      row, col = divmod(plot_idx, n_cols)
+      ax = axes[row, col]
+    else:
+      ax = None
+    ax = make_single_descent_plot(
+        point_df_dict[sweep_param], sweep_param, init_param_val, ax, plot_config
+    )
+    if subplot_cols is None:
+      ax_list.append(ax)
+  if subplot_cols is None:
+    return ax_list
+  else:
+    for plot_idx in range(n_plots, n_rows * n_cols):
+      row, col = divmod(plot_idx, n_cols)
+      fig.delaxes(axes[row, col])
+    fig.tight_layout()
+    return fig
+
+
+def make_multiple_coordinate_descent_plots(
+    per_point_dfs, initial_params_df, plot_config=None, subplot_cols=None
+):
+  """Plot coordinate descent results for multiple initialization points.
+
+  Args:
+    per_point_dfs: List of dictionaries of dataframes of scores for each
+      parameter sweep, keyed by the parameter being swept. Each dictionary
+      corresponds to one initialization point. Same as format returned by
+      pandas_util.extract_sweeps_from_results.
+    initial_params_df: Dataframe of initial parameter values for each sweep.
+    plot_config: Optional dictionary of plotting configuration parameters. If
+      None, default values are used.
+    subplot_cols: Number of columns for subplots. If None, plots are not
+      subdivided into subplots.
+  """
+  for i, point_df_dict in enumerate(per_point_dfs):
+    initial_param_dict = dict(initial_params_df.iloc[i])
+    make_coordinate_descent_plots(
+        point_df_dict,
+        initial_param_dict,
+        fig=None,
+        plot_config=plot_config,
+        subplot_cols=subplot_cols,
+    )

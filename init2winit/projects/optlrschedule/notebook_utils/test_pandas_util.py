@@ -17,6 +17,7 @@
 
 from absl.testing import absltest
 from init2winit.projects.optlrschedule.notebook_utils import pandas_util
+import numpy as np
 import pandas as pd
 import pandas.testing as pd_testing
 
@@ -544,6 +545,339 @@ class TestPandasUtil(absltest.TestCase):
     pd_testing.assert_frame_equal(
         extracted_with_stats_df, expected_with_stats_df, check_exact=False
     )
+
+  def test_extract_sweeps_from_results(self):
+    """Test extract_sweeps_from_results function."""
+    # Create a DataFrame with multiple parameter values
+    initial_params_df = pd.DataFrame([
+        {
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+        },
+        {
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+        },
+    ])
+
+    # Dataframe of sweep results
+
+    df = pd.DataFrame([
+        {
+            'base_lr': 0.001,
+            'score': 0.26,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+        },
+        {
+            'base_lr': 0.001,
+            'score': 0.30,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+        },
+        {
+            'base_lr': 0.001,
+            'score': 0.28,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+        },
+        {
+            'base_lr': 0.002,
+            'score': 0.86,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+        },
+        {
+            'base_lr': 0.002,
+            'score': 0.99,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+        },
+        {
+            'base_lr': 0.005,
+            'score': 0.26,
+            'p.exponent': 0.0022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+        },
+        {
+            'base_lr': 0.005,
+            'score': 0.24,
+            'p.exponent': 0.0022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+        },
+        {
+            'base_lr': 0.005,
+            'score': 0.28,
+            'p.exponent': 0.0022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+        },
+        {
+            'base_lr': 0.005,
+            'score': 0.22,
+            'p.exponent': 0.0022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+        },
+        {
+            'base_lr': 0.004,
+            'score': 0.26,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+            'xid_history': (52345,),
+        },
+        {
+            'base_lr': 0.004,
+            'score': 0.24,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+            'xid_history': (52345,),
+        },
+        {
+            'base_lr': 0.004,
+            'score': 0.28,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+            'xid_history': (52345,),
+        },
+        {
+            'base_lr': 0.004,
+            'score': 0.22,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+            'xid_history': (52345,),
+        },
+    ])
+
+    # Total dataframe
+    expected_total_df = pd.DataFrame([
+        {
+            'base_lr': 0.001,
+            'p.exponent': 0.1022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+            'score_mean': 0.28,
+            'score_median': 0.28,
+            'score_median_error': (
+                np.float64(0.014401937285648684),
+                np.float64(0.26),
+                np.float64(0.3),
+            ),
+            'score_std': 0.019999999999999976,
+            'score_min': 0.26,
+            'score_max': 0.3,
+            'group_size': 3,
+            'score_std_error': 0.011547005383792502,
+            'score_median_error_normal': 0.014472025091165335,
+            'ci_lower': 0.26,
+            'ci_upper': 0.3,
+        },
+        {
+            'base_lr': 0.004,
+            'p.exponent': 0.06672,
+            'p.warmup_steps': 209.092,
+            'xid_history': (52345,),
+            'score_mean': 0.25,
+            'score_median': 0.25,
+            'score_median_error': (
+                np.float64(0.015050726608278553),
+                np.float64(0.22),
+                np.float64(0.28),
+            ),
+            'score_std': 0.025819888974716126,
+            'score_min': 0.22,
+            'score_max': 0.28,
+            'group_size': 4,
+            'score_std_error': 0.012909944487358063,
+            'score_median_error_normal': 0.016180215937964166,
+            'ci_lower': 0.22,
+            'ci_upper': 0.28,
+        },
+        {
+            'base_lr': 0.005,
+            'p.exponent': 0.0022,
+            'p.warmup_steps': 155.49,
+            'xid_history': (82345,),
+            'score_mean': 0.25,
+            'score_median': 0.25,
+            'score_median_error': (
+                np.float64(0.015111278406326438),
+                np.float64(0.22),
+                np.float64(0.28),
+            ),
+            'score_std': 0.025819888974716126,
+            'score_min': 0.22,
+            'score_max': 0.28,
+            'group_size': 4,
+            'score_std_error': 0.012909944487358063,
+            'score_median_error_normal': 0.016180215937964166,
+            'ci_lower': 0.22,
+            'ci_upper': 0.28,
+        },
+    ])
+
+    # Sweep dfs
+    expected_sweep_df_list = []
+
+    expected_sweep_df_list.append({
+        'p.exponent': pd.DataFrame([
+            {
+                'base_lr': 0.005,
+                'p.exponent': 0.0022,
+                'p.warmup_steps': 155.49,
+                'xid_history': (82345,),
+                'score_mean': 0.25,
+                'score_median': 0.25,
+                'score_median_error': (
+                    np.float64(0.015111278406326438),
+                    np.float64(0.22),
+                    np.float64(0.28),
+                ),
+                'score_std': 0.025819888974716126,
+                'score_min': 0.22,
+                'score_max': 0.28,
+                'group_size': 4,
+                'score_std_error': 0.012909944487358063,
+                'score_median_error_normal': 0.016180215937964166,
+                'ci_lower': 0.22,
+                'ci_upper': 0.28,
+            },
+            {
+                'base_lr': 0.001,
+                'p.exponent': 0.1022,
+                'p.warmup_steps': 155.49,
+                'xid_history': (82345,),
+                'score_mean': 0.28,
+                'score_median': 0.28,
+                'score_median_error': (
+                    np.float64(0.014401937285648684),
+                    np.float64(0.26),
+                    np.float64(0.3),
+                ),
+                'score_std': 0.019999999999999976,
+                'score_min': 0.26,
+                'score_max': 0.3,
+                'group_size': 3,
+                'score_std_error': 0.011547005383792502,
+                'score_median_error_normal': 0.014472025091165335,
+                'ci_lower': 0.26,
+                'ci_upper': 0.3,
+            },
+        ]),
+        'p.warmup_steps': pd.DataFrame([
+            {
+                'base_lr': 0.001,
+                'p.exponent': 0.1022,
+                'p.warmup_steps': 155.49,
+                'xid_history': (82345,),
+                'score_mean': 0.28,
+                'score_median': 0.28,
+                'score_median_error': (
+                    np.float64(0.014401937285648684),
+                    np.float64(0.26),
+                    np.float64(0.3),
+                ),
+                'score_std': 0.019999999999999976,
+                'score_min': 0.26,
+                'score_max': 0.3,
+                'group_size': 3,
+                'score_std_error': 0.011547005383792502,
+                'score_median_error_normal': 0.014472025091165335,
+                'ci_lower': 0.26,
+                'ci_upper': 0.3,
+            },
+        ]),
+    })
+
+    expected_sweep_df_list.append({
+        'p.exponent': pd.DataFrame([
+            {
+                'base_lr': 0.004,
+                'p.exponent': 0.06672,
+                'p.warmup_steps': 209.092,
+                'xid_history': (52345,),
+                'score_mean': 0.25,
+                'score_median': 0.25,
+                'score_median_error': (
+                    np.float64(0.015050726608278553),
+                    np.float64(0.22),
+                    np.float64(0.28),
+                ),
+                'score_std': 0.025819888974716126,
+                'score_min': 0.22,
+                'score_max': 0.28,
+                'group_size': 4,
+                'score_std_error': 0.012909944487358063,
+                'score_median_error_normal': 0.016180215937964166,
+                'ci_lower': 0.22,
+                'ci_upper': 0.28,
+            },
+        ]),
+        'p.warmup_steps': pd.DataFrame([
+            {
+                'base_lr': 0.004,
+                'p.exponent': 0.06672,
+                'p.warmup_steps': 209.092,
+                'xid_history': (52345,),
+                'score_mean': 0.25,
+                'score_median': 0.25,
+                'score_median_error': (
+                    np.float64(0.015050726608278553),
+                    np.float64(0.22),
+                    np.float64(0.28),
+                ),
+                'score_std': 0.025819888974716126,
+                'score_min': 0.22,
+                'score_max': 0.28,
+                'group_size': 4,
+                'score_std_error': 0.012909944487358063,
+                'score_median_error_normal': 0.016180215937964166,
+                'ci_lower': 0.22,
+                'ci_upper': 0.28,
+            },
+        ]),
+    })
+
+    total_df, sweep_dfs_list = pandas_util.extract_sweeps_from_results(
+        df,
+        initial_params_df,
+        ci_config={
+            'return_ci': True,
+            'confidence_level': 0.95,
+            'n_resamples': 10000,
+        },
+    )
+
+    # Check total dataframe
+    pd_testing.assert_frame_equal(
+        expected_total_df, total_df, check_exact=False, rtol=1e-2, atol=1e-3
+    )
+
+    # Check sweep df list
+    self.assertLen(sweep_dfs_list, len(expected_sweep_df_list))
+    for expected_sweep_dict, actual_sweep_dict in zip(
+        expected_sweep_df_list, sweep_dfs_list
+    ):
+      # Check that key lists are the same in each dictionary
+      self.assertSequenceEqual(
+          expected_sweep_dict.keys(), actual_sweep_dict.keys()
+      )
+      for param in expected_sweep_dict.keys():
+        print('Checking param:', param)
+        pd_testing.assert_frame_equal(
+            expected_sweep_dict[param],
+            actual_sweep_dict[param],
+            check_exact=False,
+            rtol=1e-2,
+            atol=1e-3,
+        )
 
 
 if __name__ == '__main__':
