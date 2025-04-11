@@ -16,11 +16,11 @@
 """Callback for computing gradient statistics given set of params.
 """
 
-
+import functools
 import itertools
 import os
 
-import flax
+import flax.linen as nn
 from init2winit import base_callback
 from init2winit import checkpoint
 from init2winit.dataset_lib import data_utils
@@ -41,10 +41,10 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
                hps,
                callback_config,
                train_dir,
-               rng):
+               rng,
+               mesh):
     del optimizer_state
     del optimizer_update_fn
-    del batch_stats
 
     self.dataset = dataset
     self.model = model
@@ -52,6 +52,7 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
     self.callback_config = callback_config
     self.rng = rng
     self.save_path = os.path.join(train_dir, 'gradient_statistics/')
+    self.mesh = mesh
 
     self.num_batches_in_training_epoch = (
         self.hps.train_size // self.hps.batch_size
@@ -64,7 +65,6 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
 
     self.num_updates = 0
 
-    @jax.jit
     def update(params, batch, batch_stats, dropout_rng):
       def opt_cost(params):
         return self.model.training_cost(
@@ -77,11 +77,24 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
       grad_fn = jax.value_and_grad(opt_cost, has_aux=True)
       _, grad = grad_fn(params)
 
-      grad = jax.lax.pmean(grad, axis_name='batch')
       return grad
 
-    self.pmapped_update = jax.pmap(
-        update, axis_name='batch', in_axes=(0, 0, 0, None))
+    params_sharding = jax.tree_util.tree_map(
+        lambda x: x.sharding, params
+    )
+    batch_stats_sharding = nn.get_sharding(batch_stats, self.mesh)
+
+    self.jitted_update = jax.jit(
+        update,
+        in_shardings=(
+            params_sharding,
+            jax.sharding.NamedSharding(
+                self.mesh, jax.sharding.PartitionSpec('devices')),
+            batch_stats_sharding,
+            None
+        ),
+        out_shardings=(params_sharding)
+    )
 
   def run_eval(self, params, batch_stats, optimizer_state, global_step):
     """Computes gradient statistics from mini batches over full training data.
@@ -90,16 +103,18 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
     train_iter = itertools.islice(
         self.dataset.train_iterator_fn(), self.num_batches_in_training_epoch
     )
-    unreplicated_params = flax.jax_utils.unreplicate(params)
 
-    grad_sum = jax.tree.map(jnp.zeros_like, unreplicated_params)
-    grad_squared_sum = jax.tree.map(jnp.zeros_like, unreplicated_params)
+    grad_sum = jax.tree.map(jnp.zeros_like, params)
+    grad_squared_sum = jax.tree.map(jnp.zeros_like, params)
     self.num_updates = 0
 
+    make_global_array_fn = functools.partial(
+        data_utils.make_global_array, mesh=self.mesh
+    )
+
     for batch in train_iter:
-      sharded_batch = data_utils.shard(batch)
-      grads = self.pmapped_update(params, sharded_batch, batch_stats, self.rng)
-      grads = flax.jax_utils.unreplicate(grads)
+      sharded_batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+      grads = self.jitted_update(params, sharded_batch, batch_stats, self.rng)
 
       grad_sum = jax.tree_util.tree_map(
           lambda g_sum, g: g_sum + g, grad_sum, grads
@@ -111,20 +126,20 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
 
       self.num_updates += 1
 
-    self.grad_mean = jax.tree_util.tree_map(
+    grad_mean = jax.tree_util.tree_map(
         lambda g_sum: g_sum / self.num_updates, grad_sum
     )
-    self.grad_std = jax.tree_util.tree_map(
+    grad_std = jax.tree_util.tree_map(
         lambda g_squared, g_mean: jnp.sqrt(  # pylint: disable=g-long-lambda
             g_squared / self.num_updates - g_mean**2
         ),
         grad_squared_sum,
-        self.grad_mean,
+        grad_mean,
     )
 
     state = dict(
-        grad_std=self.grad_std,
-        grad_mean=self.grad_mean,
+        grad_std=jax.device_get(grad_std),
+        grad_mean=jax.device_get(grad_mean),
         step=global_step
     )
 
