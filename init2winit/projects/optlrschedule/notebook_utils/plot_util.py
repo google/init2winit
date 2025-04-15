@@ -772,6 +772,7 @@ def make_single_descent_plot(
   minor_tick_size = plot_config.get('minor_tick_size', 14)
   title_fontsize = plot_config.get('title_fontsize', 18)
   legend_fontsize = plot_config.get('legend_fontsize', 11)
+  score_name = plot_config.get('score_name', 'Train error')
 
   param_name = sweep_param[2:]
   # New axis if needed
@@ -780,7 +781,8 @@ def make_single_descent_plot(
 
   color = 'C0'
   ax.set_xlabel(param_name, fontsize=x_label_fontsize)
-  ax.set_ylabel('Train error (median)', color=color, fontsize=y_label_fontsize)
+  ax.set_ylabel(f'{score_name} (median)',
+                color=color, fontsize=y_label_fontsize)
   yerr = [
       sorted_sweep_df['score_median'] - sorted_sweep_df['ci_lower'],
       sorted_sweep_df['ci_upper'] - sorted_sweep_df['score_median'],
