@@ -333,6 +333,13 @@ class Wikitext103Transformer(BaseWorkload):
       tx = optax.inject_hyperparams(optax.adam)(
           learning_rate=0.0, b1=beta_1, b2=beta_2
       )
+    elif optimizer_name.lower() == 'adamw':
+      beta_1 = self.config['optimizer_config']['beta1']
+      beta_2 = self.config['optimizer_config']['beta2']
+      weight_decay = self.config['optimizer_config']['weight_decay']
+      tx = optax.inject_hyperparams(optax.adamw)(
+          learning_rate=0.0, b1=beta_1, b2=beta_2, weight_decay=weight_decay
+      )
     elif optimizer_name.lower() == 'sgd':
       tx = optax.inject_hyperparams(optax.sgd)(learning_rate=0.0)
     elif optimizer_name.lower() == 'momentumsgd':
