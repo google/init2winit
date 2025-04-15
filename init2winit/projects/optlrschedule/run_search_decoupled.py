@@ -124,6 +124,7 @@ def score_schedules(
     data_rng: jax.Array,
     schedules: np.ndarray,  # shape (num_schedules, num_training_steps)
     params_rngs: jax.Array,  # shape (num_schedules,)
+    reuse_data_rng_across_chunks: bool,
     ) -> dict[str, np.ndarray]:
   """Score schedules in chunks of num_parallel_schedules schedules at a time.
 
@@ -133,6 +134,12 @@ def score_schedules(
     data_rng: random key to use for training data sampling.
     schedules: array of schedules to score.
     params_rngs: array of random keys to use for model initialization.
+    reuse_data_rng_across_chunks: if True, use the same data rng for all chunks.
+      If False, use a different data rng for each chunk. Results will only be
+      exactly equivalent to the un-chunked version if the data_rng is reused
+      across chunks. However, we would otherwise prefer to change the data_rng
+      as frequently as possible.
+
   Returns:
     dict[str, np.ndarray]: dictionary of results, keyed by metric name. Each
     result is an array of shape (num_schedules,).
@@ -145,12 +152,14 @@ def score_schedules(
     chunk_start = c * num_parallel_schedules
     chunk_end = (c + 1) * num_parallel_schedules
     logging.info('Starting chunk %d of %d', c, num_chunks)
+    if reuse_data_rng_across_chunks:
+      chunk_data_rng = data_rng
+    else:
+      chunk_data_rng = jax.random.fold_in(data_rng, c)
     _, chunk_results = workload.train_and_evaluate_models(
         schedules[chunk_start:chunk_end],
         params_rngs[chunk_start:chunk_end],
-        # Intentional reuse of data_rng to make results equivalent to the
-        # un-chunked version.
-        data_rng,
+        chunk_data_rng,
     )
     for k, v in chunk_results.items():
       full_results[k][chunk_start:chunk_end] = np.asarray(v)
@@ -179,6 +188,14 @@ def main(argv: Sequence[str]) -> None:
   )
   search_config = config.search_config
   scoring_metric = search_config['scoring_metric']
+  # TODO(gdahl): remove this check once any configs we care about are updated.
+  if 'reuse_data_rng_across_chunks' not in search_config:
+    raise ValueError(
+        'reuse_data_rng_across_chunks must be specified. Add'
+        ' `config.search_config.reuse_data_rng_across_chunks = True` to the'
+        ' config file to reproduce the old behavior.'
+    )
+  reuse_data_rng_across_chunks = search_config['reuse_data_rng_across_chunks']
 
   # Set writer to None for OSS
   # pylint: disable=unused-variable
@@ -246,6 +263,7 @@ def main(argv: Sequence[str]) -> None:
         data_rng,
         schedules,
         params_rngs,
+        reuse_data_rng_across_chunks,
     )
     logging.info('execution_time: %f', execution_time)
     scores = results[scoring_metric]
