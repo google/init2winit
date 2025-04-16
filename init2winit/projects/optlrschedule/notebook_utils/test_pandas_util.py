@@ -879,6 +879,124 @@ class TestPandasUtil(absltest.TestCase):
             atol=1e-3,
         )
 
+  def test_med_dkw_std_fn(self):
+    """Tests the DKW inequality based median statistics measurement."""
+    # Data, with some NaN and inf values
+    values = np.array(
+        [0.5, np.inf, 0.3, 0.1, 0.6, np.nan, 0.01, 0.2, 0.3, 0.4, 0.99, 0.001]
+    )
+    n = len(values)
+    nan_val = 0.2
+    clean_values = np.array(
+        [0.5, nan_val, 0.3, 0.1, 0.6, nan_val, 0.01, 0.2, 0.3, 0.4, 0.99, 0.001]
+    )
+
+    # Manual quantile calculation
+
+    confidence = 0.4
+    alpha = 1 - confidence
+    eps = np.sqrt(np.log(2 / alpha) / (2 * n))
+    f_lb = 0.5 - eps
+    f_ub = 0.5 + eps
+    lb_idx = int(np.floor(f_lb * n))
+    ub_idx = int(np.floor(f_ub * n))
+    expected_lb = np.sort(clean_values)[lb_idx]
+    expected_ub = np.sort(clean_values)[ub_idx]
+    expected_std_err = (expected_ub - expected_lb) / 2
+
+    # Test error with NaNs and nan_val=None (via quantile_ci_from_dkw)
+    with self.assertRaisesRegex(
+        ValueError, 'All values must be finite if nan_val is None.'
+    ):
+      pandas_util.med_dkw_std(values, confidence_level=confidence)
+
+    # Test std err only
+
+    # Nan val to clean
+    std_err = pandas_util.med_dkw_std(
+        values, confidence_level=confidence, nan_val=nan_val
+    )
+    # Precleaned data
+    std_err_clean = pandas_util.med_dkw_std(
+        clean_values, confidence_level=confidence
+    )
+
+    self.assertAlmostEqual(std_err, expected_std_err)
+    self.assertAlmostEqual(std_err_clean, expected_std_err)
+
+    # Test return_ci = True
+    std_err_ci, lb_ci, ub_ci = pandas_util.med_dkw_std(
+        values, return_ci=True, confidence_level=confidence, nan_val=nan_val
+    )
+    self.assertAlmostEqual(std_err_ci, expected_std_err)
+    self.assertAlmostEqual(lb_ci, expected_lb)
+    self.assertAlmostEqual(ub_ci, expected_ub)
+
+    # Test bound failures with large bands
+    values_small = np.array([
+        1,
+        5,
+        10,
+    ])  # not many data points
+    high_confidence = 1 - 1e-6  # very high confidence
+    with self.assertRaisesRegex(ValueError, 'No upper bound for quantile 0.5'):
+      pandas_util.med_dkw_std(values_small, confidence_level=high_confidence)
+
+  def test_add_seed_stats_with_med_dkw(self):
+    """Tests that add_seed_stats uses med_dkw_std correctly."""
+    initial_df = pd.DataFrame([
+        {'base_lr': 0.001, 'p.warmup_steps': 50, 'p.exponent': 1, 'score': 10},
+        {'base_lr': 0.001, 'p.warmup_steps': 50, 'p.exponent': 1, 'score': 12},
+        {'base_lr': 0.001, 'p.warmup_steps': 50, 'p.exponent': 1, 'score': 11},
+        {'base_lr': 0.001, 'p.warmup_steps': 50, 'p.exponent': 1, 'score': 15},
+        {'base_lr': 0.001, 'p.warmup_steps': 50, 'p.exponent': 1, 'score': 9},
+        {'base_lr': 0.002, 'p.warmup_steps': 55, 'p.exponent': 2, 'score': 13},
+        {'base_lr': 0.002, 'p.warmup_steps': 55, 'p.exponent': 2, 'score': 100},
+        {'base_lr': 0.002, 'p.warmup_steps': 55, 'p.exponent': 2, 'score': 101},
+    ])
+
+    expected_df = pd.DataFrame([
+        {
+            'base_lr': 0.001,
+            'p.warmup_steps': 50,
+            'p.exponent': 1,
+            'score_mean': 11.4,
+            'score_median': 11.0,
+            'score_median_error': 1.0,
+            'score_std': 2.302172887,
+            'score_min': 9,
+            'score_max': 15,
+            'group_size': 5,
+            'score_std_error': 1.029563,
+            'score_median_error_normal': 1.2903659,
+        },
+        {
+            'base_lr': 0.002,
+            'p.warmup_steps': 55,
+            'p.exponent': 2,
+            'score_mean': 71.33333,
+            'score_median': 100.0,
+            'score_median_error': 44.0,
+            'score_std': 50.5206229,
+            'score_min': 13,
+            'score_max': 101,
+            'group_size': 3,
+            'score_std_error': 29.16801,
+            'score_median_error_normal': 36.55679,
+        },
+    ])
+
+    output_df = pandas_util.add_seed_stats_columns(
+        initial_df,
+        ci_config={'median_bound_type': 'dkw', 'confidence_level': 0.1},
+    )
+
+    print('output_df', output_df.to_dict('records'))
+
+    pd_testing.assert_frame_equal(
+        expected_df, output_df, check_exact=False, rtol=1e-4, atol=1e-5
+    )
+
 
 if __name__ == '__main__':
   absltest.main()

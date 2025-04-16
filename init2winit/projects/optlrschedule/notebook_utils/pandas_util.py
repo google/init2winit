@@ -50,6 +50,102 @@ def med_boot_std(
     return boot_obj.standard_error
 
 
+def quantile_ci_from_dkw(
+    values: np.typing.ArrayLike,
+    quantile: float,
+    confidence_level: float = 0.95,
+    nan_val: float | None = None,
+) -> tuple[float, float]:
+  """Compute quantile confidence interval upper bound using DKW inequality.
+
+  Uses the Dvoretzky–Kiefer–Wolfowitz–Massart (DKW) inequality to compute a
+  conservative confidence interval and variance estimate for the median of a
+  population. Only relies on the assumption that values are bounded. Similar in
+  spirit to Kolmogorov–Smirnov (KS) statistic.
+
+  Args:
+    values: List or array of values for median confidence interval computation.
+    quantile: Quantile to compute the confidence interval for, between 0 and 1.
+    confidence_level: Confidence level for the confidence interval.
+    nan_val: Value to use for NaN values. If none, all elements in values must
+      be finite.
+
+  Returns:
+    Tuple of (lower bound, upper bound) of the confidence interval.
+  """
+  if quantile < 0 or quantile > 1:
+    raise ValueError('quantile must be between 0 and 1.')
+  values = np.array(values)
+  if nan_val is None:
+    if np.any(np.isnan(values)):
+      raise ValueError('All values must be finite if nan_val is None.')
+  else:
+    values[~np.isfinite(values)] = nan_val
+  alpha = 1 - confidence_level
+  num_values = len(values)
+  eps = np.sqrt(
+      np.log(2 / alpha) / (2 * num_values)
+  )  # band size, in probability
+
+  # Upper and lower bound CDF values
+  F_ub = quantile + eps  # pylint: disable=invalid-name
+  F_lb = quantile - eps  # pylint: disable=invalid-name
+
+  # If bounds are outside of [0, 1], then CI estimate is unbounded in at least
+  # one direction.
+  if F_ub >= 1:
+    raise ValueError(f'No upper bound for quantile {quantile}')
+  if F_lb <= 0:
+    raise ValueError('No lower bound for quantile {quantile}')
+
+  # Get CDF values corresponding to band limits
+  sorted_values = np.sort(values)
+  if F_ub > 1:
+    ub_val = float('inf')
+  else:
+    ub_idx = int(np.floor(F_ub * num_values))  # Smallest value which is > F_ub
+    ub_val = sorted_values[ub_idx]
+  if F_lb < 0:
+    lb_val = float('-inf')
+  else:
+    lb_idx = int(np.floor(F_lb * num_values))  # Largest value which is < F_lb
+    lb_val = sorted_values[lb_idx]
+
+  return (lb_val, ub_val)  # CI values
+
+
+def med_ci_from_dkw(values, confidence_level=0.95, nan_val=None):
+  """Compute median confidence interval using DKW inequality."""
+  return quantile_ci_from_dkw(values, 0.5, confidence_level, nan_val)
+
+
+def med_dkw_std(values, return_ci=False, confidence_level=0.95, nan_val=None):
+  """Compute median statistics using DKW inequality.
+
+  Uses DKW inequality to compute confidence interval for the population median.
+  Length of interval is returned as standard error for analysis and plotting.
+
+  Args:
+    values: List of values to compute the median confidence interval for.
+    return_ci: If True, return the confidence interval as a tuple of (lower,
+      upper) bounds. Otherwise, return the standard error.
+    confidence_level: Confidence level for the confidence interval.
+    nan_val: Value to use for NaN values. If none, all elements in values must
+      be finite.
+
+  Returns:
+    If return_ci is True, returns a tuple of (lower bound, upper bound) of the
+      confidence interval. Otherwise, returns the standard error. Standard error
+      is computed as (upper bound - lower bound)/2.
+  """
+  lb, ub = quantile_ci_from_dkw(values, 0.5, confidence_level, nan_val)
+  std_err = (ub - lb) / 2
+  if return_ci:
+    return (std_err, lb, ub)
+  else:
+    return std_err
+
+
 def reduce_to_best_base_lrs(input_df: pd.DataFrame):
   """Reduce to the best base_lr for each set of parameters.
 
@@ -130,14 +226,24 @@ def add_seed_stats_columns(
         ),
     )
   else:
-    # Boostrap standard deviation function
-    def med_boot_std_apply_fn(values):
-      return med_boot_std(values, **ci_config)
+    med_bound_type = ci_config.pop('median_bound_type', 'bootstrap')
+    if med_bound_type == 'bootstrap':
+      # Boostrap standard deviation function
+      def med_std_apply_fn(values):
+        return med_boot_std(values, **ci_config)
+
+    elif med_bound_type == 'dkw':
+      # DKW standard deviation function
+      def med_std_apply_fn(values):
+        return med_dkw_std(values, **ci_config)
+
+    else:
+      raise ValueError(f'Unsupported median type: {med_bound_type}')
 
     agg_dict = dict(
         score_mean=('score', 'mean'),
         score_median=('score', 'median'),
-        score_median_error=('score', med_boot_std_apply_fn),
+        score_median_error=('score', med_std_apply_fn),
         score_std=('score', 'std'),
         score_min=('score', 'min'),
         score_max=('score', 'max'),
@@ -313,6 +419,8 @@ def extract_sweeps_from_results(
         'return_ci': True,
         'confidence_level': 0.95,
     }
+  elif not isinstance(ci_config, dict):
+    raise ValueError('ci_config must be a dictionary or "default".')
   if not ci_config.get('return_ci', False):
     raise ValueError('Median calculation must return CI for plotting.')
 
