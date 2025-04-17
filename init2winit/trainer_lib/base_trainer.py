@@ -17,6 +17,7 @@
 
 import abc
 import functools
+import itertools
 import multiprocessing
 import os.path
 import time
@@ -24,22 +25,16 @@ import time
 from absl import logging
 from init2winit import callbacks
 from init2winit import checkpoint
-from init2winit import schedules
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import gradient_accumulator
-from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import trainer_utils
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
 import numpy as np
 import optax
 import orbax.checkpoint as orbax_checkpoint
-
-
-NamedSharding = jax.sharding.NamedSharding
-P = jax.sharding.PartitionSpec
 
 
 class BaseTrainer(metaclass=abc.ABCMeta):
@@ -209,144 +204,44 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._evaluate_batch_jitted = jax.jit(
         self._model.evaluate_batch, donate_argnums=(2,))
 
-    # Numpy array of range(0, local_device_count) to send to each device to be
-    # folded into the RNG inside each train step to get a unique per-device RNG.
-    self._local_device_indices = np.arange(jax.local_device_count())
-
     # Creates a 1-d mesh with all devices available globally.
     self._mesh = model_utils.get_default_mesh()
 
   def wait_until_orbax_checkpointer_finished(self):
     self._orbax_checkpointer.wait_until_finished()
 
-  def shard(self,
-            unreplicated_params,
-            unreplicated_optimizer_state,
-            unreplicated_batch_stats,
-            unreplicated_metrics_state,
-            optimizer_init_fn):
-    """Shards the training state pytrees and returns the sharded pytrees."""
-    params_sharding = self._model.get_sharding(unreplicated_params, self._mesh)
-
-    _, params = data_utils.shard_pytree(
-        unreplicated_params, self._mesh, params_sharding
-    )
-
-    # Because we always store checkpoint without sharding annotations, we
-    # restore it on host and then shard it. In order to propagate
-    # annotations from params to the optimizer state, we need to initialize the
-    # optimizer state with the sharded params and then device_put
-    # the unreplicated_optimizer_state using the resulting annotations.
-    optimizer_state_sharding = jax.tree_util.tree_map(
-        lambda x: x.sharding
-        if isinstance(x.sharding, NamedSharding)
-        else NamedSharding(self._mesh, P()),
-        optimizer_init_fn(params),
-    )
-
-    _, optimizer_state = data_utils.shard_pytree(
-        unreplicated_optimizer_state, self._mesh, optimizer_state_sharding
-    )
-
-    batch_stats_sharding, batch_stats = data_utils.shard_pytree(
-        unreplicated_batch_stats, self._mesh)
-    metrics_state_sharding, metrics_state = data_utils.shard_pytree(
-        unreplicated_metrics_state, self._mesh)
-
-    return (params, params_sharding,
-            optimizer_state, optimizer_state_sharding,
-            batch_stats, batch_stats_sharding,
-            metrics_state, metrics_state_sharding)
-
-  def setup_and_maybe_restore(self, init_rng, data_rng, trainer_update_fn):
-    """Set up member variables for training and maybe Restore training state.
-
-    This function is useful when setting up all the objects necessary for
-    training in init2winit (such as in a colab). _setup_and_maybe_restore is
-    likely more useful for subclasses to call, because it takes all the returned
-    values from this and sets them as the proper member variables.
-
-    Args:
-      init_rng: the jax PRNGKey used for initialization. Should be *the same*
-        across hosts!
-      data_rng: the jax PRNGKey used for dataset randomness. Should be
-        *different* across hosts!
-      trainer_update_fn: the function for updating the model. If None, this will
-        skip jitting the update function.
-
-    Returns:
-      A long tuple of the following:
-        lr_fn: the learning rate schedule fn.
-        optimizer_update_fn: the optax update fn.
-        metrics_update_fn: the optional metrics update fn.
-        metrics_summary_fn: the optional metrics summary fn.
-        (optimizer_state_sharding, optimizer_state): the replicated optimizer
-        state and corresponding sharding annotations.
-        (params_sharding, params): the replicated model parameters and
-        corresponding sharding annotations.
-        (batch_stats_sharding, batch_stats): the replicated (optional) model
-        batch statistics and corresponding sharding annotations.
-        (metrics_state_sharding, metrics_state) : the replicated metric states
-        and corresponding sharding annotations.
-        global_step: the global step to start training at.
-        sum_train_cost: the sum of the train costs.
-        preemption_count: the number of times training has been preempted.
-    """
-    # Note that self._global_step refers to the number of gradients
-    # calculations, not the number of model updates. This means when using
-    # gradient accumulation, one must supply configs where the number of steps
-    # are in units of gradient calculations, not model updates, and in post
-    # processing one must divide self._global_step by grad_accum_step_multiplier
-    # to get the number of updates.
-    #
-    # The learning rate schedules are all defined in number of model updates. In
-    # order to make it clearer in the logging that the LR does not change across
-    # gradient calculations (only when updates are applied), we stretch the
-    # learning rate schedule by the number of gradient calculations per weight
-    # update.
-    stretch_factor = 1
-    if self._hps.get('total_accumulated_batch_size') is not None:
-      stretch_factor = (
-          self._hps.total_accumulated_batch_size // self._hps.batch_size)
-    lr_fn = schedules.get_schedule_fn(
-        self._hps.lr_hparams,
-        max_training_updates=self._num_train_steps // stretch_factor,
-        stretch_factor=stretch_factor)
-
-    unreplicated_params, unreplicated_batch_stats = self._model.initialize(
-        self._initializer,
-        self._hps,
-        init_rng,
-        self._init_logger,)
-
+  def log_model_info(self, unreplicated_params):
     if jax.process_index() == 0:
       utils.log_pytree_shape_and_statistics(unreplicated_params)
       logging.info('train_size: %d,', self._hps.train_size)
       utils.tabulate_model(self._model, self._hps)
 
-    optimizer_init_fn, optimizer_update_fn = optimizers.get_optimizer(
-        self._hps, self._model, batch_axis_name='batch')
-    unreplicated_optimizer_state = optimizer_init_fn(unreplicated_params)
+  def maybe_restore_from_checkpoint(self,
+                                    unreplicated_optimizer_state,
+                                    unreplicated_params,
+                                    unreplicated_batch_stats,
+                                    unreplicated_metrics_state):
+    """Restores the training state from a checkpoint if one exists.
 
-    unreplicated_metrics_state = None
-    metrics_update_fn = None
-    metrics_summary_fn = None
-    if self._training_metrics_config is not None:
-      (metrics_init_fn, metrics_update_fn,
-       metrics_summary_fn) = make_training_metrics(
-           self._num_train_steps, self._hps, **self._training_metrics_config)
-      unreplicated_metrics_state = metrics_init_fn(unreplicated_params,
-                                                   unreplicated_batch_stats)
+    Args:
+      unreplicated_optimizer_state: (optax.OptState) The optimizer state.
+      unreplicated_params: (FrozenDict) The model parameters.
+      unreplicated_batch_stats: (FrozenDict) The batch statistics.
+      unreplicated_metrics_state: (FrozenDict) The metrics state.
 
+    Returns:
+      The restored optimizer state, parameters, batch statistics, and metrics
+      state.
+    """
     (
         unreplicated_optimizer_state,
         unreplicated_params,
         unreplicated_batch_stats,
         unreplicated_metrics_state,
-        global_step,
-        sum_train_cost,
-        preemption_count,
-        is_restored,
+        self._global_step,
+        self._sum_train_cost,
+        self._preemption_count,
+        self._is_restored,
     ) = checkpoint.maybe_restore_checkpoint(
         unreplicated_optimizer_state,
         unreplicated_params,
@@ -357,29 +252,29 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         orbax_checkpointer=self._orbax_checkpointer,
     )
 
-    (
-        params,
-        params_sharding,
-        optimizer_state,
-        optimizer_state_sharding,
-        batch_stats,
-        batch_stats_sharding,
-        metrics_state,
-        metrics_state_sharding,
-    ) = self.shard(
-        unreplicated_params,
+    if self._is_restored:
+      self._preemption_count += 1
+
+    return (
         unreplicated_optimizer_state,
+        unreplicated_params,
         unreplicated_batch_stats,
         unreplicated_metrics_state,
-        optimizer_init_fn,
     )
 
-    if is_restored:
-      preemption_count += 1
+  def setup_data_loader(self, data_rng, global_step):
+    """Sets up the data loader.
 
+    Args:
+      data_rng: (jax.random.PRNGKey) Rng seed used in data shuffling.
+      global_step: (int) The global step.
+
+    Returns:
+      The dataset.
+    """
     # TODO(gdahl): Is there any harm in removing the test and always folding-in
     # global step, even when training fresh at step 0?
-    if is_restored and not self._hps.get('use_grain'):
+    if self._is_restored and not self._hps.get('use_grain'):
       # Fold the restored step into the dataset RNG so that we will get a
       # different shuffle each time we restore, so that we do not repeat a
       # previous dataset ordering again after restoring. This is not the only
@@ -418,115 +313,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           hps=self._hps,
       )
 
-    if self._hps.get('grad_clip') and self._hps.get('total_accumulated_batch_size'):  # pylint: disable=line-too-long
-      raise NotImplementedError(
-          'Gradient clipping is not supported when gradient accumulation is'
-          ' performed internally by the optimizer.'
-      )
-
-    if trainer_update_fn is not None:
-      update_fn = functools.partial(
-          trainer_update_fn,
-          training_cost=self._model.training_cost,
-          grad_clip=self._hps.get('grad_clip'),
-          optimizer_update_fn=optimizer_update_fn,
-          metrics_update_fn=metrics_update_fn)
-
-      # We donate optimizer_state, params and batch_stats in jitted computation.
-      # This helps reduce memory usage as outputs corresponding to these inputs
-      # arguments can re-use the memory.
-      update_jitted = jax.jit(
-          update_fn,
-          donate_argnums=(0, 1, 2),
-          in_shardings=(
-              optimizer_state_sharding,
-              params_sharding,
-              batch_stats_sharding,
-              metrics_state_sharding,
-              NamedSharding(self._mesh, jax.sharding.PartitionSpec('devices')),
-              None, None, None, None
-          ),
-          out_shardings=(
-              optimizer_state_sharding,
-              params_sharding,
-              batch_stats_sharding,
-              None,
-              metrics_state_sharding,
-              None,
-              None,
-          ),
-      )
-    else:
-      update_jitted = None
-
-    return (
-        lr_fn,
-        optimizer_update_fn,
-        metrics_update_fn,
-        metrics_summary_fn,
-        optimizer_state,
-        optimizer_state_sharding,
-        params,
-        params_sharding,
-        batch_stats,
-        batch_stats_sharding,
-        metrics_state,
-        metrics_state_sharding,
-        global_step,
-        sum_train_cost,
-        preemption_count,
-        dataset,
-        update_jitted)
-
-  def _setup_and_maybe_restore(
-      self, init_rng, data_rng, callback_rng, trainer_update_fn):
-    """Calls setup_and_maybe_restore and sets return values as member vars.
-
-    Has the side-effects of:
-      - setting self._lr_fn
-      - initializing and maybe restoring self._optimizer_update_fn.
-      - initializing and maybe restoring self._metrics_update_fn.
-      - initializing and maybe restoring self._metrics_summary_fn.
-      - initializing and maybe restoring self._optimizer_state.
-      - initializing and maybe restoring self._params.
-      - initializing and maybe restoring self._batch_stats.
-      - initializing and maybe restoring self._metrics_state.
-      - initializing and maybe restoring self._global_step.
-      - initializing and maybe restoring self._sum_train_cost.
-      - initializing and maybe restoring self._preemption_count.
-      - setting self._dataset
-      - setting self._update_jitted
-      - setting self._eval_callbacks
-
-    Args:
-      init_rng: the jax PRNGKey used for initialization. Should be *the same*
-        across hosts!
-      data_rng: the jax PRNGKey used for dataset randomness. Should be
-        *different* across hosts!
-      callback_rng: the jax PRNGKey used for eval callbacks. Should be
-        *different* across hosts!
-      trainer_update_fn: the function for updating the model. If None, this will
-        skip jitting the update function.
-    """
-    (self._lr_fn,
-     self._optimizer_update_fn,
-     self._metrics_update_fn,
-     self._metrics_summary_fn,
-     self._optimizer_state,
-     self._optimizer_state_sharding,
-     self._params,
-     self._params_sharding,
-     self._batch_stats,
-     self._batch_stats_sharding,
-     self._metrics_state,
-     self._metrics_state_sharding,
-     self._global_step,
-     self._sum_train_cost,
-     self._preemption_count,
-     self._dataset,
-     self._update_jitted) = self.setup_and_maybe_restore(
-         init_rng, data_rng, trainer_update_fn)
-    self._eval_callbacks = self._setup_eval_callbacks(callback_rng)
+    return dataset
 
   def _save(self, checkpoint_dir, max_to_keep=1):
     if utils.use_mock_tpu_backend():
@@ -693,10 +480,244 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._prev_eval_step = self._global_step
     return report
 
-  @abc.abstractmethod
+  def setup_and_maybe_restore(self, init_rng, data_rng, callback_rng):
+    """Sets up the training state and restores from checkpoint if one exists.
+
+    Args:
+      init_rng: (jax.random.PRNGKey) Rng seed used in model initialization.
+      data_rng: (jax.random.PRNGKey) Rng seed used in data shuffling.
+      callback_rng: (jax.random.PRNGKey) Rng seed used in callback functions.
+    """
+    unreplicated_params, unreplicated_batch_stats = self._model.initialize(
+        self._initializer,
+        self._hps,
+        init_rng,
+        self._init_logger,
+    )
+
+    self.log_model_info(unreplicated_params)
+
+    unreplicated_optimizer_state, self._optimizer_update_fn = (
+        self.init_optimizer_state(
+            self._model,
+            unreplicated_params,
+            unreplicated_batch_stats,
+            self._hps,
+            init_rng,
+        )
+    )
+
+    unreplicated_metrics_state = None
+    self._metrics_update_fn = None
+    self._metrics_summary_fn = None
+
+    if self._training_metrics_config is not None:
+      (metrics_init_fn, self._metrics_update_fn,
+       self._metrics_summary_fn) = make_training_metrics(
+           self._num_train_steps, self._hps, **self._training_metrics_config)
+      unreplicated_metrics_state = metrics_init_fn(unreplicated_params,
+                                                   unreplicated_batch_stats)
+
+    (
+        unreplicated_optimizer_state,
+        unreplicated_params,
+        unreplicated_batch_stats,
+        unreplicated_metrics_state,
+    ) = self.maybe_restore_from_checkpoint(
+        unreplicated_optimizer_state,
+        unreplicated_params,
+        unreplicated_batch_stats,
+        unreplicated_metrics_state,
+    )
+
+    (
+        self._params,
+        self._params_sharding,
+        self._optimizer_state,
+        self._optimizer_state_sharding,
+        self._batch_stats,
+        self._batch_stats_sharding,
+        self._metrics_state,
+        self._metrics_state_sharding,
+    ) = self.shard(
+        unreplicated_params,
+        unreplicated_optimizer_state,
+        unreplicated_batch_stats,
+        unreplicated_metrics_state,
+    )
+
+    self._dataset = self.setup_data_loader(data_rng, self._global_step)
+    self._eval_callbacks = self._setup_eval_callbacks(callback_rng)
+
   def train(self):
     """All training logic.
 
+    The only side-effects are:
+      - Initiailizing self._time_at_prev_eval_end to the current time
+      - Initiailizing self._prev_eval_step to the current step
+
     Yields:
       metrics: A dictionary of all eval metrics from the given epoch.
+    """
+    # NOTE: the initialization RNG should *not* be per-host, as this will create
+    # different sets of weights per host. However, all other RNGs should be
+    # per-host.
+    # TODO(znado,gilmer,gdahl): implement replicating the same initialization
+    # across hosts.
+    rng, init_rng = jax.random.split(self._rng)
+    rng = jax.random.fold_in(rng, jax.process_index())
+    rng, data_rng = jax.random.split(rng)
+    rng, callback_rng = jax.random.split(rng)
+
+    if jax.process_index() == 0:
+      logging.info('Let the training begin!')
+      logging.info('Dataset input shape: %r', self._hps.input_shape)
+      logging.info('Hyperparameters: %s', self._hps)
+
+    self.setup_and_maybe_restore(init_rng, data_rng, callback_rng)
+
+    if jax.process_index() == 0:
+      trainer_utils.log_message(
+          'Starting training!', self._logging_pool, self._xm_work_unit)
+
+    train_iter = itertools.islice(
+        self._dataset.train_iterator_fn(),
+        self._num_train_steps,
+    )
+
+
+    if self._data_selector:
+      train_iter = self._data_selector(
+          train_iter,
+          optimizer_state=self._optimizer_state,
+          params=self._params,
+          batch_stats=self._batch_stats,
+          hps=self._hps,
+          global_step=self._global_step,
+          constant_base_rng=rng)
+
+    start_time = time.time()
+    start_step = self._global_step
+
+    # NOTE(dsuo): record timestamps for run_time since we don't have a duration
+    # that we can increment as in the case of train_time.
+    self._time_at_prev_eval_end = start_time
+    self._prev_eval_step = self._global_step
+
+    if self._global_step in self._checkpoint_steps:
+      self._save(self._checkpoint_dir, max_to_keep=None)
+
+    make_global_array_fn = functools.partial(
+        data_utils.make_global_array, mesh=self._mesh
+    )
+
+    for _ in range(start_step, self._num_train_steps):
+      with jax.profiler.StepTraceAnnotation(
+          'train', step_num=self._global_step
+      ):
+        # NOTE(dsuo): to properly profile each step, we must include batch
+        # creation in the StepTraceContext (as opposed to putting `train_iter`
+        # directly in the top-level for loop).
+        batch = next(train_iter)
+        batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+
+        # It looks like we are reusing an rng key, but we aren't.
+        (
+            self._optimizer_state,
+            self._params,
+            self._batch_stats,
+            self._metrics_state,
+            self._sum_train_cost,
+            self._grad_norm,
+            self._update_norm,
+        ) = self.update_params(
+            self._model,
+            self._hps,
+            (self._optimizer_state, self._optimizer_update_fn),
+            self._params,
+            self._batch_stats,
+            self._metrics_state,
+            batch,
+            self._global_step,
+            rng,
+            self._sum_train_cost,
+        )
+        self._global_step += 1
+        if self._global_step in self._checkpoint_steps:
+          self._save(self._checkpoint_dir, max_to_keep=None)
+
+        lr = trainer_utils.fetch_learning_rate(self._optimizer_state)
+        # TODO(gdahl, gilmer): consider moving this test up.
+        # NB: Since this test is after we increment self._global_step, having 0
+        # in eval_steps does nothing.
+        if trainer_utils.should_eval(
+            self._global_step, self._eval_frequency, self._eval_steps):
+          try:
+            report = self._eval(lr, start_step, start_time)
+          except utils.TrainingDivergedError as e:
+            self.wait_until_orbax_checkpointer_finished()
+            raise utils.TrainingDivergedError(
+                f'divergence at step {self._global_step}'
+            ) from e
+          yield report
+          if self._check_early_stopping(report):
+            return
+
+    # Always log and checkpoint on host 0 at the end of training.
+    # If we moved where in the loop body evals happen then we would not need
+    # this test.
+    if self._prev_eval_step != self._num_train_steps:
+      report = self._eval(lr, start_step, start_time)
+      yield report
+    # To make sure the last checkpoint was correctly saved.
+    self.wait_until_orbax_checkpointer_finished()
+
+  @abc.abstractmethod
+  def init_optimizer_state(self, model, params, batch_stats, hps, rng):
+    """Sets up the train state."""
+
+  @abc.abstractmethod
+  def shard(self, unreplicated_params, unreplicated_optimizer_state,
+            unreplicated_batch_stats, unreplicated_metrics_state):
+    """Shard the training state.
+
+    Args:
+      unreplicated_params: (FrozenDict) The model parameters.
+      unreplicated_optimizer_state: (optax.OptState) The optimizer state.
+      unreplicated_batch_stats: (FrozenDict) The batch statistics.
+      unreplicated_metrics_state: (FrozenDict) The metrics state.
+
+    Yields:
+      The sharded training state.
+    """
+
+  @abc.abstractmethod
+  def update_params(self,
+                    model,
+                    hps,
+                    optimizer_state,
+                    params,
+                    batch_stats,
+                    metrics_state,
+                    batch,
+                    global_step,
+                    rng,
+                    sum_train_cost):
+    """All training logic.
+
+    Args:
+      model: (BaseModel) Model object to be trained.
+      hps: (dict) Model, initialization and training hparams.
+      optimizer_state: (optax.OptState) The optimizer state.
+      params: (FrozenDict) The model parameters.
+      batch_stats: (FrozenDict) The batch statistics.
+      metrics_state: (FrozenDict) The metrics state.
+      batch: (dict) The batch of data.
+      global_step: (int) The global step.
+      rng: (jax.random.PRNGKey) Rng seed used in model initialization and data
+        shuffling.
+      sum_train_cost: (float) The sum of the training cost.
+
+    Yields:
+      The updated training state.
     """

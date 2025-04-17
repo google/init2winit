@@ -14,21 +14,24 @@
 # limitations under the License.
 
 """Standard trainer for the init2winit project."""
-import functools
-import itertools
-import time
 
-from absl import logging
-from init2winit import utils
+import functools
+
+from init2winit import schedules
 from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
+from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import base_trainer
 from init2winit.trainer_lib import trainer_utils
 import jax
 import jax.numpy as jnp
 import optax
 
+
 _GRAD_CLIP_EPS = 1e-6
+
+NamedSharding = jax.sharding.NamedSharding
+P = jax.sharding.PartitionSpec
 
 
 def update(
@@ -121,133 +124,156 @@ def update(
                                           new_batch_stats)
 
   return (new_optimizer_state, new_params, new_batch_stats,
-          running_train_cost + cost_value, new_metrics_state,
+          new_metrics_state, running_train_cost + cost_value,
           grad_norm, update_norm)
 
 
 class Trainer(base_trainer.BaseTrainer):
   """Default trainer."""
 
-  def train(self):
-    """All training logic.
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self._optimizer_init_fn = None
 
-    The only side-effects are:
-      - Initiailizing self._time_at_prev_eval_end to the current time
-      - Initiailizing self._prev_eval_step to the current step
+  def init_optimizer_state(self, model, params, batch_stats, hps, rng):
+    del batch_stats
+    del rng
 
-    Yields:
-      metrics: A dictionary of all eval metrics from the given epoch.
-    """
-    # NOTE: the initialization RNG should *not* be per-host, as this will create
-    # different sets of weights per host. However, all other RNGs should be
-    # per-host.
-    # TODO(znado,gilmer,gdahl): implement replicating the same initialization
-    # across hosts.
-    rng, init_rng = jax.random.split(self._rng)
-    rng = jax.random.fold_in(rng, jax.process_index())
-    rng, data_rng = jax.random.split(rng)
-    rng, callback_rng = jax.random.split(rng)
+    stretch_factor = 1
+    if hps.get('total_accumulated_batch_size') is not None:
+      stretch_factor = (hps.total_accumulated_batch_size // hps.batch_size)
 
-    if jax.process_index() == 0:
-      logging.info('Let the training begin!')
-      logging.info('Dataset input shape: %r', self._hps.input_shape)
-      logging.info('Hyperparameters: %s', self._hps)
+    self._lr_fn = schedules.get_schedule_fn(
+        self._hps.lr_hparams,
+        max_training_updates=self._num_train_steps // stretch_factor,
+        stretch_factor=stretch_factor)
 
-    self._setup_and_maybe_restore(init_rng, data_rng, callback_rng, update)
-
-    if jax.process_index() == 0:
-      trainer_utils.log_message(
-          'Starting training!', self._logging_pool, self._xm_work_unit)
-
-    train_iter = itertools.islice(
-        self._dataset.train_iterator_fn(),
-        self._num_train_steps,
-    )
-
-
-    if self._data_selector:
-      train_iter = self._data_selector(
-          train_iter,
-          optimizer_state=self._optimizer_state,
-          params=self._params,
-          batch_stats=self._batch_stats,
-          hps=self._hps,
-          global_step=self._global_step,
-          constant_base_rng=rng)
-
-    start_time = time.time()
-    start_step = self._global_step
-
-    # NOTE(dsuo): record timestamps for run_time since we don't have a duration
-    # that we can increment as in the case of train_time.
-    self._time_at_prev_eval_end = start_time
-    self._prev_eval_step = self._global_step
-
-    if self._global_step in self._checkpoint_steps:
-      self._save(self._checkpoint_dir, max_to_keep=None)
-
-    make_global_array_fn = functools.partial(
-        data_utils.make_global_array, mesh=self._mesh
-    )
-
-    for _ in range(start_step, self._num_train_steps):
-      with jax.profiler.StepTraceAnnotation(
-          'train', step_num=self._global_step
-      ):
-        # NOTE(dsuo): to properly profile each step, we must include batch
-        # creation in the StepTraceContext (as opposed to putting `train_iter`
-        # directly in the top-level for loop).
-        batch = next(train_iter)
-        batch = jax.tree_util.tree_map(make_global_array_fn, batch)
-
-        lr = self._lr_fn(self._global_step)
-        # It looks like we are reusing an rng key, but we aren't.
-        (
-            self._optimizer_state,
-            self._params,
-            self._batch_stats,
-            self._sum_train_cost,
-            self._metrics_state,
-            self._grad_norm,
-            self._update_norm,
-        ) = self._update_jitted(
-            self._optimizer_state,
-            self._params,
-            self._batch_stats,
-            self._metrics_state,
-            batch,
-            self._global_step,
-            lr,
-            rng,
-            self._sum_train_cost,
+    self._optimizer_init_fn, self._optimizer_update_fn = (
+        optimizers.get_optimizer(
+            hps, model, batch_axis_name='batch'
         )
-        self._global_step += 1
-        if self._global_step in self._checkpoint_steps:
-          self._save(self._checkpoint_dir, max_to_keep=None)
+    )
+    unreplicated_optimizer_state = self._optimizer_init_fn(params)
+    return unreplicated_optimizer_state, self._optimizer_update_fn
 
-        lr = trainer_utils.fetch_learning_rate(self._optimizer_state)
-        # TODO(gdahl, gilmer): consider moving this test up.
-        # NB: Since this test is after we increment self._global_step, having 0
-        # in eval_steps does nothing.
-        if trainer_utils.should_eval(
-            self._global_step, self._eval_frequency, self._eval_steps):
-          try:
-            report = self._eval(lr, start_step, start_time)
-          except utils.TrainingDivergedError as e:
-            self.wait_until_orbax_checkpointer_finished()
-            raise utils.TrainingDivergedError(
-                f'divergence at step {self._global_step}'
-            ) from e
-          yield report
-          if self._check_early_stopping(report):
-            return
+  def update_params(self,
+                    model,
+                    hps,
+                    optimizer_state,
+                    params,
+                    batch_stats,
+                    metrics_state,
+                    batch,
+                    global_step,
+                    rng,
+                    sum_train_cost):
+    """Sets up the train state."""
 
-    # Always log and checkpoint on host 0 at the end of training.
-    # If we moved where in the loop body evals happen then we would not need
-    # this test.
-    if self._prev_eval_step != self._num_train_steps:
-      report = self._eval(lr, start_step, start_time)
-      yield report
-    # To make sure the last checkpoint was correctly saved.
-    self.wait_until_orbax_checkpointer_finished()
+    optimizer_state, _ = optimizer_state
+
+    update_fn = functools.partial(
+        update,
+        training_cost=model.training_cost,
+        grad_clip=hps.get('grad_clip'),
+        optimizer_update_fn=self._optimizer_update_fn,
+        metrics_update_fn=self._metrics_update_fn,
+    )
+
+    # We donate optimizer_state, params and batch_stats in jitted computation.
+    # This helps reduce memory usage as outputs corresponding to these inputs
+    # arguments can re-use the memory.
+    update_jitted = jax.jit(
+        update_fn,
+        donate_argnums=(0, 1, 2),
+        in_shardings=(
+            self._optimizer_state_sharding,
+            self._params_sharding,
+            self._batch_stats_sharding,
+            self._metrics_state_sharding,
+            NamedSharding(self._mesh, jax.sharding.PartitionSpec('devices')),
+            None, None, None, None
+        ),
+        out_shardings=(
+            self._optimizer_state_sharding,
+            self._params_sharding,
+            self._batch_stats_sharding,
+            self._metrics_state_sharding,
+            None,
+            None,
+            None,
+        ),
+    )
+
+    lr = self._lr_fn(global_step)
+    # It looks like we are reusing an rng key, but we aren't.
+    (
+        optimizer_state,
+        params,
+        batch_stats,
+        metrics_state,
+        sum_train_cost,
+        grad_norm,
+        update_norm,
+    ) = update_jitted(
+        optimizer_state,
+        params,
+        batch_stats,
+        self._metrics_state,
+        batch,
+        global_step,
+        lr,
+        rng,
+        sum_train_cost,
+    )
+
+    return (
+        optimizer_state,
+        params,
+        batch_stats,
+        metrics_state,
+        sum_train_cost,
+        grad_norm,
+        update_norm,
+    )
+
+  def shard(
+      self,
+      unreplicated_params,
+      unreplicated_optimizer_state,
+      unreplicated_batch_stats,
+      unreplicated_metrics_state,
+  ):
+    """Shards the training state pytrees and returns the sharded pytrees."""
+    params_sharding = self._model.get_sharding(unreplicated_params, self._mesh)
+
+    _, params = data_utils.shard_pytree(
+        unreplicated_params, self._mesh, params_sharding
+    )
+
+    # Because we always store checkpoint without sharding annotations, we
+    # restore it on host and then shard it. In order to propagate
+    # annotations from params to the optimizer state, we need to initialize the
+    # optimizer state with the sharded params and then device_put
+    # the unreplicated_optimizer_state using the resulting annotations.
+    optimizer_state_sharding = jax.tree_util.tree_map(
+        lambda x: x.sharding
+        if isinstance(x.sharding, NamedSharding)
+        else NamedSharding(self._mesh, P()),
+        self._optimizer_init_fn(params),
+    )
+
+    _, optimizer_state = data_utils.shard_pytree(
+        unreplicated_optimizer_state, self._mesh, optimizer_state_sharding
+    )
+
+    batch_stats_sharding, batch_stats = data_utils.shard_pytree(
+        unreplicated_batch_stats, self._mesh)
+    metrics_state_sharding, metrics_state = data_utils.shard_pytree(
+        unreplicated_metrics_state, self._mesh)
+
+    return (params, params_sharding,
+            optimizer_state, optimizer_state_sharding,
+            batch_stats, batch_stats_sharding,
+            metrics_state, metrics_state_sharding)
+
 
