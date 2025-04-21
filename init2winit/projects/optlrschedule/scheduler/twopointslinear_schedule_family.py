@@ -134,7 +134,7 @@ class TwoPointLinearScheduleFamily(base_schedule_family.WarmupScheduleFamily):
 
   def list_schedule_parameter_keys(self) -> list[str]:
     """List the keys of the schedule parameters."""
-    return ['p.x0', 'p.y0', 'p.y1', 'p.delta_x1', 'p.delta_x2', 'p.delta_y2']
+    return ['p.x0', 'p.y1', 'p.delta_x1', 'p.delta_x2', 'p.delta_y2']
 
   def get_schedule(
       self,
