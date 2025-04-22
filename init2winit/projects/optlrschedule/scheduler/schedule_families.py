@@ -19,6 +19,7 @@ from typing import Any
 
 from init2winit.projects.optlrschedule.scheduler import constant_schedule_family
 from init2winit.projects.optlrschedule.scheduler import cosine_schedule_family
+from init2winit.projects.optlrschedule.scheduler import cosine_standard_schedule_family
 from init2winit.projects.optlrschedule.scheduler import rex_schedule_family
 from init2winit.projects.optlrschedule.scheduler import smooth_nonmonotonic_schedule_family
 from init2winit.projects.optlrschedule.scheduler import sqrt_schedule_family
@@ -27,6 +28,9 @@ from init2winit.projects.optlrschedule.scheduler import twopointsspline_schedule
 
 SCHEDULE_FAMILIES = {
     'cosine': cosine_schedule_family.CosineScheduleFamily,
+    'cosine_standard': (
+        cosine_standard_schedule_family.CosineStandardScheduleFamily
+    ),
     'constant': constant_schedule_family.ConstantScheduleFamily,
     'twopointsspline': (
         twopointsspline_schedule_family.TwoPointSplineScheduleFamily

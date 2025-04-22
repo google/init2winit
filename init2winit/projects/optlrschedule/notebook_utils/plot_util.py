@@ -37,19 +37,10 @@ LINE_WIDTH = 3.0  # Unified line width for all plots
 LR_SCHEDULE_NAME_MAP = {
     'constant': 'Constant',
     'cosine': 'Generalized Cosine',
+    'cosine_standard': 'Cosine w/exponent=1.0',
     'twopointslinear': 'Two-Point Linear',
     'twopointsspline': 'Two-Point Spline',
     'smoothnonmonotonic': 'Smooth Non-Monotonic',
-    'sqrt': 'Square Root',
-    'rex': 'Generalized REX',
-}
-
-LR_SCHEDULE_SHORT_NAME_MAP = {
-    'con': 'Constant',
-    'cos': 'Generalized Cosine',
-    'tpl': 'Two-Point Linear',
-    'tps': 'Two-Point Spline',
-    'snm': 'Smooth Non-Monotonic',
     'sqrt': 'Square Root',
     'rex': 'Generalized REX',
 }
