@@ -125,6 +125,7 @@ def score_schedules(
     schedules: np.ndarray,  # shape (num_schedules, num_training_steps)
     params_rngs: jax.Array,  # shape (num_schedules,)
     reuse_data_rng_across_chunks: bool,
+    pbar=None,
     ) -> dict[str, np.ndarray]:
   """Score schedules in chunks of num_parallel_schedules schedules at a time.
 
@@ -139,6 +140,7 @@ def score_schedules(
       exactly equivalent to the un-chunked version if the data_rng is reused
       across chunks. However, we would otherwise prefer to change the data_rng
       as frequently as possible.
+    pbar: Optional tqdm-style progress bar to update.
 
   Returns:
     dict[str, np.ndarray]: dictionary of results, keyed by metric name. Each
@@ -163,6 +165,9 @@ def score_schedules(
     )
     for k, v in chunk_results.items():
       full_results[k][chunk_start:chunk_end] = np.asarray(v)
+    if pbar is not None:
+      chunk_size = len(params_rngs[chunk_start:chunk_end])
+      pbar.update(chunk_size)
   return dict(full_results)
 
 
@@ -229,8 +234,9 @@ def main(argv: Sequence[str]) -> None:
   logging.info('%d schedules/generation in chunks of %d schedules at a time',
                num_schedule_per_gen,
                num_parallel_schedules)
-  for gen_idx in range(search_config['num_generation']):
-
+  num_generations = search_config['num_generation']
+  pbar = None
+  for gen_idx in range(num_generations):
     logging.info('generation: %d', gen_idx)
 
     # Fold in generation index to rng to generate new keys for each generation
@@ -264,6 +270,7 @@ def main(argv: Sequence[str]) -> None:
         schedules,
         params_rngs,
         reuse_data_rng_across_chunks,
+        pbar
     )
     logging.info('execution_time: %f', execution_time)
     scores = results[scoring_metric]
@@ -298,6 +305,9 @@ def main(argv: Sequence[str]) -> None:
 
     del results, schedules, augmented_schedule_params
     del data_rng, param_rng, schedules_rng, params_rngs
+
+  if pbar is not None:
+    pbar.close()
 
 
   multihost_utils.sync_global_devices('end of program')
