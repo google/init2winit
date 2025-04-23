@@ -105,6 +105,7 @@ class CheckpointTest(parameterized.TestCase):
         state2,
         orbax_checkpointer=self.orbax_checkpointer,
         max_to_keep=1)
+    self.orbax_checkpointer.wait_until_finished()
     dir_contents = gfile.glob(os.path.join(self.test_dir, '*'))
     # Due to Flax Orbax migration using Orbax AsyncCheckpointer will result
     # in 'max_to_keep + 1' files.
