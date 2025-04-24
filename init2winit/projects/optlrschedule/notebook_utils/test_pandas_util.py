@@ -32,6 +32,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.01,
             'score': 0.08060000091791153,
+            'xid_history': (98654,),
             'p.exponent': 0.39098358154296875,
             'p.warmup_steps': 144.92100524902344,
             'rank': 0,
@@ -48,6 +49,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.01,
             'score': 0.06371999531984329,
+            'xid_history': (12347,),
             'p.exponent': 0.39098358154296875,
             'p.warmup_steps': 144.92100524902344,
             'rank': 0,
@@ -64,6 +66,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.02,
             'score': 0.07231999933719635,
+            'xid_history': (12347,),
             'p.exponent': 0.39098358154296875,
             'p.warmup_steps': 144.92100524902344,
             'rank': 0,
@@ -80,6 +83,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.02,
             'score': 0.07005999982357025,
+            'xid_history': (12347,),
             'p.exponent': 0.39098358154296875,
             'p.warmup_steps': 144.92100524902344,
             'rank': 0,
@@ -96,6 +100,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.03,
             'score': 0.05663999915122986,
+            'xid_history': (12347,),
             'p.exponent': 0.39098358154296875,
             'p.warmup_steps': 144.92100524902344,
             'rank': 0,
@@ -112,6 +117,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.1,
             'score': 0.10099999606609344,
+            'xid_history': (12347,),
             'p.exponent': 0.16678667068481445,
             'p.warmup_steps': 73.85269165039062,
             'rank': 19,
@@ -128,6 +134,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.1,
             'score': 0.06651999801397324,
+            'xid_history': (12347,),
             'p.exponent': 0.16678667068481445,
             'p.warmup_steps': 73.85269165039062,
             'rank': 19,
@@ -144,6 +151,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.2,
             'score': 0.07333999872207642,
+            'xid_history': (12347,),
             'p.exponent': 0.16678667068481445,
             'p.warmup_steps': 73.85269165039062,
             'rank': 19,
@@ -160,6 +168,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.2,
             'score': 0.07727999985218048,
+            'xid_history': (12347,),
             'p.exponent': 0.16678667068481445,
             'p.warmup_steps': 73.85269165039062,
             'rank': 19,
@@ -176,6 +185,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.3,
             'score': 0.08311999589204788,
+            'xid_history': (12347,),
             'p.exponent': 0.16678667068481445,
             'p.warmup_steps': 73.85269165039062,
             'rank': 19,
@@ -190,11 +200,15 @@ class TestPandasUtil(absltest.TestCase):
             'original_score_median_error': 0.006053280409385888,
         },
     ])
-    reduced_df = pandas_util.reduce_to_best_base_lrs(df)
-    expected_df = pd.DataFrame([
+    reduced_df_no_xid_grouping = pandas_util.reduce_to_best_base_lrs(df)
+    reduced_df_with_xid_grouping = pandas_util.reduce_to_best_base_lrs(
+        df, group_on_xid_history=True
+    )
+    expected_df_no_xid_grouping = pd.DataFrame([
         {
             'base_lr': 0.03,
             'score': 0.05663999915122986,
+            'xid_history': (12347,),
             'p.exponent': 0.39098358154296875,
             'p.warmup_steps': 144.92100524902344,
             'rank': 0,
@@ -211,6 +225,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.2,
             'score': 0.07333999872207642,
+            'xid_history': (12347,),
             'p.exponent': 0.16678667068481445,
             'p.warmup_steps': 73.85269165039062,
             'rank': 19,
@@ -227,6 +242,7 @@ class TestPandasUtil(absltest.TestCase):
         {
             'base_lr': 0.2,
             'score': 0.07727999985218048,
+            'xid_history': (12347,),
             'p.exponent': 0.16678667068481445,
             'p.warmup_steps': 73.85269165039062,
             'rank': 19,
@@ -241,9 +257,51 @@ class TestPandasUtil(absltest.TestCase):
             'original_score_median_error': 0.006053280409385888,
         },
     ])
-    print(reduced_df)
-    print(expected_df)
-    pd_testing.assert_frame_equal(reduced_df, expected_df, check_exact=True)
+
+    expected_df_with_xid_grouping = pd.DataFrame([
+        {
+            'base_lr': 0.01,
+            'score': 0.08060000091791153,
+            'xid_history': (98654,),
+            'p.exponent': 0.39098358154296875,
+            'p.warmup_steps': 144.92100524902344,
+            'rank': 0,
+            'original_score_mean': 0.059893997758626936,
+            'original_score_median': 0.057329997420310974,
+            'original_score_std': 0.007927739898221917,
+            'original_score_min': 0.05209999904036522,
+            'original_score_max': 0.0737999975681305,
+            'original_group_size': 10,
+            'original_score_std_error': 0.002642579966073972,
+            'original_score_median_error_normal': 0.0033119828304672243,
+            'original_score_median_error': 0.0033119828304672243,
+        },
+    ])
+    expected_df_with_xid_grouping = pd.concat(
+        [
+            expected_df_with_xid_grouping,
+            expected_df_no_xid_grouping,
+        ],
+        ignore_index=True,
+    )
+
+    print('No XID Grouping:')
+    print(reduced_df_no_xid_grouping)
+    print(expected_df_no_xid_grouping)
+    pd_testing.assert_frame_equal(
+        reduced_df_no_xid_grouping,
+        expected_df_no_xid_grouping,
+        check_exact=True,
+    )
+
+    print('With XID Grouping:')
+    print(reduced_df_with_xid_grouping)
+    print(expected_df_with_xid_grouping)
+    pd_testing.assert_frame_equal(
+        reduced_df_with_xid_grouping,
+        expected_df_with_xid_grouping,
+        check_exact=True,
+    )
 
   def test_reduce_to_best_base_lrs_search(self):
     """Test reduce_to_best_base_lrs function on run_search.py-style input."""

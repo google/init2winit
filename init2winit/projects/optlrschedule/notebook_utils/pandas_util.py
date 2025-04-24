@@ -146,7 +146,8 @@ def med_dkw_std(values, return_ci=False, confidence_level=0.95, nan_val=None):
     return std_err
 
 
-def reduce_to_best_base_lrs(input_df: pd.DataFrame):
+def reduce_to_best_base_lrs(input_df: pd.DataFrame,
+                            group_on_xid_history: bool = False):
   """Reduce to the best base_lr for each set of parameters.
 
   This function retains only the records that have the base_lr with the lowest
@@ -156,6 +157,7 @@ def reduce_to_best_base_lrs(input_df: pd.DataFrame):
   Args:
       input_df (pd.DataFrame): Input DataFrame containing configurations and
         scores.
+      group_on_xid_history (bool): If True, group by xid history as well.
 
   Returns:
       pd.DataFrame: DataFrame containing the best base_lr for each set of
@@ -168,27 +170,35 @@ def reduce_to_best_base_lrs(input_df: pd.DataFrame):
     3. Extract from the original DataFrame only the records that match the
     selected (param, base_lr) combination.
   """
-  param_cols = [col for col in input_df.columns
-                if base_schedule_family.is_schedule_param(col)]
+  distinct_shape_cols = [
+      col
+      for col in input_df.columns
+      if base_schedule_family.is_schedule_param(col)
+  ]
+  if group_on_xid_history:
+    # Same params, different xid history treated as distinct shapes
+    distinct_shape_cols.append('xid_history')
 
-  # Step 1: Calculate the median score for each (param + base_lr) combination
+  # Step 1: Calculate the median score for each
+  # (param + base_lr + [optional] xid_history) combination.
+  groupby_cols = distinct_shape_cols + ['base_lr']
   candidate_medians = (
-      input_df.groupby(param_cols + ['base_lr'])['score'].median().reset_index()
+      input_df.groupby(groupby_cols)['score'].median().reset_index()
   )
   candidate_medians.rename(columns={'score': 'score_median'}, inplace=True)
 
-  # Step 2: For each set of parameters, select the base_lr with the lowest
-  # median score.
+  # Step 2: For each set of parameters (and optionally, xid history),
+  # select the base_lr with the lowest median score.
   best_candidates = (
       candidate_medians.sort_values('score_median')
-      .groupby(param_cols)
+      .groupby(distinct_shape_cols)
       .first()
       .reset_index()
   )
 
   # Step 3: Extract from the original DataFrame only the records that match the
-  # selected (param, base_lr) combination.
-  result = input_df.merge(best_candidates, on=param_cols + ['base_lr'])
+  # selected (param, [optional] xid_history, base_lr) combination.
+  result = input_df.merge(best_candidates, on=groupby_cols)
   return result.drop(columns=['score_median'])
 
 
