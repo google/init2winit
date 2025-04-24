@@ -134,6 +134,7 @@ class Trainer(base_trainer.BaseTrainer):
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
     self._optimizer_init_fn = None
+    self._update_jitted = None
 
   def init_optimizer_state(self, model, params, batch_stats, hps, rng):
     del batch_stats
@@ -171,38 +172,39 @@ class Trainer(base_trainer.BaseTrainer):
 
     optimizer_state, _ = optimizer_state
 
-    update_fn = functools.partial(
-        update,
-        training_cost=model.training_cost,
-        grad_clip=hps.get('grad_clip'),
-        optimizer_update_fn=self._optimizer_update_fn,
-        metrics_update_fn=self._metrics_update_fn,
-    )
+    if not self._update_jitted:
+      update_fn = functools.partial(
+          update,
+          training_cost=model.training_cost,
+          grad_clip=hps.get('grad_clip'),
+          optimizer_update_fn=self._optimizer_update_fn,
+          metrics_update_fn=self._metrics_update_fn,
+      )
 
-    # We donate optimizer_state, params and batch_stats in jitted computation.
-    # This helps reduce memory usage as outputs corresponding to these inputs
-    # arguments can re-use the memory.
-    update_jitted = jax.jit(
-        update_fn,
-        donate_argnums=(0, 1, 2),
-        in_shardings=(
-            self._optimizer_state_sharding,
-            self._params_sharding,
-            self._batch_stats_sharding,
-            self._metrics_state_sharding,
-            NamedSharding(self._mesh, jax.sharding.PartitionSpec('devices')),
-            None, None, None, None
-        ),
-        out_shardings=(
-            self._optimizer_state_sharding,
-            self._params_sharding,
-            self._batch_stats_sharding,
-            self._metrics_state_sharding,
-            None,
-            None,
-            None,
-        ),
-    )
+      # We donate optimizer_state, params and batch_stats in jitted computation.
+      # This helps reduce memory usage as outputs corresponding to these inputs
+      # arguments can re-use the memory.
+      self._update_jitted = jax.jit(
+          update_fn,
+          donate_argnums=(0, 1, 2),
+          in_shardings=(
+              self._optimizer_state_sharding,
+              self._params_sharding,
+              self._batch_stats_sharding,
+              self._metrics_state_sharding,
+              NamedSharding(self._mesh, jax.sharding.PartitionSpec('devices')),
+              None, None, None, None
+          ),
+          out_shardings=(
+              self._optimizer_state_sharding,
+              self._params_sharding,
+              self._batch_stats_sharding,
+              self._metrics_state_sharding,
+              None,
+              None,
+              None,
+          ),
+      )
 
     lr = self._lr_fn(global_step)
     # It looks like we are reusing an rng key, but we aren't.
@@ -214,7 +216,7 @@ class Trainer(base_trainer.BaseTrainer):
         sum_train_cost,
         grad_norm,
         update_norm,
-    ) = update_jitted(
+    ) = self._update_jitted(
         optimizer_state,
         params,
         batch_stats,
