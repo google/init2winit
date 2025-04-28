@@ -268,7 +268,7 @@ def get_librispeech_datasets(
     hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng
 ):
   """Helper method to get train, eval and test sets for librispeech data."""
-  train_ds_builder = tfds.builder('librispeech')
+  train_ds_builder = tfds.builder('librispeech/2.1.1')
 
   file_shuffle_seed, data_shuffle_seed = jax.random.split(shuffle_rng, 2)
 
