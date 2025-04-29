@@ -56,7 +56,7 @@ flags.DEFINE_integer(
 
 
 def get_schedules_and_augmented_params(
-    schedule_family_config: dict[str, float],
+    schedule_family: base_schedule_family.BaseScheduleFamily,
     schedule_params: list[dict[str, float]],
     base_lr_list: list[float],
     num_training_steps: int,
@@ -65,7 +65,7 @@ def get_schedules_and_augmented_params(
   """Get schedules and augmented schedule parameters.
 
   Args:
-    schedule_family_config: configuration for schedule family.
+    schedule_family: configuration for schedule family.
     schedule_params: list of schedule parameters.
     base_lr_list: list of base learning rates.
     num_training_steps: number of training steps.
@@ -80,12 +80,6 @@ def get_schedules_and_augmented_params(
     augmented_schedule_params: list of augmented schedule parameters.
     schedule_group_keys: array of schedule group keys.
   """
-
-  schedule_family_class = schedule_families.get_schedule_family_class(
-      str(schedule_family_config['schedule_type'])
-  )
-  schedule_family = schedule_family_class(schedule_family_config)
-
   num_schedule_per_gen = (
       len(schedule_params) * len(base_lr_list) * num_param_rngs
   )
@@ -186,11 +180,27 @@ def main(argv: Sequence[str]) -> None:
   logging.info('worker_id: %d', worker_id)
   workload_config = config.workload_config
   schedule_family_config = config.schedule_family_config
+  schedule_family_class = schedule_families.get_schedule_family_class(
+      schedule_family_config['schedule_type']
+  )
+  schedule_family = schedule_family_class(schedule_family_config)
   schedule_param_range = (
       base_schedule_family.add_prefix_to_schedule_param_dict(
           config.schedule_param_range
       )
   )
+  allowed_schedule_param_keys = set(
+      schedule_family.list_schedule_parameter_keys()
+  )
+  if any(
+      k not in allowed_schedule_param_keys for k in schedule_param_range
+  ):
+    raise ValueError(
+        'Some schedule parameters in the schedule_param_range are not valid for'
+        ' the schedule family. Please double check the config.'
+        f'search space: {schedule_param_range}, '
+        f'allowed keys: {allowed_schedule_param_keys}'
+    )
   search_config = config.search_config
   scoring_metric = search_config['scoring_metric']
   # TODO(gdahl): remove this check once any configs we care about are updated.
@@ -254,7 +264,7 @@ def main(argv: Sequence[str]) -> None:
     # Augment schedule parameters with base learning rate
     (schedules, augmented_schedule_params, _) = (
         get_schedules_and_augmented_params(
-            schedule_family_config,
+            schedule_family,
             schedule_params,
             config.base_lr_list,
             config.total_steps,
