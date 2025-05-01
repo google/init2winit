@@ -19,6 +19,7 @@ import io
 from typing import List, Optional
 
 from etils import epath
+import utils as i2wutils  # local file import
 import pandas as pd
 
 
@@ -65,6 +66,52 @@ def load_parquet_file(
 
 
 def load_all_parquet_files(
+    paths: List[str],
+    file_name: Optional[str] = None,
+    *,
+    sort_by: str = 'score',
+    ascending: bool = True,
+    include_provenance: bool = False,
+    num_workers: int = 50,
+) -> pd.DataFrame:
+  """Load and merge all parquet files from different paths.
+
+  Args:
+      paths: List of directory paths.
+      file_name (optional): File name string (default: 'results.parquet')
+      sort_by: Column to sort by (default: 'score').
+      ascending: Sort order (default: True).
+      include_provenance: Whether to include the provenance of the data in the
+        DataFrame (default: False). If set, adds a column 'provenance' to the
+        DataFrame with the path of the file each row came from.
+      num_workers: Number of workers to use for parallel loading (default: 50).
+
+  Returns:
+      Merged pandas DataFrame.
+  """
+  shared_kwargs = {
+      'file_name': file_name,
+      'sort_by': sort_by,
+      'ascending': ascending,
+      'include_provenance': include_provenance,
+  }
+  kwargs_list = []
+  for path in paths:
+    kwargs_list.append({
+        'path': path,
+        **shared_kwargs,
+    })
+  dfs = i2wutils.run_in_parallel(load_parquet_file, kwargs_list, num_workers)
+  if dfs:
+    # Concat will ignore empty DataFrames properly.
+    merged_df = pd.concat(dfs, ignore_index=True)
+    return merged_df
+  else:
+    return pd.DataFrame()
+
+
+# TODO(gdahl): delete this function once we are happy with the parallel version.
+def load_all_parquet_files_sequentially(
     paths: List[str],
     file_name: Optional[str] = None,
     *,
