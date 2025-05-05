@@ -22,7 +22,9 @@ from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import optimizers
 from init2winit.trainer_lib import base_trainer
+from init2winit.trainer_lib import i2w_workload
 from init2winit.trainer_lib import trainer_utils
+from init2winit.trainer_lib.submissions_lib import submissions
 import jax
 import jax.numpy as jnp
 import optax
@@ -137,24 +139,47 @@ class Trainer(base_trainer.BaseTrainer):
     self._update_jitted = None
 
   def init_optimizer_state(self, model, params, batch_stats, hps, rng):
-    del batch_stats
-    del rng
+    if hps.get('algoperf_submission_name', None):
+      print('inside algoperf code path ')
 
-    stretch_factor = 1
-    if hps.get('total_accumulated_batch_size') is not None:
-      stretch_factor = (hps.total_accumulated_batch_size // hps.batch_size)
+      workload = i2w_workload.Init2winitWorkload(model, hps)
+      submission_module = submissions.get_submission_module(
+          hps.algoperf_submission_name
+      )
 
-    self._lr_fn = schedules.get_schedule_fn(
-        self._hps.lr_hparams,
-        max_training_updates=self._num_train_steps // stretch_factor,
-        stretch_factor=stretch_factor)
+      submission_hps = submission_module.map_i2w_hparams_to_algoperf_hparams(
+          hps
+      )
 
-    self._optimizer_init_fn, self._optimizer_update_fn = (
-        optimizers.get_optimizer(
-            hps, model, batch_axis_name='batch'
-        )
-    )
-    unreplicated_optimizer_state = self._optimizer_init_fn(params)
+      (
+          unreplicated_optimizer_state,
+          self._optimizer_init_fn,
+          self._optimizer_update_fn,
+      ) = submission_module.init_optimizer_state(
+          workload, params, batch_stats, submission_hps, rng
+      )
+
+    else:
+      # Init2winit optimizer_lib code path.
+      del batch_stats
+      del rng
+
+      stretch_factor = 1
+      if hps.get('total_accumulated_batch_size') is not None:
+        stretch_factor = (hps.total_accumulated_batch_size // hps.batch_size)
+
+      self._lr_fn = schedules.get_schedule_fn(
+          self._hps.lr_hparams,
+          max_training_updates=self._num_train_steps // stretch_factor,
+          stretch_factor=stretch_factor)
+
+      self._optimizer_init_fn, self._optimizer_update_fn = (
+          optimizers.get_optimizer(
+              hps, model, batch_axis_name='batch'
+          )
+      )
+      unreplicated_optimizer_state = self._optimizer_init_fn(params)
+
     return unreplicated_optimizer_state, self._optimizer_update_fn
 
   def update_params(self,
