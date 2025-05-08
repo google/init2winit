@@ -327,6 +327,12 @@ class Wikitext103Transformer(BaseWorkload):
 
     # Select optimizer based on name
     optimizer_name = self.config['optimizer']
+    weight_decay = self.config['optimizer_config'].get('weight_decay', 0)
+    if weight_decay > 0 and optimizer_name != 'adamw':
+      raise ValueError(
+          'Weight decay is only supported for AdamW optimizer. Set adamw as the'
+          ' optimizer instead.'
+      )
     if optimizer_name.lower() == 'adam':
       beta_1 = self.config['optimizer_config']['beta1']
       beta_2 = self.config['optimizer_config']['beta2']
@@ -336,7 +342,6 @@ class Wikitext103Transformer(BaseWorkload):
     elif optimizer_name.lower() == 'adamw':
       beta_1 = self.config['optimizer_config']['beta1']
       beta_2 = self.config['optimizer_config']['beta2']
-      weight_decay = self.config['optimizer_config']['weight_decay']
       tx = optax.inject_hyperparams(optax.adamw)(
           learning_rate=0.0, b1=beta_1, b2=beta_2, weight_decay=weight_decay
       )
