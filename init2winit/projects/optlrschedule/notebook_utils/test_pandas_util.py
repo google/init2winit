@@ -310,6 +310,13 @@ class TestPandasUtil(absltest.TestCase):
         {
             'generation': 0,
             'base_lr': 0.001,
+            'score': -0.25648000836372375,
+            'p.exponent': 0.10225892066955566,
+            'p.warmup_steps': 155.4968719482422,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.001,
             'score': 0.25648000836372375,
             'p.exponent': 0.10225892066955566,
             'p.warmup_steps': 155.4968719482422,
@@ -379,8 +386,16 @@ class TestPandasUtil(absltest.TestCase):
         },
     ])
 
-    reduced_df = pandas_util.reduce_to_best_base_lrs(df)
-    expected_df = pd.DataFrame([
+    default_reduced_df = pandas_util.reduce_to_best_base_lrs(
+        df,
+    )
+    median_reduced_df = pandas_util.reduce_to_best_base_lrs(
+        df, reduction_statistic='median'
+    )
+    mean_reduced_df = pandas_util.reduce_to_best_base_lrs(
+        df, reduction_statistic='mean'
+    )
+    expected_median_reduction_df = pd.DataFrame([
         {
             'generation': 0,
             'base_lr': 0.002,
@@ -403,7 +418,46 @@ class TestPandasUtil(absltest.TestCase):
             'p.warmup_steps': 209.09278869628906,
         },
     ])
-    pd_testing.assert_frame_equal(reduced_df, expected_df, check_exact=True)
+
+    expected_mean_reduction_df = pd.DataFrame([
+        {
+            'generation': 0,
+            'base_lr': 0.001,
+            'score': -0.25648000836372375,
+            'p.exponent': 0.10225892066955566,
+            'p.warmup_steps': 155.4968719482422,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.001,
+            'score': 0.25648000836372375,
+            'p.exponent': 0.10225892066955566,
+            'p.warmup_steps': 155.4968719482422,
+        },
+        {
+            'generation': 0,
+            'base_lr': 0.001,
+            'score': 0.25562000274658203,
+            'p.exponent': 0.10225892066955566,
+            'p.warmup_steps': 155.4968719482422,
+        },
+        {
+            'generation': 4,
+            'base_lr': 0.3,
+            'score': 0.7,
+            'p.exponent': 0.0667257308959961,
+            'p.warmup_steps': 209.09278869628906,
+        },
+    ])
+    pd_testing.assert_frame_equal(
+        default_reduced_df, expected_median_reduction_df, check_exact=True
+    )
+    pd_testing.assert_frame_equal(
+        median_reduced_df, expected_median_reduction_df, check_exact=True
+    )
+    pd_testing.assert_frame_equal(
+        mean_reduced_df, expected_mean_reduction_df, check_exact=True
+    )
 
   def test_get_all_scores_from_param_list(self):
     """Test get_all_scores_from_param_list function."""
