@@ -23,6 +23,7 @@ from flax import jax_utils
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
 import jax
+from jax.experimental.multihost_utils import process_allgather  # pylint: disable=g-importing-member
 import jax.numpy as jnp
 import numpy as np
 import optax
@@ -179,6 +180,8 @@ def evaluate(
       # `merge` aggregates the metrics across batches.
       metrics = metrics.merge(computed_metrics)
 
+  metrics = jax.device_get(process_allgather(metrics))
+  metrics = jax.tree_util.tree_map(lambda x: x[0] if x.ndim > 0 else x, metrics)
   # For data splits with no data (e.g. Imagenet no test set) no values
   # will appear for that split.
   if metrics is not None:
