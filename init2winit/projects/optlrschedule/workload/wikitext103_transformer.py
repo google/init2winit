@@ -28,11 +28,11 @@ from flax.training import train_state
 from init2winit.model_lib import losses
 from init2winit.model_lib import transformer_lm
 from init2winit.projects.optlrschedule.workload import base_workload
+from init2winit.projects.optlrschedule.workload import optimizers
 from init2winit.projects.optlrschedule.workload.datasets import wikitext_103
 import jax
 from jax import numpy as jnp
 import numpy as np
-import optax
 
 
 PAD_ID = wikitext_103.PAD_ID
@@ -325,32 +325,7 @@ class Wikitext103Transformer(BaseWorkload):
         train=False,
     )
 
-    # Select optimizer based on name
-    optimizer_name = self.config['optimizer']
-    weight_decay = self.config['optimizer_config'].get('weight_decay', 0)
-    if weight_decay > 0 and optimizer_name != 'adamw':
-      raise ValueError(
-          'Weight decay is only supported for AdamW optimizer. Set adamw as the'
-          ' optimizer instead.'
-      )
-    if optimizer_name.lower() == 'adam':
-      beta_1 = self.config['optimizer_config']['beta1']
-      beta_2 = self.config['optimizer_config']['beta2']
-      tx = optax.inject_hyperparams(optax.adam)(
-          learning_rate=0.0, b1=beta_1, b2=beta_2
-      )
-    elif optimizer_name.lower() == 'adamw':
-      beta_1 = self.config['optimizer_config']['beta1']
-      beta_2 = self.config['optimizer_config']['beta2']
-      tx = optax.inject_hyperparams(optax.adamw)(
-          learning_rate=0.0, b1=beta_1, b2=beta_2, weight_decay=weight_decay
-      )
-    elif optimizer_name.lower() == 'sgd':
-      tx = optax.inject_hyperparams(optax.sgd)(learning_rate=0.0)
-    elif optimizer_name.lower() == 'momentumsgd':
-      tx = optax.inject_hyperparams(optax.sgd)(learning_rate=0.0, momentum=0.9)
-    else:
-      raise ValueError(f'Unsupported optimizer: {optimizer_name}')
+    tx = optimizers.get_optimizer_from_config(self.config)
 
     state = train_state.TrainState.create(
         apply_fn=transformer.apply, params=variables['params'], tx=tx
