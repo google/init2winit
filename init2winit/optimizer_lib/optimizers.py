@@ -27,6 +27,7 @@ from init2winit.optimizer_lib import online_newton_step
 from init2winit.optimizer_lib import pax_adafactor
 from init2winit.optimizer_lib import samuel
 from init2winit.optimizer_lib import sharpness_aware_minimization
+from init2winit.optimizer_lib import sla
 from init2winit.optimizer_lib import utils
 import jax
 import optax

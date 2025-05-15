@@ -14,7 +14,6 @@
 # limitations under the License.
 
 """Tests for optimizers."""
-# import os
 import shutil
 import tempfile
 
