@@ -40,6 +40,7 @@ import optax
 
 
 
+
 def sgd(learning_rate, weight_decay, momentum=None, nesterov=False):
   r"""A customizable gradient descent optimizer.
 
@@ -121,10 +122,48 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         eps=hps.opt_hparams.get('eps', 1e-7),
         bias_correction=hps.opt_hparams.get('bias_correction', False),
     )
+  elif hps.optimizer == 'diag_bubbles':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        lora_bubbles.diag_bubbles
+    )(
+        learning_rate=0.0,  # Manually injected on each train step.
+        beta1=hps.opt_hparams.get('beta1', None),
+        beta2=hps.opt_hparams.get('beta2', 0.999),
+        eps=hps.opt_hparams.get('eps', 1e-8),
+        precond_grad_clip=hps.opt_hparams.get('precond_grad_clip', None),
+        nesterov=hps.opt_hparams.get('nesterov', False),
+        bias_correction=hps.opt_hparams.get('bias_correction', True),
+        weight_decay=hps.opt_hparams.get('weight_decay', 1e-4),
+    )
+  elif hps.optimizer == 'lora_bubbles':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        lora_bubbles.scale_by_bubbles
+    )(
+        learning_rate=0.0,  # Manually injected on each train step.
+        weight_decay=hps.opt_hparams.get('weight_decay', 0.01),
+        beta1=hps.opt_hparams.get('beta1', 0.9),
+        beta2=hps.opt_hparams.get('beta2', 0.999),
+        nesterov=hps.opt_hparams.get('nesterov', True),
+        eps=hps.opt_hparams.get('eps', 1e-7),
+        lora_min_steps=hps.opt_hparams.get('lora_min_steps', 100),
+        lora_update_steps=hps.opt_hparams.get('lora_update_steps', 20),
+        lora_rank=hps.opt_hparams.get('lora_rank', 64),
+        grad_rms_threshold=hps.opt_hparams.get('grad_rms_threshold', 10.0),
+        precond_grad_clip=hps.opt_hparams.get('precond_grad_clip', None),
+        bias_correction=hps.opt_hparams.get('bias_correction', True),
+    )
   elif hps.optimizer == 'generic_multi_optimizer':
     param_type_to_optimizer_and_hparams = hps.opt_hparams[
         'param_type_to_optimizer_and_hparams'
     ]
+
+    # With sweeps, we need to be able to modify the hparams at each leaf
+    # We introduce a special dict `to_merge` that we merge into the hparams
+    # of each leaf optimizer.
+    hparams_to_merge = {}
+    if 'to_merge' in hps.opt_hparams:
+      hparams_to_merge = copy.deepcopy(hps.opt_hparams['to_merge'])
+      del hps.opt_hparams['to_merge']
 
     param_type_to_optimizer_and_hparams = {
         int(k): v for k, v in param_type_to_optimizer_and_hparams.items()
@@ -141,8 +180,10 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
     for param_type, opt_hparams in param_type_to_optimizer_and_hparams.items():
       hps_copy = copy.deepcopy(hps)
       del hps_copy.opt_hparams['param_type_to_optimizer_and_hparams']
-
+      if hparams_to_merge:
+        opt_hparams.opt_hparams.update(hparams_to_merge)
       hps_copy.update(opt_hparams)
+      logging.info('HPS_COPY %s', hps_copy)
       param_type_to_grad_tx[param_type] = (
           optax.GradientTransformation(*get_optimizer(hps_copy, model))
       )
@@ -428,15 +469,17 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
     )
     optimizer_requires_grad_fn = True
   elif hps.opt_hparams.get('use_pal', False):
-    opt_init, opt_update = parabolic_approximation_line_search.parabolic_approximation_line_search(
-        mu=hps.opt_hparams['mu'],
-        alpha=hps.opt_hparams['alpha'],
-        s_max=hps.opt_hparams['s_max'],
-        start_step=hps.opt_hparams['start_step'],
-        stop_step=hps.opt_hparams['stop_step'],
-        batch_axis_name=batch_axis_name,
-        base_opt_init_fn=opt_init,
-        base_opt_update_fn=opt_update
+    opt_init, opt_update = (
+        parabolic_approximation_line_search.parabolic_approximation_line_search(
+            mu=hps.opt_hparams['mu'],
+            alpha=hps.opt_hparams['alpha'],
+            s_max=hps.opt_hparams['s_max'],
+            start_step=hps.opt_hparams['start_step'],
+            stop_step=hps.opt_hparams['stop_step'],
+            batch_axis_name=batch_axis_name,
+            base_opt_init_fn=opt_init,
+            base_opt_update_fn=opt_update,
+        )
     )
     optimizer_requires_cost_fn = True
   elif hps.opt_hparams.get('use_mechanic', False):
