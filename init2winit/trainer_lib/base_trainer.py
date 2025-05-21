@@ -661,6 +661,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
             ) from e
           yield report
           if self._check_early_stopping(report):
+            self.wait_until_orbax_checkpointer_finished()
             return
 
     # Always log and checkpoint on host 0 at the end of training.
