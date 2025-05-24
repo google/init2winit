@@ -147,7 +147,8 @@ def med_dkw_std(values, return_ci=False, confidence_level=0.95, nan_val=None):
 
 
 def reduce_to_best_base_lrs(input_df: pd.DataFrame,
-                            group_on_xid_history: bool = False):
+                            group_on_xid_history: bool = False,
+                            reduction_statistic: str = 'median'):
   """Reduce to the best base_lr for each set of parameters.
 
   This function retains only the records that have the base_lr with the lowest
@@ -158,6 +159,8 @@ def reduce_to_best_base_lrs(input_df: pd.DataFrame,
       input_df (pd.DataFrame): Input DataFrame containing configurations and
         scores.
       group_on_xid_history (bool): If True, group by xid history as well.
+      reduction_statistic (str): Statistic to use for reduction. Currently,
+        only 'median' and 'mean' are supported.
 
   Returns:
       pd.DataFrame: DataFrame containing the best base_lr for each set of
@@ -165,8 +168,8 @@ def reduce_to_best_base_lrs(input_df: pd.DataFrame,
 
   [Process Flow]
     1. Calculate the median score for each (param + base_lr) combination.
-    2. For each set of parameters, select the base_lr with the lowest median
-    score.
+    2. For each set of parameters, select the base_lr with the lowest
+    reduction_statistic score (median by default).
     3. Extract from the original DataFrame only the records that match the
     selected (param, base_lr) combination.
   """
@@ -182,15 +185,26 @@ def reduce_to_best_base_lrs(input_df: pd.DataFrame,
   # Step 1: Calculate the median score for each
   # (param + base_lr + [optional] xid_history) combination.
   groupby_cols = distinct_shape_cols + ['base_lr']
-  candidate_medians = (
-      input_df.groupby(groupby_cols)['score'].median().reset_index()
-  )
-  candidate_medians.rename(columns={'score': 'score_median'}, inplace=True)
+  if reduction_statistic == 'median':
+    candidate_summary_scores = (
+        input_df.groupby(groupby_cols)['score'].median().reset_index()
+    )
+  elif reduction_statistic == 'mean':
+    candidate_summary_scores = (
+        input_df.groupby(groupby_cols)['score'].mean().reset_index()
+    )
+  else:
+    raise ValueError(
+        f'Unsupported reduction statistic: {reduction_statistic}. Currently,'
+        ' only "median" and "mean" are supported.'
+    )
+  candidate_summary_scores.rename(
+      columns={'score': 'score_reduced'}, inplace=True)
 
   # Step 2: For each set of parameters (and optionally, xid history),
   # select the base_lr with the lowest median score.
   best_candidates = (
-      candidate_medians.sort_values('score_median')
+      candidate_summary_scores.sort_values('score_reduced')
       .groupby(distinct_shape_cols)
       .first()
       .reset_index()
@@ -199,7 +213,7 @@ def reduce_to_best_base_lrs(input_df: pd.DataFrame,
   # Step 3: Extract from the original DataFrame only the records that match the
   # selected (param, [optional] xid_history, base_lr) combination.
   result = input_df.merge(best_candidates, on=groupby_cols)
-  return result.drop(columns=['score_median'])
+  return result.drop(columns=['score_reduced'])
 
 
 def add_seed_stats_columns(
