@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2024 The init2winit Authors.
+# Copyright 2025 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -566,8 +566,10 @@ def plot_multiple_schedules_with_metadata(
     metrics = metadata.get(key_metric, None)
     if key_metric == 'score_median':
       score_std = metadata.get('score_median_error', None)
-    else:
+    elif key_metric == 'score_mean':
       score_std = metadata.get('score_std_error', None)
+    else:
+      score_std = None
     if metrics is None:
       label = legend_names[i]
     elif score_std is None:
