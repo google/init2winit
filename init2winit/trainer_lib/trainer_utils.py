@@ -15,13 +15,11 @@
 
 """Utility functions related to training."""
 
-import functools
 import time
 
 from absl import logging
 from flax import jax_utils
 from init2winit import utils
-from init2winit.dataset_lib import data_utils
 import jax
 from jax.experimental.multihost_utils import process_allgather  # pylint: disable=g-importing-member
 import jax.numpy as jnp
@@ -133,7 +131,7 @@ def evaluate(
     batch_stats,
     batch_iter,
     evaluate_batch_jitted,
-    mesh):
+    ):
   """Compute aggregated metrics on the given data iterator.
 
   WARNING: The caller is responsible for synchronizing the batch norm statistics
@@ -152,23 +150,18 @@ def evaluate(
     batch_stats: a dict of non-trainable model state. Passed as
       {'batch_stats': batch_stats} into flax_module.apply().
     batch_iter: Generator which yields batches. Must support the API
-      for b in batch_iter:
+      for b in batch_iter. Should include sharding if desired.
     evaluate_batch_jitted: A function with API evaluate_batch_jitted(params,
       batch_stats, batch). Returns a dictionary mapping keys to the metric
       values across the sharded batch.
-    mesh: Mesh specification to use for sharding.
 
   Returns:
     A dictionary of aggregated metrics. The keys will match the keys returned by
     evaluate_batch_jitted.
   """
   metrics = None
-  make_global_array_fn = functools.partial(
-      data_utils.make_global_array, mesh=mesh
-  )
 
   for batch in batch_iter:
-    batch = jax.tree_util.tree_map(make_global_array_fn, batch)
     # Returns a clu.metrics.Collection object. We assume that
     # `evaluate_batch_jitted` calls CLU's `single_from_model_outputs`.
     computed_metrics = evaluate_batch_jitted(
@@ -255,9 +248,16 @@ def _merge_and_apply_prefix(d1, d2, prefix):
 
 
 @utils.timed
-def eval_metrics(params, batch_stats, dataset, eval_num_batches,
-                 test_num_batches, eval_train_num_batches,
-                 evaluate_batch_jitted, mesh):
+def eval_metrics(
+    params,
+    batch_stats,
+    dataset,
+    eval_num_batches,
+    test_num_batches,
+    eval_train_num_batches,
+    evaluate_batch_jitted,
+    post_processing_fn=None,
+):
   """Evaluates the given network on the train, validation, and test sets.
 
   WARNING: we assume that `batch_stats` has already been synchronized across
@@ -270,18 +270,19 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
   Args:
     params: a dict of trainable model parameters. Passed as {'params': params}
       into flax_module.apply().
-    batch_stats: a dict of non-trainable model state. Passed as
-      {'batch_stats': batch_stats} into flax_module.apply().
+    batch_stats: a dict of non-trainable model state. Passed as {'batch_stats':
+      batch_stats} into flax_module.apply().
     dataset: Dataset returned from datasets.get_dataset. train, validation, and
       test sets.
     eval_num_batches: (int) The batch size used for evaluating on validation
       sets. Set to None to evaluate on the whole validation set.
-    test_num_batches: (int) The batch size used for evaluating on test
-      sets. Set to None to evaluate on the whole test set.
+    test_num_batches: (int) The batch size used for evaluating on test sets. Set
+      to None to evaluate on the whole test set.
     eval_train_num_batches: (int) The batch size used for evaluating on train
       set. Set to None to evaluate on the whole training set.
     evaluate_batch_jitted: Computes the metrics on a sharded batch.
-    mesh: Mesh specification to use for sharding.
+    post_processing_fn: Any post-processing function to apply to the dataset
+      (optional). Should take care of sharding if desired.
 
   Returns:
     A dictionary of all computed metrics.
@@ -293,8 +294,10 @@ def eval_metrics(params, batch_stats, dataset, eval_num_batches,
   metrics = {}
   for split_iter, split_name in zip([train_iter, valid_iter, test_iter],
                                     ['train', 'valid', 'test']):
+    if post_processing_fn is not None:
+      split_iter = map(post_processing_fn, split_iter)
     split_metrics = evaluate(params, batch_stats, split_iter,
-                             evaluate_batch_jitted, mesh)
+                             evaluate_batch_jitted)
     # Metrics are None if the dataset doesn't have that split
     if split_metrics is not None:
       metrics = _merge_and_apply_prefix(metrics, split_metrics,

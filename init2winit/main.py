@@ -26,7 +26,7 @@ import time
 
 from absl import flags
 from absl import logging
-
+import chex
 from flax import jax_utils
 from init2winit import hyperparameters
 from init2winit import utils
@@ -40,6 +40,7 @@ from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow as tf
 from vizier import pyvizier
+
 
 gfile = tf.io.gfile
 
@@ -149,6 +150,9 @@ flags.DEFINE_string(
 
 flags.DEFINE_integer('worker_id', 1,
                      'Client id for hparam sweeps and tuning studies.')
+flags.DEFINE_integer(
+    'mock_num_devices', 0, 'If > 0, mock number of devices using CPU threads.'
+)
 
 FLAGS = flags.FLAGS
 
@@ -301,6 +305,14 @@ def _run(
 
 
 def main(unused_argv):
+
+  if FLAGS.mock_num_devices:
+    chex.set_n_cpu_devices(FLAGS.mock_num_devices)
+    jax.config.update('jax_platform_name', 'cpu')
+    logging.info(
+        'Mocking devices with CPU threads. Resulting devices: %s', jax.devices()
+    )
+
   # Don't let TF see the GPU, because all we use it for is tf.data loading.
   tf.config.experimental.set_visible_devices([], 'GPU')
 
