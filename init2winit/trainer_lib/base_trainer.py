@@ -16,7 +16,6 @@
 """Abstract parent class for all trainers."""
 
 import abc
-import functools
 import itertools
 import multiprocessing
 import os.path
@@ -26,7 +25,6 @@ from absl import logging
 from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import utils
-from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.trainer_lib import trainer_utils
@@ -433,7 +431,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._test_num_batches,
         self._eval_train_num_batches,
         self._evaluate_batch_jitted,
-        self._mesh)
+        self.apply_array_placement,
+    )
     self._run_eval_callbacks(report)
     if save:
       self._save(self._train_dir)
@@ -607,11 +606,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     if self._global_step in self._checkpoint_steps:
       self._save(self._checkpoint_dir, max_to_keep=None)
 
-    make_global_array_fn = functools.partial(
-        data_utils.make_global_array, mesh=self._mesh
-    )
-
     for _ in range(start_step, self._num_train_steps):
+      logging.info('global_step: %d', self._global_step)
       with jax.profiler.StepTraceAnnotation(
           'train', step_num=self._global_step
       ):
@@ -619,7 +615,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         # creation in the StepTraceContext (as opposed to putting `train_iter`
         # directly in the top-level for loop).
         batch = next(train_iter)
-        batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+        batch = self.apply_array_placement(batch)
+
 
         # It looks like we are reusing an rng key, but we aren't.
         (
@@ -646,7 +643,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         if self._global_step in self._checkpoint_steps:
           self._save(self._checkpoint_dir, max_to_keep=None)
 
-        lr = trainer_utils.fetch_learning_rate(self._optimizer_state)
+        lr = self.get_learning_rate(self._optimizer_state, self._metrics_state)
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.
@@ -722,3 +719,11 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     Yields:
       The updated training state.
     """
+
+  @abc.abstractmethod
+  def get_learning_rate(self, optimizer_state, metrics_state):
+    """Returns the learning rate."""
+
+  @abc.abstractmethod
+  def apply_array_placement(self, batch):
+    """Possibly places the batch data on devices."""
