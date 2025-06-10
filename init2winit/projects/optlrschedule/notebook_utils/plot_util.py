@@ -521,6 +521,7 @@ def plot_multiple_schedules_with_metadata(
     title='Learning Rate Schedule Comparison',
     ax=None,
     notation='floating_point',
+    **plot_kwargs,
 ) -> plt.Axes:
   """Plots multiple learning rate schedules with enhanced line widths and a clear legend.
 
@@ -536,6 +537,7 @@ def plot_multiple_schedules_with_metadata(
       title: Plot title.
       ax: Optional existing axis to plot on.
       notation: Notation to use for reported scores ('floating_point' or 'sci').
+      **plot_kwargs: Additional keyword arguments to pass to the plot function.
 
   Returns:
       The matplotlib Axes object on which the plot is plotted.
@@ -594,6 +596,7 @@ def plot_multiple_schedules_with_metadata(
         label=label,
         color=color,
         alpha=0.8,
+        **plot_kwargs,
     )
 
   # Configure plot
