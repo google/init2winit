@@ -257,11 +257,6 @@ class InferenceManager(object):
       inputs = pred_batch['inputs']
       targets = pred_batch['targets']
       weights = pred_batch['weights']
-
-      predicted = np.array(predicted)
-      inputs = np.array(inputs)
-      targets = np.array(targets)
-      weights = np.array(weights)
       current_batch_size = int(weights[:, 0].sum())
       if self.mt_eval_config.get('decoding_type') == 'beam_search':
         self.process_beam_search_output(inputs, targets, predicted,
