@@ -207,6 +207,12 @@ class Trainer(base_trainer.BaseTrainer):
       )
 
     lr = self._lr_fn(global_step)
+
+    make_global_array_fn = functools.partial(
+        data_utils.make_global_array, mesh=self._mesh
+    )
+    batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+
     # It looks like we are reusing an rng key, but we aren't.
     (
         optimizer_state,
@@ -278,4 +284,12 @@ class Trainer(base_trainer.BaseTrainer):
             batch_stats, batch_stats_sharding,
             metrics_state, metrics_state_sharding)
 
+  def get_learning_rate(self, optimizer_state, metrics_state):
+    del metrics_state
+    return trainer_utils.fetch_learning_rate(optimizer_state)
 
+  def apply_array_placement(self, batch):
+    make_global_array_fn = functools.partial(
+        data_utils.make_global_array, mesh=self._mesh
+    )
+    return jax.tree_util.tree_map(make_global_array_fn, batch)
