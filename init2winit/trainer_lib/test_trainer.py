@@ -44,7 +44,7 @@ import jraph
 from ml_collections.config_dict import config_dict
 import numpy as np
 import pandas
-import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
+import tensorflow as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
 
 

@@ -19,7 +19,7 @@ from absl.testing import absltest
 from init2winit import schedules
 from ml_collections.config_dict import config_dict
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 
 class LearningRateTest(absltest.TestCase):
