@@ -22,10 +22,9 @@ from init2winit.dataset_lib.datasets import get_dataset_hparams
 import jax.random
 from ml_collections.config_dict import config_dict
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 import tensorflow_datasets as tfds
 
-tf.enable_eager_execution()
 
 NUM_LABELS = 2
 NORMAL_LABELS = np.array([1, 1]).astype('float32')
