@@ -45,13 +45,52 @@ LR_SCHEDULE_NAME_MAP = {
     'rex': 'Generalized REX',
 }
 
+LR_SCHEDULE_SHORT_NAME_MAP = {
+    'constant': 'con',
+    'cosine': 'cos-gen',
+    'cosine_standard': 'cos-std',
+    'twopointslinear': 'tpl',
+    'twopointsspline': 'tps',
+    'smoothnonmonotonic': 'snm',
+    'sqrt': 'sqrt',
+    'rex': 'rex',
+}
 
-def map_schedule_name_to_label(schedule_type: str) -> str:
+DEFAULT_CMAP = plt.cm.Set2
+DEFAULT_CYCLE_LENGTH = 9
+
+
+def get_colors_from_cmap(
+    num_colors: int, cmap=DEFAULT_CMAP, cycle_length: int = DEFAULT_CYCLE_LENGTH
+):
+  """Returns a list of colors from a colormap.
+
+  Args:
+    num_colors: The number of colors to return.
+    cmap: The colormap to use.
+    cycle_length: The number of colors before repeating the color cycle.
+
+  Returns:
+    A list of colors.
+  """
+  if cycle_length == 1:
+    index_delta = 0
+  else:
+    index_delta = 1.0 / (cycle_length - 1)
+  index_list = [(i % cycle_length) * index_delta for i in range(num_colors)]
+  return cmap(index_list)
+
+
+def map_schedule_name_to_label(
+    schedule_type: str, short_name: bool = False
+) -> str:
   """Maps the given lr schedule type name to its human-readable string.
 
   Args:
       schedule_type (str): The lr schedule type name (e.g., 'constant',
         'cosine', etc.)
+      short_name (bool, optional): If True, return the short name instead of the
+        full name.
 
   Returns:
       str: The corresponding human-readable lr schedule name. If the given
@@ -60,7 +99,10 @@ def map_schedule_name_to_label(schedule_type: str) -> str:
   """
   # Convert the input to lowercase to ensure case-insensitive matching
   # and return the mapped name.
-  return LR_SCHEDULE_NAME_MAP.get(schedule_type.lower(), schedule_type)
+  if short_name:
+    return LR_SCHEDULE_SHORT_NAME_MAP.get(schedule_type.lower(), schedule_type)
+  else:
+    return LR_SCHEDULE_NAME_MAP.get(schedule_type.lower(), schedule_type)
 
 
 def plot_best_base_lr_histgram(
@@ -190,7 +232,7 @@ def plot_multiple_best_base_lr_histgrams(
   x_positions = np.arange(len(all_base_lr))
 
   # Use a color cycle for differentiating experiments
-  colors = plt.cm.tab10(np.linspace(0, 1, n))
+  colors = get_colors_from_cmap(n)
 
   # For each DataFrame, compute and plot its best base_lr histogram
   for i, (df, exp_name) in enumerate(zip(df_list, exp_names)):
@@ -303,7 +345,7 @@ def plot_multiple_best_base_lr_distribution(
 
   # Use a color cycle for differentiating experiments
   n = len(df_list)
-  colors = plt.cm.tab10(np.linspace(0, 1, n))
+  colors = get_colors_from_cmap(n)
 
   for i, (df, exp_name) in enumerate(zip(df_list, exp_names)):
     # Exclude specific columns to determine grouping parameters
@@ -376,7 +418,7 @@ def plot_multiple_schedules(
       The matplotlib axis on which the plot is plotted.
   """
   # Colors for the schedules
-  colors = plt.cm.tab20(np.linspace(0, 1, len(schedules_data)))
+  colors = get_colors_from_cmap(len(schedules_data))
 
   if ax is None:
     _, ax = plt.subplots(figsize=(10, 6))
@@ -460,7 +502,7 @@ def plot_ecdf_with_legend(
     )
 
   # Create a color cycle for better visibility using a distinct colormap
-  colors = plt.cm.Set1(np.linspace(0, 1, len(schedule_df_list)))
+  colors = get_colors_from_cmap(len(schedule_df_list))
 
   # For each DataFrame, calculate and plot the ECDF
   for i, (df, legend) in enumerate(zip(schedule_df_list, legend_names)):
@@ -521,6 +563,8 @@ def plot_multiple_schedules_with_metadata(
     title='Learning Rate Schedule Comparison',
     ax=None,
     notation='floating_point',
+    score_digits=None,
+    error_digits=None,
     **plot_kwargs,
 ) -> plt.Axes:
   """Plots multiple learning rate schedules with enhanced line widths and a clear legend.
@@ -537,6 +581,8 @@ def plot_multiple_schedules_with_metadata(
       title: Plot title.
       ax: Optional existing axis to plot on.
       notation: Notation to use for reported scores ('floating_point' or 'sci').
+      score_digits: Number of digits to display for scores.
+      error_digits: Number of digits to display for errors.
       **plot_kwargs: Additional keyword arguments to pass to the plot function.
 
   Returns:
@@ -547,15 +593,25 @@ def plot_multiple_schedules_with_metadata(
     raise ValueError(
         'schedule_array and schedule_metadata must have the same length.'
     )
+  if score_digits is None:
+    if notation == 'floating_point':
+      score_digits = 1
+    elif notation == 'sci':
+      score_digits = 2
+  if error_digits is None:
+    if notation == 'floating_point':
+      error_digits = 2
+    elif notation == 'sci':
+      error_digits = 0
 
   if not legend_names:
     legend_names = [f'Schedule {i+1}' for i in range(len(schedule_array))]
 
   # Create a color cycle using a distinct colormap for better visibility
-  colors = plt.cm.Set2(np.linspace(0, 1, len(schedule_array)))
+  colors = get_colors_from_cmap(len(schedule_array))
 
   if ax is None:
-    _, ax = plt.subplots(figsize=(10, 6))
+    _, ax = plt.subplots(figsize=(8, 6))
 
   # Plot schedules
   for i, (schedule, metadata, color) in enumerate(
@@ -576,16 +632,22 @@ def plot_multiple_schedules_with_metadata(
       label = legend_names[i]
     elif score_std is None:
       if notation == 'floating_point':
-        label = f'{legend_names[i]}: {metrics:.4f}'
+        label = f'{legend_names[i]}: {metrics:.{score_digits}f}'
       elif notation == 'sci':
-        label = f'{legend_names[i]}: {metrics:.2e}'
+        label = f'{legend_names[i]}: {metrics:.{score_digits}e}'
       else:
         raise ValueError(f'Unsupported notation: {notation}')
     else:
       if notation == 'floating_point':
-        label = f'{legend_names[i]}: {metrics:.4f} ± {score_std:.4f}'
+        label = (
+            f'{legend_names[i]}: {metrics:.{score_digits}f} ±'
+            f' {score_std:.{error_digits}f}'
+        )
       elif notation == 'sci':
-        label = f'{legend_names[i]}: {metrics:.2e} ± {score_std:.2e}'
+        label = (
+            f'{legend_names[i]}: {metrics:.{score_digits}e} ±'
+            f' {score_std:.{error_digits}e}'
+        )
       else:
         raise ValueError(f'Unsupported notation: {notation}')
 
