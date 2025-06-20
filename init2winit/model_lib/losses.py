@@ -115,6 +115,8 @@ def sigmoid_binary_cross_entropy(logits, targets, weights=None):
   )
 
 
+
+
 def unnormalized_bi_tempered_sigmoid_binary_cross_entropy(
     logits, targets, weights=None, t1=1.0, t2=1.0
 ):
@@ -300,6 +302,8 @@ def weighted_cross_entropy(logits, targets, weights=None):
   return jnp.sum(unnormalized_cross_entropy), normalization
 
 
+
+
 def weighted_unnormalized_bi_tempered_cross_entropy(
     logits, targets, weights=None, t1=1.0, t2=1.0
 ):
@@ -413,14 +417,19 @@ def weighted_mean_absolute_error(logits, targets, weights=None):
 _ALL_LOSS_FUNCTIONS = {
     'rescaled_mean_squared_error': (rescaled_mean_squared_error, None),
     'sigmoid_mean_squared_error': (sigmoid_mean_squared_error, jax.nn.sigmoid),
-    'sigmoid_binary_cross_entropy':
-        (sigmoid_binary_cross_entropy, jax.nn.sigmoid),
-    'bi_tempered_sigmoid_binary_cross_entropy':
-        (bi_tempered_sigmoid_binary_cross_entropy,
-         bi_tempered_loss.tempered_sigmoid),
+    'sigmoid_binary_cross_entropy': (
+        sigmoid_binary_cross_entropy,
+        jax.nn.sigmoid,
+    ),
+    'bi_tempered_sigmoid_binary_cross_entropy': (
+        bi_tempered_sigmoid_binary_cross_entropy,
+        bi_tempered_loss.tempered_sigmoid,
+    ),
     'cross_entropy': (weighted_cross_entropy, jax.nn.softmax),
-    'bi_tempered_cross_entropy':
-        (weighted_bi_tempered_cross_entropy, bi_tempered_loss.tempered_softmax),
+    'bi_tempered_cross_entropy': (
+        weighted_bi_tempered_cross_entropy,
+        bi_tempered_loss.tempered_softmax,
+    ),
     'ctc': (ctc_loss, jax.nn.log_softmax),
     'mean_absolute_error': (weighted_mean_absolute_error, None),
 }

@@ -28,4 +28,3 @@ def get_trainer_cls(trainer_name):
     return _ALL_TRAINERS[trainer_name]
   except KeyError:
     raise ValueError('Unrecognized trainer: {}'.format(trainer_name)) from None
-
