@@ -64,9 +64,9 @@ class CosineYScheduleFamily(cosine_schedule_family.CosineScheduleFamily):
     missing_params = required_params - set(schedule_param.keys())
     if missing_params:
       raise ValueError(f'Missing required parameters: {missing_params}')
-    if not (0 < schedule_param['p.alpha'] < 1):
+    if not (0 <= schedule_param['p.alpha'] <= 1):
       raise ValueError(
-          f'alpha must be in (0, 1), got {schedule_param['p.alpha']}'
+          f'alpha must be in [0, 1], got {schedule_param['p.alpha']}'
       )
 
     return True
