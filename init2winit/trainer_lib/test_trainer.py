@@ -360,7 +360,8 @@ class TrainerTest(parameterized.TestCase):
         batch_stats,
         fake_batches_gen(),
         evaluate_batch_jitted,
-        mesh)
+        trainer_utils.make_finalize_batch_fn(mesh),
+    )
 
     def batch_ce_loss(logits, targets):
       one_hot_targets = np.eye(4)[targets]
@@ -930,7 +931,8 @@ class TrainerTest(parameterized.TestCase):
         batch_stats=None,
         batch_iter=batch_iter,
         evaluate_batch_jitted=jax.jit(mock_evaluate_batch),
-        mesh=mesh)
+        finalize_batch_fn=trainer_utils.make_finalize_batch_fn(mesh),
+    )
 
     for metric, val in zip(test_metric_names, test_metric_vals):
       self.assertAlmostEqual(result[metric], val, places=5)

@@ -67,6 +67,7 @@ class InferenceManager(object):
       raise ValueError('BLEU score computation only support online or '
                        'offline modes.')
     self.mesh = kwargs['mesh']
+    self.finalize_batch_fn = kwargs['finalize_batch_fn']
     if kwargs['mode'] == 'offline':
       self.init_offline_evaluator(*args)
     else:
@@ -286,6 +287,11 @@ class InferenceManager(object):
                                  batch_size,
                                  decode_output):
     """Process output if its beam search decoding."""
+
+    # Non-final dimensions are batch dimensions.
+    inputs = inputs.reshape((-1,) + inputs.shape[-1:])
+    targets = targets.reshape((-1,) + targets.shape[-1:])
+    predicted = predicted.reshape((-1,) + predicted.shape[-1:])
     for i in range(batch_size):
       curr_source = self.decode_tokens(inputs[i])
       curr_ref = self.decode_tokens(targets[i])
@@ -301,6 +307,11 @@ class InferenceManager(object):
                               batch_size,
                               decode_output):
     """Process output if its sampling decoding."""
+
+    # Non-final dimensions are batch dimensions.
+    inputs = inputs.reshape((-1,) + inputs.shape[-1:])
+    targets = targets.reshape((-1,) + targets.shape[-1:])
+    predicted = predicted.reshape((-1,) + predicted.shape[-1:])
     for i in range(batch_size):
       curr_source = self.decode_tokens(inputs[i])
       curr_ref = self.decode_tokens(targets[i])
