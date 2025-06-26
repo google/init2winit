@@ -565,6 +565,8 @@ def plot_multiple_schedules_with_metadata(
     notation='floating_point',
     score_digits=None,
     error_digits=None,
+    normalized_x_axis=False,
+    normalized_y_axis=False,
     **plot_kwargs,
 ) -> plt.Axes:
   """Plots multiple learning rate schedules with enhanced line widths and a clear legend.
@@ -583,6 +585,8 @@ def plot_multiple_schedules_with_metadata(
       notation: Notation to use for reported scores ('floating_point' or 'sci').
       score_digits: Number of digits to display for scores.
       error_digits: Number of digits to display for errors.
+      normalized_x_axis: Whether to normalize the x-axis to [0, 1].
+      normalized_y_axis: Whether to normalize the y-axis to [0, 1].
       **plot_kwargs: Additional keyword arguments to pass to the plot function.
 
   Returns:
@@ -650,10 +654,17 @@ def plot_multiple_schedules_with_metadata(
         )
       else:
         raise ValueError(f'Unsupported notation: {notation}')
-
+    if normalized_x_axis:
+      xs = np.linspace(0, 1, len(schedule))
+    else:
+      xs = np.arange(len(schedule))
+    if normalized_y_axis:
+      ys = schedule/np.max(schedule)
+    else:
+      ys = schedule
     ax.plot(
-        np.arange(len(schedule)),
-        schedule,
+        xs,
+        ys,
         linewidth=LINE_WIDTH,
         label=label,
         color=color,
@@ -662,8 +673,14 @@ def plot_multiple_schedules_with_metadata(
     )
 
   # Configure plot
-  ax.set_xlabel('Steps', fontsize=AXIS_LABEL_FONT_SIZE)
-  ax.set_ylabel('Learning Rate', fontsize=AXIS_LABEL_FONT_SIZE)
+  if normalized_x_axis:
+    ax.set_xlabel('Training fraction', fontsize=AXIS_LABEL_FONT_SIZE)
+  else:
+    ax.set_xlabel('Steps', fontsize=AXIS_LABEL_FONT_SIZE)
+  if normalized_y_axis:
+    ax.set_ylabel('Relative learning rate', fontsize=AXIS_LABEL_FONT_SIZE)
+  else:
+    ax.set_ylabel('Learning Rate', fontsize=AXIS_LABEL_FONT_SIZE)
   ax.set_title(title, pad=20, fontsize=TITLE_FONT_SIZE)
   ax.grid(True, alpha=0.3)
   ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
