@@ -26,6 +26,7 @@ from init2winit.projects.optlrschedule.scheduler import smooth_nonmonotonic_sche
 from init2winit.projects.optlrschedule.scheduler import sqrt_schedule_family
 from init2winit.projects.optlrschedule.scheduler import twopointslinear_schedule_family
 from init2winit.projects.optlrschedule.scheduler import twopointsspline_schedule_family
+from init2winit.projects.optlrschedule.scheduler import twopointsspline_y_schedule_family
 
 
 SCHEDULE_FAMILIES = {
@@ -37,6 +38,9 @@ SCHEDULE_FAMILIES = {
     'constant': constant_schedule_family.ConstantScheduleFamily,
     'twopointsspline': (
         twopointsspline_schedule_family.TwoPointSplineScheduleFamily
+    ),
+    'twopointsspline_y': (
+        twopointsspline_y_schedule_family.TwoPointSplineYScheduleFamily
     ),
     'twopointslinear': (
         twopointslinear_schedule_family.TwoPointLinearScheduleFamily
