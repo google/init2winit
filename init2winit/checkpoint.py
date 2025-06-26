@@ -67,14 +67,14 @@ def maybe_restore_checkpoint(
     unreplicated_training_metrics_state: unreplicated metrics state
     train_dir: (str) The training directory where we will look for a checkpoint.
     external_checkpoint_path: (str) If this argument is set, then we will load
-    the external checkpoint stored there.
+      the external checkpoint stored there.
     orbax_checkpointer: orbax.Checkpointer
 
   Returns:
-    replicated_optimizer_state
-    replicated_params
-    replicated_batch_stats
-    replicated_training_metrics_state
+    unreplicated_optimizer_state
+    unreplicated_params
+    unreplicated_batch_stats
+    unreplicated_training_metrics_state
     global_step (int)
     sum_train_cost (float)
     preemption_count (int)
