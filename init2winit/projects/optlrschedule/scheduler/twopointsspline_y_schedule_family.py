@@ -70,7 +70,8 @@ class TwoPointSplineYScheduleFamily(base_schedule_family.WarmupScheduleFamily):
       raise ValueError(f'Missing required parameters: {missing_params}')
 
     # Validate parameter ranges
-    for param, value in schedule_param.items():
+    for param in required_params:
+      value = schedule_param[param]
       if not 0 <= value <= 1:
         raise ValueError(f'{param} must be in [0, 1], got {value}')
 
