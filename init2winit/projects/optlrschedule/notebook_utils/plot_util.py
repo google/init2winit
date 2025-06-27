@@ -37,9 +37,11 @@ LINE_WIDTH = 3.0  # Unified line width for all plots
 LR_SCHEDULE_NAME_MAP = {
     'constant': 'Constant',
     'cosine': 'Generalized Cosine',
+    'cosine_y': 'Cosine w/non-zero decay',
     'cosine_standard': 'Cosine w/exponent=1.0',
     'twopointslinear': 'Two-Point Linear',
     'twopointsspline': 'Two-Point Spline',
+    'twopointsspline_y': 'Two-Point Spline w/non-zero decay',
     'smoothnonmonotonic': 'Smooth Non-Monotonic',
     'sqrt': 'Square Root',
     'rex': 'Generalized REX',
@@ -48,9 +50,11 @@ LR_SCHEDULE_NAME_MAP = {
 LR_SCHEDULE_SHORT_NAME_MAP = {
     'constant': 'con',
     'cosine': 'cos-gen',
+    'cosine_y': 'cos-y',
     'cosine_standard': 'cos-std',
     'twopointslinear': 'tpl',
     'twopointsspline': 'tps',
+    'twopointsspline_y': 'tps-y',
     'smoothnonmonotonic': 'snm',
     'sqrt': 'sqrt',
     'rex': 'rex',
