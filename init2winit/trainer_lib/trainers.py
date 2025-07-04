@@ -17,9 +17,15 @@
 
 from init2winit.trainer_lib import trainer
 
+
 _ALL_TRAINERS = {
     'standard': trainer.Trainer,
 }
+
+
+def register_trainers(trainer_dict):
+  """Registers trainers."""
+  _ALL_TRAINERS.update(trainer_dict)
 
 
 def get_trainer_cls(trainer_name):

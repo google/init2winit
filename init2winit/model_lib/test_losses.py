@@ -183,6 +183,13 @@ class LossesTest(parameterized.TestCase):
     with self.assertRaises(ValueError):
       losses.get_loss_fn('__test__loss__name__')
 
+  def test_loss_registration(self):
+    dummy = {'new_loss': 1}
+    losses_dict = losses._ALL_LOSS_FUNCTIONS.copy()  # pylint: disable=protected-access
+    losses.register_losses(dummy)
+    losses_dict.update(dummy)
+    self.assertEqual(losses._ALL_LOSS_FUNCTIONS, losses_dict)  # pylint: disable=protected-access
+
   def test_output_activation_fn_registry(self):
     activation_fn = losses.get_output_activation_fn('cross_entropy')
     self.assertEqual(activation_fn.__name__, 'softmax')

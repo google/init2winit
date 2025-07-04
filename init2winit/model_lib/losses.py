@@ -115,8 +115,6 @@ def sigmoid_binary_cross_entropy(logits, targets, weights=None):
   )
 
 
-
-
 def unnormalized_bi_tempered_sigmoid_binary_cross_entropy(
     logits, targets, weights=None, t1=1.0, t2=1.0
 ):
@@ -302,8 +300,6 @@ def weighted_cross_entropy(logits, targets, weights=None):
   return jnp.sum(unnormalized_cross_entropy), normalization
 
 
-
-
 def weighted_unnormalized_bi_tempered_cross_entropy(
     logits, targets, weights=None, t1=1.0, t2=1.0
 ):
@@ -433,6 +429,11 @@ _ALL_LOSS_FUNCTIONS = {
     'ctc': (ctc_loss, jax.nn.log_softmax),
     'mean_absolute_error': (weighted_mean_absolute_error, None),
 }
+
+
+def register_losses(losses_dict):
+  """Registers losses."""
+  _ALL_LOSS_FUNCTIONS.update(losses_dict)
 
 
 def get_loss_fn(loss_name, hps=None):
