@@ -79,12 +79,8 @@ def get_fake(shuffle_rng, batch_size, eval_batch_size, hps=None):
     while True:
       yield fake_train_batch
 
-  def valid_epoch(epoch, num_batches=None):
-    del num_batches
-    del epoch
-    # Note that we do // beacuse we do not support partial batching for the fake
-    # dataset.
-    for _ in range(hps.valid_size // eval_batch_size):
+  def valid_epoch(num_batches):
+    for _ in range(num_batches):
       yield fake_test_batch
 
   # pylint: disable=unreachable
@@ -105,4 +101,3 @@ def get_fake(shuffle_rng, batch_size, eval_batch_size, hps=None):
 
   return data_utils.Dataset(
       train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
-
