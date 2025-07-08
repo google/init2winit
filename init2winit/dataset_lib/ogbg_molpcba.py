@@ -251,7 +251,10 @@ def _get_batch_iterator(dataset_iter,
 
     if count == num_shards:
       yield {
-          'inputs': jraph.batch(graphs_shards),
+          # Note: Use jraph.batch_np instead of jraph.batch (jnp) which leaks
+          # memory due to the call to jnp.concatenate.
+          # It is possible we may be leaking host memory with the np call.
+          'inputs': jraph.batch_np(graphs_shards),
           'targets': np.vstack(labels_shards),
           'weights': np.vstack(weights_shards)
       }
