@@ -75,13 +75,27 @@ def get_grad(params,
 class ModelDebugCallback:
   """Used to run the hessian eval in the trainer binary."""
 
-  def __init__(self, model, params, batch_stats, optimizer_state,
-               optimizer_update_fn, dataset, hps, callback_config, train_dir,
-               rng):
+  def __init__(
+      self,
+      model,
+      params,
+      batch_stats,
+      optimizer_state,
+      optimizer_update_fn,
+      dataset,
+      hps,
+      callback_config,
+      train_dir,
+      rng,
+      mesh,
+      finalize_batch_fn,
+  ):
     del hps
     del params
     del optimizer_state
     del optimizer_update_fn
+    del mesh
+    del finalize_batch_fn
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
     # copy batch_stats as we close over it, and it gets modified.
     self.dataset = dataset

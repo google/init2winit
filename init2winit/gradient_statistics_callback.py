@@ -31,20 +31,24 @@ import jax.numpy as jnp
 class GradientStatisticsCallback(base_callback.BaseCallBack):
   """Runs evals on MT models with datasets/params different than in training."""
 
-  def __init__(self,
-               model,
-               params,
-               batch_stats,
-               optimizer_state,
-               optimizer_update_fn,
-               dataset,
-               hps,
-               callback_config,
-               train_dir,
-               rng,
-               mesh):
+  def __init__(
+      self,
+      model,
+      params,
+      batch_stats,
+      optimizer_state,
+      optimizer_update_fn,
+      dataset,
+      hps,
+      callback_config,
+      train_dir,
+      rng,
+      mesh,
+      finalize_batch_fn,
+  ):
     del optimizer_state
     del optimizer_update_fn
+    del finalize_batch_fn
 
     self.dataset = dataset
     self.model = model

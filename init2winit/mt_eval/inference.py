@@ -19,7 +19,7 @@ import copy
 import dataclasses
 import functools
 import os
-from typing import Any, Sequence
+from typing import Any
 
 from absl import logging
 from init2winit.dataset_lib import data_utils as utils
@@ -52,9 +52,9 @@ DEFAULT_EVAL_CONFIG = {
 
 @dataclasses.dataclass
 class DecodingOutput:
-  source_list: Sequence[Any] = dataclasses.field(default_factory=list)
-  reference_list: Sequence[Any] = dataclasses.field(default_factory=list)
-  translation_list: Sequence[Any] = dataclasses.field(default_factory=list)
+  source_list: list[Any] = dataclasses.field(default_factory=list)
+  reference_list: list[Any] = dataclasses.field(default_factory=list)
+  translation_list: list[Any] = dataclasses.field(default_factory=list)
   bleu_score: float = 0.0
   decoding_type: str = 'beam_search'
 
@@ -67,6 +67,7 @@ class InferenceManager(object):
       raise ValueError('BLEU score computation only support online or '
                        'offline modes.')
     self.mesh = kwargs['mesh']
+    self.finalize_batch_fn = kwargs['finalize_batch_fn']
     if kwargs['mode'] == 'offline':
       self.init_offline_evaluator(*args)
     else:
@@ -246,18 +247,14 @@ class InferenceManager(object):
     decode_output = DecodingOutput()
     logging.info('Starting decoding..')
 
-    make_global_array_fn = functools.partial(
-        utils.make_global_array, mesh=self.mesh
-    )
-
     for batch in self.get_ds_iter(eval_split):
-      pred_batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+      pred_batch = self.finalize_batch_fn(batch)
       cache = self.init_cache(pred_batch['inputs'])
       predicted = self.predictor(pred_batch, params, cache)
       inputs = pred_batch['inputs']
       targets = pred_batch['targets']
       weights = pred_batch['weights']
-      current_batch_size = int(weights[:, 0].sum())
+      current_batch_size = int(weights[..., 0].sum())
       if self.mt_eval_config.get('decoding_type') == 'beam_search':
         self.process_beam_search_output(inputs, targets, predicted,
                                         current_batch_size, decode_output)
@@ -286,6 +283,11 @@ class InferenceManager(object):
                                  batch_size,
                                  decode_output):
     """Process output if its beam search decoding."""
+
+    # Non-final dimensions are batch dimensions.
+    inputs = inputs.reshape((-1,) + inputs.shape[-1:])
+    targets = targets.reshape((-1,) + targets.shape[-1:])
+    predicted = predicted.reshape((-1,) + predicted.shape[-1:])
     for i in range(batch_size):
       curr_source = self.decode_tokens(inputs[i])
       curr_ref = self.decode_tokens(targets[i])
@@ -301,6 +303,11 @@ class InferenceManager(object):
                               batch_size,
                               decode_output):
     """Process output if its sampling decoding."""
+
+    # Non-final dimensions are batch dimensions.
+    inputs = inputs.reshape((-1,) + inputs.shape[-1:])
+    targets = targets.reshape((-1,) + targets.shape[-1:])
+    predicted = predicted.reshape((-1,) + predicted.shape[-1:])
     for i in range(batch_size):
       curr_source = self.decode_tokens(inputs[i])
       curr_ref = self.decode_tokens(targets[i])

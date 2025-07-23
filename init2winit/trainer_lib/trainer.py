@@ -278,4 +278,5 @@ class Trainer(base_trainer.BaseTrainer):
             batch_stats, batch_stats_sharding,
             metrics_state, metrics_state_sharding)
 
-
+  def finalize_batch_fn(self, batch):
+    return trainer_utils.make_finalize_batch_fn(self._mesh)(batch)

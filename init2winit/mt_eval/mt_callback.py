@@ -40,12 +40,9 @@ If your decoder uses remat_scan, e.g. an xformer_translate with
 'scan_over_layers_offset' equal to the length of that tuple.
 """
 
-import functools
-
 from absl import logging
 from init2winit import base_callback
 from init2winit import utils
-from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import datasets
 from init2winit.model_lib import models
 from init2winit.mt_eval import inference
@@ -65,18 +62,23 @@ _SPLITS = ['train', 'valid', 'test']
 class MTEvaluationCallback(base_callback.BaseCallBack):
   """Runs evals on MT models with datasets/params different than in training."""
 
-  def __init__(self,
-               model,
-               params,
-               batch_stats,
-               optimizer_state,
-               optimizer_update_fn,
-               dataset,
-               hps,
-               callback_config,
-               train_dir,
-               rng,
-               mesh):
+  inference_manager_class = inference.InferenceManager
+
+  def __init__(
+      self,
+      model,
+      params,
+      batch_stats,
+      optimizer_state,
+      optimizer_update_fn,
+      dataset,
+      hps,
+      callback_config,
+      train_dir,
+      rng,
+      mesh,
+      finalize_batch_fn,
+  ):
     del optimizer_state
     del optimizer_update_fn
     del train_dir
@@ -89,17 +91,19 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     self.callback_config = merged_callback_config
 
     self._validate_callback_config()
+    self.model = model
     self.evaluate_batch_jitted = jax.jit(
-        model.evaluate_batch, donate_argnums=(2,)
+        self.model.evaluate_batch, donate_argnums=(2,)
     )
     self.batch_stats = batch_stats
 
     dataset, dataset_metadata = self._get_dataset(hps, rng)
     self.dataset = dataset
     self.mesh = mesh
+    self.finalize_batch_fn = finalize_batch_fn
     model_class = models.get_model(callback_config['model_name'])
 
-    self.inference_manager = inference.InferenceManager(
+    self.inference_manager = self.inference_manager_class(
         hps,
         rng,
         model_class,
@@ -107,7 +111,9 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
         dataset_metadata,
         self.callback_config,
         mode='online',
-        mesh=mesh)
+        mesh=mesh,
+        finalize_batch_fn=finalize_batch_fn,
+    )
 
   def _validate_callback_config(self):
     assert all(key in self.callback_config for key in _REQUIRED_KEYS), (
@@ -162,12 +168,9 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       by evaluate_batch_jitted.
     """
     metrics = None
-    make_global_array_fn = functools.partial(
-        data_utils.make_global_array, mesh=self.mesh
-    )
 
     for batch in batch_iter:
-      batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+      batch = self.finalize_batch_fn(batch)
       computed_metrics = evaluate_batch_jitted(
           params=params, batch_stats=batch_stats, batch=batch
       )

@@ -16,7 +16,6 @@
 """Abstract parent class for all trainers."""
 
 import abc
-import functools
 import itertools
 import multiprocessing
 import os.path
@@ -26,7 +25,6 @@ from absl import logging
 from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import utils
-from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.trainer_lib import trainer_utils
@@ -337,13 +335,25 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     return float(cur_step - start_step) / (time.time() - start_time)
 
   def _setup_eval_callbacks(self, callback_rng):
+    """Sets up the eval callbacks."""
     eval_callbacks = []
     callback_rngs = jax.random.split(callback_rng, len(self._callback_configs))
     for rng, config in zip(callback_rngs, self._callback_configs):
+      logging.info('Setting up eval callback: %s', config['callback_name'])
       eval_callback = callbacks.get_callback(config['callback_name'])(
-          self._model, self._params, self._batch_stats, self._optimizer_state,
-          self._optimizer_update_fn, self._dataset, self._hps, config,
-          self._train_dir, rng, self._mesh)
+          self._model,
+          self._params,
+          self._batch_stats,
+          self._optimizer_state,
+          self._optimizer_update_fn,
+          self._dataset,
+          self._hps,
+          config,
+          self._train_dir,
+          rng,
+          self._mesh,
+          self.finalize_batch_fn,
+      )
       eval_callbacks.append(eval_callback)
     return eval_callbacks
 
@@ -433,7 +443,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._test_num_batches,
         self._eval_train_num_batches,
         self._evaluate_batch_jitted,
-        self._mesh)
+        self.finalize_batch_fn,
+    )
     self._run_eval_callbacks(report)
     if save:
       self._save(self._train_dir)
@@ -607,10 +618,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     if self._global_step in self._checkpoint_steps:
       self._save(self._checkpoint_dir, max_to_keep=None)
 
-    make_global_array_fn = functools.partial(
-        data_utils.make_global_array, mesh=self._mesh
-    )
-
     for _ in range(start_step, self._num_train_steps):
       with jax.profiler.StepTraceAnnotation(
           'train', step_num=self._global_step
@@ -619,7 +626,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         # creation in the StepTraceContext (as opposed to putting `train_iter`
         # directly in the top-level for loop).
         batch = next(train_iter)
-        batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+        batch = self.finalize_batch_fn(batch)
 
         # It looks like we are reusing an rng key, but we aren't.
         (
@@ -646,7 +653,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         if self._global_step in self._checkpoint_steps:
           self._save(self._checkpoint_dir, max_to_keep=None)
 
-        lr = trainer_utils.fetch_learning_rate(self._optimizer_state)
+        lr = self.fetch_learning_rate(self._optimizer_state)
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.
@@ -722,3 +729,19 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     Yields:
       The updated training state.
     """
+
+  @abc.abstractmethod
+  def finalize_batch_fn(self, batch):
+    """Finalizes the batch before passing to the model.
+
+    Example use cases: Handle sharding or reshaping.
+
+    Args:
+      batch: (dict) A batch of data.
+
+    Returns:
+      The finalized batch of data.
+    """
+
+  def fetch_learning_rate(self, optimizer_state):
+    return trainer_utils.fetch_learning_rate(optimizer_state)

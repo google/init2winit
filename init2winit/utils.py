@@ -240,7 +240,7 @@ class MetricLogger(object):
     if 'global_step' in metrics:
       metrics['global_step'] = int(reduce_to_scalar(metrics['global_step']))
 
-    if self._xm_work_unit:
+    if self._xm_work_unit and self._xm_work_unit.id > -1:
       for name, value in metrics.items():
         if name not in self._measurements:
           self._measurements[name] = self._xm_work_unit.get_measurement_series(
