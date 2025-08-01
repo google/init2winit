@@ -419,7 +419,15 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     time_since_last_eval = time.time() - self._time_at_prev_eval_end
 
     if self._eval_use_ema:
-      if isinstance(
+      if (
+          schedule_free_state := optax.tree_utils.tree_get(
+              self._optimizer_state, 'ScheduleFreeState'
+          )
+      ) is not None:
+        eval_params = optax.contrib.schedule_free_eval_params(
+            schedule_free_state, self._params
+        )
+      elif isinstance(
           self._optimizer_state, optax.InjectStatefulHyperparamsState
       ):
         eval_params = self._optimizer_state.inner_state[0][0].ema
