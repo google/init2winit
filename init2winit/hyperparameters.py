@@ -102,7 +102,8 @@ def build_hparams(model_name,
                   hparam_file,
                   hparam_overrides,
                   input_pipeline_hps=None,
-                  allowed_unrecognized_hparams=None):
+                  allowed_unrecognized_hparams=None,
+                  algoperf_submission_name=None):
   """Build experiment hyperparameters.
 
   Args:
@@ -121,6 +122,7 @@ def build_hparams(model_name,
       hparams from an error to a warning can be useful when trying to tune using
       a shared search space over multiple workloads that don't all support the
       same set of hyperparameters.
+    algoperf_submission_name: The name of the algoperf submission.
 
   Returns:
     A ConfigDict of experiment hyperparameters.
@@ -162,6 +164,10 @@ def build_hparams(model_name,
 
   for key in ['opt_hparams', 'lr_hparams']:
     merged[key].unlock()
+
+  if algoperf_submission_name:
+    with merged.unlocked():
+      merged['algoperf_submission_name'] = algoperf_submission_name
 
   if hparam_file:
     logging.info('Loading hparams from %s', hparam_file)
