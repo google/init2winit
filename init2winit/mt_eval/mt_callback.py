@@ -70,7 +70,6 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       params,
       batch_stats,
       optimizer_state,
-      optimizer_update_fn,
       dataset,
       hps,
       callback_config,
@@ -80,7 +79,6 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       finalize_batch_fn,
   ):
     del optimizer_state
-    del optimizer_update_fn
     del train_dir
     del dataset
     del params

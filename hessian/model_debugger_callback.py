@@ -81,7 +81,6 @@ class ModelDebugCallback:
       params,
       batch_stats,
       optimizer_state,
-      optimizer_update_fn,
       dataset,
       hps,
       callback_config,
@@ -93,7 +92,6 @@ class ModelDebugCallback:
     del hps
     del params
     del optimizer_state
-    del optimizer_update_fn
     del mesh
     del finalize_batch_fn
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')

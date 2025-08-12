@@ -37,7 +37,6 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
       params,
       batch_stats,
       optimizer_state,
-      optimizer_update_fn,
       dataset,
       hps,
       callback_config,
@@ -47,7 +46,6 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
       finalize_batch_fn,
   ):
     del optimizer_state
-    del optimizer_update_fn
     del finalize_batch_fn
 
     self.dataset = dataset

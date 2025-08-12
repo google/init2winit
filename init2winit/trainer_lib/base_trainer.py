@@ -26,12 +26,11 @@ from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import utils
 from init2winit.model_lib import model_utils
-from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.trainer_lib import trainer_utils
+from init2winit.trainer_lib import training_algorithm
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
 import numpy as np
-import optax
 import orbax.checkpoint as orbax_checkpoint
 
 
@@ -68,6 +67,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       loss_name=None,
       metrics_name=None,
       data_selector=None,
+      training_algorithm_class=training_algorithm.OptaxTrainingAlgorithm,
   ):
     """Main training loop.
 
@@ -136,6 +136,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         it.
       data_selector: data selection function returned by
         datasets.get_data_selector.
+      training_algorithm_class: Class of training algorithm to use.
     """
     del dataset_meta_data
     del loss_name
@@ -204,6 +205,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     # Creates a 1-d mesh with all devices available globally.
     self._mesh = model_utils.get_default_mesh()
+
+    # Default training algorithm class.
+    self._training_algorithm_class = training_algorithm_class
 
   def wait_until_orbax_checkpointer_finished(self):
     self._orbax_checkpointer.wait_until_finished()
@@ -345,7 +349,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           self._params,
           self._batch_stats,
           self._optimizer_state,
-          self._optimizer_update_fn,
           self._dataset,
           self._hps,
           config,
@@ -390,12 +393,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           self._early_stopping_target_value)
     return early_stopping_condition
 
-  def _eval(
-      self,
-      lr,
-      start_step,
-      start_time,
-      save=True):
+  def _eval(self, start_step, start_time, save=True):
     """Evaluate.
 
     Has the side-effects of:
@@ -406,7 +404,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       - resetting self._prev_eval_step to self._global_step
 
     Args:
-      lr: the current learning rate.
       start_step: the training start step.
       start_time: the training start time.
       save: flag to save a checkpoint to disk. defaults to True.
@@ -414,24 +411,13 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     Returns:
       A Dict[str, Any] eval report, originally created in
       trainer_utils.eval_metrics.
-
     """
     time_since_last_eval = time.time() - self._time_at_prev_eval_end
 
     if self._eval_use_ema:
-      if isinstance(
-          self._optimizer_state, optax.InjectStatefulHyperparamsState
-      ):
-        eval_params = self._optimizer_state.inner_state[0][0].ema
-      elif isinstance(
-          self._optimizer_state, gradient_accumulator.GradientAccumulatorState
-      ):
-        eval_params = self._optimizer_state.base_state.inner_state[0][0].ema
-      else:
-        raise ValueError(
-            'EMA computation should be the very first transformation in defined'
-            ' kitchensink optimizer.'
-        )
+      eval_params = self.training_algorithm.get_ema_eval_params(
+          self._optimizer_state
+      )
     else:
       eval_params = self._params
 
@@ -461,7 +447,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     overall_steps_per_sec = self._get_step_frequency(
         self._global_step, start_step, start_time)
     report.update(
-        learning_rate=float(lr),
+        learning_rate=self.training_algorithm.get_learning_rate(),
         global_step=self._global_step,
         epoch=epoch,
         update_norm=np.mean(self._update_norm),
@@ -473,7 +459,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         steps_per_sec=steps_per_sec,
         eval_time=eval_time,
         run_time_no_eval=time_since_last_eval,
-        run_time=run_time)
+        run_time=run_time,
+    )
     if jax.process_index() == 0:
       trainer_utils.log_eta(
           self._logging_pool,
@@ -499,6 +486,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       data_rng: (jax.random.PRNGKey) Rng seed used in data shuffling.
       callback_rng: (jax.random.PRNGKey) Rng seed used in callback functions.
     """
+    self.training_algorithm = self._training_algorithm_class(
+        self._hps, self._model, self._num_train_steps
+    )
+
     unreplicated_params, unreplicated_batch_stats = self._model.initialize(
         self._initializer,
         self._hps,
@@ -508,17 +499,16 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     self.log_model_info(unreplicated_params)
 
-    unreplicated_optimizer_state, self._optimizer_update_fn = (
-        self.init_optimizer_state(
-            self._model,
-            unreplicated_params,
-            unreplicated_batch_stats,
-            self._hps,
-            init_rng,
-        )
+    unreplicated_optimizer_state = self.training_algorithm.init_optimizer_state(
+        self._model,
+        unreplicated_params,
+        unreplicated_batch_stats,
+        self._hps,
+        init_rng,
     )
 
     unreplicated_metrics_state = None
+    # TODO(kasimbeg): move this to initialization.
     self._metrics_update_fn = None
     self._metrics_summary_fn = None
 
@@ -526,8 +516,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       (metrics_init_fn, self._metrics_update_fn,
        self._metrics_summary_fn) = make_training_metrics(
            self._num_train_steps, self._hps, **self._training_metrics_config)
-      unreplicated_metrics_state = metrics_init_fn(unreplicated_params,
-                                                   unreplicated_batch_stats)
+      unreplicated_metrics_state = metrics_init_fn(
+          unreplicated_params, unreplicated_batch_stats
+      )
 
     (
         unreplicated_optimizer_state,
@@ -637,30 +628,23 @@ class BaseTrainer(metaclass=abc.ABCMeta):
             self._sum_train_cost,
             self._grad_norm,
             self._update_norm,
-        ) = self.update_params(
-            self._model,
-            self._hps,
-            (self._optimizer_state, self._optimizer_update_fn),
-            self._params,
-            self._batch_stats,
-            self._metrics_state,
+        ) = self.update(
             batch,
-            self._global_step,
             rng,
+            self._metrics_state,
             self._sum_train_cost,
         )
         self._global_step += 1
         if self._global_step in self._checkpoint_steps:
           self._save(self._checkpoint_dir, max_to_keep=None)
 
-        lr = self.fetch_learning_rate(self._optimizer_state)
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.
         if trainer_utils.should_eval(
             self._global_step, self._eval_frequency, self._eval_steps):
           try:
-            report = self._eval(lr, start_step, start_time)
+            report = self._eval(start_step, start_time)
           except utils.TrainingDivergedError as e:
             self.wait_until_orbax_checkpointer_finished()
             raise utils.TrainingDivergedError(
@@ -675,14 +659,30 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # If we moved where in the loop body evals happen then we would not need
     # this test.
     if self._prev_eval_step != self._num_train_steps:
-      report = self._eval(lr, start_step, start_time)
+      report = self._eval(start_step, start_time)
       yield report
     # To make sure the last checkpoint was correctly saved.
     self.wait_until_orbax_checkpointer_finished()
 
   @abc.abstractmethod
-  def init_optimizer_state(self, model, params, batch_stats, hps, rng):
-    """Sets up the train state."""
+  def update(self, batch, rng, metrics_update_fn, metrics_state, training_cost):
+    """Single step of the training loop.
+    
+    Args:
+      batch: the per-device batch of data to process.
+      rng: the RNG used for calling the model. `step` and `local_device_index`
+        will be folded into this to produce a unique per-device, per-step RNG.
+      metrics_update_fn: a function that takes in the current metrics state, the
+        current step, and the training cost, gradients, params, and optimizer
+        state and returns the new metrics state.
+      metrics_state: the current metrics state.
+      training_cost: the current training cost.
+
+    Returns:
+      A tuple of the new optimizer, the new batch stats, the scalar training
+      cost,
+      the new training metrics state, the gradient norm, and the update norm.
+    """
 
   @abc.abstractmethod
   def shard(self, unreplicated_params, unreplicated_optimizer_state,
@@ -697,37 +697,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     Yields:
       The sharded training state.
-    """
-
-  @abc.abstractmethod
-  def update_params(self,
-                    model,
-                    hps,
-                    optimizer_state,
-                    params,
-                    batch_stats,
-                    metrics_state,
-                    batch,
-                    global_step,
-                    rng,
-                    sum_train_cost):
-    """All training logic.
-
-    Args:
-      model: (BaseModel) Model object to be trained.
-      hps: (dict) Model, initialization and training hparams.
-      optimizer_state: (optax.OptState) The optimizer state.
-      params: (FrozenDict) The model parameters.
-      batch_stats: (FrozenDict) The batch statistics.
-      metrics_state: (FrozenDict) The metrics state.
-      batch: (dict) The batch of data.
-      global_step: (int) The global step.
-      rng: (jax.random.PRNGKey) Rng seed used in model initialization and data
-        shuffling.
-      sum_train_cost: (float) The sum of the training cost.
-
-    Yields:
-      The updated training state.
     """
 
   @abc.abstractmethod

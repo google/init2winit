@@ -30,6 +30,7 @@ from init2winit.optimizer_lib import sharpness_aware_minimization
 from init2winit.optimizer_lib import sla
 from init2winit.optimizer_lib import utils
 import jax
+import jax.numpy as jnp
 import optax
 
 
@@ -39,6 +40,60 @@ import optax
 
 
 
+
+
+def _filtering(path, _) -> bool:
+  """Filter to ensure that we inject/fetch lrs from 'InjectHyperparamsState'-like states."""
+  if (
+      (len(path) > 1)
+      and isinstance(path[-2], optax.tree_utils.NamedTupleKey)
+      and path[-2].name == 'hyperparams'
+  ):
+    return True
+  else:
+    return False
+
+
+def inject_learning_rate(optimizer_state, lr):
+  """Inject the given LR into any optimizer state that will accept it.
+
+  We require that the optimizer state exposes an 'InjectHyperparamsState'-like
+  interface, i.e., it should contain a `hyperparams` dictionary with a
+  'learning_rate' key where the learning rate can be set. We need to do this
+  to allow arbitrary (non-jittable) LR schedules.
+
+  Args:
+    optimizer_state: optimizer state returned by an optax optimizer
+    lr: learning rate to inject
+
+  Returns:
+    new_optimizer_state
+      optimizer state with the same structure as the input. The learning_rate
+      entry in the state has been set to lr.
+  """
+  return optax.tree_utils.tree_set(
+      optimizer_state, _filtering, learning_rate=lr
+  )
+
+
+def fetch_learning_rate(optimizer_state):
+  """Fetch the LR from any optimizer state."""
+  lrs_with_path = optax.tree_utils.tree_get_all_with_path(
+      optimizer_state, 'learning_rate', _filtering
+  )
+  if not lrs_with_path:
+    raise ValueError(f'No learning rate found in {optimizer_state}.')
+  all_equal = all(
+      jnp.array_equal(lr, lrs_with_path[0][1]) for _, lr in lrs_with_path
+  )
+  if all_equal:
+    lr_array = lrs_with_path[0][1]
+    return lr_array
+  else:
+    raise ValueError(
+        'All learning rates in the optimizer state must be the same.'
+        f'Found {lrs_with_path} in {optimizer_state}.'
+    )
 
 
 def sgd(learning_rate, weight_decay, momentum=None, nesterov=False):
