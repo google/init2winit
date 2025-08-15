@@ -17,7 +17,6 @@
 
 from absl.testing import absltest
 from init2winit import hyperparameters
-import tensorflow.compat.v1 as tf
 
 
 class HyperParameterTest(absltest.TestCase):
@@ -228,5 +227,4 @@ class HyperParameterTest(absltest.TestCase):
 
 
 if __name__ == '__main__':
-  tf.enable_v2_behavior()
   absltest.main()
