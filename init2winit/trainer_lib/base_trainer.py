@@ -30,7 +30,6 @@ from init2winit.trainer_lib import trainer_utils
 from init2winit.trainer_lib import training_algorithm
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
-import numpy as np
 import orbax.checkpoint as orbax_checkpoint
 
 
@@ -447,11 +446,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     overall_steps_per_sec = self._get_step_frequency(
         self._global_step, start_step, start_time)
     report.update(
-        learning_rate=self.training_algorithm.get_learning_rate(),
         global_step=self._global_step,
         epoch=epoch,
-        update_norm=np.mean(self._update_norm),
-        grad_norm=np.mean(self._grad_norm),
         preemption_count=self._preemption_count,
         train_cost=mean_train_cost,
         overall_steps_per_sec=overall_steps_per_sec,
@@ -461,6 +457,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         run_time_no_eval=time_since_last_eval,
         run_time=run_time,
     )
+    report.update(self.training_algorithm.eval_report_metrics)
     if jax.process_index() == 0:
       trainer_utils.log_eta(
           self._logging_pool,
@@ -626,8 +623,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
             self._batch_stats,
             self._metrics_state,
             self._sum_train_cost,
-            self._grad_norm,
-            self._update_norm,
         ) = self.update(
             batch,
             rng,
