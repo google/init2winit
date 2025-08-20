@@ -239,6 +239,19 @@ def l2_regularization(params, l2_decay_rank_threshold):
   return weight_l2
 
 
+def mean_std_estimate(scalar_tree):
+  """Computes the mean and std of the leaves of a scalar pytree.
+
+  Args:
+    scalar_tree: Pytree containing scalars.
+
+  Returns:
+    mean, std: the mean and std of the scalars in the pytree.
+  """
+  scalar_leaves = jnp.array(jax.tree.leaves(scalar_tree))
+  return jnp.mean(scalar_leaves), jnp.std(scalar_leaves)
+
+
 def flatten_dict(nested_dict, sep='/'):
   """Flattens the nested dictionary.
 
@@ -334,6 +347,8 @@ class ParameterType(enum.Enum):
   NQM_PARAM = 16
   DEFAULT = 17
   ATTENTION_SCALE = 18
+  SUBSAMPLE_WEIGHT = 19
+  SUBSAMPLE_BIAS = 20
 
 
 def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
@@ -405,6 +420,11 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
         else:
           raise ValueError(
               f'Unrecognized attention parameter: {parent_name}/{name}.')
+      elif 'subsample' in parent_name and 'dense' in parent_name:
+        if name == 'kernel':
+          param_types_dict[original_name] = ParameterType.SUBSAMPLE_WEIGHT
+        elif name == 'bias':
+          param_types_dict[original_name] = ParameterType.SUBSAMPLE_BIAS
       elif 'bias' in name:
         param_types_dict[original_name] = ParameterType.BIAS
       elif 'kernel' in name:
@@ -418,7 +438,7 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
 
 
 def is_shape_compatible_with_sharding(param_shape, sharding, mesh):
-  """Checks if a parameter shape is compatible with a sharding spec. 
+  """Checks if a parameter shape is compatible with a sharding spec.
 
   More specifically, checks if the inidvidual dimensions of the parameter shape
   are divisible by the sharding spec passed in.
