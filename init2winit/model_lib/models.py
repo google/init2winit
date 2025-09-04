@@ -32,6 +32,7 @@ from init2winit.model_lib import mlperf_resnet
 from init2winit.model_lib import nanodo
 from init2winit.model_lib import nqm
 from init2winit.model_lib import resnet
+from init2winit.model_lib import rope_nanodo
 from init2winit.model_lib import simple_cnn
 from init2winit.model_lib import transformer_lm
 from init2winit.model_lib import transformer_stu_lm
@@ -89,6 +90,10 @@ _ALL_MODELS = {
     'nanodo': (
         nanodo.NanodoModel,
         nanodo.DEFAULT_HPARAMS,
+    ),
+    'rope_nanodo': (
+        rope_nanodo.RoPENanodoModel,
+        rope_nanodo.DEFAULT_HPARAMS,
     ),
     'xformer_translate': (xformer_translate.TransformerTranslate,
                           xformer_translate.DEFAULT_HPARAMS),
