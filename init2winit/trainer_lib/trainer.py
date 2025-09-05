@@ -41,16 +41,19 @@ class Trainer(base_trainer.BaseTrainer):
       training_cost: the current training cost.
 
     Returns:
-      A tuple of the new optimizer, the new batch stats, the scalar training
-      cost,
-      the new training metrics state, the gradient norm, and the update norm.
+      A tuple containing:
+        new_optimizer_state: Pytree of optimizer state.
+        new_params: Pytree of model parameters.
+        new_model_state: Pytree of model state.
+        cost_value: The training cost used for the metrics state.
+        grad: The gradient used for the metrics state.
     """
     # `jax.random.split` is very slow outside the train step, so instead we do a
     # `jax.random.fold_in` here.
     step = self._global_step
     rng = jax.random.fold_in(rng, step)
 
-    new_optimizer_state, new_params, new_batch_stats = (
+    new_optimizer_state, new_params, new_batch_stats, cost_value, grad = (
         self.training_algorithm.update_params(
             params=self._params,
             model_state=self._batch_stats,
@@ -66,8 +69,8 @@ class Trainer(base_trainer.BaseTrainer):
       new_metrics_state = self._metrics_update_fn(
           metrics_state,
           step,
-          self.training_algorithm.metrics['cost_value'],
-          self.training_algorithm.metrics['grad'],
+          cost_value,
+          grad,
           self._params,
           new_params,
           new_optimizer_state,
@@ -75,7 +78,7 @@ class Trainer(base_trainer.BaseTrainer):
       )
 
     new_sum_train_cost = (
-        training_cost + self.training_algorithm.metrics['cost_value']
+        training_cost + cost_value
     )
 
     return (
@@ -84,8 +87,6 @@ class Trainer(base_trainer.BaseTrainer):
         new_batch_stats,
         new_metrics_state,
         new_sum_train_cost,
-        self.training_algorithm.metrics['grad_norm'],
-        self.training_algorithm.metrics['update_norm'],
     )
 
   def shard(

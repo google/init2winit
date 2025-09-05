@@ -89,17 +89,16 @@ def optax_update_params_helper(
   )
 
   update_norm = jnp.sqrt(model_utils.l2_regularization(model_updates, 0))
-  metrics = collections.defaultdict()
-  metrics['update_norm'] = update_norm
-  metrics['grad_norm'] = grad_norm
-  metrics['cost_value'] = cost_value
 
   new_params = optax.apply_updates(params, model_updates)
   return (
       new_optimizer_state,
       new_params,
       new_batch_stats,
-      metrics,
+      cost_value,
+      grad,
+      grad_norm,
+      update_norm,
   )
 
 
@@ -110,7 +109,7 @@ class TrainingAlgorithm(metaclass=abc.ABCMeta):
     self.model = model
     self.num_train_steps = num_train_steps
     self.hps = hps
-    self.metrics = collections.defaultdict()
+    self.eval_report_metrics = collections.defaultdict()
 
   @abc.abstractmethod
   def update_params(
@@ -149,6 +148,8 @@ class TrainingAlgorithm(metaclass=abc.ABCMeta):
         new_optimizer_state: Pytree of optimizer state.
         new_params: Pytree of model parameters.
         new_model_state: Pytree of model state.
+        cost_value: The training cost.
+        grad: The gradient.
     """
 
   @abc.abstractmethod
@@ -245,7 +246,10 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
         new_optimizer_state,
         new_params,
         new_batch_stats,
-        metrics,
+        cost_value,
+        grad,
+        grad_norm,
+        update_norm,
     ) = jitted_update_fn(
         params,
         model_state,
@@ -257,10 +261,15 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
         grad_clip,
         self.training_cost_fn,
     )
-    self.metrics.update(metrics)
+
+    self.eval_report_metrics.update(
+        learning_rate=lr,
+        grad_norm=grad_norm.item(),
+        update_norm=update_norm.item(),
+    )
     self._optimizer_state = new_optimizer_state
 
-    return new_optimizer_state, new_params, new_batch_stats
+    return new_optimizer_state, new_params, new_batch_stats, cost_value, grad
 
   def init_optimizer_state(
       self,
@@ -329,11 +338,3 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
           ' kitchensink optimizer.'
       )
     return eval_params
-
-  def get_learning_rate(self):
-    """Extracts the current learning rate.
-
-    Returns:
-      The current learning rate as float.
-    """
-    return optimizers.fetch_learning_rate(self._optimizer_state)
