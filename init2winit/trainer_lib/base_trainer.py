@@ -205,8 +205,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # Creates a 1-d mesh with all devices available globally.
     self._mesh = model_utils.get_default_mesh()
 
-    # Default training algorithm class.
+    # Set training algorithm class.
     self._training_algorithm_class = training_algorithm_class
+    logging.info('Using training algorithm class: %s',
+                 self._training_algorithm_class)
 
   def wait_until_orbax_checkpointer_finished(self):
     self._orbax_checkpointer.wait_until_finished()
