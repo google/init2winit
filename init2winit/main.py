@@ -34,6 +34,7 @@ from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
 from init2winit.trainer_lib import trainers
+from init2winit.trainer_lib import training_algorithms
 import jax
 from jax import lax
 from ml_collections.config_dict import config_dict
@@ -149,6 +150,11 @@ flags.DEFINE_string(
 
 flags.DEFINE_integer('worker_id', 1,
                      'Client id for hparam sweeps and tuning studies.')
+flags.DEFINE_string(
+    'training_algorithm',
+    'optax_training_algorithm',
+    'Name of the training algorithm to use.',
+)
 
 FLAGS = flags.FLAGS
 
@@ -205,6 +211,7 @@ def _run(
     training_metrics_config,
     callback_configs,
     external_checkpoint_path,
+    training_algorithm_name,
 ):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
@@ -217,6 +224,9 @@ def _run(
       num_device_prefetches=num_device_prefetches,
       num_tf_data_map_parallel_calls=num_tf_data_map_parallel_calls,
   ))
+  training_algorithm_class = training_algorithms.get_training_algorithm(
+      training_algorithm_name
+  )
 
   merged_hps = hyperparameters.build_hparams(
       model_name=model_name,
@@ -288,6 +298,7 @@ def _run(
             loss_name=loss_name,
             metrics_name=metrics_name,
             data_selector=data_selector,
+            training_algorithm_class=training_algorithm_class,
         ).train()
     )
     logging.info(epoch_reports)
@@ -365,6 +376,7 @@ def main(unused_argv):
         training_metrics_config=training_metrics_config,
         callback_configs=callback_configs,
         external_checkpoint_path=FLAGS.external_checkpoint_path,
+        training_algorithm_name=FLAGS.training_algorithm,
     )
 
 
