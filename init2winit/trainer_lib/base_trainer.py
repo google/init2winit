@@ -631,7 +631,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
             self._metrics_state,
             self._sum_train_cost,
         )
-        self._global_step += 1
         if self._global_step in self._checkpoint_steps:
           self._save(self._checkpoint_dir, max_to_keep=None)
 
@@ -664,6 +663,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def update(self, batch, rng, metrics_update_fn, metrics_state, training_cost):
     """Single step of the training loop.
+    
+    Note this method is responsible for updating the private _global_step
+    attribute of the Trainer.
     
     Args:
       batch: the per-device batch of data to process.

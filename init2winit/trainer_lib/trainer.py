@@ -32,6 +32,8 @@ class Trainer(base_trainer.BaseTrainer):
     
     Uses the training algorithm's update_params function to get the updated
     optimizer state, params, and batch stats.
+    Note this method is also responsible for updating the private _global_step
+    attribute of the Trainer.
 
     Args:
       batch: the per-device batch of data to process.
@@ -80,7 +82,7 @@ class Trainer(base_trainer.BaseTrainer):
     new_sum_train_cost = (
         training_cost + cost_value
     )
-
+    self._global_step += 1
     return (
         new_optimizer_state,
         new_params,
