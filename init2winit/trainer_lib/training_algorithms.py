@@ -16,6 +16,7 @@
 """Module for registering and retrieving training algorithms."""
 
 from init2winit.trainer_lib import training_algorithm
+# pylint: disable=g-bad-import-order
 
 
 _ALGORITHMS = {
