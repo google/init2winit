@@ -25,6 +25,7 @@ from init2winit.dataset_lib import fastmri_dataset
 from init2winit.dataset_lib import imagenet_dataset
 from init2winit.dataset_lib import librispeech
 from init2winit.dataset_lib import lm1b_v2
+from init2winit.dataset_lib import fineweb_edu_10b  # pylint: disable=g-bad-import-order
 from init2winit.dataset_lib import mlperf_imagenet_dataset
 from init2winit.dataset_lib import nanodo_c4
 from init2winit.dataset_lib import nanodo_fineweb_edu
@@ -72,6 +73,10 @@ _ALL_DATASETS = {
     'fastmri':
         _Dataset(fastmri_dataset.get_fastmri, fastmri_dataset.DEFAULT_HPARAMS,
                  fastmri_dataset.METADATA, fastmri_dataset.get_fake_batch),
+    'fineweb_edu_10B': _Dataset(
+        fineweb_edu_10b.get_fineweb_edu,
+        fineweb_edu_10b.DEFAULT_HPARAMS,
+        fineweb_edu_10b.METADATA, None),
     'imagenet':
         _Dataset(imagenet_dataset.get_imagenet,
                  imagenet_dataset.DEFAULT_HPARAMS, imagenet_dataset.METADATA,

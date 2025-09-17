@@ -181,6 +181,11 @@ DATA_HPS = {
         'input_shape': (32, 32, 3),
         'output_shape': (5,),
     },
+    'rope_nanodo': {
+        'input_shape': (32,),
+        'output_shape': (32, 32000),
+        'vocab_size': 32000,
+    },
     'simple_cnn': {
         'input_shape': (32, 32, 3),
         'output_shape': (5,),
