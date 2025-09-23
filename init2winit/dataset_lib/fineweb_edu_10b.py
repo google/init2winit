@@ -123,7 +123,6 @@ def get_fineweb_edu(
 
   def train_iterator_fn():
     for batch in train_dataset:
-      # yield data_utils.tf_to_numpy(batch)
       yield add_weights_to_batch(data_utils.tf_to_numpy(batch), pad_id)
 
   def eval_train_epoch(num_batches=None):
