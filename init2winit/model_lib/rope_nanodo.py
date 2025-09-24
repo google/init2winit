@@ -59,7 +59,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         grad_clip=None,
         label_smoothing=0.0,
         use_shallue_label_smoothing=False,
-        normalization='layernorm',
+        normalization='rmsnorm',
         mlp_activation='glu',
     )
 )
@@ -84,7 +84,7 @@ class DoConfig:
   multiple_of: int = 256
   tie_embeddings: bool = True  # Whether to tie input and output embeddings
   mlp_activation: str = 'glu'
-  normalization: str = 'layernorm'
+  normalization: str = 'rmsnorm'
 
 
 class Mlp(nn.Module):
@@ -251,6 +251,10 @@ class TBlock(nn.Module):
     # "pre-layernorm"
     if cfg.normalization == 'layernorm':
       x_BxLxD = nn.LayerNorm(dtype=cfg.dtype, use_bias=False)(in_BxLxD)
+    elif cfg.normalization == 'rmsnorm':
+      x_BxLxD = nn.RMSNorm(dtype=cfg.dtype, epsilon=cfg.rmsnorm_epsilon)(
+          in_BxLxD
+      )
     else:
       raise ValueError(f'Unknown normalization: {cfg.normalization}')
 
