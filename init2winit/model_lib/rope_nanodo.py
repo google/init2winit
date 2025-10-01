@@ -38,10 +38,10 @@ P = jax.sharding.PartitionSpec
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        emb_dim=1024,  # model/embed dim  = qkv dim
+        emb_dim=512,  # model/embed dim  = qkv dim
         num_heads=8,  # num attention heads
         num_layers=12,  # number of transformer block layers
-        mlp_dim=1024,  # FF inner dimension
+        mlp_dim=2048,  # FF inner dimension
         rng_seed=-1,
         computation_dtype='bfloat16',
         model_dtype='float32',
@@ -61,6 +61,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         use_shallue_label_smoothing=False,
         normalization='rmsnorm',
         mlp_activation='glu',
+        qk_norm=True,
     )
 )
 
@@ -85,6 +86,7 @@ class DoConfig:
   tie_embeddings: bool = True  # Whether to tie input and output embeddings
   mlp_activation: str = 'glu'
   normalization: str = 'rmsnorm'
+  qk_norm: bool = True
 
 
 class Mlp(nn.Module):
@@ -196,6 +198,8 @@ class CausalAttn(nn.Module):
         use_bias=False,
         dtype=cfg.dtype,
     )
+    self.layer_norm_q = nn.LayerNorm(dtype=cfg.dtype, use_bias=False)
+    self.layer_norm_k = nn.LayerNorm(dtype=cfg.dtype, use_bias=False)
 
   def __call__(self, x_BxLxD: jax.Array):
     cfg = self.cfg
@@ -204,6 +208,10 @@ class CausalAttn(nn.Module):
     q_BxLxHxDh = self.multilinear_query(x_BxLxD)
     k_BxLxHxDh = self.multilinear_key(x_BxLxD)
     v_BxLxHxDh = self.multilinear_value(x_BxLxD)
+
+    if cfg.qk_norm:
+      q_BxLxHxDh = self.layer_norm_q(q_BxLxHxDh)
+      k_BxLxHxDh = self.layer_norm_k(k_BxLxHxDh)
 
     # Apply rotary embeddings to Q and K
     q_BxLxHxDh, k_BxLxHxDh = apply_rope(q_BxLxHxDh, k_BxLxHxDh, self.freqs_cis)
@@ -325,6 +333,7 @@ class RoPENanodoModel(base_model.BaseModel):
         dtype=utils.dtype_from_str(self.hps['computation_dtype']),
         mlp_activation=self.hps['mlp_activation'],
         normalization=self.hps['normalization'],
+        qk_norm=self.hps['qk_norm'],
     )
     return TransformerDo(config)
 
