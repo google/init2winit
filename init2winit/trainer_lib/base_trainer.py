@@ -617,6 +617,16 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         # directly in the top-level for loop).
         batch = next(train_iter)
         batch = self.finalize_batch_fn(batch)
+        if self._global_step == 0:
+          batch_size_pytree = trainer_utils.get_batch_size(batch)
+          if any(
+              bsz != self._hps.batch_size
+              for bsz in jax.tree.leaves(batch_size_pytree)
+          ):
+            raise ValueError(
+                f'Batch size {batch_size_pytree} does not match global array'
+                f' does not match hps batch size {self._hps.batch_size}'
+            )
 
         # It looks like we are reusing an rng key, but we aren't.
         (

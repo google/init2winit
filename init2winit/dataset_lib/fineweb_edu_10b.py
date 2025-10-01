@@ -94,6 +94,7 @@ def get_fineweb_edu(
     ValueError: If eval_batch_size is not divisible by jax process count.
   """
   process_count = jax.process_count()
+  n_devices = jax.local_device_count()
 
   if batch_size % process_count != 0:
     raise ValueError(
@@ -105,6 +106,12 @@ def get_fineweb_edu(
   if eval_batch_size is None:
     eval_batch_size = batch_size
 
+  if batch_size % process_count != 0:
+    raise ValueError(
+        'process_count={} must divide batch_size={}.'.format(
+            process_count, batch_size
+        )
+    )
   if eval_batch_size % process_count != 0:
     raise ValueError(
         'process_count={} must divide batch_size={}.'.format(
@@ -112,11 +119,27 @@ def get_fineweb_edu(
         )
     )
 
+  per_host_batch_size = int(batch_size / process_count)
+  per_host_eval_batch_size = int(eval_batch_size / process_count)
+
+  if per_host_batch_size % n_devices != 0:
+    raise ValueError(
+        'per_host_batch_size={} must be divisible by n_devices={}.'.format(
+            per_host_batch_size, n_devices
+        )
+    )
+  if per_host_eval_batch_size % n_devices != 0:
+    raise ValueError(
+        'per_host_eval_batch_size={} must be divisible by n_devices={}.'.format(
+            per_host_eval_batch_size, n_devices
+        )
+    )
+
   train_dataset, eval_train_dataset, valid_dataset = (
       input_pipeline.get_fineweb_edu_dataset(
           hps,
-          train_batch_size=batch_size,
-          valid_batch_size=eval_batch_size,
+          train_batch_size=per_host_batch_size,
+          valid_batch_size=per_host_eval_batch_size,
           shuffle_seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng),
       )
   )
