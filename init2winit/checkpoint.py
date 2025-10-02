@@ -173,8 +173,8 @@ def save_unreplicated_checkpoint(
   # So we first all_gather it to the host and then call jax.device_get
   if jax.process_count() > 1:
     unreplicated_optimizer_state = jax.device_get(
-        process_allgather(optimizer_state))
-    unreplicated_params = jax.device_get(process_allgather(params))
+        process_allgather(optimizer_state, tiled=True))
+    unreplicated_params = jax.device_get(process_allgather(params, tiled=True))
   else:
     unreplicated_optimizer_state = jax.device_get(optimizer_state)
     unreplicated_params = jax.device_get(params)
