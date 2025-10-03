@@ -416,15 +416,6 @@ def edit_distance(source, target):
   return distance[num_source_words][num_target_words]
 
 
-def data_gather(data, axis_name):
-  """Helper function to retrieve data across hosts, return first replica."""
-  p_gather = jax.pmap(
-      lambda d: jax.lax.all_gather(d, axis_name),
-      axis_name=axis_name)
-
-  return p_gather(data)[0]
-
-
 def combine_gathered(x):
   if len(x.shape) < 3:
     raise ValueError('Rank of input array to combine_gathered must be > 3')
