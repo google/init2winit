@@ -191,8 +191,7 @@ def evaluate(
       # `merge` aggregates the metrics across batches.
       metrics = metrics.merge(computed_metrics)
 
-  metrics = jax.device_get(process_allgather(metrics))
-  metrics = jax.tree_util.tree_map(lambda x: x[0] if x.ndim > 0 else x, metrics)
+  metrics = jax.device_get(process_allgather(metrics, tiled=True))
   # For data splits with no data (e.g. Imagenet no test set) no values
   # will appear for that split.
   if metrics is not None:
