@@ -38,7 +38,7 @@ from ml_collections.config_dict import config_dict
 import numpy as np
 import optax
 import pandas
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 
 def _init_model(model_cls, hps):
