@@ -618,7 +618,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         batch = next(train_iter)
         batch = self.finalize_batch_fn(batch)
         if self._global_step == 0:
-          batch_size_pytree = trainer_utils.get_batch_size(batch)
+          batch_size_pytree = self.get_batch_size(batch)
           if any(
               bsz != self._hps.batch_size
               for bsz in jax.tree.leaves(batch_size_pytree)
@@ -673,10 +673,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def update(self, batch, rng, metrics_update_fn, metrics_state, training_cost):
     """Single step of the training loop.
-    
+
     Note this method is responsible for updating the private _global_step
     attribute of the Trainer.
-    
+
     Args:
       batch: the per-device batch of data to process.
       rng: the RNG used for calling the model. `step` and `local_device_index`
@@ -723,3 +723,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
   def fetch_learning_rate(self, optimizer_state):
     return trainer_utils.fetch_learning_rate(optimizer_state)
+
+  def get_batch_size(self, batch):
+    return trainer_utils.get_batch_size(batch)

@@ -155,7 +155,7 @@ class TrainingAlgorithm(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def init_optimizer_state(
       self,
-      workload=None,
+      model=None,
       params=None,
       model_state=None,
       hyperparameters=None,
@@ -164,7 +164,7 @@ class TrainingAlgorithm(metaclass=abc.ABCMeta):
     """Initializes the optimizer state.
 
     Args:
-      workload: The workload being trained.
+      model: The model being trained.
       params: The initial model parameters.
       model_state: The initial state of the model.
       hyperparameters: The hyperparameters for the training.
@@ -273,7 +273,7 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
 
   def init_optimizer_state(
       self,
-      workload=None,
+      model=None,
       params=None,
       model_state=None,
       hyperparameters=None,
@@ -282,7 +282,7 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     """Initializes the optimizer state.
 
     Args:
-      workload: The workload being trained.
+      model: The model being trained.
       params: The initial model parameters.
       model_state: The initial state of the model.
       hyperparameters: The hyperparameters for the training.
@@ -291,7 +291,7 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     Returns:
       Optimizer state: Pytree of optimizer state.
     """
-    del workload, model_state, hyperparameters, rng  # Unused
+    del model, model_state, hyperparameters, rng  # Unused
     stretch_factor = 1
     if self.hps.get('total_accumulated_batch_size') is not None:
       stretch_factor = (
