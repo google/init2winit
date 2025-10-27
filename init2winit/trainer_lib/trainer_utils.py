@@ -191,7 +191,11 @@ def evaluate(
       # `merge` aggregates the metrics across batches.
       metrics = metrics.merge(computed_metrics)
 
-  metrics = jax.device_get(process_allgather(metrics, tiled=True))
+  # Note: process_allgather is a no-op for fully replicated metrics like
+  # accuracy (synced via a call to .sum()) but will tile for metrics like
+  # AveragePrecision that carry auxiliary non-replicated data. It returns
+  # pytree of numpy arrays on the host.
+  metrics = process_allgather(metrics, tiled=True)
   # For data splits with no data (e.g. Imagenet no test set) no values
   # will appear for that split.
   if metrics is not None:
