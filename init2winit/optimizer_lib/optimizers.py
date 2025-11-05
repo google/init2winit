@@ -192,7 +192,7 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
     )
   elif hps.optimizer == 'lora_bubbles':
     opt_init, opt_update = utils.static_inject_hyperparams(
-        lora_bubbles.scale_by_bubbles
+        lora_bubbles.scale_by_lora_bubbles
     )(
         learning_rate=0.0,  # Manually injected on each train step.
         weight_decay=hps.opt_hparams.get('weight_decay', 0.01),
@@ -203,6 +203,20 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         lora_min_steps=hps.opt_hparams.get('lora_min_steps', 100),
         lora_update_steps=hps.opt_hparams.get('lora_update_steps', 20),
         lora_rank=hps.opt_hparams.get('lora_rank', 64),
+        grad_rms_threshold=hps.opt_hparams.get('grad_rms_threshold', 10.0),
+        precond_grad_clip=hps.opt_hparams.get('precond_grad_clip', None),
+        bias_correction=hps.opt_hparams.get('bias_correction', True),
+    )
+  elif hps.optimizer == 'bubbles':
+    opt_init, opt_update = utils.static_inject_hyperparams(
+        lora_bubbles.scale_by_bubbles
+    )(
+        learning_rate=0.0,  # Manually injected on each train step.
+        weight_decay=hps.opt_hparams.get('weight_decay', 0.01),
+        beta1=hps.opt_hparams.get('beta1', 0.9),
+        beta2=hps.opt_hparams.get('beta2', 0.999),
+        nesterov=hps.opt_hparams.get('nesterov', True),
+        min_steps=hps.opt_hparams.get('min_steps', 100),
         grad_rms_threshold=hps.opt_hparams.get('grad_rms_threshold', 10.0),
         precond_grad_clip=hps.opt_hparams.get('precond_grad_clip', None),
         bias_correction=hps.opt_hparams.get('bias_correction', True),
@@ -545,15 +559,20 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         num_betas=hps.opt_hparams['mech_num_betas'],
         base_optimizer=optax.GradientTransformationExtraArgs(
             opt_init, opt_update
-        )
+        ),
     )
+
   if opt_init is None or opt_update is None:
-    raise NotImplementedError('Optimizer {} not implemented'.format(
-        hps.optimizer))
-  return opt_init, _wrap_update_fn(hps.optimizer, opt_update,
-                                   send_grad_fn=optimizer_requires_grad_fn,
-                                   send_cost_fn=optimizer_requires_cost_fn,
-                                   send_value=optimizer_requires_value)
+    raise NotImplementedError(
+        'Optimizer {} not implemented'.format(hps.optimizer)
+    )
+  return opt_init, _wrap_update_fn(
+      hps.optimizer,
+      opt_update,
+      send_grad_fn=optimizer_requires_grad_fn,
+      send_cost_fn=optimizer_requires_cost_fn,
+      send_value=optimizer_requires_value,
+  )
 
 
 def _wrap_update_fn(
@@ -563,7 +582,7 @@ def _wrap_update_fn(
     send_cost_fn=False,
     send_value=False,
 ):
-  """Wraps the optimizer update function to have the same function signiture.
+  """Wraps the optimizer update function to have the same function signature.
 
   Args:
     opt_name: The optimizer name.
