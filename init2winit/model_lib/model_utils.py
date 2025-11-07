@@ -480,4 +480,8 @@ def is_shape_compatible_with_sharding(param_shape, sharding, mesh):
 
 
 def get_default_mesh():
-  return jax.make_mesh((jax.device_count(),), ('devices',))
+  return jax.make_mesh(
+      (jax.device_count(),),
+      ('devices',),
+      axis_types=(jax.sharding.AxisType.Auto,) * len(('devices',)),
+  )
