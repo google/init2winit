@@ -62,6 +62,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         normalization='rmsnorm',
         mlp_activation='glu',
         qk_norm=True,
+        tie_embeddings=True,
     )
 )
 
@@ -339,6 +340,7 @@ class RoPENanodoModel(base_model.BaseModel):
         mlp_activation=self.hps['mlp_activation'],
         normalization=self.hps['normalization'],
         qk_norm=self.hps['qk_norm'],
+        tie_embeddings=self.hps['tie_embeddings'],
     )
     return TransformerDo(config)
 
