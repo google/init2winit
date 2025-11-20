@@ -217,8 +217,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
   def log_model_info(self, unreplicated_params):
     if jax.process_index() == 0:
       utils.log_pytree_shape_and_statistics(unreplicated_params)
-      logging.info('train_size: %d,', self._hps.train_size)
       utils.tabulate_model(self._model, self._hps)
+      logging.info('train_size: %d,', self._hps.train_size)
 
   def maybe_restore_from_checkpoint(self,
                                     unreplicated_optimizer_state,
@@ -486,19 +486,25 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       data_rng: (jax.random.PRNGKey) Rng seed used in data shuffling.
       callback_rng: (jax.random.PRNGKey) Rng seed used in callback functions.
     """
+    start_time = time.time()
     self.training_algorithm = self._training_algorithm_class(
         self._hps, self._model, self._num_train_steps
     )
-
+    logging.info(
+        'Training algorithm set up in %f seconds', time.time() - start_time
+    )
+    start_time = time.time()
     unreplicated_params, unreplicated_batch_stats = self._model.initialize(
         self._initializer,
         self._hps,
         init_rng,
         self._init_logger,
     )
+    logging.info('Model initialized in %f seconds', time.time() - start_time)
 
     self.log_model_info(unreplicated_params)
 
+    start_time = time.time()
     unreplicated_optimizer_state = self.training_algorithm.init_optimizer_state(
         self._model,
         unreplicated_params,
@@ -506,12 +512,16 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._hps,
         init_rng,
     )
+    logging.info(
+        'Optimizer state initialized in %f seconds', time.time() - start_time
+    )
 
     unreplicated_metrics_state = None
     # TODO(kasimbeg): move this to initialization.
     self._metrics_update_fn = None
     self._metrics_summary_fn = None
 
+    start_time = time.time()
     if self._training_metrics_config is not None:
       (metrics_init_fn, self._metrics_update_fn,
        self._metrics_summary_fn) = make_training_metrics(
@@ -519,7 +529,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       unreplicated_metrics_state = metrics_init_fn(
           unreplicated_params, unreplicated_batch_stats
       )
-
+    logging.info(
+        'Metrics initialized in %f seconds', time.time() - start_time
+    )
+    start_time = time.time()
     (
         unreplicated_optimizer_state,
         unreplicated_params,
@@ -532,6 +545,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         unreplicated_metrics_state,
     )
 
+    logging.info(
+        'Checkpoint restored in %f seconds', time.time() - start_time
+    )
+    start_time = time.time()
     (
         self._params,
         self._params_sharding,
@@ -547,9 +564,13 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         unreplicated_batch_stats,
         unreplicated_metrics_state,
     )
+    logging.info(
+        'Training state sharded in %f seconds', time.time() - start_time
+    )
 
     self._dataset = self.setup_data_loader(data_rng, self._global_step)
     self._eval_callbacks = self._setup_eval_callbacks(callback_rng)
+    logging.info('Training state setup complete')
 
   def train(self):
     """All training logic.
@@ -578,9 +599,11 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     self.setup_and_maybe_restore(init_rng, data_rng, callback_rng)
 
-    if jax.process_index() == 0:
-      trainer_utils.log_message(
-          'Starting training!', self._logging_pool, self._xm_work_unit)
+    trainer_utils.log_message(
+        'Setup and maybe restore completed!',
+        self._logging_pool,
+        self._xm_work_unit,
+    )
 
     train_iter = itertools.islice(
         self._dataset.train_iterator_fn(),

@@ -17,7 +17,9 @@
 
 import copy
 import functools
+import time
 
+from absl import logging
 from flax import linen as nn
 from init2winit import utils
 from init2winit.model_lib import losses
@@ -197,17 +199,28 @@ class BaseModel(object):
     # mess up Pythonic boolean statements like `not train` inside the model
     # construction.
     # We initialize model params on host to avoid memory issues.
+
+    start_time = time.time()
     model_init_fn = jax.jit(
         functools.partial(self.flax_module.init, train=False),
         backend='cpu')
+
     init_dict = model_init_fn({'params': params_rng, 'dropout': dropout_rng},
                               *fake_input_batch)
+
+    logging.info(
+        'Flax module init call took %f seconds.',
+        time.time() - start_time,
+    )
+    start_time = time.time()
     # Trainable model parameters.
     params = init_dict['params']
     batch_stats = init_dict.get('batch_stats', {})
 
     if hps.get('layer_rescale_factors'):
       params = model_utils.rescale_layers(params, hps.layer_rescale_factors)
+    logging.info('Layers rescaled in %f seconds.', time.time() - start_time)
+    start_time = time.time()
     # We don't pass batch_stats to the initializer, the initializer will just
     # run batch_norm in train mode and does not need to maintain the
     # batch_stats.
@@ -216,12 +229,25 @@ class BaseModel(object):
     # hyper_param?
     # TODO(gilmer): instead of passing in weighted_xent, pass in the model and
     # get the loss from that.
-    params = initializer(self.loss_fn, self.flax_module, params, hps,
-                         hps.input_shape, hps.output_shape, init_rng,
-                         metrics_logger)
+    params = initializer(
+        self.loss_fn,
+        self.flax_module,
+        params,
+        hps,
+        hps.input_shape,
+        hps.output_shape,
+        init_rng,
+        metrics_logger,
+    )
+    logging.info('Initializer run in %f seconds.', time.time() - start_time)
+    start_time = time.time()
 
     self._param_shapes = model_utils.param_shapes(params)
     self._param_types = model_utils.param_types(self._param_shapes)
+    logging.info(
+        'Param shapes and types computed in %f seconds.',
+        time.time() - start_time,
+    )
 
     return params, batch_stats
 
