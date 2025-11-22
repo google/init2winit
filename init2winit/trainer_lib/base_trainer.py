@@ -25,6 +25,7 @@ from absl import logging
 from init2winit import callbacks
 from init2winit import checkpoint
 from init2winit import utils
+from init2winit.dataset_lib import data_utils
 from init2winit.model_lib import model_utils
 from init2winit.trainer_lib import trainer_utils
 from init2winit.trainer_lib import training_algorithm
@@ -624,7 +625,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
               for bsz in jax.tree.leaves(batch_size_pytree)
           ):
             raise ValueError(
-                f'Batch size {batch_size_pytree} does not match global array'
+                f'Batch size {batch_size_pytree} of global array'
                 f' does not match hps batch size {self._hps.batch_size}'
             )
 
@@ -725,4 +726,4 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     return trainer_utils.fetch_learning_rate(optimizer_state)
 
   def get_batch_size(self, batch):
-    return trainer_utils.get_batch_size(batch)
+    return data_utils.get_batch_size_pytree(batch)

@@ -24,7 +24,6 @@ from init2winit import utils
 from init2winit.dataset_lib import data_utils
 import jax
 from jax.experimental.multihost_utils import process_allgather  # pylint: disable=g-importing-member
-import jraph
 import numpy as np
 
 
@@ -274,13 +273,3 @@ def eval_metrics(
       metrics = _merge_and_apply_prefix(metrics, split_metrics,
                                         (split_name + '/'))
   return metrics
-
-
-def get_batch_size(pytree):
-  """Returns a pytree of batch sizes."""
-  if isinstance(pytree['inputs'], jraph.GraphsTuple):
-    pytree = pytree[
-        'inputs'
-    ].n_node  # Infer bsz from node field of GraphTuple.
-  batch_sizes_pytree = jax.tree.map(lambda x: x.shape[0], pytree)
-  return batch_sizes_pytree

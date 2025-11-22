@@ -267,6 +267,24 @@ def _get_batch_iterator(dataset_iter,
 
 def get_ogbg_molpcba(shuffle_rng, batch_size, eval_batch_size, hps=None):
   """Data generators for ogbg-molpcba."""
+
+  process_count = jax.process_count()
+  if batch_size % process_count != 0:
+    raise ValueError(
+        'process_count={} must divide batch_size={}.'.format(
+            process_count, batch_size
+        )
+    )
+  if eval_batch_size % process_count != 0:
+    raise ValueError(
+        'process_count={} must divide eval_batch_size={}.'.format(
+            process_count, eval_batch_size
+        )
+    )
+
+  per_host_batch_size = int(batch_size / process_count)
+  per_host_eval_batch_size = int(eval_batch_size / process_count)
+
   shuffle_buffer_size = 2**15
   shuffle_rng_train, shuffle_rng_eval_train = jax.random.split(shuffle_rng)
   train_ds = _load_dataset(
@@ -304,25 +322,34 @@ def get_ogbg_molpcba(shuffle_rng, batch_size, eval_batch_size, hps=None):
       add_self_loops=hps.add_self_loops)
 
   def train_iterator_fn():
-    return iterator_from_ds(dataset_iter=iter(train_ds), batch_size=batch_size)
+    return iterator_from_ds(
+        dataset_iter=iter(train_ds), batch_size=per_host_batch_size
+    )
 
   def eval_train_epoch(num_batches=None):
     return itertools.islice(
         iterator_from_ds(
-            dataset_iter=iter(eval_train_ds), batch_size=eval_batch_size),
-        num_batches)
+            dataset_iter=iter(eval_train_ds),
+            batch_size=per_host_eval_batch_size,
+        ),
+        num_batches,
+    )
 
   def valid_epoch(num_batches=None):
     return itertools.islice(
         iterator_from_ds(
-            dataset_iter=iter(valid_ds), batch_size=eval_batch_size),
-        num_batches)
+            dataset_iter=iter(valid_ds), batch_size=per_host_eval_batch_size
+        ),
+        num_batches,
+    )
 
   def test_epoch(num_batches=None):
     return itertools.islice(
         iterator_from_ds(
-            dataset_iter=iter(test_ds), batch_size=eval_batch_size),
-        num_batches)
+            dataset_iter=iter(test_ds), batch_size=per_host_eval_batch_size
+        ),
+        num_batches,
+    )
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
 

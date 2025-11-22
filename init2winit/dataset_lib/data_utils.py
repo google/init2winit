@@ -21,6 +21,7 @@ import flax.linen as nn
 import jax
 from jax.nn import one_hot
 from jax.sharding import PartitionSpec as P
+import jraph
 import numpy as np
 
 
@@ -193,3 +194,26 @@ def shard_pytree(pytree, mesh, shardings=None):
   )
 
   return shardings, pytree
+
+
+def get_batch_size_pytree(pytree):
+  """Returns a pytree of batch sizes.
+
+  Warning: For OGBG, this function is a blocking operation so do not use it in
+  each training step.
+
+  Args:
+    pytree: A pytree representing an init2winit batch of data.
+
+  Returns:
+    A pytree of batch sizes, or a single integer for OGBG.
+  """
+  if isinstance(pytree['inputs'], jraph.GraphsTuple):
+    # Subtract the extra padding graphs from the padded batch size to get
+    # the actual batch size.
+    padding_graphs = jax.process_count() * jax.local_device_count()
+    batch_sizes_pytree = pytree['inputs'].n_node.shape[0] - padding_graphs
+    return batch_sizes_pytree
+
+  batch_sizes_pytree = jax.tree.map(lambda x: x.shape[0], pytree)
+  return batch_sizes_pytree

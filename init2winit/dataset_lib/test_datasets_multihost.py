@@ -27,14 +27,51 @@ from init2winit.dataset_lib import datasets
 import dataset_lib.fineweb_edu_10b_input_pipeline  # pylint: disable=unused-import  # local file import
 import jax
 from jax.experimental import mesh_utils
-import jax.experimental.multihost_utils
 import tensorflow as tf
 
 
 
-def get_shape(pytree):
-  """Returns a pytree of shapes."""
-  return jax.tree_util.tree_map(lambda x: x.shape, pytree)
+
+def ogbg_molpcba_mock(*args, **kwargs):
+  del args, kwargs
+  num_examples = 10
+  num_nodes = 8
+  num_edges = 8
+  node_dim = 3
+  edge_dim = 2
+  return tf.data.Dataset.from_generator(
+      lambda: (
+          {
+              'edge_feat': tf.ones(
+                  shape=(num_edges, edge_dim), dtype=tf.float32
+              ),
+              'edge_index': tf.ones(shape=(num_edges, 2), dtype=tf.int64),
+              'labels': tf.ones(shape=(128,), dtype=tf.int64),
+              'node_feat': tf.ones(
+                  shape=(num_nodes, node_dim), dtype=tf.float32
+              ),
+              'num_nodes': tf.constant([num_nodes], dtype=tf.int64),
+              'num_edges': tf.constant([num_edges], dtype=tf.int64),
+          }
+          for _ in range(num_examples)
+      ),
+      output_types={
+          'edge_feat': tf.float32,
+          'edge_index': tf.int64,
+          'labels': tf.int64,
+          'node_feat': tf.float32,
+          'num_nodes': tf.int64,
+          'num_edges': tf.int64,
+      },
+      output_shapes={
+          'edge_feat': tf.TensorShape([num_edges, edge_dim]),
+          'edge_index': tf.TensorShape([num_edges, 2]),
+          'labels': tf.TensorShape([128]),
+          'node_feat': tf.TensorShape([num_nodes, node_dim]),
+          'num_nodes': tf.TensorShape([1]),
+          'num_edges': tf.TensorShape([1]),
+      },
+  )
 
 
 def fineweb_edu_10b_mock(*args, **kwargs):  # pylint: disable=unused-argument
@@ -52,8 +89,12 @@ def fineweb_edu_10b_mock(*args, **kwargs):  # pylint: disable=unused-argument
 all_dataset_names = {
     'fineweb_edu_10B': (
         fineweb_edu_10b_mock,
-        'init2winit.dataset_lib.fineweb_edu_10b_input_pipeline.tf.data.Dataset.load'
-    )
+        'init2winit.dataset_lib.fineweb_edu_10b_input_pipeline.tf.data.Dataset.load',
+    ),
+    'ogbg_molpcba': (
+        ogbg_molpcba_mock,
+        'init2winit.dataset_lib.ogbg_molpcba.tfds.load',
+    ),
 }
 
 parameterized_tests = [
@@ -80,7 +121,9 @@ class DatasetsTest(parameterized.TestCase):
       rng = jax.random.PRNGKey(42)
       host_rng = jax.random.fold_in(rng, jax.process_index())
 
-      batch_size = jax.process_count() * jax.local_device_count()
+      num_processes = jax.process_count()
+      assert num_processes > 1
+      batch_size = num_processes * jax.local_device_count()
       logging.info('batch size = %d', batch_size)
       dataset_builder = datasets.get_dataset(dataset_name)
       hps = datasets.get_dataset_hparams(dataset_name)
@@ -96,11 +139,20 @@ class DatasetsTest(parameterized.TestCase):
       )
 
       # Combine host-local batches into global batch
-      sharded_batch = jax.tree_util.tree_map(make_global_array_fn, batch)
-      sharded_batch_shape = get_shape(sharded_batch)  # global shape
+      global_batch = jax.tree_util.tree_map(make_global_array_fn, batch)
+      global_batch_shape_pytree = data_utils.get_batch_size_pytree(
+          global_batch
+      )
 
-      for shape in sharded_batch_shape.values():
-        self.assertEqual(shape[0], batch_size)
+      # Check that the global batch shape is the same as the hps batch size.
+      self.assertTrue(
+          all(
+              global_batch_size == batch_size
+              for global_batch_size in jax.tree_util.tree_leaves(
+                  global_batch_shape_pytree
+              )
+          )
+      )
 
 if __name__ == '__main__':
   multiprocess_test_util.main()

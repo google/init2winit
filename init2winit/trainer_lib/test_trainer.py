@@ -131,9 +131,8 @@ def _get_fake_text_dataset(batch_size, eval_num_batches):
 def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
   """Yields graph batches with label 1 if graph has 4 or 6 nodes and 0 otherwise."""
 
-  def _get_batch(n_nodes_list, batch_size):
+  def _get_batch(n_nodes_list):
     # Hardcode batch_size to be 2 for simplicity
-    del batch_size
     graphs_list = []
     labels_list = []
     weights_list = []
@@ -157,27 +156,35 @@ def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
 
   # Ensure each batch has one positive and one negative example for
   # average precision to not be NaN.
+  num_batches = 2
+  min_nodes = 2
+  # Since we call dynamically batch with bsz + 1
+  n_graphs_per_batch = batch_size + 1
+  n_nodes_list = [
+      [i for i in range(min_nodes, min_nodes + n_graphs_per_batch)]
+      for _ in range(num_batches)
+  ]
   def train_iterator_fn():
-    for ns in itertools.cycle([[3, 6], [4, 5]]):
-      yield _get_batch(ns, batch_size)
+    for ns in itertools.cycle(n_nodes_list):
+      yield _get_batch(ns)
 
   def eval_train_epoch(num_batches=None):
     if num_batches is None:
       num_batches = eval_num_batches
-    for ns in itertools.islice(itertools.cycle([[3, 6], [4, 5]]), num_batches):
-      yield _get_batch(ns, batch_size)
+    for ns in itertools.islice(itertools.cycle(n_nodes_list), num_batches):
+      yield _get_batch(ns)
 
   def valid_epoch(num_batches=None):
     if num_batches is None:
       num_batches = eval_num_batches
-    for ns in itertools.islice(itertools.cycle([[3, 6], [4, 5]]), num_batches):
-      yield _get_batch(ns, batch_size)
+    for ns in itertools.islice(itertools.cycle(n_nodes_list), num_batches):
+      yield _get_batch(ns)
 
   def test_epoch(num_batches=None):
     if num_batches is None:
       num_batches = eval_num_batches
-    for ns in itertools.islice(itertools.cycle([[3, 6], [4, 5]]), num_batches):
-      yield _get_batch(ns, batch_size)
+    for ns in itertools.islice(itertools.cycle(n_nodes_list), num_batches):
+      yield _get_batch(ns)
 
   return (Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
                   test_epoch), {
