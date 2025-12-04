@@ -19,9 +19,8 @@ from init2winit.trainer_lib import base_trainer
 from init2winit.trainer_lib import trainer_utils
 import jax
 
-
-NamedSharding = jax.sharding.NamedSharding
-P = jax.sharding.PartitionSpec
+NamedSharding = jax.NamedSharding
+P = jax.P
 
 
 class Trainer(base_trainer.BaseTrainer):
@@ -52,6 +51,8 @@ class Trainer(base_trainer.BaseTrainer):
     """
     # `jax.random.split` is very slow outside the train step, so instead we do a
     # `jax.random.fold_in` here.
+    # The RNG is already sharded per-device, so each device has a scalar
+    # PRNGKey.
     step = self._global_step
     rng = jax.random.fold_in(rng, step)
 

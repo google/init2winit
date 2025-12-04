@@ -17,7 +17,6 @@ r"""Main file for the init2winit project, updated to use config_flags.
 
 """
 
-import functools
 import json
 import os
 import struct
@@ -26,8 +25,6 @@ import time
 
 from absl import flags
 from absl import logging
-
-from flax import jax_utils
 from init2winit import hyperparameters
 from init2winit import utils
 from init2winit.dataset_lib import datasets
@@ -42,6 +39,7 @@ from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow as tf
 from vizier import pyvizier
+
 
 gfile = tf.io.gfile
 
@@ -80,16 +78,27 @@ def _write_trial_meta_data(meta_data_path, meta_data):
     f.write(json.dumps(d, indent=2))
 
 
-@functools.partial(jax.pmap, axis_name='hosts')
-def _sum_seeds_pmapped(seed):
-  return lax.psum(seed, 'hosts')
-
-
 def _create_synchronized_rng_seed():
+  """Create an RNG seed synchronized across all devices."""
   rng_seed = np.int64(struct.unpack('q', os.urandom(8))[0])
-  rng_seed = _sum_seeds_pmapped(jax_utils.replicate(rng_seed))
-  rng_seed = np.sum(rng_seed)
-  return rng_seed
+
+  # Synchronize seed across devices using shard_map
+  devices = jax.devices()
+  mesh = jax.sharding.Mesh(np.array(devices), axis_names=('devices',))
+  replicated_seed = np.array([rng_seed] * len(devices))
+
+  def sum_fn(x):
+    return lax.psum(x, 'devices')
+
+  sharded_sum = jax.shard_map(
+      sum_fn,
+      mesh=mesh,
+      in_specs=jax.P('devices'),
+      out_specs=jax.P('devices'),
+  )
+
+  rng_seed = sharded_sum(replicated_seed)
+  return np.sum(rng_seed)
 
 
 def _run(

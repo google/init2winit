@@ -578,6 +578,13 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     self.setup_and_maybe_restore(init_rng, data_rng, callback_rng)
 
+    # Replicate the training RNG across devices once upfront to ensure correct
+    # device ordering with params throughout training. We use P() (full
+    # replication) so each device gets the same scalar PRNGKey, not a sharded
+    # slice of it.
+    rng_sharding = jax.NamedSharding(self._mesh, jax.P())
+    rng = jax.device_put(rng, rng_sharding)
+
     if jax.process_index() == 0:
       trainer_utils.log_message(
           'Starting training!', self._logging_pool, self._xm_work_unit)
