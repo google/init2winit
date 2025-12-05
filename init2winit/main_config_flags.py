@@ -33,7 +33,7 @@ from init2winit.model_lib import models
 from init2winit.trainer_lib import trainers
 from init2winit.trainer_lib import training_algorithms
 import jax
-from jax import lax
+from jax.experimental.multihost_utils import process_allgather
 from ml_collections import config_flags
 from ml_collections.config_dict import config_dict
 import numpy as np
@@ -79,26 +79,13 @@ def _write_trial_meta_data(meta_data_path, meta_data):
 
 
 def _create_synchronized_rng_seed():
-  """Create an RNG seed synchronized across all devices."""
+  """Create an RNG seed synchronized across all processes."""
+  # Each process generates its own random seed
   rng_seed = np.int64(struct.unpack('q', os.urandom(8))[0])
 
-  # Synchronize seed across devices using shard_map
-  devices = jax.devices()
-  mesh = jax.sharding.Mesh(np.array(devices), axis_names=('devices',))
-  replicated_seed = np.array([rng_seed] * len(devices))
-
-  def sum_fn(x):
-    return lax.psum(x, 'devices')
-
-  sharded_sum = jax.shard_map(
-      sum_fn,
-      mesh=mesh,
-      in_specs=jax.P('devices'),
-      out_specs=jax.P('devices'),
-  )
-
-  rng_seed = sharded_sum(replicated_seed)
-  return np.sum(rng_seed)
+  # Gather seeds from all processes and sum them
+  seeds = process_allgather(rng_seed)
+  return np.int64(np.sum(seeds))
 
 
 def _run(
