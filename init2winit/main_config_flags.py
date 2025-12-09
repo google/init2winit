@@ -241,7 +241,8 @@ def main(unused_argv):
   eval_steps = [int(s.strip()) for s in config.eval_steps]
   if jax.process_index() == 0:
     makedirs(experiment_dir, mode=0o775)
-  log_dir = os.path.join(experiment_dir, 'r=3/')
+  log_encoding = 'r=3'
+  log_dir = os.path.join(experiment_dir, log_encoding)
   makedirs(log_dir, mode=0o775)
   log_path = os.path.join(
       log_dir, 'worker{}_{}.log'.format(worker_id, jax.process_index()))
