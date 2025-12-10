@@ -90,9 +90,11 @@ def maybe_restore_checkpoint(
       global_step=uninitialized_global_step,
       preemption_count=0,
       sum_train_cost=0.0)
+  logging.info('Loading latest checkpoint from train_dir: %s', train_dir)
   latest_ckpt = load_latest_checkpoint(train_dir,
                                        target=unreplicated_checkpoint_state,
                                        orbax_checkpointer=orbax_checkpointer)
+  logging.info('Loading checkpoint from train_dir %s complete.', train_dir)
   # Load_latest_checkpoint() will return unreplicated_checkpoint_state if
   # train_dir does not exist or if it exists and contains no checkpoints.
   # Note that we could likely change the below line to:
