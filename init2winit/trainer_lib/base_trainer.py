@@ -31,7 +31,7 @@ from init2winit.trainer_lib import trainer_utils
 from init2winit.trainer_lib import training_algorithm
 from init2winit.training_metrics_grabber import make_training_metrics
 import jax
-import orbax.checkpoint as orbax_checkpoint
+import orbax.checkpoint as ocp
 
 
 class BaseTrainer(metaclass=abc.ABCMeta):
@@ -159,11 +159,16 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._eval_train_num_batches = eval_train_num_batches
     self._eval_frequency = eval_frequency
     self._checkpoint_steps = checkpoint_steps
-    self._orbax_checkpointer = orbax_checkpoint.AsyncCheckpointer(
-        orbax_checkpoint.PyTreeCheckpointHandler(use_ocdbt=False),
+    orbax_file_options = ocp.checkpoint_manager.FileOptions(
+        path_permission_mode=0o775,
+        cns2_storage_options=ocp.options.Cns2StorageOptions(
+            choose_store_cell=True,
+        ),
+    )
+    self._orbax_checkpointer = ocp.AsyncCheckpointer(
+        ocp.PyTreeCheckpointHandler(use_ocdbt=False),
         timeout_secs=600,
-        file_options=orbax_checkpoint.checkpoint_manager.FileOptions(
-            path_permission_mode=0o775),
+        file_options=orbax_file_options,
     )
     self._early_stopping_target_name = early_stopping_target_name
     self._early_stopping_target_value = early_stopping_target_value

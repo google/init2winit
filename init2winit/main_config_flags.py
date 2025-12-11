@@ -33,7 +33,7 @@ from init2winit.model_lib import models
 from init2winit.trainer_lib import trainers
 from init2winit.trainer_lib import training_algorithms
 import jax
-from jax.experimental.multihost_utils import process_allgather
+from jax.experimental import multihost_utils
 from ml_collections import config_flags
 from ml_collections.config_dict import config_dict
 import numpy as np
@@ -84,7 +84,7 @@ def _create_synchronized_rng_seed():
   rng_seed = np.int64(struct.unpack('q', os.urandom(8))[0])
 
   # Gather seeds from all processes and sum them
-  seeds = process_allgather(rng_seed)
+  seeds = multihost_utils.process_allgather(rng_seed)
   return np.int64(np.sum(seeds))
 
 
