@@ -231,6 +231,8 @@ def main(unused_argv):
     with config.ignore_type():
       config.hparam_overrides = config.hparam_overrides_json
 
+  logging.info('jax_compilation_cache_dir=%s',
+               jax.config.jax_compilation_cache_dir)
 
   if config.callback_configs:
     callback_configs = config.callback_configs
