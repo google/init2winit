@@ -738,7 +738,7 @@ class TrainerTest(parameterized.TestCase):
     epoch_reports = list(self.trainer.train())
 
     # check that the additional checkpoints are saved.
-    checkpoint_dir = os.path.join(self.test_dir, 'checkpoints')
+    checkpoint_dir = os.path.join(self.test_dir, 'ttl=180d', 'checkpoints')
     saved_steps = []
     for f in tf.io.gfile.listdir(checkpoint_dir):
       if f[:5] == 'ckpt_':

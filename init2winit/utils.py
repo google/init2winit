@@ -105,7 +105,7 @@ def timed(f):
 def set_up_loggers(train_dir, xm_work_unit=None):
   """Creates a logger for eval metrics as well as initialization metrics."""
   csv_path = os.path.join(train_dir, 'measurements.csv')
-  pytree_path = os.path.join(train_dir, 'training_metrics')
+  pytree_path = os.path.join(train_dir, 'ttl=180d', 'training_metrics')
   metrics_logger = MetricLogger(
       csv_path=csv_path,
       pytree_path=pytree_path,

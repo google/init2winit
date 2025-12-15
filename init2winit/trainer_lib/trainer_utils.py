@@ -19,7 +19,6 @@ import functools
 import time
 
 from absl import logging
-from flax import jax_utils
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
 import jax
@@ -74,18 +73,6 @@ def log_epoch_report(report, metrics_logger):
     metrics_logger.append_scalar_metrics(report)
   logging.info('Finished (estimated) epoch %d. Saving checkpoint.',
                report['epoch'])
-
-
-def maybe_log_training_metrics(metrics_state,
-                               metrics_summary_fn,
-                               metrics_logger):
-  """If appropriate, send a summary tree of training metrics to the logger."""
-  if metrics_state:
-    unreplicated_metrics_state = jax_utils.unreplicate(metrics_state)
-    summary_tree = metrics_summary_fn(unreplicated_metrics_state)
-    metrics_logger.append_pytree(summary_tree)
-    metrics_logger.write_pytree(unreplicated_metrics_state,
-                                prefix='metrics_state')
 
 
 def should_eval(global_step, eval_frequency, eval_steps):

@@ -34,6 +34,9 @@ import jax
 import orbax.checkpoint as ocp
 
 
+CHECKPOINT_TTL = 'ttl=180d'
+
+
 class BaseTrainer(metaclass=abc.ABCMeta):
   """Abstract parent class for all trainers."""
 
@@ -142,6 +145,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     del loss_name
     del metrics_name
     self._train_dir = train_dir
+    self._checkpoint_dir = os.path.join(train_dir, CHECKPOINT_TTL)
     self._model = model
     self._dataset_builder = dataset_builder
     self._data_selector = data_selector
@@ -200,7 +204,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     # Only used if checkpoints_steps is non-empty. Standard checkpoints are
     # saved in train_dir.
-    self._checkpoint_dir = os.path.join(self._train_dir, 'checkpoints')
+    self._extra_checkpoint_dir = os.path.join(
+        self._checkpoint_dir, 'checkpoints'
+    )
 
     # During eval, we can donate the 'batch' buffer. We don't donate the
     # 'params' and 'batch_stats' buffers as we don't re-assign those values in
@@ -256,7 +262,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         unreplicated_params,
         unreplicated_batch_stats,
         unreplicated_metrics_state,
-        train_dir=self._train_dir,
+        train_dir=self._checkpoint_dir,
         external_checkpoint_path=self._external_checkpoint_path,
         orbax_checkpointer=self._orbax_checkpointer,
     )
@@ -405,7 +411,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     Has the side-effects of:
       - synchronizing self._batch_stats across hosts
-      - checkpointing via self._save(self._train_dir)
+      - checkpointing via self._save(self._checkpoint_dir)
       - resetting self._sum_train_cost to jnp.zeros
       - resetting self._time_at_prev_eval_end to the current time
       - resetting self._prev_eval_step to self._global_step
@@ -440,7 +446,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     )
     self._run_eval_callbacks(report)
     if save:
-      self._save(self._train_dir)
+      self._save(self._checkpoint_dir)
     steps_since_last_eval = self._global_step - self._prev_eval_step
     steps_per_sec_no_eval = steps_since_last_eval / time_since_last_eval
     run_time = time.time() - self._time_at_prev_eval_end
@@ -635,7 +641,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._prev_eval_step = self._global_step
 
     if self._global_step in self._checkpoint_steps:
-      self._save(self._checkpoint_dir, max_to_keep=None)
+      self._save(self._extra_checkpoint_dir, max_to_keep=None)
 
     for _ in range(start_step, self._num_train_steps):
       with jax.profiler.StepTraceAnnotation(
@@ -671,7 +677,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
             self._sum_train_cost,
         )
         if self._global_step in self._checkpoint_steps:
-          self._save(self._checkpoint_dir, max_to_keep=None)
+          self._save(self._extra_checkpoint_dir, max_to_keep=None)
 
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
