@@ -52,6 +52,7 @@ jax.config.update('jax_persistent_cache_min_entry_size_bytes', -1)
 # Since we don't restrict caching by executable size, set a slightly higher
 # minimum compile time threshold than the default of 1 second.
 jax.config.update('jax_persistent_cache_min_compile_time_secs', 10)
+jax.config.update('jax_log_compiles', True)
 # Setting jax default prng implementation to protect against jax defaults
 # change.
 jax.config.update('jax_default_prng_impl', 'threefry2x32')
