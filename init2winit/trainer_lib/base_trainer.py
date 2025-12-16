@@ -71,6 +71,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       metrics_name=None,
       data_selector=None,
       training_algorithm_class=training_algorithm.OptaxTrainingAlgorithm,
+      checkpoint_ttl=CHECKPOINT_TTL,
   ):
     """Main training loop.
 
@@ -140,12 +141,16 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       data_selector: data selection function returned by
         datasets.get_data_selector.
       training_algorithm_class: Class of training algorithm to use.
+      checkpoint_ttl: (str) Optional TTL path segment to use for checkpoints. By
+        default, checkpoints will use 'ttl=180d'.
     """
     del dataset_meta_data
     del loss_name
     del metrics_name
     self._train_dir = train_dir
-    self._checkpoint_dir = os.path.join(train_dir, CHECKPOINT_TTL)
+    if not checkpoint_ttl:  # If checkpoint_ttl is None or '', use the default.
+      checkpoint_ttl = CHECKPOINT_TTL
+    self._checkpoint_dir = os.path.join(train_dir, checkpoint_ttl)
     self._model = model
     self._dataset_builder = dataset_builder
     self._data_selector = data_selector

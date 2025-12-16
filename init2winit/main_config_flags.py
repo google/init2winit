@@ -129,6 +129,7 @@ def _run(
     callback_configs,
     external_checkpoint_path,
     training_algorithm_name,
+    checkpoint_ttl,
 ):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
@@ -216,6 +217,7 @@ def _run(
             metrics_name=metrics_name,
             data_selector=data_selector,
             training_algorithm_class=training_algorithm_class,
+            checkpoint_ttl=checkpoint_ttl,
         ).train()
     )
     logging.info(epoch_reports)
@@ -300,6 +302,7 @@ def main(unused_argv):
         callback_configs=callback_configs,
         external_checkpoint_path=config.external_checkpoint_path,
         training_algorithm_name=config.training_algorithm,
+        checkpoint_ttl=config.ttl,
     )
 
 
