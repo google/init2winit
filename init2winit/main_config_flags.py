@@ -231,6 +231,12 @@ def _run(
 
 
 def main(unused_argv):
+  logging.info(
+      'jax_compilation_cache_dir=%s', jax.config.jax_compilation_cache_dir
+  )
+  logging.info(
+      'jax_enable_compilation_cache=%s', jax.config.jax_enable_compilation_cache
+  )
   # Don't let TF see the GPU, because all we use it for is tf.data loading.
   tf.config.set_visible_devices([], 'GPU')
 
@@ -240,8 +246,6 @@ def main(unused_argv):
     with config.ignore_type():
       config.hparam_overrides = config.hparam_overrides_json
 
-  logging.info('jax_compilation_cache_dir=%s',
-               jax.config.jax_compilation_cache_dir)
 
   if config.callback_configs:
     callback_configs = config.callback_configs
