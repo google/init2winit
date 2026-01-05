@@ -112,7 +112,7 @@ class WideResnetBlock(nn.Module):
         kernel_init=self.conv_kernel_init,
         use_bias=False)(y)
 
-    if self.normalizer == 'none':
+    if self.normalizer == 'none' and jnp.isscalar(y):
       y = model_utils.ScalarMultiply()(y)
 
     return x + y
