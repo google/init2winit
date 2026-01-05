@@ -128,7 +128,7 @@ class ModelDebugCallback:
     self.logger = logger
     self.dataset = dataset
 
-    batch = next(dataset.train_iterator_fn())
+    batch = next(iter(dataset.train_iterator_fn()))
     self.batch = data_utils.shard(batch)
 
     self.batch_rng = flax.jax_utils.replicate(rng)
