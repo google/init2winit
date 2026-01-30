@@ -401,9 +401,9 @@ class BatchNorm(nn.Module):
 
     if train:
       mask = 1.0 - padding
-      sum_v = jnp.sum(inputs * mask, axis=reduce_over_dims, keepdims=True)
+      sum_v = jnp.sum(inputs * mask, axis=reduce_over_dims, keepdims=False)
       count_v = jnp.sum(
-          jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=True)
+          jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=False)
 
       count_v = jnp.maximum(count_v, 1.0)
       mean = sum_v / count_v
@@ -411,7 +411,7 @@ class BatchNorm(nn.Module):
       sum_vv = jnp.sum(
           (inputs - mean) * (inputs - mean) * mask,
           axis=reduce_over_dims,
-          keepdims=True)
+          keepdims=False)
 
       var = sum_vv / count_v
 
