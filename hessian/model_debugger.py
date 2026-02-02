@@ -555,7 +555,7 @@ class ModelDebugger:
         self._stored_metrics,
         remove_leaf_tuples(flax.core.unfreeze(all_metrics)))
 
-    if self._metrics_logger and jax.host_id() == 0:
+    if self._metrics_logger and jax.process_index() == 0:
       self._maybe_save_metrics(step)
 
     return all_metrics

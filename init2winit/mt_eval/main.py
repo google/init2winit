@@ -101,8 +101,8 @@ def main(unused_argv):
   if jax.process_index() == 0:
     logging.info('argv:\n%s', ' '.join(sys.argv))
     logging.info('device_count: %d', jax.device_count())
-    logging.info('num_hosts : %d', jax.host_count())
-    logging.info('host_id : %d', jax.host_id())
+    logging.info('num_hosts : %d', jax.process_count())
+    logging.info('host_id : %d', jax.process_index())
 
   model_class = models.get_model(model_name)
   dataset_builder = datasets.get_dataset(dataset_name)

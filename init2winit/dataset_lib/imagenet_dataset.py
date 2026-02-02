@@ -134,7 +134,7 @@ class MixupTransform(grain.MapTransform):
     # Grain currently doesn't support the `ds.enumerate()`
     # functionality, they suggested moving mixup to the training loop where we
     # can access the step number.
-    batch_index = features[grain.INDEX][0] // jax.host_count()
+    batch_index = features[grain.INDEX][0] // jax.process_count()
     seed = tf.random.experimental.stateless_fold_in(
         self.initial_seed, batch_index
     )
