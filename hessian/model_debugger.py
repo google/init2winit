@@ -18,11 +18,9 @@ r"""Debugging tool for identifying problematic layers in a network.
 """
 
 import functools
-import os
 
 import flax
 import flax.linen as nn
-from init2winit.checkpoint import load_pytree
 from init2winit.model_lib import partition_tree
 from init2winit.utils import array_append
 from init2winit.utils import tree_norm_sql2
@@ -342,11 +340,8 @@ class ModelDebugger:
     self._stored_metrics = {}
 
     # In the case of preemption we want to restore prior metrics.
-    if metrics_logger:
-      metrics_file = os.path.join(metrics_logger._pytree_path,
-                                  'training_metrics')
-      if exists(metrics_file):
-        self._stored_metrics = load_pytree(metrics_file)
+    if metrics_logger and metrics_logger.latest_pytree_checkpoint_step():
+      self._stored_metrics = metrics_logger.load_latest_pytree()
 
   def _grab_statistics(self,
                        step,
@@ -380,9 +375,9 @@ class ModelDebugger:
     save_dict = self._stored_metrics.copy()
     if self._save_every:
       if step % self._save_every == 0:
-        self._metrics_logger.write_pytree(save_dict)
+        self._metrics_logger.write_pytree(save_dict, step=step)
     else:
-      self._metrics_logger.write_pytree(save_dict)
+      self._metrics_logger.write_pytree(save_dict, step=step)
 
   @property
   def stored_metrics(self):

@@ -23,7 +23,6 @@ import tempfile
 
 from absl.testing import absltest
 from absl.testing import parameterized
-from init2winit import checkpoint
 from init2winit import utils
 import jax.numpy as jnp
 import numpy as np
@@ -75,31 +74,35 @@ class UtilsTest(parameterized.TestCase):
           expected=list(range(1, 10)),
       ),
   )
-  def testRunInParallel(self, input_list_dict, num_workers, expected):
+  def test_run_in_parallel(self, input_list_dict, num_workers, expected):
     """Test running successful fns in parallel, originally from mlbileschi."""
     actual = utils.run_in_parallel(_identity, input_list_dict, num_workers)
     self.assertEqual(actual, expected)
 
-  def testRunInParallelOnFailingFn(self):
+  def test_run_in_parallel_on_failing_fn(self):
     """Test running failing fns in parallel, originally from mlbileschi."""
     with self.assertRaisesRegex(ValueError, 'I always fail.'):
       utils.run_in_parallel(_fn_that_always_fails, [dict(arg='hi')], 10)
 
-  def testAppendPytree(self):
+  def test_append_pytree(self):
     """Test appending and loading pytrees."""
     pytrees = [{'a': i} for i in range(10)]
-    pytree_path = os.path.join(self.test_dir, 'pytree.ckpt')
+    pytree_path = os.path.join(self.test_dir, 'pytrees')
     logger = utils.MetricLogger(pytree_path=pytree_path)
 
-    for pytree in pytrees:
-      logger.append_pytree(pytree)
+    for i, pytree in enumerate(pytrees):
+      logger.append_pytree(pytree, step=i)
 
-    latest = checkpoint.load_latest_checkpoint(pytree_path, prefix='')
-    saved_pytrees = latest['pytree'] if latest else []
+    latest = logger.load_latest_pytree(
+        target=None,
+    )
+    saved_pytrees = latest if latest else []
+
     self.assertEqual(
-        pytrees, [saved_pytrees[str(i)] for i in range(len(saved_pytrees))])
+        pytrees, [saved_pytrees[i] for i in range(len(saved_pytrees))]
+    )
 
-  def testArrayAppend(self):
+  def test_array_append(self):
     """Test appending to an array."""
     np.testing.assert_allclose(
         utils.array_append(jnp.array([1, 2, 3]), 4), jnp.array([1, 2, 3, 4]))
@@ -107,13 +110,13 @@ class UtilsTest(parameterized.TestCase):
         utils.array_append(jnp.array([[1, 2], [3, 4]]), jnp.array([5, 6])),
         jnp.array([[1, 2], [3, 4], [5, 6]]))
 
-  def testTreeNormSqL2(self):
+  def test_tree_norm_sq_l2(self):
     """Test computing the squared L2 norm of a pytree."""
     pytree = {'foo': jnp.ones(10), 'baz': jnp.ones(20)}
     self.assertEqual(utils.tree_norm_sql2(pytree), {'foo': 10.0, 'baz': 20.0})
     self.assertEqual(utils.total_tree_norm_sql2(pytree), 30.0)
 
-  def testTreeSum(self):
+  def test_tree_sum(self):
     """Test computing the sum of a pytree."""
     pytree = {'foo': 2*jnp.ones(10), 'baz': jnp.ones(20)}
     self.assertEqual(utils.total_tree_sum(pytree), 40)

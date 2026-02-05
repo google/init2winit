@@ -18,24 +18,23 @@
 This is useful for training neural networks with stax, where model parameters
 are nested numpy arrays.
 """
-import os
-import sys
-
 from absl import flags
 from absl import logging
-from flax.training import checkpoints as flax_checkpoints
 import jax
 # pylint: disable=g-importing-member
 from jax.experimental.multihost_utils import process_allgather
+import orbax.checkpoint as ocp
 
 FLAGS = flags.FLAGS
 
 
-def load_pytree(pytree_file, orbax_checkpointer=None):
-  """Loads the checkpointed pytree."""
-  latest = load_latest_checkpoint(pytree_file,
-                                  target=None,
-                                  orbax_checkpointer=orbax_checkpointer)
+def load_pytree(pytree_file, orbax_checkpoint_manager=None):
+  """Loads a checkpointed pytree."""
+  if not orbax_checkpoint_manager:
+    orbax_checkpoint_manager = ocp.CheckpointManager(pytree_file)
+  latest = load_latest_checkpoint(
+      target=None, orbax_checkpoint_manager=orbax_checkpoint_manager
+  )
   if latest:
     # Because we pass target=None, flax checkpointing will return the raw
     # state dict, where 'state' will be a dict with keys ['0', '1', ...]
@@ -49,15 +48,13 @@ def maybe_restore_checkpoint(
     unreplicated_params,
     unreplicated_batch_stats,
     unreplicated_training_metrics_state,
-    train_dir,
-    external_checkpoint_path=None,
-    orbax_checkpointer=None):
+    orbax_checkpoint_manager=None,
+    orbax_checkpoint_manager_external=None):
   """Optionally restores from a checkpoint.
 
-  The checkpoint logic is as follows: if there is a checkpoint in `train_dir`,
-  restore it.  Else, if `external_checkpoint_path` is set, restore the
-  checkpoint found there.  Else, don't restore any checkpoint, and just
-  return the passed-in optimizer_state, params, batch_stats, and
+  The checkpoint logic is as follows: if `orbax_checkpoint_manager` contains
+  a latest checkpoint, restore it. Otherwise, don't restore any checkpoint,
+  and just return the passed-in optimizer_state, params, batch_stats, and
   metrics_grabber.
 
   Args:
@@ -65,10 +62,8 @@ def maybe_restore_checkpoint(
     unreplicated_params: unreplicated params
     unreplicated_batch_stats: unreplicated batch stats
     unreplicated_training_metrics_state: unreplicated metrics state
-    train_dir: (str) The training directory where we will look for a checkpoint.
-    external_checkpoint_path: (str) If this argument is set, then we will load
-      the external checkpoint stored there.
-    orbax_checkpointer: orbax.Checkpointer
+    orbax_checkpoint_manager: orbax.CheckpointManager
+    orbax_checkpoint_manager_external: orbax.CheckpointManager
 
   Returns:
     unreplicated_optimizer_state
@@ -89,12 +84,14 @@ def maybe_restore_checkpoint(
       training_metrics_grabber=unreplicated_training_metrics_state,
       global_step=uninitialized_global_step,
       preemption_count=0,
-      sum_train_cost=0.0)
-  logging.info('Loading latest checkpoint from train_dir: %s', train_dir)
-  latest_ckpt = load_latest_checkpoint(train_dir,
-                                       target=unreplicated_checkpoint_state,
-                                       orbax_checkpointer=orbax_checkpointer)
-  logging.info('Loading checkpoint from train_dir %s complete.', train_dir)
+      sum_train_cost=0.0,
+  )
+  logging.info('Loading latest checkpoint')
+  latest_ckpt = load_latest_checkpoint(
+      target=unreplicated_checkpoint_state,
+      orbax_checkpoint_manager=orbax_checkpoint_manager,
+  )
+  logging.info('Loading checkpoint from complete.')
   # Load_latest_checkpoint() will return unreplicated_checkpoint_state if
   # train_dir does not exist or if it exists and contains no checkpoints.
   # Note that we could likely change the below line to:
@@ -105,23 +102,14 @@ def maybe_restore_checkpoint(
   if found_checkpoint:
     ckpt_to_return = latest_ckpt
     is_restored = True  # We do want trainer to increment preemption_count.
-    logging.info('Restoring checkpoint from ckpt_%d',
-                 latest_ckpt['global_step'])
-  # Else, if external_checkpoint_path is non-null, restore from that checkpoint.
-  elif external_checkpoint_path is not None:
-    # TODO(jeremycohen) This code will crash if we try to load an external
-    # checkpoint which was trained with a different num_train_steps.  The issue
-    # is that some of the fields in the training metrics state are arrays of
-    # shape [num_train_steps].  In the future we may want to handle these
-    # arrays explicitly, in order to avoid this crash.
     logging.info(
-        'Restoring checkpoint from external_checkpoint_path %s',
-        external_checkpoint_path,
+        'Restoring checkpoint from ckpt_%d', latest_ckpt['global_step']
     )
-    ckpt_to_return = load_checkpoint(
-        external_checkpoint_path,
+  elif not found_checkpoint and orbax_checkpoint_manager_external:
+    logging.info('Restoring checkpoint from external checkpoint.')
+    ckpt_to_return = load_latest_checkpoint(
         target=unreplicated_checkpoint_state,
-        orbax_checkpointer=orbax_checkpointer,
+        orbax_checkpoint_manager=orbax_checkpoint_manager_external,
     )
     is_restored = False  # We don't want trainer to increment preemption_count.
 
@@ -158,8 +146,7 @@ def maybe_restore_checkpoint(
       is_restored)  # is_restored
 
 
-def save_unreplicated_checkpoint(
-    train_dir,
+def unreplicate_and_save_checkpoint(
     optimizer_state,
     params,
     batch_stats,
@@ -167,8 +154,7 @@ def save_unreplicated_checkpoint(
     global_step,
     preemption_count,
     sum_train_cost,
-    orbax_checkpointer,
-    max_to_keep=1):
+    orbax_checkpoint_manager):
   """Saves pytree, step, preemption_count, and sum_train_cost to train_dir."""
   logging.info('Saving checkpoint to ckpt_%d', global_step)
   # jax.device_get doesn't work if jax.Array lives on multiple hosts.
@@ -191,79 +177,61 @@ def save_unreplicated_checkpoint(
                params=unreplicated_params,
                batch_stats=unreplicated_batch_stats,
                training_metrics_grabber=unreplicated_training_metrics_state)
-  save_checkpoint(train_dir,
-                  global_step,
+  save_checkpoint(global_step,
                   state,
-                  max_to_keep=max_to_keep,
-                  orbax_checkpointer=orbax_checkpointer)
+                  orbax_checkpoint_manager=orbax_checkpoint_manager)
   logging.info('Done saving checkpoint.')
 
 
-def save_checkpoint(train_dir,
-                    step,
+def save_checkpoint(step,
                     state,
-                    prefix='ckpt_',
-                    max_to_keep=None,
-                    orbax_checkpointer=None):
-  """Saves checkpoint to train_dir/{prefix}{step}.
+                    orbax_checkpoint_manager):
+  """Saves checkpoint to train_dir.
 
-  A list of checkpoints will be stored in train_dir. The user
-  is responsible for using unique checkpoint names when calling save_checkpoint
-  repeatedly. If the same train_dir and checkpoint name are used more than once,
-  the latest file will become corrupt. This may become an issue if max_to_keep
-  is not None.
+  A list of checkpoints will be stored in train_dir/step.
+  If the step folder already exists, the checkpoint will not be saved and a
+  warning will be logged.
 
   Args:
-    train_dir: (str) Directory to create the checkpoint directory in.
     step: (int) Step of the checkpoint.
-    state: (dict) The state to save.
-    prefix: (str) Prefix of the checkpoint name.
-    max_to_keep: (int) Checkpoints older than the max_to_keep'th will be
-      deleted. Defaults to never deleting.
-    orbax_checkpointer: orbax.Checkpointer
+    state: (pytree)The state to save.
+    orbax_checkpoint_manager: orbax.CheckpointManager
 
   Returns:
     The path of the checkpoint directory.
   """
-  if max_to_keep is None:
-    max_to_keep = sys.maxsize
-  flax_checkpoints.save_checkpoint_multiprocess(
-      train_dir,
-      target=state,
-      step=step,
-      prefix=prefix,
-      keep=max_to_keep,
-      overwrite=True,
-      orbax_checkpointer=orbax_checkpointer,
-  )
-  save_dir = os.path.join(train_dir, prefix + str(step))
-  return save_dir
+  saved = orbax_checkpoint_manager.save(step, args=ocp.args.StandardSave(state))
+  if not saved:
+    logging.warning(
+        'Checkpoint at step %d was not saved! Perhaps it already exists?', step
+    )
+  return orbax_checkpoint_manager.directory
 
 
 def load_checkpoint(
-    checkpoint_path, target=None, prefix='ckpt_', orbax_checkpointer=None
+    checkpoint_path=None,
+    target=None,
+    step=0,
+    orbax_checkpoint_manager=None,
 ):
   """Loads the specified checkpoint."""
-  restored = flax_checkpoints.restore_checkpoint(
-      checkpoint_path,
-      target=target,
-      prefix=prefix,
-      orbax_checkpointer=orbax_checkpointer,
+  # for backwards compatibility
+  if checkpoint_path and not orbax_checkpoint_manager:
+    orbax_checkpoint_manager = ocp.CheckpointManager(checkpoint_path)
+  restored = orbax_checkpoint_manager.restore(
+      step,
+      args=ocp.args.StandardRestore(target),
   )
   return restored
 
 
-def load_latest_checkpoint(
-    train_dir, target=None, prefix='ckpt_', orbax_checkpointer=None
-):
+def load_latest_checkpoint(target=None, orbax_checkpoint_manager=None):
   """Loads the most recent checkpoint listed in train_dir.
 
   Args:
-    train_dir: the directory to read checkpoints from.
-    target: used for Flax checkpointing, a pytree whose structure will be used
+    target: used for checkpointing, a pytree whose structure will be used
       to structure the restored checkpoint data.
-    prefix: the prefix of the names of checkpoint files.
-    orbax_checkpointer: orbax.Checkpointer
+    orbax_checkpoint_manager: An orbax.CheckpointManager instance.
   Returns:
     The state restored from the checkpoint. If using Flax checkpointing and
     target=None, this will return a unstructured dictionary containing the
@@ -271,11 +239,11 @@ def load_latest_checkpoint(
     https://github.com/google/flax/blob/master/flax/serialization.py#L67. If
     the directory doesn't exist, it will return the original target.
   """
+  restore_step = orbax_checkpoint_manager.latest_step()
   try:
-    restored = flax_checkpoints.restore_checkpoint(
-        train_dir, target=target, prefix=prefix,
-        orbax_checkpointer=orbax_checkpointer
+    restored = orbax_checkpoint_manager.restore(
+        restore_step, args=ocp.args.StandardRestore(target)
     )
     return restored
-  except ValueError:
+  except FileNotFoundError:
     return target

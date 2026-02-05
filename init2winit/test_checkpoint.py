@@ -30,7 +30,7 @@ from init2winit.shared_test_utilities import pytree_equal
 import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
-import orbax.checkpoint as orbax_checkpoint
+import orbax.checkpoint as ocp
 from tensorflow.io import gfile
 
 
@@ -59,8 +59,6 @@ class CheckpointTest(parameterized.TestCase):
     model_init_fn = jax.jit(
         functools.partial(model.flax_module.init, train=False))
     init_dict = model_init_fn({'params': params_rng}, xs)
-    self.orbax_checkpointer = orbax_checkpoint.AsyncCheckpointer(
-        orbax_checkpoint.PyTreeCheckpointHandler(), timeout_secs=60)
     self.params = init_dict['params']
 
   def tearDown(self):
@@ -71,45 +69,53 @@ class CheckpointTest(parameterized.TestCase):
   # We could supply the params pytree as a fake gradient and do an update.
   def test_save_load_roundtrip(self):
     """Test that saving and loading produces the original state."""
-    baz = ['a', 'b', 'ccc']
-    state = dict(params=self.params, global_step=5, completed_epochs=4, baz=baz)
-    checkpoint.save_checkpoint(self.test_dir, 0, state,
-                               orbax_checkpointer=self.orbax_checkpointer)
+    orbax_checkpoint_manager = ocp.CheckpointManager(
+        self.test_dir,
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=1, create=True),
+    )
+    state = dict(params=self.params, global_step=5, completed_epochs=4)
+    checkpoint.save_checkpoint(
+        0,
+        state,
+        orbax_checkpoint_manager=orbax_checkpoint_manager,
+    )
+    orbax_checkpoint_manager.wait_until_finished()
     latest = checkpoint.load_latest_checkpoint(
-        self.test_dir, target=state, orbax_checkpointer=self.orbax_checkpointer
+        target=state, orbax_checkpoint_manager=orbax_checkpoint_manager
     )
 
-    self.assertEqual(latest['baz'], baz)
     assert pytree_equal(latest['params'], self.params)
     self.assertEqual(latest['global_step'], 5)
     self.assertEqual(latest['completed_epochs'], 4)
 
   def test_delete_old_checkpoints(self):
     """Test that old checkpoints are deleted."""
+    orbax_checkpoint_manager = ocp.CheckpointManager(
+        self.test_dir,
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=1, create=True
+        ),
+    )
     state1 = dict(params=self.params,
                   global_step=5,
                   completed_epochs=4,)
     checkpoint.save_checkpoint(
-        self.test_dir,
         0,
         state1,
-        orbax_checkpointer=self.orbax_checkpointer,
-        max_to_keep=1)
+        orbax_checkpoint_manager=orbax_checkpoint_manager)
 
     state2 = dict(params=self.params,
                   global_step=10,
                   completed_epochs=8)
     checkpoint.save_checkpoint(
-        self.test_dir,
         1,
         state2,
-        orbax_checkpointer=self.orbax_checkpointer,
-        max_to_keep=1)
-    self.orbax_checkpointer.wait_until_finished()
+        orbax_checkpoint_manager=orbax_checkpoint_manager)
+    orbax_checkpoint_manager.wait_until_finished()
     dir_contents = gfile.glob(os.path.join(self.test_dir, '*'))
-    # Due to Flax Orbax migration using Orbax AsyncCheckpointer will result
-    # in 'max_to_keep + 1' files.
-    self.assertLen(dir_contents, 1 + 1)
+
+    self.assertLen(dir_contents, 1)
 
   def test_all_variables_restored(self):
     """Test that all variables are properly restored.
@@ -134,8 +140,14 @@ class CheckpointTest(parameterized.TestCase):
     initial_batch_stats = {'mean': 0}
     initial_training_metrics = {'ema': 0}
 
+    orbax_checkpoint_manager = ocp.CheckpointManager(
+        fresh_train_dir,
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=1, create=True
+        ),
+    )
+
     checkpoint.save_checkpoint(
-        train_dir=fresh_train_dir,
         step=global_step,
         state=dict(global_step=global_step,
                    preemption_count=preemption_count,
@@ -144,8 +156,7 @@ class CheckpointTest(parameterized.TestCase):
                    params=saved_params,
                    batch_stats=saved_batch_stats,
                    training_metrics_grabber=saved_training_metrics),
-        orbax_checkpointer=self.orbax_checkpointer,
-        max_to_keep=1)
+        orbax_checkpoint_manager=orbax_checkpoint_manager,)
 
     (
         ret_state,
@@ -161,8 +172,7 @@ class CheckpointTest(parameterized.TestCase):
         initial_params,
         initial_batch_stats,
         initial_training_metrics,
-        fresh_train_dir,
-        orbax_checkpointer=self.orbax_checkpointer,
+        orbax_checkpoint_manager=orbax_checkpoint_manager,
     )
 
     assert pytree_equal(
@@ -189,74 +199,87 @@ class CheckpointTest(parameterized.TestCase):
   def test_maybe_restore_from_checkpoint_logic(self):
     """Test that the right checkpoint is returned.
 
-      1.  If no external_checkpoint_path was passed, and if there is no
-      latest checkpoint in the train_dir, then the function should return
-      the passed-in params, batch_stats, etc.
-      2.  If an external checkpoint was provided but no latest checkpoint
-      exists in the train_dir, then the function should return the external
-      checkpoint.
-      3.  If a latest checkpoint exists in the train dir, then the function
-      should return that checkpoint.
-
+      1.  If there is no latest checkpoint in the train_dir, then the function 
+      should returnthe passed-in params, batch_stats, etc.
+      2.  If there is a latest checkpoint in the train_dir, then the function
+      should return the latest checkpoint.
       In the interest of conciseness, this test only checks the params,
       not the batch_stats, optimizer_state, or training_metics.  The below test
       test_all_variables_restored() covers the other three.
     """
     # mock parameters.
     initial_params = {'foo': 1.0}
-    latest_params = {'foo': 2.0}
-    external_params = {'foo': 3.0}
+    latest_params = {'foo': 3.0}
 
-    fresh_train_dir = tempfile.mkdtemp()
-    external_dir = tempfile.mkdtemp()
+    checkpoint_dir = tempfile.mkdtemp()
+
+    orbax_checkpoint_manager = ocp.CheckpointManager(
+        checkpoint_dir,
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=1, create=True
+        ),
+    )
 
     # two helper functions
-    def save_checkpoint(train_dir, global_step, preemption_count,
-                        sum_train_cost, params):
+    def save_checkpoint(
+        orbax_checkpoint_manager,
+        global_step,
+        preemption_count,
+        sum_train_cost,
+        params,
+    ):
       """Helper function to save a checkpoint."""
 
       checkpoint.save_checkpoint(
-          train_dir=train_dir,
           step=global_step,
-          state=dict(global_step=global_step,
-                     preemption_count=preemption_count,
-                     sum_train_cost=sum_train_cost,
-                     optimizer_state={},
-                     params=params,
-                     batch_stats={},
-                     training_metrics_grabber={}),
-          orbax_checkpointer=self.orbax_checkpointer,
-          max_to_keep=1)
+          state=dict(
+              global_step=global_step,
+              preemption_count=preemption_count,
+              sum_train_cost=sum_train_cost,
+              optimizer_state={},
+              params=params,
+              batch_stats={},
+              training_metrics_grabber={},
+          ),
+          orbax_checkpoint_manager=orbax_checkpoint_manager,
+      )
 
-    def maybe_restore_checkpoint(params, train_dir, external_checkpoint_path):
+    def maybe_restore_checkpoint(orbax_checkpoint_manager, params):
       """Helper function to replicate_and_maybe_restore a checkpoint."""
 
-      (_, ret_params, _, _,
-       ret_global_step, ret_sum_train_cost, ret_preemption_count,
-       ret_is_restored) = checkpoint.maybe_restore_checkpoint(
-           {}, params, {}, {}, train_dir, external_checkpoint_path,
-           orbax_checkpointer=self.orbax_checkpointer)
+      (
+          _,
+          ret_params,
+          _,
+          _,
+          ret_global_step,
+          ret_sum_train_cost,
+          ret_preemption_count,
+          ret_is_restored,
+      ) = checkpoint.maybe_restore_checkpoint(
+          {}, params, {}, {}, orbax_checkpoint_manager=orbax_checkpoint_manager
+      )
 
       ret_params_unrep = ret_params
 
-      return (ret_params_unrep, ret_global_step, ret_sum_train_cost,
-              ret_preemption_count, ret_is_restored)
+      return (
+          ret_params_unrep,
+          ret_global_step,
+          ret_sum_train_cost,
+          ret_preemption_count,
+          ret_is_restored,
+      )
 
-    # Save external checkpoint.
-    save_checkpoint(train_dir=external_dir,
-                    global_step=5,
-                    preemption_count=4,
-                    sum_train_cost=7.0,
-                    params=external_params)
-    external_checkpoint_path = os.path.join(external_dir, 'ckpt_' + str(5))
+    # If no latest checkpoint exists, the function should return the passed-in
+    # params.
 
-    # If no latest checkpoint exists, and no external checkpoint was provided,
-    # the function should return the passed-in params.
-
-    (ret_params, ret_global_step, ret_sum_train_cost, ret_preemption_count,
-     ret_is_restored) = maybe_restore_checkpoint(initial_params,
-                                                 fresh_train_dir,
-                                                 None)
+    (
+        ret_params,
+        ret_global_step,
+        ret_sum_train_cost,
+        ret_preemption_count,
+        ret_is_restored,
+    ) = maybe_restore_checkpoint(orbax_checkpoint_manager, initial_params)
 
     self.assertEqual(ret_preemption_count, 0)
     self.assertEqual(ret_global_step, 0)
@@ -267,40 +290,32 @@ class CheckpointTest(parameterized.TestCase):
     # If no latest checkpoint exists, and an external checkpoint was provided,
     # the function should return the external checkpoint.
 
-    (ret_params, ret_global_step, ret_sum_train_cost, ret_preemption_count,
-     ret_is_restored) = maybe_restore_checkpoint(initial_params,
-                                                 fresh_train_dir,
-                                                 external_checkpoint_path)
+    # Save external checkpoint.
+    save_checkpoint(
+        orbax_checkpoint_manager,
+        global_step=5,
+        preemption_count=4,
+        sum_train_cost=7.0,
+        params=latest_params,
+    )
+
+    orbax_checkpoint_manager.wait_until_finished()
+
+    (
+        ret_params,
+        ret_global_step,
+        ret_sum_train_cost,
+        ret_preemption_count,
+        ret_is_restored,
+    ) = maybe_restore_checkpoint(orbax_checkpoint_manager, latest_params)
 
     self.assertEqual(ret_preemption_count, 4)
     self.assertEqual(ret_global_step, 5)
     self.assertEqual(ret_sum_train_cost, 7.0)
-    self.assertFalse(ret_is_restored)
-    assert pytree_equal(ret_params, external_params)
-
-    # Save latest checkpoint.
-    save_checkpoint(train_dir=fresh_train_dir,
-                    global_step=10,
-                    preemption_count=2,
-                    sum_train_cost=2.2,
-                    params=latest_params)
-
-    # If a latest checkpoint exists, then even if an external checkpoint was
-    # provided, the function should return the latest checkpoint.
-
-    (ret_params, ret_global_step, ret_sum_train_cost, ret_preemption_count,
-     ret_is_restored) = maybe_restore_checkpoint(initial_params,
-                                                 fresh_train_dir,
-                                                 external_checkpoint_path)
-
-    self.assertEqual(ret_preemption_count, 2)
-    self.assertEqual(ret_global_step, 10)
-    self.assertEqual(ret_sum_train_cost, 2.2)
     self.assertTrue(ret_is_restored)
     assert pytree_equal(ret_params, latest_params)
 
-    shutil.rmtree(fresh_train_dir)
-    shutil.rmtree(external_dir)
+    shutil.rmtree(checkpoint_dir)
 
 
 if __name__ == '__main__':

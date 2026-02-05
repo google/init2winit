@@ -174,10 +174,11 @@ class BaseTrainer(metaclass=abc.ABCMeta):
             choose_store_cell=True,
         ),
     )
-    self._orbax_checkpointer = ocp.AsyncCheckpointer(
-        ocp.PyTreeCheckpointHandler(use_ocdbt=False),
-        timeout_secs=600,
-        file_options=orbax_file_options,
+    self._orbax_checkpoint_manager = ocp.CheckpointManager(
+        self._checkpoint_dir,
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=1, create=True, file_options=orbax_file_options
+        ),
     )
     self._early_stopping_target_name = early_stopping_target_name
     self._early_stopping_target_value = early_stopping_target_value
@@ -195,8 +196,15 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       self._callback_configs = [callback_configs]
     else:
       self._callback_configs = callback_configs
-    self._external_checkpoint_path = external_checkpoint_path
-
+    if external_checkpoint_path is not None:
+      self._orbax_checkpoint_manager_external = ocp.CheckpointManager(
+          external_checkpoint_path,
+          options=ocp.CheckpointManagerOptions(
+              create=True, file_options=orbax_file_options
+          ),
+      )
+    else:
+      self._orbax_checkpoint_manager_external = None
     # For logging / processing off the main thread
     self._logging_pool = multiprocessing.pool.ThreadPool()
 
@@ -208,9 +216,15 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     assert eval_batch_size % (jax.device_count()) == 0
 
     # Only used if checkpoints_steps is non-empty. Standard checkpoints are
-    # saved in train_dir.
+    # saved in  _checkpoint_dir.
     self._extra_checkpoint_dir = os.path.join(
         self._checkpoint_dir, 'checkpoints'
+    )
+    self._orbax_checkpoint_manager_extra = ocp.CheckpointManager(
+        self._extra_checkpoint_dir,
+        options=ocp.CheckpointManagerOptions(
+            create=True, file_options=orbax_file_options
+        ),
     )
 
     # During eval, we can donate the 'batch' buffer. We don't donate the
@@ -228,7 +242,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
                  self._training_algorithm_class)
 
   def wait_until_orbax_checkpointer_finished(self):
-    self._orbax_checkpointer.wait_until_finished()
+    self._orbax_checkpoint_manager.wait_until_finished()
 
   def log_model_info(self, unreplicated_params):
     if jax.process_index() == 0:
@@ -267,9 +281,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         unreplicated_params,
         unreplicated_batch_stats,
         unreplicated_metrics_state,
-        train_dir=self._checkpoint_dir,
-        external_checkpoint_path=self._external_checkpoint_path,
-        orbax_checkpointer=self._orbax_checkpointer,
+        orbax_checkpoint_manager=self._orbax_checkpoint_manager,
+        orbax_checkpoint_manager_external=self._orbax_checkpoint_manager_external,
     )
 
     if self._is_restored:
@@ -335,13 +348,14 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     return dataset
 
-  def _save(self, checkpoint_dir, max_to_keep=1):
+  def _save(self, checkpoint_manager=None):
     if utils.use_mock_tpu_backend():
       logging.info('Skip saving checkpoint when running with mock backend.')
       return
+    if checkpoint_manager is None:
+      checkpoint_manager = self._orbax_checkpoint_manager
 
-    checkpoint.save_unreplicated_checkpoint(
-        checkpoint_dir,
+    checkpoint.unreplicate_and_save_checkpoint(
         self._optimizer_state,
         self._params,
         self._batch_stats,
@@ -349,8 +363,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._global_step,
         self._preemption_count,
         self._sum_train_cost,
-        self._orbax_checkpointer,
-        max_to_keep=max_to_keep,
+        checkpoint_manager,
     )
 
   def _get_step_frequency(self, cur_step, start_step, start_time):
@@ -451,7 +464,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     )
     self._run_eval_callbacks(report)
     if save:
-      self._save(self._checkpoint_dir)
+      self._save()
     steps_since_last_eval = self._global_step - self._prev_eval_step
     steps_per_sec_no_eval = steps_since_last_eval / time_since_last_eval
     run_time = time.time() - self._time_at_prev_eval_end
@@ -646,7 +659,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._prev_eval_step = self._global_step
 
     if self._global_step in self._checkpoint_steps:
-      self._save(self._extra_checkpoint_dir, max_to_keep=None)
+      self._save(checkpoint_manager=self._orbax_checkpoint_manager_extra)
 
     for _ in range(start_step, self._num_train_steps):
       with jax.profiler.StepTraceAnnotation(
@@ -682,13 +695,15 @@ class BaseTrainer(metaclass=abc.ABCMeta):
             self._sum_train_cost,
         )
         if self._global_step in self._checkpoint_steps:
-          self._save(self._extra_checkpoint_dir, max_to_keep=None)
+          logging.info('Saving checkpoint at step %d', self._global_step)
+          self._save(checkpoint_manager=self._orbax_checkpoint_manager_extra)
 
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.
         if trainer_utils.should_eval(
-            self._global_step, self._eval_frequency, self._eval_steps):
+            self._global_step, self._eval_frequency, self._eval_steps
+        ):
           try:
             report = self._eval(start_step, start_time)
           except utils.TrainingDivergedError as e:
@@ -709,6 +724,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       yield report
     # To make sure the last checkpoint was correctly saved.
     self.wait_until_orbax_checkpointer_finished()
+    self._orbax_checkpoint_manager.close()
+    self._orbax_checkpoint_manager_extra.close()
 
   @abc.abstractmethod
   def update(self, batch, rng, metrics_update_fn, metrics_state, training_cost):

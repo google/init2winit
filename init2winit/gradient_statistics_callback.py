@@ -26,6 +26,7 @@ from init2winit import checkpoint
 from init2winit.dataset_lib import data_utils
 import jax
 import jax.numpy as jnp
+import orbax.checkpoint as ocp
 
 
 class GradientStatisticsCallback(base_callback.BaseCallBack):
@@ -66,6 +67,12 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
         ]
 
     self.num_updates = 0
+    self.orbax_checkpoint_manager = ocp.CheckpointManager(
+        self.save_path,
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=1, create=True
+        ),
+    )
 
     def update(params, batch, batch_stats, dropout_rng):
       def opt_cost(params):
@@ -146,10 +153,8 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
     )
 
     checkpoint.save_checkpoint(
-        self.save_path,
         step=global_step,
         state=state,
-        prefix='measurement_',
-        max_to_keep=None)
+        orbax_checkpoint_manager=self.orbax_checkpoint_manager)
 
     return {}

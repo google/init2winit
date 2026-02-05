@@ -27,13 +27,14 @@ from absl import logging as absl_logging
 from clu import metric_writers
 import flax
 import flax.linen as nn
-from flax.training import checkpoints as flax_checkpoints
 from init2winit import checkpoint
 import jax
 import jax.numpy as jnp
 import numpy as np
+import orbax.checkpoint as ocp
 import pandas as pd
 from tensorflow.io import gfile
+
 
 exists = gfile.exists
 
@@ -215,6 +216,33 @@ class MetricLogger(object):
     if events_dir:
       self._tb_metric_writer = metric_writers.create_default_writer(events_dir)
 
+    orbax_file_options = ocp.checkpoint_manager.FileOptions(
+        path_permission_mode=0o775,
+        cns2_storage_options=ocp.options.Cns2StorageOptions(
+            choose_store_cell=True,
+        ),
+    )
+    self._orbax_checkpoint_manager = ocp.CheckpointManager(
+        self._pytree_path,
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=1, create=True, file_options=orbax_file_options
+        ),
+    )
+
+  def load_latest_pytree(self, target=None):
+    """Load pytree from checkpoint."""
+    if target:
+      target = dict(pytree=target)
+    logging.info('target: %s', target)
+    loaded_target = checkpoint.load_latest_checkpoint(
+        target=target,
+        orbax_checkpoint_manager=self._orbax_checkpoint_manager,
+    )
+    if loaded_target:
+      return loaded_target['pytree']
+    else:
+      return target
+
   def append_scalar_metrics(self, metrics):
     """Record a dictionary of scalar metrics at a given step.
 
@@ -261,23 +289,27 @@ class MetricLogger(object):
       # size 512. We could only flush at the end of training to optimize this.
       self._tb_metric_writer.flush()
 
-  def write_pytree(self, pytree, prefix='training_metrics'):
-    """Record a serializable pytree to disk, overwriting any previous state.
+  def write_pytree(self, pytree, step=0):
+    """Record a serializable pytree to disk at the given step.
 
     Args:
       pytree: Any serializable pytree
-      prefix: The prefix for the checkpoint.  Save path is
-        self._pytree_path/prefix
+      step: Integer. The global step.
     """
     state = dict(pytree=pytree)
     checkpoint.save_checkpoint(
-        self._pytree_path,
-        step='',
+        step,
         state=state,
-        prefix=prefix,
-        max_to_keep=None)
+        orbax_checkpoint_manager=self._orbax_checkpoint_manager,
+    )
 
-  def append_pytree(self, pytree, prefix='training_metrics'):
+  def wait_until_pytree_checkpoint_finished(self):
+    self._orbax_checkpoint_manager.wait_until_finished()
+
+  def latest_pytree_checkpoint_step(self):
+    return self._orbax_checkpoint_manager.latest_step()
+
+  def append_pytree(self, pytree, step=0):
     """Append and record a serializable pytree to disk.
 
     The pytree will be saved to disk as a list of pytree objects. Everytime
@@ -286,26 +318,24 @@ class MetricLogger(object):
 
     Args:
       pytree: Any serializable pytree.
-      prefix: The prefix for the checkpoint.
+      step: Integer. The global step.
     """
     # Read the latest (and only) checkpoint if it exists, then append the new
     # state to it before saving back to disk.
     try:
-      old_state = flax_checkpoints.restore_checkpoint(
-          self._pytree_path, target=None, prefix=prefix)
+      old_state = self.load_latest_pytree(target=None)
     except ValueError:
       old_state = None
     # Because we pass target=None, checkpointing will return the raw state
     # dict, where 'pytree' is a dict with keys ['0', '1', ...] instead of a
     # list.
     if old_state:
-      state_list = old_state['pytree']
-      state_list = [state_list[str(i)] for i in range(len(state_list))]
+      state_list = [old_state[i] for i in range(len(old_state))]
     else:
       state_list = []
     state_list.append(pytree)
 
-    self.write_pytree(state_list)
+    self.write_pytree(state_list, step=step)
 
   def append_json_object(self, json_obj):
     """Append a json serializable object to the json file."""

@@ -741,8 +741,8 @@ class TrainerTest(parameterized.TestCase):
     checkpoint_dir = os.path.join(self.test_dir, 'ttl=180d', 'checkpoints')
     saved_steps = []
     for f in tf.io.gfile.listdir(checkpoint_dir):
-      if f[:5] == 'ckpt_':
-        saved_steps.append(int(f[5:]))
+      if f.isdigit():
+        saved_steps.append(int(f))
 
     self.assertEqual(set(saved_steps), set(checkpoint_steps))
 
