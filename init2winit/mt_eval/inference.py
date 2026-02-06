@@ -64,8 +64,9 @@ class InferenceManager(object):
 
   def __init__(self, *args, **kwargs):
     if kwargs['mode'] not in ['offline', 'online']:
-      raise ValueError('BLEU score computation only support online or '
-                       'offline modes.')
+      raise ValueError(
+          'BLEU score computation only support online or offline modes.'
+      )
     self.mesh = kwargs['mesh']
     self.finalize_batch_fn = kwargs['finalize_batch_fn']
     if kwargs['mode'] == 'offline':
@@ -73,14 +74,16 @@ class InferenceManager(object):
     else:
       self.init_online_evaluator(*args)
 
-  def init_offline_evaluator(self,
-                             checkpoint_dir,
-                             hps,
-                             rng,
-                             model_cls,
-                             dataset,
-                             dataset_meta_data,
-                             mt_eval_config):
+  def init_offline_evaluator(
+      self,
+      checkpoint_dir,
+      hps,
+      rng,
+      model_cls,
+      dataset,
+      dataset_meta_data,
+      mt_eval_config,
+  ):
     """Utility for initializing offline BLEU evaluator."""
     self.checkpoint_dir = checkpoint_dir
     self.hps = hps
@@ -97,13 +100,9 @@ class InferenceManager(object):
     self.encoder = self.load_tokenizer(hps.vocab_path)
     self.initialize_model(model_cls, dataset_meta_data, dropout_rng, params_rng)
 
-  def init_online_evaluator(self,
-                            hps,
-                            rng,
-                            model_cls,
-                            dataset,
-                            dataset_metadata,
-                            mt_eval_config):
+  def init_online_evaluator(
+      self, hps, rng, model_cls, dataset, dataset_metadata, mt_eval_config
+  ):
     """Utility for initializing online BLEU evaluator."""
     self.hps = hps
     self.eos_id = decode.EOS_ID
@@ -150,8 +149,9 @@ class InferenceManager(object):
     return mt_tokenizer._load_sentencepiece_tokenizer(vocab_path)
     # pylint: enable=protected-access
 
-  def initialize_model(self, model_cls, dataset_meta_data, dropout_rng,
-                       params_rng):
+  def initialize_model(
+      self, model_cls, dataset_meta_data, dropout_rng, params_rng
+  ):
     """Initialie model, especially cache for fast auto-regressive decoding."""
     loss_name = 'cross_entropy'
     metrics_name = 'classification_metrics'
@@ -162,9 +162,11 @@ class InferenceManager(object):
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
     xs = [np.zeros((self.hps.batch_size, *x)) for x in self.hps.input_shape]
     model_init_fn = jax.jit(
-        functools.partial(model.flax_module.init, train=False))
+        functools.partial(model.flax_module.init, train=False)
+    )
     init_dict = model_init_fn(
-        {'params': params_rng, 'dropout': dropout_rng}, *xs)
+        {'params': params_rng, 'dropout': dropout_rng}, *xs
+    )
     params = init_dict['params']
     self.flax_module = model.flax_module
     self.params = params
@@ -173,7 +175,9 @@ class InferenceManager(object):
             self.initialize_cache,
             max_length=self.max_length,
             params_rng=params_rng,
-            dropout_rng=dropout_rng))
+            dropout_rng=dropout_rng,
+        )
+    )
 
   def initialize_cache(self, inputs, max_length, params_rng, dropout_rng):
     """Initialize a cache for a given input shape and max decode length."""
@@ -181,16 +185,17 @@ class InferenceManager(object):
 
     targets_shape = (inputs.shape[0], max_length) + inputs.shape[2:]
     model_init_fn = jax.jit(
-        functools.partial(self.flax_module.init, train=False))
+        functools.partial(self.flax_module.init, train=False)
+    )
     xs = [jnp.ones(inputs.shape), jnp.ones(targets_shape)]
-    init_dict = model_init_fn({
-        'params': params_rng,
-        'dropout': dropout_rng
-    }, *xs)
+    init_dict = model_init_fn(
+        {'params': params_rng, 'dropout': dropout_rng}, *xs
+    )
+    logging.info('Finished initializing cache.')
     return init_dict['cache']
 
   def decode_tokens(self, toks):
-    valid_toks = toks[:np.argmax(toks == self.eos_id) + 1].astype(np.int32)
+    valid_toks = toks[: np.argmax(toks == self.eos_id) + 1].astype(np.int32)
     return self.encoder.detokenize(valid_toks).numpy().decode('utf-8')
 
   def current_batch_size(self, batch):
@@ -208,7 +213,8 @@ class InferenceManager(object):
           eos_id=self.eos_id,
           sample_size=self.mt_eval_config.get('sample_size'),
           temperature=self.mt_eval_config.get('temperature'),
-          rescale_log_probs=self.mt_eval_config.get('rescale_log_probs'))
+          rescale_log_probs=self.mt_eval_config.get('rescale_log_probs'),
+      )
     else:
       decoder = functools.partial(
           decode.decode_step,
@@ -216,7 +222,8 @@ class InferenceManager(object):
           flax_module=self.flax_module,
           eos_id=self.eos_id,
           beam_size=self.mt_eval_config.get('beam_size'),
-          offset=self.mt_eval_config.get('scan_over_layers_offset', 0))
+          offset=self.mt_eval_config.get('scan_over_layers_offset', 0),
+      )
     self.predictor = jax.jit(decoder)
 
   def translate_and_calculate_bleu(self):
@@ -228,16 +235,19 @@ class InferenceManager(object):
       ckpt_paths = eval_utils.get_checkpoints_in_range(
           checkpoint_dir=self.checkpoint_dir,
           lower_bound=step - self.ckpt_avg_window,
-          upper_bound=step)
+          upper_bound=step,
+      )
       logging.info('Current checkpoints: %s', ckpt_paths)
       params = eval_utils.average_checkpoints(
-          checkpoint_paths=ckpt_paths,
-          params=self.params)
+          checkpoint_paths=ckpt_paths, params=self.params
+      )
       _, params_replicated = utils.shard_pytree(params, self.mesh)
       decoding_output = self.translate_and_calculate_bleu_single_model(
-          params_replicated, self.eval_split)
-      logging.info('Sacre bleu score at step %d: %f', step,
-                   decoding_output.bleu_score)
+          params_replicated, self.eval_split
+      )
+      logging.info(
+          'Sacre bleu score at step %d: %f', step, decoding_output.bleu_score
+      )
       decoding_outputs.append(decoding_output)
     return decoding_outputs
 
@@ -256,32 +266,34 @@ class InferenceManager(object):
       weights = pred_batch['weights']
       current_batch_size = int(weights[..., 0].sum())
       if self.mt_eval_config.get('decoding_type') == 'beam_search':
-        self.process_beam_search_output(inputs, targets, predicted,
-                                        current_batch_size, decode_output)
+        self.process_beam_search_output(
+            inputs, targets, predicted, current_batch_size, decode_output
+        )
       else:
-        self.process_sampling_output(inputs, targets, predicted,
-                                     current_batch_size, decode_output)
+        self.process_sampling_output(
+            inputs, targets, predicted, current_batch_size, decode_output
+        )
 
-    logging.info('Predictions: %d References %d Sources %d.',
-                 len(decode_output.translation_list),
-                 len(decode_output.reference_list),
-                 len(decode_output.source_list))
+    logging.info(
+        'Predictions: %d References %d Sources %d.',
+        len(decode_output.translation_list),
+        len(decode_output.reference_list),
+        len(decode_output.source_list),
+    )
     if self.mt_eval_config.get('decoding_type') == 'beam_search':
       bleu_score = eval_utils.compute_bleu_from_predictions(
           decode_output.translation_list,
           decode_output.reference_list,
           self.mt_eval_config.get('tl_code'),
-          'sacrebleu')['sacrebleu']
+          'sacrebleu',
+      )['sacrebleu']
       decode_output.bleu_score = bleu_score
     decode_output.decoding_type = self.mt_eval_config.get('decoding_type')
     return decode_output
 
-  def process_beam_search_output(self,
-                                 inputs,
-                                 targets,
-                                 predicted,
-                                 batch_size,
-                                 decode_output):
+  def process_beam_search_output(
+      self, inputs, targets, predicted, batch_size, decode_output
+  ):
     """Process output if its beam search decoding."""
 
     # Non-final dimensions are batch dimensions.
@@ -296,12 +308,9 @@ class InferenceManager(object):
       decode_output.reference_list.append(curr_ref)
       decode_output.translation_list.append(curr_pred)
 
-  def process_sampling_output(self,
-                              inputs,
-                              targets,
-                              predicted,
-                              batch_size,
-                              decode_output):
+  def process_sampling_output(
+      self, inputs, targets, predicted, batch_size, decode_output
+  ):
     """Process output if its sampling decoding."""
 
     # Non-final dimensions are batch dimensions.
