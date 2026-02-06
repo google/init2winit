@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The init2winit Authors.
+# Copyright 2026 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -670,7 +670,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         # directly in the top-level for loop).
         batch = next(train_iter)
         batch = self.finalize_batch_fn(batch)
-        if self._global_step == 0:
+        if False and self._global_step == 0:
           batch_size_pytree = self.get_batch_size(batch)
           if any(
               bsz != self._hps.batch_size

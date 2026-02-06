@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The init2winit Authors.
+# Copyright 2026 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -285,10 +285,20 @@ def _get_batch_iterator(dataset_iter,
       weights_shards = []
 
 
-def get_ogbg_molpcba(shuffle_rng, batch_size, eval_batch_size, hps=None):
+def get_ogbg_molpcba(
+    shuffle_rng,
+    batch_size,
+    eval_batch_size,
+    hps=None,
+    override_process_count=None,
+):
   """Data generators for ogbg-molpcba."""
 
-  process_count = jax.process_count()
+  process_count = (
+      jax.process_count()
+      if not override_process_count
+      else override_process_count
+  )
   if batch_size % process_count != 0:
     raise ValueError(
         'process_count={} must divide batch_size={}.'.format(
@@ -339,7 +349,9 @@ def get_ogbg_molpcba(shuffle_rng, batch_size, eval_batch_size, hps=None):
       edges_per_graph=int(max_edges_multiplier),
       add_bidirectional_edges=hps.add_bidirectional_edges,
       add_virtual_node=hps.add_virtual_node,
-      add_self_loops=hps.add_self_loops)
+      add_self_loops=hps.add_self_loops,
+      num_shards=override_process_count,
+  )
 
   def train_iterator_fn():
     return iterator_from_ds(
