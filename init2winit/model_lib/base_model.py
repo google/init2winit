@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The init2winit Authors.
+# Copyright 2026 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -202,8 +202,7 @@ class BaseModel(object):
 
     start_time = time.time()
     model_init_fn = jax.jit(
-        functools.partial(self.flax_module.init, train=False),
-        backend='cpu')
+        functools.partial(self.flax_module.init, train=False))
 
     init_dict = model_init_fn({'params': params_rng, 'dropout': dropout_rng},
                               *fake_input_batch)
