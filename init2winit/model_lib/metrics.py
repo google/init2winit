@@ -481,12 +481,39 @@ def average_ctc_loss():
   return _Metric
 
 
-def compute_wer(decoded,
-                decoded_paddings,
-                targets,
-                target_paddings,
-                tokenizer,
-                tokenizer_type='SPM'):
+def mdlm_perplexity():
+  """Metrics that calculate the perplexity in addition to the cross entropy loss for the masked diffusion language model."""
+
+  @flax.struct.dataclass
+  class _MDLMPerplexity(metrics.Metric):
+    """Calculates the perplexity based on the cross-entropy provided by the masked diffusion language model."""
+
+    total: np.float32
+    weight: np.float32
+
+    @classmethod
+    def from_model_output(cls, normalized_loss, **_):
+      return cls(total=normalized_loss, weight=1.0)
+
+    def merge(self, other):
+      return type(self)(
+          total=self.total + other.total, weight=self.weight + other.weight
+      )
+
+    def compute(self):
+      return jnp.exp(self.total / self.weight)
+
+  return _MDLMPerplexity
+
+
+def compute_wer(
+    decoded,
+    decoded_paddings,
+    targets,
+    target_paddings,
+    tokenizer,
+    tokenizer_type='SPM',
+):
   """Computes word error rate."""
   word_errors = 0.0
   num_words = 0.0
@@ -606,6 +633,9 @@ _METRICS = {
             ssim=weighted_average_metric(ssim),
             num_examples=NumExamples,
         ),
+    'mdlm_metrics': metrics.Collection.create(
+        ce_loss=average_ctc_loss(), perplexity=mdlm_perplexity()
+    ),
 }
 
 

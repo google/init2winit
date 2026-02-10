@@ -186,6 +186,11 @@ DATA_HPS = {
         'output_shape': (32, 32000),
         'vocab_size': 32000,
     },
+    'mdlm_rope_nanodo': {
+        'input_shape': (32,),
+        'output_shape': (32, 50258),
+        'vocab_size': 50257,
+    },
     'simple_cnn': {
         'input_shape': (32, 32, 3),
         'output_shape': (5,),
@@ -289,6 +294,7 @@ LOSS_NAME = {
     'performer': 'cross_entropy',
     'resnet': 'cross_entropy',
     'rope_nanodo': 'cross_entropy',
+    'mdlm_rope_nanodo': 'passthrough',
     'simple_cnn': 'cross_entropy',
     'transformer': 'cross_entropy',
     'unet': 'mean_absolute_error',
@@ -327,6 +333,7 @@ METRICS_NAME = {
     'nanodo': 'classification_metrics',
     'unet': 'image_reconstruction_metrics',
     'rope_nanodo': 'classification_metrics',
+    'mdlm_rope_nanodo': 'mdlm_metrics',
     'vit': 'classification_metrics',
     'wide_resnet': 'classification_metrics',
     'xformer_translate_binary': 'classification_metrics',

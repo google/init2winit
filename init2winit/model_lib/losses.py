@@ -428,6 +428,9 @@ _ALL_LOSS_FUNCTIONS = {
     ),
     'ctc': (ctc_loss, jax.nn.log_softmax),
     'mean_absolute_error': (weighted_mean_absolute_error, None),
+    # The below loss is needed for the masked diffusion language model.
+    # This is because the loss calculation is part of the model there.
+    'passthrough': (lambda logits, targets, weights=None: (logits, 1.0), None),
 }
 
 
