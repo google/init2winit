@@ -424,7 +424,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           self._early_stopping_target_value)
     return early_stopping_condition
 
-  def _eval(self, start_step, start_time, save=True):
+  def _eval(self, start_step, start_time, eval_rng, save=True):
     """Evaluate.
 
     Has the side-effects of:
@@ -437,12 +437,14 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     Args:
       start_step: the training start step.
       start_time: the training start time.
+      eval_rng: rng seed used in eval (chiefly for the MDLM workload).
       save: flag to save a checkpoint to disk. defaults to True.
 
     Returns:
       A Dict[str, Any] eval report, originally created in
       trainer_utils.eval_metrics.
     """
+
     time_since_last_eval = time.time() - self._time_at_prev_eval_end
 
     if self._eval_use_ema:
@@ -451,6 +453,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       )
     else:
       eval_params = self._params
+
+    eval_rng = jax.random.fold_in(eval_rng, self._global_step)
 
     report, eval_time = trainer_utils.eval_metrics(
         eval_params,
@@ -461,6 +465,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._eval_train_num_batches,
         self._evaluate_batch_jitted,
         self.finalize_batch_fn,
+        eval_rng=eval_rng,
     )
     self._run_eval_callbacks(report)
     if save:
@@ -618,8 +623,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # across hosts.
     rng, init_rng = jax.random.split(self._rng)
     rng = jax.random.fold_in(rng, jax.process_index())
-    rng, data_rng = jax.random.split(rng)
-    rng, callback_rng = jax.random.split(rng)
+    rng, data_rng, callback_rng, eval_rng = jax.random.split(rng, 4)
 
     if jax.process_index() == 0:
       logging.info('Let the training begin!')
@@ -705,7 +709,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
             self._global_step, self._eval_frequency, self._eval_steps
         ):
           try:
-            report = self._eval(start_step, start_time)
+            report = self._eval(start_step, start_time, eval_rng)
           except utils.TrainingDivergedError as e:
             self.wait_until_orbax_checkpointer_finished()
             raise utils.TrainingDivergedError(
@@ -720,7 +724,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # If we moved where in the loop body evals happen then we would not need
     # this test.
     if self._prev_eval_step != self._num_train_steps:
-      report = self._eval(start_step, start_time)
+      report = self._eval(start_step, start_time, eval_rng)
       yield report
     # To make sure the last checkpoint was correctly saved.
     self.wait_until_orbax_checkpointer_finished()

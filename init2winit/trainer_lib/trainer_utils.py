@@ -147,6 +147,7 @@ def evaluate(
     batch_iter,
     evaluate_batch_jitted,
     finalize_batch_fn,
+    eval_rng=None,
 ):
   """Compute aggregated metrics on the given data iterator.
 
@@ -173,6 +174,8 @@ def evaluate(
     finalize_batch_fn: Function to finalize the batch before passing to
       evaluate_batch_jitted. For sharding or reshaping if necessary. Can be a
       no-op otherwise.
+    eval_rng: Optional JAX PRNG key. When provided, a unique sub-key is injected
+      into each batch as batch['eval_rng'].
 
   Returns:
     A dictionary of aggregated metrics. The keys will match the keys returned by
@@ -180,8 +183,10 @@ def evaluate(
   """
   metrics = None
 
-  for batch in batch_iter:
+  for batch_idx, batch in enumerate(batch_iter):
     batch = finalize_batch_fn(batch)
+    if eval_rng is not None:
+      batch['eval_rng'] = jax.random.fold_in(eval_rng, batch_idx)
     # Returns a clu.metrics.Collection object. We assume that
     # `evaluate_batch_jitted` calls CLU's `single_from_model_outputs`.
     computed_metrics = evaluate_batch_jitted(
@@ -226,6 +231,7 @@ def eval_metrics(
     eval_train_num_batches,
     evaluate_batch_jitted,
     finalize_batch_fn=None,
+    eval_rng=None,
 ):
   """Evaluates the given network on the train, validation, and test sets.
 
@@ -252,6 +258,8 @@ def eval_metrics(
     evaluate_batch_jitted: Computes the metrics on a sharded batch.
     finalize_batch_fn: Function to finalize the batch before passing to
       evaluate_batch_jitted. For sharding or reshaping.
+    eval_rng: Optional JAX PRNG key for stochastic evaluation. Used for the
+      masked diffusion language model.
 
   Returns:
     A dictionary of all computed metrics.
@@ -261,15 +269,20 @@ def eval_metrics(
   test_iter = dataset.test_epoch(test_num_batches)
 
   metrics = {}
-  for split_iter, split_name in zip([train_iter, valid_iter, test_iter],
-                                    ['train', 'valid', 'test']):
+  for split_idx, (split_iter, split_name) in enumerate(
+      zip([train_iter, valid_iter, test_iter], ['train', 'valid', 'test'])
+  ):
     logging.info('Evaluating split: %s', split_name)
+    split_rng = None
+    if eval_rng is not None:
+      split_rng = jax.random.fold_in(eval_rng, split_idx)
     split_metrics = evaluate(
         params,
         batch_stats,
         split_iter,
         evaluate_batch_jitted,
         finalize_batch_fn,
+        eval_rng=split_rng,
     )
     # Metrics are None if the dataset doesn't have that split
     if split_metrics is not None:
