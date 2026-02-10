@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The init2winit Authors.
+# Copyright 2026 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -88,6 +88,8 @@ class DoConfig:
   mlp_activation: str = 'glu'
   normalization: str = 'rmsnorm'
   qk_norm: bool = True
+  is_causal: bool = True
+  eps: float = 1e-6
 
 
 class Mlp(nn.Module):
@@ -144,14 +146,13 @@ def init_rope(dim=256, seq_len=128, n_heads=4):
 @jax.jit
 def apply_rope(q, k, freqs_cis):
   """Apply rotary embeddings to Q and K."""
+  input_dtype = q.dtype
 
   def rotate_tensor(x):
-    # Split into real and imaginary parts
     x_r2 = x.reshape(*x.shape[:-1], -1, 2)
     L = x.shape[1]
     freqs = freqs_cis[:, :L, :, :, :]
 
-    # Apply rotation
     rotated_x_r2 = jnp.stack(
         [
             x_r2[..., 0] * freqs[..., 0] - x_r2[..., 1] * freqs[..., 1],
@@ -162,14 +163,13 @@ def apply_rope(q, k, freqs_cis):
 
     return rotated_x_r2.reshape(*x.shape)
 
-  # Apply rotation to Q and K separately
-  rotated_q = rotate_tensor(q)
-  rotated_k = rotate_tensor(k)
+  rotated_q = rotate_tensor(q).astype(input_dtype)
+  rotated_k = rotate_tensor(k).astype(input_dtype)
 
   return rotated_q, rotated_k
 
 
-class CausalAttn(nn.Module):
+class Attention(nn.Module):
   """Causal attention layer with rotary embeddings."""
 
   cfg: DoConfig
@@ -204,50 +204,42 @@ class CausalAttn(nn.Module):
         use_bias=False,
         dtype=cfg.dtype,
     )
-    self.layer_norm_q = nn.LayerNorm(dtype=cfg.dtype, use_bias=False)
-    self.layer_norm_k = nn.LayerNorm(dtype=cfg.dtype, use_bias=False)
+    if cfg.qk_norm:
+      self.eps = cfg.eps
+    attn_scale0 = jnp.log2(cfg.L**2 - cfg.L).astype(cfg.dtype)
+    self.attn_scale = self.param(
+        'attn_scale',
+        nn.initializers.constant(attn_scale0, dtype=cfg.dtype),
+        (),
+    )
 
   def __call__(self, x_BxLxD: jax.Array):
     cfg = self.cfg
 
-    # Project inputs to Q, K, V
     q_BxLxHxDh = self.multilinear_query(x_BxLxD)
     k_BxLxHxDh = self.multilinear_key(x_BxLxD)
     v_BxLxHxDh = self.multilinear_value(x_BxLxD)
 
     if cfg.qk_norm:
-      q_BxLxHxDh = self.layer_norm_q(q_BxLxHxDh)
-      k_BxLxHxDh = self.layer_norm_k(k_BxLxHxDh)
+      q_BxLxHxDh /= (
+          jnp.linalg.norm(q_BxLxHxDh, axis=-1, keepdims=True) + self.eps
+      )
+      k_BxLxHxDh /= (
+          jnp.linalg.norm(k_BxLxHxDh, axis=-1, keepdims=True) + self.eps
+      )
+    q_BxLxHxDh = q_BxLxHxDh * self.attn_scale
 
-    # Apply rotary embeddings to Q and K
     q_BxLxHxDh, k_BxLxHxDh = apply_rope(q_BxLxHxDh, k_BxLxHxDh, self.freqs_cis)
 
-    # Scale queries
-    q_BxLxHxDh /= self.Dh**0.5
+    out_BxLxHxDh = jax.nn.dot_product_attention(
+        q_BxLxHxDh,
+        k_BxLxHxDh,
+        v_BxLxHxDh,
+        is_causal=cfg.is_causal,
+        scale=1.0,
+    )
 
-    # Compute attention scores
-    att_BxHxLxL = jnp.einsum('...qhd,...khd->...hqk', q_BxLxHxDh, k_BxLxHxDh)
-    # TODO(kasimbeg): Remove this.
-    # # cast to fp32 for softmax
-    # att_BxHxLxL = att_BxHxLxL.astype(jnp.float32)
-
-    # Causal attention mask
-    L = x_BxLxD.shape[1]
-    mask_1x1xLxL = jnp.tril(jnp.ones((1, 1, L, L), dtype=jnp.bool_))
-
-    # Apply mask and softmax
-    _NEG_INF = jnp.finfo(cfg.dtype).min
-    att_BxHxLxL = jnp.where(mask_1x1xLxL, att_BxHxLxL, _NEG_INF)
-    att_BxHxLxL = jax.nn.softmax(att_BxHxLxL, axis=-1)
-    att_BxHxLxL = att_BxHxLxL.astype(cfg.dtype)
-
-    # Compute attention output
-    out_BxLxHxDh = jnp.einsum('...hqk,...khd->...qhd', att_BxHxLxL, v_BxLxHxDh)
-
-    # Reshape and project output
     out_BxLxD = out_BxLxHxDh.reshape(*x_BxLxD.shape)
-
-    # Output projection
     out_BxLxD = self.output_projection(out_BxLxD)
 
     return out_BxLxD
@@ -272,7 +264,7 @@ class TBlock(nn.Module):
     else:
       raise ValueError(f'Unknown normalization: {cfg.normalization}')
 
-    x_BxLxD = CausalAttn(cfg)(x_BxLxD)
+    x_BxLxD = Attention(cfg)(x_BxLxD)
     x_BxLxD += in_BxLxD
 
     z_BxLxD = Mlp(cfg)(x_BxLxD)
