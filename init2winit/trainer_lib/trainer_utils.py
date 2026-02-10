@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The init2winit Authors.
+# Copyright 2026 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -43,8 +43,17 @@ def log_message(msg, pool=None, work_unit=None):
   logging.info('%s', msg)
 
 
-def log_eta(pool, work_unit, global_step, steps_per_sec_no_eval,
-            num_train_steps, start_time, eval_frequency, eval_steps, eval_time):
+def log_eta(
+    pool,
+    work_unit,
+    global_step,
+    steps_per_sec_no_eval,
+    num_train_steps,
+    start_time,
+    eval_frequency,
+    eval_steps,
+    eval_time,
+):
   """Construct and ETA / total time entry."""
   msg = f'Steps: {global_step} / {num_train_steps} '
   msg += f'[{global_step / num_train_steps:.1%}] '
@@ -67,17 +76,22 @@ def log_eta(pool, work_unit, global_step, steps_per_sec_no_eval,
 
 
 def log_epoch_report(report, metrics_logger):
-  logging.info('Step %d, steps/second: %f, report: %r', report['global_step'],
-               report['steps_per_sec_no_eval'], report)
+  logging.info(
+      'Step %d, steps/second: %f, report: %r',
+      report['global_step'],
+      report['steps_per_sec_no_eval'],
+      report,
+  )
   if metrics_logger:
     metrics_logger.append_scalar_metrics(report)
-  logging.info('Finished (estimated) epoch %d. Saving checkpoint.',
-               report['epoch'])
+  logging.info(
+      'Finished (estimated) epoch %d. Saving checkpoint.', report['epoch']
+  )
 
 
 def should_eval(global_step, eval_frequency, eval_steps):
   on_step = eval_steps and global_step in eval_steps
-  on_freq = (global_step % eval_frequency == 0)
+  on_freq = global_step % eval_frequency == 0
 
   return on_step or on_freq
 
@@ -95,10 +109,12 @@ def check_for_early_stopping(
       raise ValueError(
           'Provided early_stopping_target_name '
           f'{early_stopping_target_name} not in the computed metrics: '
-          f'{eval_report.keys()}.')
+          f'{eval_report.keys()}.'
+      )
     if early_stopping_mode is None:
       raise ValueError(
-          'Need to provide a early_stopping_mode if using early stopping.')
+          'Need to provide a early_stopping_mode if using early stopping.'
+      )
     # Note that because eval metrics are synced across hosts, this should
     # stop training on every host at the same step.
     if eval_report['global_step'] < early_stopping_min_steps:
@@ -131,6 +147,7 @@ def evaluate(
     batch_iter,
     evaluate_batch_jitted,
     finalize_batch_fn,
+    eval_rng=None,
 ):
   """Compute aggregated metrics on the given data iterator.
 
@@ -157,6 +174,8 @@ def evaluate(
     finalize_batch_fn: Function to finalize the batch before passing to
       evaluate_batch_jitted. For sharding or reshaping if necessary. Can be a
       no-op otherwise.
+    eval_rng: Optional JAX PRNG key. When provided, a unique sub-key is injected
+      into each batch as batch['eval_rng'].
 
   Returns:
     A dictionary of aggregated metrics. The keys will match the keys returned by
@@ -164,8 +183,10 @@ def evaluate(
   """
   metrics = None
 
-  for batch in batch_iter:
+  for batch_idx, batch in enumerate(batch_iter):
     batch = finalize_batch_fn(batch)
+    if eval_rng is not None:
+      batch['eval_rng'] = jax.random.fold_in(eval_rng, batch_idx)
     # Returns a clu.metrics.Collection object. We assume that
     # `evaluate_batch_jitted` calls CLU's `single_from_model_outputs`.
     computed_metrics = evaluate_batch_jitted(
@@ -196,7 +217,7 @@ def evaluate(
 def _merge_and_apply_prefix(d1, d2, prefix):
   d1 = d1.copy()
   for key in d2:
-    d1[prefix+key] = d2[key]
+    d1[prefix + key] = d2[key]
   return d1
 
 
@@ -210,6 +231,7 @@ def eval_metrics(
     eval_train_num_batches,
     evaluate_batch_jitted,
     finalize_batch_fn=None,
+    eval_rng=None,
 ):
   """Evaluates the given network on the train, validation, and test sets.
 
@@ -236,6 +258,8 @@ def eval_metrics(
     evaluate_batch_jitted: Computes the metrics on a sharded batch.
     finalize_batch_fn: Function to finalize the batch before passing to
       evaluate_batch_jitted. For sharding or reshaping.
+    eval_rng: Optional JAX PRNG key for stochastic evaluation. Used for the
+      masked diffusion language model.
 
   Returns:
     A dictionary of all computed metrics.
@@ -245,18 +269,23 @@ def eval_metrics(
   test_iter = dataset.test_epoch(test_num_batches)
 
   metrics = {}
-  for split_iter, split_name in zip([train_iter, valid_iter, test_iter],
-                                    ['train', 'valid', 'test']):
+  for split_idx, (split_iter, split_name) in enumerate(
+      zip([train_iter, valid_iter, test_iter], ['train', 'valid', 'test'])
+  ):
     logging.info('Evaluating split: %s', split_name)
+    split_rng = None
+    if eval_rng is not None:
+      split_rng = jax.random.fold_in(eval_rng, split_idx)
     split_metrics = evaluate(
         params,
         batch_stats,
         split_iter,
         evaluate_batch_jitted,
         finalize_batch_fn,
+        eval_rng=split_rng,
     )
-    # Metrics are None if the dataset doesn't have that split
     if split_metrics is not None:
-      metrics = _merge_and_apply_prefix(metrics, split_metrics,
-                                        (split_name + '/'))
+      metrics = _merge_and_apply_prefix(
+          metrics, split_metrics, (split_name + '/')
+      )
   return metrics

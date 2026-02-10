@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The init2winit Authors.
+# Copyright 2026 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Standard trainer for the init2winit project."""
+
 from init2winit.dataset_lib import data_utils
 from init2winit.trainer_lib import base_trainer
 from init2winit.trainer_lib import trainer_utils
@@ -28,7 +29,7 @@ class Trainer(base_trainer.BaseTrainer):
 
   def update(self, batch, rng, metrics_state, training_cost):
     """Single step of the training loop.
-    
+
     Uses the training algorithm's update_params function to get the updated
     optimizer state, params, and batch stats.
     Note this method is also responsible for updating the private _global_step
@@ -49,6 +50,7 @@ class Trainer(base_trainer.BaseTrainer):
         cost_value: The training cost used for the metrics state.
         grad: The gradient used for the metrics state.
     """
+
     # `jax.random.split` is very slow outside the train step, so instead we do a
     # `jax.random.fold_in` here.
     # The RNG is already sharded per-device, so each device has a scalar
@@ -80,9 +82,7 @@ class Trainer(base_trainer.BaseTrainer):
           new_batch_stats,
       )
 
-    new_sum_train_cost = (
-        training_cost + cost_value
-    )
+    new_sum_train_cost = training_cost + cost_value
     self._global_step += 1
     return (
         new_optimizer_state,
@@ -117,14 +117,28 @@ class Trainer(base_trainer.BaseTrainer):
     )
 
     batch_stats_sharding, batch_stats = data_utils.shard_pytree(
-        unreplicated_batch_stats, self._mesh)
+        unreplicated_batch_stats, self._mesh
+    )
     metrics_state_sharding, metrics_state = data_utils.shard_pytree(
-        unreplicated_metrics_state, self._mesh)
+        unreplicated_metrics_state, self._mesh
+    )
 
-    return (params, params_sharding,
-            optimizer_state, optimizer_state_sharding,
-            batch_stats, batch_stats_sharding,
-            metrics_state, metrics_state_sharding)
+    return (
+        params,
+        params_sharding,
+        optimizer_state,
+        optimizer_state_sharding,
+        batch_stats,
+        batch_stats_sharding,
+        metrics_state,
+        metrics_state_sharding,
+    )
 
   def finalize_batch_fn(self, batch):
+    """Finalize the batch by making a global array out of the shards."""
+
     return trainer_utils.make_finalize_batch_fn(self._mesh)(batch)
+
+  def get_params(self):
+    """Returns the model parameters."""
+    return self._params

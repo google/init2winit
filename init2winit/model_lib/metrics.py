@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The init2winit Authors.
+# Copyright 2026 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ Metric functions take a batch of (logits, targets, weights) as input and
 return a batch of loss values. This is for safe aggregation across
 different-sized eval batches.
 """
+
 import functools
 from absl import logging
 from clu import metrics
@@ -42,6 +43,7 @@ except ImportError:
 @flax.struct.dataclass
 class NumExamples(metrics.Metric):
   """Computes the number of examples used for evaluation."""
+
   count: np.float32
 
   @classmethod
@@ -63,7 +65,8 @@ class NumExamples(metrics.Metric):
 # https://github.com/google/flax/blob/main/examples/ogbg_molpcba/train.py
 @flax.struct.dataclass
 class OGBGMeanAveragePrecision(
-    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))):
+    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))
+):
   """Computes the mean average precision (mAP) over different tasks on CPU.
 
   This implements the uncommon feature of allowing both per-example and
@@ -90,12 +93,14 @@ class OGBGMeanAveragePrecision(
       # We need weights to be the exact same shape as targets, not just
       # compatible for broadcasting, so multiply by ones of the right shape.
       weights = np.ones(targets.shape) * losses.conform_weights_to_targets(
-          weights, targets)
+          weights, targets
+      )
 
     if not (logits.shape == targets.shape == weights.shape):  # pylint: disable=superfluous-parens
       raise ValueError(
           f'Shape mismatch between logits ({logits.shape}), targets '
-          f'({targets.shape}), and weights ({weights.shape}).')
+          f'({targets.shape}), and weights ({weights.shape}).'
+      )
     if len(logits.shape) != 2:
       raise ValueError(f'Rank of logits ({logits.shape}) must be 2.')
     if not np.logical_or(weights == 1, weights == 0).all():
@@ -110,11 +115,14 @@ class OGBGMeanAveragePrecision(
     for task in range(num_tasks):
       # AP is only defined when there is at least one negative data
       # and at least one positive data.
-      if (np.sum(targets[:, task] == 0) > 0 and
-          np.sum(targets[:, task] == 1) > 0):
+      if (
+          np.sum(targets[:, task] == 0) > 0
+          and np.sum(targets[:, task] == 1) > 0
+      ):
         is_labeled = weights[:, task]
         average_precisions[task] = sklearn.metrics.average_precision_score(
-            targets[is_labeled, task], probs[is_labeled, task])
+            targets[is_labeled, task], probs[is_labeled, task]
+        )
 
     # When all APs are NaNs, return NaN. This avoids raising a RuntimeWarning.
     if np.isnan(average_precisions).all():
@@ -159,7 +167,8 @@ def _binary_auc_shape_fix(targets, logits, weights, metric_name):
   shape_error_msg = (
       f'Inputs for {metric_name} should be of shape (n,) or (n, 2). Received '
       f'targets={targets.shape}, logits={logits.shape}, '
-      f'weights={weights.shape}.')
+      f'weights={weights.shape}.'
+  )
   targets = _binary_auc_shape_fix_check(targets, shape_error_msg)
   logits = _binary_auc_shape_fix_check(logits, shape_error_msg)
   weights = _binary_auc_shape_fix_check(weights, shape_error_msg)
@@ -169,13 +178,15 @@ def _binary_auc_shape_fix(targets, logits, weights, metric_name):
   # We need weights to be the exact same shape as targets, not just
   # compatible for broadcasting, so multiply by ones of the right shape.
   weights = np.ones(targets.shape) * losses.conform_weights_to_targets(
-      weights, targets)
+      weights, targets
+  )
   return targets, logits, weights
 
 
 @flax.struct.dataclass
 class BinaryMeanAveragePrecision(
-    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))):
+    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))
+):
   """Computes the mean average precision for a binary classifier on CPU."""
 
   def compute(self):
@@ -183,8 +194,11 @@ class BinaryMeanAveragePrecision(
     # Ensure the arrays are numpy and not jax.numpy.
     values = {k: np.array(v) for k, v in values.items()}
     targets, logits, weights = _binary_auc_shape_fix(
-        values['targets'], values['logits'], values['weights'],
-        'BinaryMeanAveragePrecision')
+        values['targets'],
+        values['logits'],
+        values['weights'],
+        'BinaryMeanAveragePrecision',
+    )
 
     if np.any(np.isnan(logits)):
       raise utils.TrainingDivergedError('NaN detected in logits')
@@ -197,22 +211,23 @@ class BinaryMeanAveragePrecision(
       return 0.0
     probs = expit(logits)  # Sigmoid.
     return sklearn.metrics.average_precision_score(
-        targets, probs, sample_weight=weights)
+        targets, probs, sample_weight=weights
+    )
 
 
 @flax.struct.dataclass
 class BinaryAUCROC(
-    metrics.CollectingMetric.from_outputs(('targets', 'logits', 'weights'))):
+    metrics.CollectingMetric.from_outputs(('targets', 'logits', 'weights'))
+):
   """Compute the AUC-ROC for binary classification on the CPU."""
 
   def compute(self):
     values = super().compute()
     # Ensure the arrays are numpy and not jax.numpy.
     values = {k: np.array(v) for k, v in values.items()}
-    targets, logits, weights = _binary_auc_shape_fix(values['targets'],
-                                                     values['logits'],
-                                                     values['weights'],
-                                                     'BinaryAUCROC')
+    targets, logits, weights = _binary_auc_shape_fix(
+        values['targets'], values['logits'], values['weights'], 'BinaryAUCROC'
+    )
     # TODO(mbadura): The np.array call should not be needed after numpy upgrade.
     valid_targets = targets[np.array(weights > 0)]
     targets_sum = np.sum(valid_targets)
@@ -221,7 +236,8 @@ class BinaryAUCROC(
       return 0.0
     positive_probs = expit(logits)  # Sigmoid.
     return sklearn.metrics.roc_auc_score(
-        targets, positive_probs, sample_weight=weights)
+        targets, positive_probs, sample_weight=weights
+    )
 
 
 # TODO(mbadura): Check if we can use metrics.Average with a mask
@@ -242,6 +258,7 @@ def weighted_average_metric(fun):
   @flax.struct.dataclass
   class _Metric(metrics.Metric):
     """Applies `fun` and computes the average."""
+
     total: np.float32
     weight: np.float32
 
@@ -259,7 +276,8 @@ def weighted_average_metric(fun):
 
     def merge(self, other):
       return type(self)(
-          total=self.total + other.total, weight=self.weight + other.weight)
+          total=self.total + other.total, weight=self.weight + other.weight
+      )
 
     def compute(self):
       return self.total / self.weight
@@ -282,7 +300,8 @@ def perplexity_fun():
       computed per example, shape [batch, ...].
   """
   _ParentMetricClass = weighted_average_metric(
-      losses.weighted_unnormalized_cross_entropy)
+      losses.weighted_unnormalized_cross_entropy
+  )
 
   @flax.struct.dataclass
   class _PerplexityMetricClass(_ParentMetricClass):
@@ -311,16 +330,19 @@ def weighted_misclassifications(logits, targets, weights=None):
     Binary vector indicated which examples are misclassified ([batch, ...]).
   """
   if logits.ndim != targets.ndim:
-    raise ValueError('Incorrect shapes. Got shape %s logits and %s targets' %
-                     (str(logits.shape), str(targets.shape)))
+    raise ValueError(
+        'Incorrect shapes. Got shape %s logits and %s targets'
+        % (str(logits.shape), str(targets.shape))
+    )
   preds = jnp.argmax(logits, axis=-1)
   pred_targets = jnp.argmax(targets, axis=-1)
   loss = jnp.not_equal(preds, pred_targets)
   if weights is not None:
     if weights.ndim != targets.ndim - 1:
       raise ValueError(
-          'Incorrect shapes. Got shape %s weights and %s one_hot_targets' %
-          (str(weights.shape), str(targets.shape)))
+          'Incorrect shapes. Got shape %s weights and %s one_hot_targets'
+          % (str(weights.shape), str(targets.shape))
+      )
     loss = loss * weights
   return loss
 
@@ -328,21 +350,23 @@ def weighted_misclassifications(logits, targets, weights=None):
 def uniform_filter(im, size=7):  # pylint: disable=missing-docstring
 
   def conv(im):
-    return jnp.convolve(
-        jnp.pad(im, pad_width=size // 2, mode='symmetric'),
-        jnp.ones(size),
-        mode='valid') / size
+    return (
+        jnp.convolve(
+            jnp.pad(im, pad_width=size // 2, mode='symmetric'),
+            jnp.ones(size),
+            mode='valid',
+        )
+        / size
+    )
+
   im = jax.vmap(conv, (0,))(im)
   im = jax.vmap(conv, (1,))(im)
   return im.T
 
 
-def structural_similarity(im1,
-                          im2,
-                          data_range=1.0,
-                          win_size=7,
-                          k1=0.01,
-                          k2=0.03):
+def structural_similarity(
+    im1, im2, data_range=1.0, win_size=7, k1=0.01, k2=0.03
+):
   """Compute the mean structural similarity index between two images.
 
   NOTE(dsuo): modified from skimage.metrics.structural_similarity.
@@ -373,7 +397,7 @@ def structural_similarity(im1,
   """
   filter_func = functools.partial(uniform_filter, size=win_size)
 
-  num_points = win_size**len(im1.shape)
+  num_points = win_size ** len(im1.shape)
 
   # filter has already normalized by num_points
   cov_norm = num_points / (num_points - 1)  # sample covariance
@@ -390,8 +414,8 @@ def structural_similarity(im1,
   vy = cov_norm * (uyy - uy * uy)
   vxy = cov_norm * (uxy - ux * uy)
 
-  c1 = (k1 * data_range)**2
-  c2 = (k2 * data_range)**2
+  c1 = (k1 * data_range) ** 2
+  c2 = (k2 * data_range) ** 2
 
   a1 = 2 * ux * uy + c1
   a2 = 2 * vxy + c2
@@ -464,6 +488,7 @@ def average_ctc_loss():
   @flax.struct.dataclass
   class _Metric(metrics.Metric):
     """Applies `fun` and computes the average."""
+
     total: np.float32
     weight: np.float32
 
@@ -473,7 +498,8 @@ def average_ctc_loss():
 
     def merge(self, other):
       return type(self)(
-          total=self.total + other.total, weight=self.weight + other.weight)
+          total=self.total + other.total, weight=self.weight + other.weight
+      )
 
     def compute(self):
       return self.total / self.weight
@@ -481,12 +507,39 @@ def average_ctc_loss():
   return _Metric
 
 
-def compute_wer(decoded,
-                decoded_paddings,
-                targets,
-                target_paddings,
-                tokenizer,
-                tokenizer_type='SPM'):
+def mdlm_perplexity():
+  """Metrics that calculate the perplexity in addition to the cross entropy loss for the masked diffusion language model."""
+
+  @flax.struct.dataclass
+  class _MDLMPerplexity(metrics.Metric):
+    """Calculates the perplexity based on the cross-entropy provided by the masked diffusion language model."""
+
+    total: np.float32
+    weight: np.float32
+
+    @classmethod
+    def from_model_output(cls, normalized_loss, **_):
+      return cls(total=normalized_loss, weight=1.0)
+
+    def merge(self, other):
+      return type(self)(
+          total=self.total + other.total, weight=self.weight + other.weight
+      )
+
+    def compute(self):
+      return jnp.exp(self.total / self.weight)
+
+  return _MDLMPerplexity
+
+
+def compute_wer(
+    decoded,
+    decoded_paddings,
+    targets,
+    target_paddings,
+    tokenizer,
+    tokenizer_type='SPM',
+):
   """Computes word error rate."""
   word_errors = 0.0
   num_words = 0.0
@@ -532,12 +585,15 @@ def wer(hps):
     tokenizer = spm_tokenizer.load_tokenizer(hps.tokenizer_vocab_path)
   else:
     raise ValueError(
-        'WER computation is currently only supported for SPM tokenizer.')
+        'WER computation is currently only supported for SPM tokenizer.'
+    )
 
   @flax.struct.dataclass
   class WER(
       metrics.CollectingMetric.from_outputs(
-          ('hyps', 'hyp_paddings', 'targets', 'target_paddings'))):
+          ('hyps', 'hyp_paddings', 'targets', 'target_paddings')
+      )
+  ):
     """Metric computing word error rate."""
 
     def compute(self):
@@ -545,11 +601,14 @@ def wer(hps):
       # Ensure the arrays are numpy and not jax.numpy.
       values = {k: np.array(v) for k, v in values.items()}
 
-      word_errors, num_words = compute_wer(values['hyps'],
-                                           values['hyp_paddings'],
-                                           values['targets'],
-                                           values['target_paddings'],
-                                           tokenizer, hps.tokenizer_type)
+      word_errors, num_words = compute_wer(
+          values['hyps'],
+          values['hyp_paddings'],
+          values['targets'],
+          values['target_paddings'],
+          tokenizer,
+          hps.tokenizer_type,
+      )
       return word_errors / num_words
 
   return WER
@@ -560,52 +619,61 @@ def wer(hps):
 # that information from `weights`. The total weight for calculating the average
 # is `weights.sum()`.
 _METRICS = {
-    'autoregressive_language_model_metrics':
-        metrics.Collection.create(
-            error_rate=weighted_average_metric(weighted_misclassifications),
-            ce_loss=weighted_average_metric(
-                losses.weighted_unnormalized_cross_entropy),
-            perplexity=perplexity_fun(),
-            num_examples=NumExamples),
-    'binary_autoencoder_metrics':
-        metrics.Collection.create(
-            sigmoid_binary_cross_entropy=weighted_average_metric(
-                losses.unnormalized_sigmoid_binary_cross_entropy),
-            sigmoid_mean_squared_error=weighted_average_metric(
-                losses.unnormalized_sigmoid_mean_squared_error),
-            num_examples=NumExamples),
-    'classification_metrics':
-        metrics.Collection.create(
-            error_rate=weighted_average_metric(weighted_misclassifications),
-            ce_loss=weighted_average_metric(
-                losses.weighted_unnormalized_cross_entropy),
-            num_examples=NumExamples),
-    'binary_classification_metrics_ogbg_map':
-        metrics.Collection.create(
-            ce_loss=weighted_average_metric(
-                losses.unnormalized_sigmoid_binary_cross_entropy),
-            num_examples=NumExamples,
-            average_precision=OGBGMeanAveragePrecision),
-    'binary_classification_metrics':
-        metrics.Collection.create(
-            ce_loss=weighted_average_metric(
-                losses.unnormalized_sigmoid_binary_cross_entropy),
-            num_examples=NumExamples,
-            average_precision=BinaryMeanAveragePrecision,
-            auc_roc=BinaryAUCROC),
-    'binary_classification_metrics_dlrm_no_auc':
-        metrics.Collection.create(
-            ce_loss=weighted_average_metric(
-                losses.unnormalized_sigmoid_binary_cross_entropy),
-            num_examples=NumExamples,
+    'autoregressive_language_model_metrics': metrics.Collection.create(
+        error_rate=weighted_average_metric(weighted_misclassifications),
+        ce_loss=weighted_average_metric(
+            losses.weighted_unnormalized_cross_entropy
         ),
-    'image_reconstruction_metrics':
-        metrics.Collection.create(
-            l1_loss=weighted_average_metric(
-                losses.weighted_unnormalized_mean_absolute_error),
-            ssim=weighted_average_metric(ssim),
-            num_examples=NumExamples,
+        perplexity=perplexity_fun(),
+        num_examples=NumExamples,
+    ),
+    'binary_autoencoder_metrics': metrics.Collection.create(
+        sigmoid_binary_cross_entropy=weighted_average_metric(
+            losses.unnormalized_sigmoid_binary_cross_entropy
         ),
+        sigmoid_mean_squared_error=weighted_average_metric(
+            losses.unnormalized_sigmoid_mean_squared_error
+        ),
+        num_examples=NumExamples,
+    ),
+    'classification_metrics': metrics.Collection.create(
+        error_rate=weighted_average_metric(weighted_misclassifications),
+        ce_loss=weighted_average_metric(
+            losses.weighted_unnormalized_cross_entropy
+        ),
+        num_examples=NumExamples,
+    ),
+    'binary_classification_metrics_ogbg_map': metrics.Collection.create(
+        ce_loss=weighted_average_metric(
+            losses.unnormalized_sigmoid_binary_cross_entropy
+        ),
+        num_examples=NumExamples,
+        average_precision=OGBGMeanAveragePrecision,
+    ),
+    'binary_classification_metrics': metrics.Collection.create(
+        ce_loss=weighted_average_metric(
+            losses.unnormalized_sigmoid_binary_cross_entropy
+        ),
+        num_examples=NumExamples,
+        average_precision=BinaryMeanAveragePrecision,
+        auc_roc=BinaryAUCROC,
+    ),
+    'binary_classification_metrics_dlrm_no_auc': metrics.Collection.create(
+        ce_loss=weighted_average_metric(
+            losses.unnormalized_sigmoid_binary_cross_entropy
+        ),
+        num_examples=NumExamples,
+    ),
+    'image_reconstruction_metrics': metrics.Collection.create(
+        l1_loss=weighted_average_metric(
+            losses.weighted_unnormalized_mean_absolute_error
+        ),
+        ssim=weighted_average_metric(ssim),
+        num_examples=NumExamples,
+    ),
+    'mdlm_metrics': metrics.Collection.create(
+        ce_loss=average_ctc_loss(), perplexity=mdlm_perplexity()
+    ),
 }
 
 
@@ -626,5 +694,6 @@ def get_metrics(metrics_name, hps=None):
   try:
     return _METRICS[metrics_name]
   except KeyError as metric_not_found_error:
-    raise ValueError('Unrecognized metrics bundle: {}'.format(
-        metrics_name)) from metric_not_found_error
+    raise ValueError(
+        'Unrecognized metrics bundle: {}'.format(metrics_name)
+    ) from metric_not_found_error

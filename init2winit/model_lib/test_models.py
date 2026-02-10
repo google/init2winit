@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The init2winit Authors.
+# Copyright 2026 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@ DATA_HPS = {
         'num_layers': 1,
         'growth_rate': 1,
         'output_shape': (5,),
-        'batch_size': 1
+        'batch_size': 1,
     },
     'adabelief_resnet': {
         'input_shape': (32, 32, 3),
@@ -81,31 +81,23 @@ DATA_HPS = {
     # TODO(kasimbeg): fix issue with tokenizer_vocab_path
     'conformer': {
         'input_shape': (64,),
-        'max_eval_target_length':
-            64,
-        'max_target_length':
-            64,
+        'max_eval_target_length': 64,
+        'max_target_length': 64,
         'output_shape': (16,),
-        'vocab_size':
-            16,
-        'tokenizer_type':
-            'WPM',
+        'vocab_size': 16,
+        'tokenizer_type': 'WPM',
     },
     'mlcommons_conformer': {
         'input_shape': (64,),
-        'max_eval_target_length':
-            64,
-        'max_target_length':
-            64,
+        'max_eval_target_length': 64,
+        'max_target_length': 64,
         'output_shape': (16,),
-        'vocab_size':
-            16,
-        'tokenizer_type':
-            'WPM',
+        'vocab_size': 16,
+        'tokenizer_type': 'WPM',
     },
     'convolutional_autoencoder': {
-        'input_shape': ((28, 28, 1)),
-        'output_shape': ((28, 28, 1)),
+        'input_shape': (28, 28, 1),
+        'output_shape': (28, 28, 1),
     },
     'deepspeech': {
         'max_input_length': 64,
@@ -186,6 +178,11 @@ DATA_HPS = {
         'output_shape': (32, 32000),
         'vocab_size': 32000,
     },
+    'mdlm_rope_nanodo': {
+        'input_shape': (32,),
+        'output_shape': (32, 50258),
+        'vocab_size': 50257,
+    },
     'simple_cnn': {
         'input_shape': (32, 32, 3),
         'output_shape': (5,),
@@ -262,7 +259,7 @@ DATA_HPS = {
         'max_target_length': 64,
         'output_shape': (16,),
         'vocab_size': 16,
-    }
+    },
 }
 
 LOSS_NAME = {
@@ -289,6 +286,7 @@ LOSS_NAME = {
     'performer': 'cross_entropy',
     'resnet': 'cross_entropy',
     'rope_nanodo': 'cross_entropy',
+    'mdlm_rope_nanodo': 'passthrough',
     'simple_cnn': 'cross_entropy',
     'transformer': 'cross_entropy',
     'unet': 'mean_absolute_error',
@@ -327,6 +325,7 @@ METRICS_NAME = {
     'nanodo': 'classification_metrics',
     'unet': 'image_reconstruction_metrics',
     'rope_nanodo': 'classification_metrics',
+    'mdlm_rope_nanodo': 'mdlm_metrics',
     'vit': 'classification_metrics',
     'wide_resnet': 'classification_metrics',
     'xformer_translate_binary': 'classification_metrics',

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The init2winit Authors.
+# Copyright 2026 The init2winit Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -452,6 +452,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     else:
       eval_params = self._params
 
+    eval_rng = jax.random.fold_in(self._rng, self._global_step)
+
     report, eval_time = trainer_utils.eval_metrics(
         eval_params,
         self._batch_stats,
@@ -461,6 +463,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         self._eval_train_num_batches,
         self._evaluate_batch_jitted,
         self.finalize_batch_fn,
+        eval_rng=eval_rng,
     )
     self._run_eval_callbacks(report)
     if save:
