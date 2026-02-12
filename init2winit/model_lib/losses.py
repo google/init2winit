@@ -19,6 +19,7 @@ Loss functions take a batch of (logits, targets, weights) as input and
 return the mean of function values. This is to make trainer.py more agnostic to
 the details of the padding and masking.
 """
+
 import functools
 
 from absl import logging
@@ -50,18 +51,20 @@ def conform_weights_to_targets(weights, targets):
 
   Returns:
     weights with proper dimensions added to apply it as a mask.
-
   """
   if weights is None:
     weights = jnp.ones_like(targets)
-  elif weights.shape == targets.shape[:weights.ndim]:
+  elif weights.shape == targets.shape[: weights.ndim]:
     # Add extra dimension if weights.shape is a prefix of targets.shape
     # so that multiplication can be broadcasted.
     weights = jnp.expand_dims(
-        weights, axis=tuple(range(weights.ndim, targets.ndim)))
+        weights, axis=tuple(range(weights.ndim, targets.ndim))
+    )
   elif weights.shape != targets.shape:
-    raise ValueError('Incorrect shapes. Got shape %s weights and %s targets.' %
-                     (str(weights.shape), str(targets.shape)))
+    raise ValueError(
+        'Incorrect shapes. Got shape %s weights and %s targets.'
+        % (str(weights.shape), str(targets.shape))
+    )
   return weights
 
 
@@ -78,8 +81,7 @@ def unnormalized_sigmoid_binary_cross_entropy(logits, targets, weights=None):
   """
   log_p = jax.nn.log_sigmoid(logits)
   log_not_p = jax.nn.log_sigmoid(-logits)
-  losses = -1.0 * (targets * log_p +
-                   (1 - targets) * log_not_p)
+  losses = -1.0 * (targets * log_p + (1 - targets) * log_not_p)
 
   if weights is not None:
     weights = conform_weights_to_targets(weights, targets)
@@ -133,7 +135,8 @@ def unnormalized_bi_tempered_sigmoid_binary_cross_entropy(
       per example, shape (batch,).
   """
   losses = bi_tempered_loss.bi_tempered_binary_logistic_loss(
-      logits, targets, t1, t2)
+      logits, targets, t1, t2
+  )
 
   if weights is not None:
     weights = conform_weights_to_targets(weights, targets)
@@ -144,15 +147,14 @@ def unnormalized_bi_tempered_sigmoid_binary_cross_entropy(
   return jnp.sum((weighted_losses).reshape(losses.shape[0], -1), axis=-1)
 
 
-def bi_tempered_sigmoid_binary_cross_entropy(hps,
-                                             logits,
-                                             targets,
-                                             weights=None):
+def bi_tempered_sigmoid_binary_cross_entropy(
+    hps, logits, targets, weights=None
+):
   """Computes the bi-tempered sigmoid binary cross entropy between logits and targets.
 
   Args:
-    hps: ConfigDict containing bi_tempered_t1 and bi_tempered_t2,
-      where bi_tempered_loss_t1 is the temperature of the logarithm (<1.0 for
+    hps: ConfigDict containing bi_tempered_t1 and bi_tempered_t2, where
+      bi_tempered_loss_t1 is the temperature of the logarithm (<1.0 for
       boundedness and bi_tempered_loss_t2 is the temperature of the exponential
       (>1.0 for tail heaviness, < 1.0 for finite support).
     logits: float array of shape (batch, output_shape).
@@ -211,7 +213,8 @@ def sigmoid_mean_squared_error(logits, targets, weights=None):
 
   normalization = jnp.array(normalization, float)
   unnormalized_sigmoid_mse = unnormalized_sigmoid_mean_squared_error(
-      logits, targets, weights)
+      logits, targets, weights
+  )
 
   return jnp.sum(unnormalized_sigmoid_mse), normalization
 
@@ -221,9 +224,9 @@ def rescaled_mean_squared_error(hps, logits, targets, weights=None):
 
   Args:
     hps: ConfigDict containing hyper params 'rescaled_loss_k' and
-      'rescaled_loss_m', where 'rescaled_loss_k' is a scalar to multily
-      loss at true label and 'rescaled_loss_m' is a scalar to multiply the
-      one-hot labels.
+      'rescaled_loss_m', where 'rescaled_loss_k' is a scalar to multily loss at
+      true label and 'rescaled_loss_m' is a scalar to multiply the one-hot
+      labels.
     logits: Array with shape [batch_size, num_labels].
     targets: One-hot encoded labels with shape [batch size, num labels].
     weights: None or float array of shape (batch,).
@@ -246,8 +249,10 @@ def rescaled_mean_squared_error(hps, logits, targets, weights=None):
   )
   if weights is not None:
     if weights.ndim != targets.ndim - 1:
-      raise ValueError('Incorrect shapes. Got shape %s weights and %s targets' %
-                       (str(weights.shape), str(targets.shape)))
+      raise ValueError(
+          'Incorrect shapes. Got shape %s weights and %s targets'
+          % (str(weights.shape), str(targets.shape))
+      )
     normalization = weights.sum()
     losses *= weights
   else:
@@ -273,14 +278,18 @@ def weighted_unnormalized_cross_entropy(logits, targets, weights=None):
     Cross entropy loss computed per example, shape [batch, ...].
   """
   if logits.ndim != targets.ndim:
-    raise ValueError('Incorrect shapes. Got shape %s logits and %s targets' %
-                     (str(logits.shape), str(targets.shape)))
+    raise ValueError(
+        'Incorrect shapes. Got shape %s logits and %s targets'
+        % (str(logits.shape), str(targets.shape))
+    )
 
   loss = -jnp.sum(targets * nn.log_softmax(logits), axis=-1)
   if weights is not None:
     if weights.ndim != targets.ndim - 1:
-      raise ValueError('Incorrect shapes. Got shape %s weights and %s targets' %
-                       (str(weights.shape), str(targets.shape)))
+      raise ValueError(
+          'Incorrect shapes. Got shape %s weights and %s targets'
+          % (str(weights.shape), str(targets.shape))
+      )
     loss = loss * weights
 
   return loss
@@ -322,23 +331,24 @@ def weighted_unnormalized_bi_tempered_cross_entropy(
     Bi-tempered cross entropy loss computed per example, shape [batch, ...].
   """
   if logits.ndim != targets.ndim:
-    raise ValueError('Incorrect shapes. Got shape %s logits and %s targets' %
-                     (str(logits.shape), str(targets.shape)))
+    raise ValueError(
+        'Incorrect shapes. Got shape %s logits and %s targets'
+        % (str(logits.shape), str(targets.shape))
+    )
 
   loss = bi_tempered_loss.bi_tempered_logistic_loss(logits, targets, t1, t2)
   if weights is not None:
     if weights.ndim != targets.ndim - 1:
-      raise ValueError('Incorrect shapes. Got shape %s weights and %s targets' %
-                       (str(weights.shape), str(targets.shape)))
+      raise ValueError(
+          'Incorrect shapes. Got shape %s weights and %s targets'
+          % (str(weights.shape), str(targets.shape))
+      )
     loss = loss * weights
 
   return loss
 
 
-def weighted_bi_tempered_cross_entropy(hps,
-                                       logits,
-                                       targets,
-                                       weights=None):
+def weighted_bi_tempered_cross_entropy(hps, logits, targets, weights=None):
   """Same as weighted_unnormalized, but additionally takes the mean."""
   if weights is None:
     normalization = targets.shape[0]
@@ -353,16 +363,15 @@ def weighted_bi_tempered_cross_entropy(hps,
 
 def ctc_loss(logits, logit_paddings, labels, label_paddings):
   logprobs = nn.log_softmax(logits)
-  per_seq_loss = optax.ctc_loss(logprobs, logit_paddings, labels,
-                                label_paddings)
+  per_seq_loss = optax.ctc_loss(
+      logprobs, logit_paddings, labels, label_paddings
+  )
   normalizer = jnp.sum(1 - label_paddings)
 
   return jnp.sum(per_seq_loss), jnp.maximum(normalizer, 1)
 
 
-def weighted_unnormalized_mean_absolute_error(logits,
-                                              targets,
-                                              weights=None):
+def weighted_unnormalized_mean_absolute_error(logits, targets, weights=None):
   """Computes weighted mean absolute error (L1) loss.
 
   Args:
@@ -379,8 +388,10 @@ def weighted_unnormalized_mean_absolute_error(logits,
 
   if weights is not None:
     if weights.shape[0] != loss.shape[0] or weights.ndim != loss.ndim:
-      raise ValueError('Incorrect shapes. Got shape %s weights and %s loss' %
-                       (str(weights.shape), str(loss.shape)))
+      raise ValueError(
+          'Incorrect shapes. Got shape %s weights and %s loss'
+          % (str(weights.shape), str(loss.shape))
+      )
     loss = loss * weights
 
   return loss
@@ -428,6 +439,9 @@ _ALL_LOSS_FUNCTIONS = {
     ),
     'ctc': (ctc_loss, jax.nn.log_softmax),
     'mean_absolute_error': (weighted_mean_absolute_error, None),
+    # The below loss is needed for the masked diffusion language model.
+    # This is because the loss calculation is part of the model there.
+    'passthrough': (lambda logits, targets, weights=None: (logits, 1.0), None),
 }
 
 
@@ -442,7 +456,7 @@ def get_loss_fn(loss_name, hps=None):
   Args:
     loss_name: (str) e.g. cross_entropy.
     hps: (ConfigDict) optionally containing loss hyperparameters for some loss
-    functions like rescaled_mean_squared_error_loss and bi_tempered_losses.
+      functions like rescaled_mean_squared_error_loss and bi_tempered_losses.
 
   Returns:
     The loss function.
@@ -457,8 +471,9 @@ def get_loss_fn(loss_name, hps=None):
       return functools.partial(loss_fn, hps)
     return loss_fn
   except KeyError as loss_fn_not_found_error:
-    raise ValueError('Unrecognized loss function: {}'.format(
-        loss_name)) from loss_fn_not_found_error
+    raise ValueError(
+        'Unrecognized loss function: {}'.format(loss_name)
+    ) from loss_fn_not_found_error
 
 
 def get_output_activation_fn(loss_name, bi_tempered_t1=1.0):
@@ -479,5 +494,6 @@ def get_output_activation_fn(loss_name, bi_tempered_t1=1.0):
       activation_fn = functools.partial(activation_fn, t1=bi_tempered_t1)
     return activation_fn
   except KeyError as activation_fn_not_found_error:
-    raise ValueError('Unrecognized loss function: {}'.format(
-        loss_name)) from activation_fn_not_found_error
+    raise ValueError(
+        'Unrecognized loss function: {}'.format(loss_name)
+    ) from activation_fn_not_found_error

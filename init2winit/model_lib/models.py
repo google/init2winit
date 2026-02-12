@@ -28,6 +28,7 @@ from init2winit.model_lib import gnn
 from init2winit.model_lib import local_attention_transformer
 from init2winit.model_lib import lstm_lm
 from init2winit.model_lib import max_pooling_cnn
+from init2winit.model_lib import mdlm_rope_nanodo
 from init2winit.model_lib import mlperf_resnet
 from init2winit.model_lib import nanodo
 from init2winit.model_lib import nqm
@@ -46,29 +47,46 @@ from init2winit.model_lib import xformer_translate_mlc_variant
 
 
 _ALL_MODELS = {
-    'fully_connected':
-        (fully_connected.FullyConnectedModel, fully_connected.DEFAULT_HPARAMS),
+    'fully_connected': (
+        fully_connected.FullyConnectedModel,
+        fully_connected.DEFAULT_HPARAMS,
+    ),
     'simple_cnn': (simple_cnn.SimpleCNNModel, simple_cnn.DEFAULT_HPARAMS),
-    'max_pooling_cnn':
-        (max_pooling_cnn.MaxPoolingCNNModel, max_pooling_cnn.DEFAULT_HPARAMS),
+    'max_pooling_cnn': (
+        max_pooling_cnn.MaxPoolingCNNModel,
+        max_pooling_cnn.DEFAULT_HPARAMS,
+    ),
     'wide_resnet': (wide_resnet.WideResnetModel, wide_resnet.DEFAULT_HPARAMS),
     'resnet': (resnet.ResnetModel, resnet.DEFAULT_HPARAMS),
-    'adabelief_densenet': (adabelief_densenet.AdaBeliefDensenetModel,
-                           adabelief_densenet.DEFAULT_HPARAMS),
-    'adabelief_resnet': (adabelief_resnet.AdaBeliefResnetModel,
-                         adabelief_resnet.DEFAULT_HPARAMS),
-    'adabelief_vgg':
-        (adabelief_vgg.AdaBeliefVGGModel, adabelief_vgg.DEFAULT_HPARAMS),
+    'adabelief_densenet': (
+        adabelief_densenet.AdaBeliefDensenetModel,
+        adabelief_densenet.DEFAULT_HPARAMS,
+    ),
+    'adabelief_resnet': (
+        adabelief_resnet.AdaBeliefResnetModel,
+        adabelief_resnet.DEFAULT_HPARAMS,
+    ),
+    'adabelief_vgg': (
+        adabelief_vgg.AdaBeliefVGGModel,
+        adabelief_vgg.DEFAULT_HPARAMS,
+    ),
     'autoencoder': (autoencoder.AutoEncoderModel, autoencoder.DEFAULT_HPARAMS),
-    'convolutional_autoencoder':
-        (convolutional_autoencoder.ConvAutoEncoderModel,
-         convolutional_autoencoder.DEFAULT_HPARAMS),
-    'fake_resnet':
-        (mlperf_resnet.FakeModel, mlperf_resnet.FAKE_MODEL_DEFAULT_HPARAMS),
-    'mlperf_resnet':
-        (mlperf_resnet.ResnetModelMLPerf, mlperf_resnet.MLPERF_DEFAULT_HPARAMS),
-    'transformer':
-        (transformer_lm.TransformerLM1B, transformer_lm.DEFAULT_HPARAMS),
+    'convolutional_autoencoder': (
+        convolutional_autoencoder.ConvAutoEncoderModel,
+        convolutional_autoencoder.DEFAULT_HPARAMS,
+    ),
+    'fake_resnet': (
+        mlperf_resnet.FakeModel,
+        mlperf_resnet.FAKE_MODEL_DEFAULT_HPARAMS,
+    ),
+    'mlperf_resnet': (
+        mlperf_resnet.ResnetModelMLPerf,
+        mlperf_resnet.MLPERF_DEFAULT_HPARAMS,
+    ),
+    'transformer': (
+        transformer_lm.TransformerLM1B,
+        transformer_lm.DEFAULT_HPARAMS,
+    ),
     'transformer_stu': (
         transformer_stu_lm.TransformerLM1B,
         transformer_stu_lm.DEFAULT_HPARAMS,
@@ -78,33 +96,48 @@ _ALL_MODELS = {
         transformer_stu_tensordot_lm.DEFAULT_HPARAMS,
     ),
     'conformer': (conformer.ConformerModel, conformer.DEFAULT_HPARAMS),
-    'mlcommons_conformer': (conformer.MLCommonsConformerModel,
-                            conformer.MLCOMMONS_DEFAULT_HPARAMS),
-    'local_attention_transformer':
-        (local_attention_transformer.LocalAttentionTransformer,
-         local_attention_transformer.DEFAULT_HPARAMS),
+    'mlcommons_conformer': (
+        conformer.MLCommonsConformerModel,
+        conformer.MLCOMMONS_DEFAULT_HPARAMS,
+    ),
+    'local_attention_transformer': (
+        local_attention_transformer.LocalAttentionTransformer,
+        local_attention_transformer.DEFAULT_HPARAMS,
+    ),
     'deepspeech': (deepspeech.DeepSpeechModel, deepspeech.DEFAULT_HPARAMS),
-    'mlcommons_deepspeech': (deepspeech.MLCommonsDeepSpeechModel,
-                             deepspeech.MLCOMMONS_DEFAULT_HPARAMS),
+    'mlcommons_deepspeech': (
+        deepspeech.MLCommonsDeepSpeechModel,
+        deepspeech.MLCOMMONS_DEFAULT_HPARAMS,
+    ),
     'nqm': (nqm.NQM, nqm.DEFAULT_HPARAMS),
     'nanodo': (
         nanodo.NanodoModel,
         nanodo.DEFAULT_HPARAMS,
     ),
+    'mdlm_rope_nanodo': (
+        mdlm_rope_nanodo.MDLMModel,
+        mdlm_rope_nanodo.DEFAULT_HPARAMS,
+    ),
     'rope_nanodo': (
         rope_nanodo.RoPENanodoModel,
         rope_nanodo.DEFAULT_HPARAMS,
     ),
-    'xformer_translate': (xformer_translate.TransformerTranslate,
-                          xformer_translate.DEFAULT_HPARAMS),
-    'mlcommons_xformer_translate':
-        (xformer_translate.MLCommonsTransformerTranslate,
-         xformer_translate.MLCOMMONS_DEFAULT_HPARAMS),
-    'xformer_translate_mlc_variant':
-        (xformer_translate_mlc_variant.TransformerTranslate,
-         xformer_translate_mlc_variant.DEFAULT_HPARAMS),
-    'xformer_translate_binary': (xformer_translate_binary.TransformerTranslate,
-                                 xformer_translate_binary.DEFAULT_HPARAMS),
+    'xformer_translate': (
+        xformer_translate.TransformerTranslate,
+        xformer_translate.DEFAULT_HPARAMS,
+    ),
+    'mlcommons_xformer_translate': (
+        xformer_translate.MLCommonsTransformerTranslate,
+        xformer_translate.MLCOMMONS_DEFAULT_HPARAMS,
+    ),
+    'xformer_translate_mlc_variant': (
+        xformer_translate_mlc_variant.TransformerTranslate,
+        xformer_translate_mlc_variant.DEFAULT_HPARAMS,
+    ),
+    'xformer_translate_binary': (
+        xformer_translate_binary.TransformerTranslate,
+        xformer_translate_binary.DEFAULT_HPARAMS,
+    ),
     'gnn': (gnn.GNNModel, gnn.DEFAULT_HPARAMS),
     'dlrm': (dlrm.DLRMModel, dlrm.DEFAULT_HPARAMS),
     'dlrm_resnet': (dlrm.DLRMResNetModel, dlrm.DEFAULT_RESNET_HPARAMS),

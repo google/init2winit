@@ -76,6 +76,7 @@ def get_fineweb_edu_dataset(
     train_batch_size: int,
     valid_batch_size: int,
     shuffle_seed: int,
+    shift: bool = True,
 ) -> tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset]:
   """Returns wikitext-103 dataset.
 
@@ -84,6 +85,8 @@ def get_fineweb_edu_dataset(
     train_batch_size: Batch size for train iterations
     valid_batch_size: Batch size for validation iterations
     shuffle_seed: seed for shuffling dataset sequences
+    shift: If True (default), inputs = x[:-1], targets = x[1:] (AR mode). If
+      False, inputs = targets = x (MDLM mode).
 
   Returns:
     train_dataset, eval_train_dataset, valid_dataset, test_dataset
@@ -101,37 +104,47 @@ def get_fineweb_edu_dataset(
   val_tokens = val_dataset.flat_map(tf.data.Dataset.from_tensor_slices)
 
   # split into sequences
+  seq_batch_len = hps.sequence_length + 1 if shift else hps.sequence_length
+  eval_seq_batch_len = (
+      hps.eval_sequence_length + 1 if shift else hps.eval_sequence_length
+  )
   train_sequences_dataset = train_tokens.batch(
-      hps.sequence_length + 1, drop_remainder=True
+      seq_batch_len, drop_remainder=True
   )
   eval_train_sequences_dataset = train_tokens.batch(
-      hps.eval_sequence_length + 1, drop_remainder=True
+      eval_seq_batch_len, drop_remainder=True
   )
   val_sequences_dataset = val_tokens.batch(
-      hps.eval_sequence_length + 1, drop_remainder=True
+      eval_seq_batch_len, drop_remainder=True
   )
 
   # Split the sequences into inputs and targets.
+  if shift:
+    map_fn = lambda x: {
+        'inputs': x['input_ids'][: hps.sequence_length],
+        'targets': x['input_ids'][1:],
+    }
+    eval_map_fn = lambda x: {
+        'inputs': x['input_ids'][: hps.eval_sequence_length],
+        'targets': x['input_ids'][1:],
+    }
+  else:
+    map_fn = lambda x: {
+        'inputs': x['input_ids'][: hps.sequence_length],
+        'targets': x['input_ids'][: hps.sequence_length],
+    }
+    eval_map_fn = lambda x: {
+        'inputs': x['input_ids'][: hps.eval_sequence_length],
+        'targets': x['input_ids'][: hps.eval_sequence_length],
+    }
   train_sequences_dataset = train_sequences_dataset.map(
-      lambda x: {
-          'inputs': x['input_ids'][: hps.sequence_length],
-          'targets': x['input_ids'][1:],
-      },
-      num_parallel_calls=AUTOTUNE,
+      map_fn, num_parallel_calls=AUTOTUNE
   )
   eval_train_sequences_dataset = eval_train_sequences_dataset.map(
-      lambda x: {
-          'inputs': x['input_ids'][: hps.eval_sequence_length],
-          'targets': x['input_ids'][1:],
-      },
-      num_parallel_calls=AUTOTUNE,
+      eval_map_fn, num_parallel_calls=AUTOTUNE
   )
   val_sequences_dataset = val_sequences_dataset.map(
-      lambda x: {
-          'inputs': x['input_ids'][: hps.eval_sequence_length],
-          'targets': x['input_ids'][1:],
-      },
-      num_parallel_calls=AUTOTUNE,
+      eval_map_fn, num_parallel_calls=AUTOTUNE
   )
 
   # Shuffle the train sequences.
