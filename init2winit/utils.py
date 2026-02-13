@@ -225,7 +225,10 @@ class MetricLogger(object):
     self._orbax_checkpoint_manager = ocp.CheckpointManager(
         self._pytree_path,
         options=ocp.CheckpointManagerOptions(
-            max_to_keep=1, create=True, file_options=orbax_file_options
+            max_to_keep=1,
+            create=False,
+            save_root_metadata=False,
+            file_options=orbax_file_options,
         ),
     )
 
