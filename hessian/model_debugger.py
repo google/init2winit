@@ -288,6 +288,7 @@ class ModelDebugger:
                use_pmap=True,
                save_every=1,
                metrics_logger=None,
+               pytree_metrics_logger=None,
                skip_flags=None,
                skip_groups=None):
     """Used to inspect a models forward and backward pass.
@@ -305,6 +306,7 @@ class ModelDebugger:
         save_every == 0
       metrics_logger: utils.MetricsLogger object. If provided then all
         calculations will be saved to disk.
+      pytree_metrics_logger: utils.PytreeMetricLogger object.
       skip_flags: A list of strings of modules to selectively turn off when
         doing the skip analysis on the backward pass.
       skip_groups: A list of registered functions (defined in partition_tree.py)
@@ -317,6 +319,7 @@ class ModelDebugger:
                        ' path must be specified when building metrics_logger')
     self._save_every = save_every
     self._metrics_logger = metrics_logger
+    self._pytree_metrics_logger = pytree_metrics_logger
     self._use_pmap = use_pmap
     self.forward_pass = None
     self.grad_fn = None
@@ -340,8 +343,11 @@ class ModelDebugger:
     self._stored_metrics = {}
 
     # In the case of preemption we want to restore prior metrics.
-    if metrics_logger and metrics_logger.latest_pytree_checkpoint_step():
-      self._stored_metrics = metrics_logger.load_latest_pytree()
+    if (
+        pytree_metrics_logger
+        and pytree_metrics_logger.latest_pytree_checkpoint_step()
+    ):
+      self._stored_metrics = pytree_metrics_logger.load_latest_pytree()
 
   def _grab_statistics(self,
                        step,
@@ -375,9 +381,9 @@ class ModelDebugger:
     save_dict = self._stored_metrics.copy()
     if self._save_every:
       if step % self._save_every == 0:
-        self._metrics_logger.write_pytree(save_dict, step=step)
+        self._pytree_metrics_logger.write_pytree(save_dict, step=step)
     else:
-      self._metrics_logger.write_pytree(save_dict, step=step)
+      self._pytree_metrics_logger.write_pytree(save_dict, step=step)
 
   @property
   def stored_metrics(self):

@@ -17,7 +17,6 @@
 
 """
 
-import os
 import shutil
 import tempfile
 
@@ -83,24 +82,6 @@ class UtilsTest(parameterized.TestCase):
     """Test running failing fns in parallel, originally from mlbileschi."""
     with self.assertRaisesRegex(ValueError, 'I always fail.'):
       utils.run_in_parallel(_fn_that_always_fails, [dict(arg='hi')], 10)
-
-  def test_append_pytree(self):
-    """Test appending and loading pytrees."""
-    pytrees = [{'a': i} for i in range(10)]
-    pytree_path = os.path.join(self.test_dir, 'pytrees')
-    logger = utils.MetricLogger(pytree_path=pytree_path)
-
-    for i, pytree in enumerate(pytrees):
-      logger.append_pytree(pytree, step=i)
-
-    latest = logger.load_latest_pytree(
-        target=None,
-    )
-    saved_pytrees = latest if latest else []
-
-    self.assertEqual(
-        pytrees, [saved_pytrees[i] for i in range(len(saved_pytrees))]
-    )
 
   def test_array_append(self):
     """Test appending to an array."""

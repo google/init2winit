@@ -106,10 +106,8 @@ def timed(f):
 def set_up_loggers(train_dir, xm_work_unit=None):
   """Creates a logger for eval metrics as well as initialization metrics."""
   csv_path = os.path.join(train_dir, 'measurements.csv')
-  pytree_path = os.path.join(train_dir, 'ttl=180d', 'training_metrics')
   metrics_logger = MetricLogger(
       csv_path=csv_path,
-      pytree_path=pytree_path,
       xm_work_unit=xm_work_unit,
       events_dir=train_dir)
 
@@ -171,50 +169,18 @@ def add_log_file(logfile):
   absl_logger.addHandler(handler)
 
 
-# TODO(gdahl,gilmer): Use atomic writes to avoid file corruptions due to
-# preemptions.
-class MetricLogger(object):
-  """Used to log all measurements during training.
-
-  Note: Writes are not atomic, so files may become corrupted if preempted at
-  the wrong time.
+class PytreeMetricLogger(object):
+  """Used to log pytree metrics during training.
+  
+  This class is used to log pytree metrics during training. It is similar to
+  MetricLogger, but it is designed to log pytree metrics.
   """
 
-  def __init__(self,
-               csv_path='',
-               json_path='',
-               pytree_path='',
-               events_dir=None,
-               **logger_kwargs):
-    """Create a recorder for metrics, as CSV or JSON.
-
-
-    Args:
-      csv_path: A filepath to a CSV file to append to.
-      json_path: An optional filepath to a JSON file to append to.
-      pytree_path: Where to save trees of numeric arrays.
-      events_dir: Optional. If specified, save tfevents summaries to this
-        directory.
-      **logger_kwargs: Optional keyword arguments, whose only valid parameter
-        name is an optional XM WorkUnit used to also record metrics to XM as
-        MeasurementSeries.
-    """
-    self._measurements = {}
-    self._csv_path = csv_path
-    self._json_path = json_path
+  def __init__(
+      self,
+      pytree_path,
+  ):
     self._pytree_path = pytree_path
-    if logger_kwargs:
-      if len(logger_kwargs.keys()) > 1 or 'xm_work_unit' not in logger_kwargs:
-        raise ValueError(
-            'The only logger_kwarg that should be passed to MetricLogger is '
-            'xm_work_unit.')
-      self._xm_work_unit = logger_kwargs['xm_work_unit']
-    else:
-      self._xm_work_unit = None
-
-    self._tb_metric_writer = None
-    if events_dir:
-      self._tb_metric_writer = metric_writers.create_default_writer(events_dir)
 
     orbax_file_options = ocp.checkpoint_manager.FileOptions(
         path_permission_mode=0o775,
@@ -225,9 +191,30 @@ class MetricLogger(object):
     self._orbax_checkpoint_manager = ocp.CheckpointManager(
         self._pytree_path,
         options=ocp.CheckpointManagerOptions(
-            max_to_keep=1, create=True, file_options=orbax_file_options
+            file_options=orbax_file_options,
+            max_to_keep=1, create=True,
         ),
     )
+
+  def write_pytree(self, pytree, step=0):
+    """Record a serializable pytree to disk at the given step.
+
+    Args:
+      pytree: Any serializable pytree
+      step: Integer. The global step.
+    """
+    state = dict(pytree=pytree)
+    checkpoint.save_checkpoint(
+        step,
+        state=state,
+        orbax_checkpoint_manager=self._orbax_checkpoint_manager,
+    )
+
+  def wait_until_pytree_checkpoint_finished(self):
+    self._orbax_checkpoint_manager.wait_until_finished()
+
+  def latest_pytree_checkpoint_step(self):
+    return self._orbax_checkpoint_manager.latest_step()
 
   def load_latest_pytree(self, target=None):
     """Load pytree from checkpoint."""
@@ -242,6 +229,49 @@ class MetricLogger(object):
       return loaded_target['pytree']
     else:
       return target
+
+
+# TODO(gdahl,gilmer): Use atomic writes to avoid file corruptions due to
+# preemptions.
+class MetricLogger(object):
+  """Used to log all measurements during training.
+
+  Note: Writes are not atomic, so files may become corrupted if preempted at
+  the wrong time.
+  """
+
+  def __init__(self,
+               csv_path='',
+               json_path='',
+               events_dir=None,
+               **logger_kwargs):
+    """Create a recorder for metrics, as CSV or JSON.
+
+
+    Args:
+      csv_path: A filepath to a CSV file to append to.
+      json_path: An optional filepath to a JSON file to append to.
+      events_dir: Optional. If specified, save tfevents summaries to this
+        directory.
+      **logger_kwargs: Optional keyword arguments, whose only valid parameter
+        name is an optional XM WorkUnit used to also record metrics to XM as
+        MeasurementSeries.
+    """
+    self._measurements = {}
+    self._csv_path = csv_path
+    self._json_path = json_path
+    if logger_kwargs:
+      if len(logger_kwargs.keys()) > 1 or 'xm_work_unit' not in logger_kwargs:
+        raise ValueError(
+            'The only logger_kwarg that should be passed to MetricLogger is '
+            'xm_work_unit.')
+      self._xm_work_unit = logger_kwargs['xm_work_unit']
+    else:
+      self._xm_work_unit = None
+
+    self._tb_metric_writer = None
+    if events_dir:
+      self._tb_metric_writer = metric_writers.create_default_writer(events_dir)
 
   def append_scalar_metrics(self, metrics):
     """Record a dictionary of scalar metrics at a given step.
@@ -288,54 +318,6 @@ class MetricLogger(object):
       # This gives a 1-2% slowdown in steps_per_sec on cifar-10 with batch
       # size 512. We could only flush at the end of training to optimize this.
       self._tb_metric_writer.flush()
-
-  def write_pytree(self, pytree, step=0):
-    """Record a serializable pytree to disk at the given step.
-
-    Args:
-      pytree: Any serializable pytree
-      step: Integer. The global step.
-    """
-    state = dict(pytree=pytree)
-    checkpoint.save_checkpoint(
-        step,
-        state=state,
-        orbax_checkpoint_manager=self._orbax_checkpoint_manager,
-    )
-
-  def wait_until_pytree_checkpoint_finished(self):
-    self._orbax_checkpoint_manager.wait_until_finished()
-
-  def latest_pytree_checkpoint_step(self):
-    return self._orbax_checkpoint_manager.latest_step()
-
-  def append_pytree(self, pytree, step=0):
-    """Append and record a serializable pytree to disk.
-
-    The pytree will be saved to disk as a list of pytree objects. Everytime
-    this function is called, it will load the previous saved state, append the
-    next pytree to the list, then save the appended list.
-
-    Args:
-      pytree: Any serializable pytree.
-      step: Integer. The global step.
-    """
-    # Read the latest (and only) checkpoint if it exists, then append the new
-    # state to it before saving back to disk.
-    try:
-      old_state = self.load_latest_pytree(target=None)
-    except ValueError:
-      old_state = None
-    # Because we pass target=None, checkpointing will return the raw state
-    # dict, where 'pytree' is a dict with keys ['0', '1', ...] instead of a
-    # list.
-    if old_state:
-      state_list = [old_state[i] for i in range(len(old_state))]
-    else:
-      state_list = []
-    state_list.append(pytree)
-
-    self.write_pytree(state_list, step=step)
 
   def append_json_object(self, json_obj):
     """Append a json serializable object to the json file."""

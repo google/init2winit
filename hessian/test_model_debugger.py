@@ -286,8 +286,9 @@ class ModelDebuggerTest(absltest.TestCase):
 
     rep_variables = set_up_cnn()
     pytree_path = os.path.join(self.test_dir, 'metrics')
-    metrics_logger = utils.MetricLogger(
-        pytree_path=pytree_path, events_dir=self.test_dir)
+    pytree_metrics_logger = utils.PytreeMetricLogger(
+        pytree_path=pytree_path)
+    metrics_logger = utils.MetricLogger(self.test_dir)
 
     # Fake grad_fn for testing.
     def grad_fn(params, batch, rng):
@@ -295,7 +296,10 @@ class ModelDebuggerTest(absltest.TestCase):
       return rep_variables['params']
 
     debugger = model_debugger.ModelDebugger(
-        use_pmap=False, grad_fn=grad_fn, metrics_logger=metrics_logger)
+        use_pmap=False,
+        grad_fn=grad_fn,
+        metrics_logger=metrics_logger,
+        pytree_metrics_logger=pytree_metrics_logger)
 
     # eval twice to test the concat
     extra_metrics = {'train_loss': 1.0}
@@ -319,8 +323,8 @@ class ModelDebuggerTest(absltest.TestCase):
         'train_loss',
     ]
 
-    metrics_logger.wait_until_pytree_checkpoint_finished()
-    loaded_metrics = metrics_logger.load_latest_pytree(None)
+    pytree_metrics_logger.wait_until_pytree_checkpoint_finished()
+    loaded_metrics = pytree_metrics_logger.load_latest_pytree(None)
 
     self.assertEqual(set(expected_keys), set(metrics.keys()))
     expected_shape = ()
@@ -337,13 +341,15 @@ class ModelDebuggerTest(absltest.TestCase):
 
     # Test restore of prior metrics.
     new_debugger = model_debugger.ModelDebugger(
-        use_pmap=True, metrics_logger=metrics_logger)
+        use_pmap=True,
+        metrics_logger=metrics_logger,
+        pytree_metrics_logger=pytree_metrics_logger)
     _ = new_debugger.full_eval(
         30,
         params=rep_variables['params'],
         grad=rep_variables['params'],
         extra_scalar_metrics=extra_metrics2)
-    metrics_logger.wait_until_pytree_checkpoint_finished()
+    pytree_metrics_logger.wait_until_pytree_checkpoint_finished()
     self.assertEqual(
         new_debugger.stored_metrics['param_norms_sql2']['Conv_0']
         ['kernel'].shape, (3,))

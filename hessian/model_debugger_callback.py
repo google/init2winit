@@ -99,7 +99,7 @@ class ModelDebugCallback:
     self.dataset = dataset
     checkpoint_dir = os.path.join(train_dir, 'checkpoints')
     pytree_path = os.path.join(checkpoint_dir, 'debugger')
-    logger = utils.MetricLogger(pytree_path=pytree_path)
+    logger = utils.PytreeMetricLogger(pytree_path=pytree_path)
 
     get_act_stats_fn = model_debugger.create_forward_pass_stats_fn(
         model.apply_on_batch,
