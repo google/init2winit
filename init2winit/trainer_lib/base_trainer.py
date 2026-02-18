@@ -447,7 +447,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     if self._eval_use_ema:
       eval_params = self.training_algorithm.get_ema_eval_params(
-          self._optimizer_state
+          self._optimizer_state, self._params
       )
     else:
       eval_params = self._params

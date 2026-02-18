@@ -313,11 +313,12 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     return optax_optimizer_state
 
   # TODO(b/436634470): Consolidate this with the prepare_for_eval API
-  def get_ema_eval_params(self, optimizer_state):
+  def get_ema_eval_params(self, optimizer_state, params):
     """Extracts the exponential moving average (EMA) parameters from the optimizer state.
 
     Args:
       optimizer_state: The current state of the optimizer.
+      params: The current model parameters.
 
     Returns:
       The EMA parameters.
@@ -326,6 +327,7 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
       ValueError: If the EMA parameters cannot be extracted from the optimizer
         state.
     """
+    del params  # Unused
     if isinstance(optimizer_state, optax.InjectStatefulHyperparamsState):
       eval_params = optimizer_state.inner_state[0][0].ema
     elif isinstance(
