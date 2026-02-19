@@ -200,10 +200,18 @@ class BaseModel(object):
     # construction.
     # We initialize model params on host to avoid memory issues.
 
+    compile_init_on_cpu = hps.get('compile_init_on_cpu', False)
+    jit_kwargs = {}
+    if compile_init_on_cpu:
+      jit_kwargs['backend'] = 'cpu'
+    logging.info(
+        'Compiling model init on %s.',
+        'cpu' if compile_init_on_cpu else 'device',
+    )
     start_time = time.time()
     model_init_fn = jax.jit(
-        functools.partial(self.flax_module.init, train=False),
-        backend='cpu')
+        functools.partial(self.flax_module.init, train=False), **jit_kwargs
+    )
 
     init_dict = model_init_fn({'params': params_rng, 'dropout': dropout_rng},
                               *fake_input_batch)
