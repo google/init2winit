@@ -150,6 +150,8 @@ def build_hparams(model_name,
   if merged_dict.get('use_shallue_label_smoothing', False):
     num_classes = merged_dict['output_shape'][-1]
     merged_dict['label_smoothing'] *= num_classes / float(num_classes - 1)
+  if 'compile_init_on_cpu' not in merged_dict:
+    merged_dict['compile_init_on_cpu'] = False
 
   merged = config_dict.ConfigDict(merged_dict)
   merged.lock()
