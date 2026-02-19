@@ -130,6 +130,7 @@ def _run(
     external_checkpoint_path,
     training_algorithm_name,
     checkpoint_ttl,
+    compile_init_on_cpu,
 ):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
@@ -168,7 +169,13 @@ def _run(
   rng = jax.random.PRNGKey(rng_seed)
 
   # Build the loss_fn, metrics_bundle, and flax_module.
-  model = model_cls(merged_hps, dataset_meta_data, loss_name, metrics_name)
+  model = model_cls(
+      merged_hps,
+      dataset_meta_data,
+      loss_name,
+      metrics_name,
+      compile_init_on_cpu=compile_init_on_cpu,
+  )
   trial_dir = os.path.join(experiment_dir, str(worker_id))
   meta_data_path = os.path.join(trial_dir, 'meta_data.json')
   meta_data = {'worker_id': worker_id, 'status': 'incomplete'}
@@ -307,6 +314,7 @@ def main(unused_argv):
         external_checkpoint_path=config.external_checkpoint_path,
         training_algorithm_name=config.training_algorithm,
         checkpoint_ttl=config.ttl,
+        compile_init_on_cpu=config.compile_init_on_cpu,
     )
 
 

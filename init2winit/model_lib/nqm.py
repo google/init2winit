@@ -177,15 +177,21 @@ class NQM(base_model.BaseModel):
   generates isotropic Gaussian noise.
   """
 
-  def __init__(self, hps, dataset_meta_data, loss_name, metrics_name):
+  def __init__(
+      self,
+      hps,
+      dataset_meta_data,
+      loss_name,
+      metrics_name,
+      compile_init_on_cpu=False,
+  ):
     del loss_name
-
     # This is ignored, but is needed to satisfy the initializer API.
     self.loss_fn = None
     self.metrics_name = metrics_name
-
     self.hps = hps
     self.dataset_meta_data = dataset_meta_data
+    self._compile_init_on_cpu = compile_init_on_cpu
     self.flax_module = self.build_flax_module()
 
   def evaluate_batch(self, params, batch_stats, batch):

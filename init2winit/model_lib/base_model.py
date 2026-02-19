@@ -142,13 +142,21 @@ class BaseModel(object):
   https://flax.readthedocs.io/en/latest/flax.linen.html#flax.linen.Module.apply.
   """
 
-  def __init__(self, hps, dataset_meta_data, loss_name, metrics_name):
+  def __init__(
+      self,
+      hps,
+      dataset_meta_data,
+      loss_name,
+      metrics_name,
+      compile_init_on_cpu=False,
+  ):
     self.hps = hps
     self.dataset_meta_data = dataset_meta_data
     self._loss_name = loss_name
     self.loss_fn = losses.get_loss_fn(loss_name, hps)
     self.output_activation_fn = losses.get_output_activation_fn(loss_name)
     self.metrics_bundle = metrics.get_metrics(metrics_name, hps)
+    self._compile_init_on_cpu = compile_init_on_cpu
     self.flax_module = self.build_flax_module()
 
   def initialize(self, initializer, hps, rng, metrics_logger):
@@ -200,10 +208,17 @@ class BaseModel(object):
     # construction.
     # We initialize model params on host to avoid memory issues.
 
+    jit_kwargs = {}
+    if self._compile_init_on_cpu:
+      jit_kwargs['backend'] = 'cpu'
+    logging.info(
+        'Compiling model init on %s.',
+        'cpu' if self._compile_init_on_cpu else 'device',
+    )
     start_time = time.time()
     model_init_fn = jax.jit(
-        functools.partial(self.flax_module.init, train=False),
-        backend='cpu')
+        functools.partial(self.flax_module.init, train=False), **jit_kwargs
+    )
 
     init_dict = model_init_fn({'params': params_rng, 'dropout': dropout_rng},
                               *fake_input_batch)

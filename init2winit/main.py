@@ -153,6 +153,11 @@ flags.DEFINE_string(
     'optax_training_algorithm',
     'Name of the training algorithm to use.',
 )
+flags.DEFINE_boolean(
+    'compile_init_on_cpu',
+    False,
+    'Whether or not to compile the init function on CPU or on device.',
+)
 
 FLAGS = flags.FLAGS
 
@@ -208,6 +213,7 @@ def _run(
     callback_configs,
     external_checkpoint_path,
     training_algorithm_name,
+    compile_init_on_cpu,
 ):
   """Function that runs a Jax experiment. See flag definitions for args."""
   model_cls = models.get_model(model_name)
@@ -246,7 +252,13 @@ def _run(
   rng = jax.random.PRNGKey(rng_seed)
 
   # Build the loss_fn, metrics_bundle, and flax_module.
-  model = model_cls(merged_hps, dataset_meta_data, loss_name, metrics_name)
+  model = model_cls(
+      merged_hps,
+      dataset_meta_data,
+      loss_name,
+      metrics_name,
+      compile_init_on_cpu=compile_init_on_cpu,
+  )
   trial_dir = os.path.join(experiment_dir, str(worker_id))
   meta_data_path = os.path.join(trial_dir, 'meta_data.json')
   meta_data = {'worker_id': worker_id, 'status': 'incomplete'}
@@ -373,6 +385,7 @@ def main(unused_argv):
         callback_configs=callback_configs,
         external_checkpoint_path=FLAGS.external_checkpoint_path,
         training_algorithm_name=FLAGS.training_algorithm,
+        compile_init_on_cpu=FLAGS.compile_init_on_cpu,
     )
 
 
