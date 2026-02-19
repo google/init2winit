@@ -167,15 +167,41 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         weight_decay=weight_decay,
     )
   elif hps.optimizer == 'muon':
-    opt_init, opt_update = utils.static_inject_hyperparams(muon.scale_by_muon)(
-        learning_rate=0.0,  # Manually injected on each train step.
-        weight_decay=hps.opt_hparams.get('weight_decay', 0.01),
-        beta=hps.opt_hparams.get('beta', 0.95),
-        nesterov=hps.opt_hparams.get('nesterov', True),
-        ns_coeffs=hps.opt_hparams.get('ns_coeffs', (3.4445, -4.7750, 2.0315)),
-        ns_steps=hps.opt_hparams.get('ns_steps', 5),
-        eps=hps.opt_hparams.get('eps', 1e-7),
-        bias_correction=hps.opt_hparams.get('bias_correction', False),
+    muon_hparams = hps.opt_hparams.get('muon_hparams', {})
+    pair_optimizer = hps.opt_hparams.get('pair_optimizer', 'rmsprop')
+    pair_hparams = hps.opt_hparams.get('pair_hparams', {})
+
+    pair_hps = copy.deepcopy(hps)
+    pair_hps.optimizer = pair_optimizer
+    pair_hps.opt_hparams = pair_hparams
+    pair_hps.l2_decay_factor = None
+    pair_tx = optax.GradientTransformation(*get_optimizer(pair_hps))
+
+    muon_mask = hps.opt_hparams.get('muon_mask', None)
+    if muon_mask is None:
+      muon_mask = lambda p: jax.tree_util.tree_map_with_path(
+          lambda path, x: 'muon'
+          if (x.ndim >= 2 and 'embed' not in jax.tree_util.keystr(path).lower())
+          else 'pair',
+          p,
+      )
+
+    def _muon_with_pair(learning_rate=0.0):
+      _muon_hparams = dict(**muon_hparams)
+      learning_rate_multiplier = _muon_hparams.pop('lr_multiplier', 1.0)
+      _muon_opt = optax.chain(
+          muon.scale_by_muon(learning_rate, **_muon_hparams),
+          optax.scale_by_learning_rate(
+              learning_rate_multiplier, flip_sign=False
+          ),
+      )
+      return optax.partition(
+          transforms={'muon': _muon_opt, 'pair': pair_tx},
+          param_labels=muon_mask,
+      )
+
+    opt_init, opt_update = utils.static_inject_hyperparams(_muon_with_pair)(
+        learning_rate=0.0,
     )
   elif hps.optimizer == 'diag_bubbles':
     opt_init, opt_update = utils.static_inject_hyperparams(
