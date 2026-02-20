@@ -43,8 +43,17 @@ def log_message(msg, pool=None, work_unit=None):
   logging.info('%s', msg)
 
 
-def log_eta(pool, work_unit, global_step, steps_per_sec_no_eval,
-            num_train_steps, start_time, eval_frequency, eval_steps, eval_time):
+def log_eta(
+    pool,
+    work_unit,
+    global_step,
+    steps_per_sec_no_eval,
+    num_train_steps,
+    start_time,
+    eval_frequency,
+    eval_steps,
+    eval_time,
+):
   """Construct and ETA / total time entry."""
   msg = f'Steps: {global_step} / {num_train_steps} '
   msg += f'[{global_step / num_train_steps:.1%}] '
@@ -67,17 +76,22 @@ def log_eta(pool, work_unit, global_step, steps_per_sec_no_eval,
 
 
 def log_epoch_report(report, metrics_logger):
-  logging.info('Step %d, steps/second: %f, report: %r', report['global_step'],
-               report['steps_per_sec_no_eval'], report)
+  logging.info(
+      'Step %d, steps/second: %f, report: %r',
+      report['global_step'],
+      report['steps_per_sec_no_eval'],
+      report,
+  )
   if metrics_logger:
     metrics_logger.append_scalar_metrics(report)
-  logging.info('Finished (estimated) epoch %d. Saving checkpoint.',
-               report['epoch'])
+  logging.info(
+      'Finished (estimated) epoch %d. Saving checkpoint.', report['epoch']
+  )
 
 
 def should_eval(global_step, eval_frequency, eval_steps):
   on_step = eval_steps and global_step in eval_steps
-  on_freq = (global_step % eval_frequency == 0)
+  on_freq = global_step % eval_frequency == 0
 
   return on_step or on_freq
 
@@ -95,10 +109,12 @@ def check_for_early_stopping(
       raise ValueError(
           'Provided early_stopping_target_name '
           f'{early_stopping_target_name} not in the computed metrics: '
-          f'{eval_report.keys()}.')
+          f'{eval_report.keys()}.'
+      )
     if early_stopping_mode is None:
       raise ValueError(
-          'Need to provide a early_stopping_mode if using early stopping.')
+          'Need to provide a early_stopping_mode if using early stopping.'
+      )
     # Note that because eval metrics are synced across hosts, this should
     # stop training on every host at the same step.
     if eval_report['global_step'] < early_stopping_min_steps:
@@ -196,7 +212,7 @@ def evaluate(
 def _merge_and_apply_prefix(d1, d2, prefix):
   d1 = d1.copy()
   for key in d2:
-    d1[prefix+key] = d2[key]
+    d1[prefix + key] = d2[key]
   return d1
 
 
