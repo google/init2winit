@@ -16,7 +16,12 @@
 """Common code used by different models."""
 
 import collections
+import queue
+import resource
+import threading
+from typing import Iterator
 
+from absl import logging
 import flax.linen as nn
 import jax
 from jax.nn import one_hot
@@ -31,6 +36,97 @@ Dataset = collections.namedtuple('Dataset', [
     'valid_epoch',
     'test_epoch',
 ])
+
+
+def log_rss(msg: str):
+  """Logs the current memory usage and prints the given message."""
+  rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+  logging.info('%s — RSS: %.1f MB', msg, rss_mb)
+
+
+def prefetch_iterator(source_iter: Iterator[jax.typing.ArrayLike],
+                      num_prefetch: int) -> Iterator[jax.typing.ArrayLike]:
+  """Wraps the given iterator with prefetching.
+
+  Args:
+    source_iter: The iterator to wrap.
+    num_prefetch: The number of items to prefetch.
+
+  Yields:
+    Prefetched items from `source_iter`.
+  """
+  buf = queue.Queue(maxsize=num_prefetch)
+  sentinel = object()  # Used to signal end of iterator
+
+  def producer():
+    try:
+      for item in source_iter:
+        buf.put(item)
+    except Exception as e:  # pylint: disable=broad-except
+      buf.put(e)
+    buf.put(sentinel)
+
+  t = threading.Thread(target=producer, daemon=True)
+  t.start()
+
+  while True:
+    item = buf.get()
+    if item is sentinel:
+      return
+    if isinstance(item, Exception):
+      raise item
+    yield item
+
+
+class CachedEvalIterator:
+  """Lazily caches eval batches, which are typically small enough to fit into host memory."""
+
+  def __init__(self, iterator_factory, split_name='eval'):
+    self._factory = iterator_factory
+    self._split_name = split_name
+    self._cache = []
+    self._iterator = None
+    self._fully_cached = False
+
+  def __call__(self, num_batches=None):
+    yielded = 0
+
+    limit = (
+        len(self._cache)
+        if num_batches is None
+        else min(len(self._cache), num_batches)
+    )
+    for i in range(limit):
+      yield self._cache[i]
+      yielded += 1
+
+    if num_batches is not None and yielded >= num_batches:
+      return
+
+    if self._fully_cached:
+      return
+
+    if self._iterator is None:
+      logging.info('Building %s cache lazily...', self._split_name)
+      self._iterator = iter(self._factory(None))
+
+    for batch in self._iterator:
+      self._cache.append(batch)
+      yield batch
+      yielded += 1
+      if num_batches is not None and yielded >= num_batches:
+        return
+
+    self._fully_cached = True
+    self._factory = None
+    self._iterator = None
+    rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    logging.info(
+        '%s cache complete: %d batches — RSS: %.1f MB',
+        self._split_name,
+        len(self._cache),
+        rss_mb,
+    )
 
 
 def iterator_as_numpy(iterator):
