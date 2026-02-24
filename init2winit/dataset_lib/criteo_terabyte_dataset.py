@@ -142,9 +142,9 @@ def criteo_tsv_reader(
     ds = ds.repeat()
   ds = ds.interleave(
       tf.data.TextLineDataset,
-      cycle_length=128,
+      cycle_length=64,
       block_length=batch_size // 8,
-      num_parallel_calls=128,
+      num_parallel_calls=64,
       deterministic=False)
   if is_training:
     ds = ds.shuffle(buffer_size=524_288 * 100, seed=data_shuffle_seed)
