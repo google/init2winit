@@ -1046,14 +1046,6 @@ class Transformer(nn.Module):
 class TransformerTranslate(base_model.BaseModel):
   """Transformer Model for machine translation."""
 
-  # pylint: disable=useless-super-delegation
-  def __init__(self, hps, dataset_meta_data, loss_name, metrics_name):
-    super().__init__(hps, dataset_meta_data, loss_name, metrics_name)
-    # TODO(ankugarg): Initialize cache for fast auto-regressive decoding here.
-    # Also, initilaize tokenizer here to de-tokenize predicted logits
-    # from beach search to target language sequence.
-  # pylint: disable=useless-super-delegation
-
   def evaluate_batch(self, params, batch_stats, batch):
     """Evaluates cross_entopy on the given batch."""
 
