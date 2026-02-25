@@ -16,7 +16,13 @@
 """Common code used by different models."""
 
 import collections
+import itertools
+import queue
+import resource
+import threading
+from typing import Any, Iterator
 
+from absl import logging
 import flax.linen as nn
 import jax
 from jax.nn import one_hot
@@ -31,6 +37,83 @@ Dataset = collections.namedtuple('Dataset', [
     'valid_epoch',
     'test_epoch',
 ])
+
+
+def log_rss(msg: str):
+  """Logs the current memory usage and prints the given message."""
+  rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+  logging.info('%s — RSS: %.1f MB', msg, rss_mb)
+
+
+def prefetch_iterator(source_iter: Iterator[jax.typing.ArrayLike],
+                      num_prefetch: int) -> Iterator[jax.typing.ArrayLike]:
+  """Wraps the given iterator with prefetching.
+
+  Args:
+    source_iter: The iterator to wrap.
+    num_prefetch: The number of items to prefetch.
+
+  Yields:
+    Prefetched items from `source_iter`.
+  """
+  if num_prefetch < 0:
+    raise ValueError(f'num_prefetch must be non-negative, got {num_prefetch}')
+  elif num_prefetch == 0:
+    yield from source_iter
+    return
+
+  buf = queue.Queue(maxsize=num_prefetch)
+  sentinel = object()  # Used to signal end of iterator
+
+  def producer():
+    for item in source_iter:
+      buf.put(item)
+    buf.put(sentinel)
+
+  t = threading.Thread(target=producer, daemon=True)
+  t.start()
+
+  while True:
+    item = buf.get()
+    if item is sentinel:
+      return
+    yield item
+
+
+def _history_keeping_iterator(iterable, history, num_items=None):
+  for val in itertools.islice(iterable, num_items):
+    history.append(val)
+    yield val
+
+
+class CachedIteratorFactory:
+  """A callable that caches batches from an iterator factory.
+
+  On each call, yields up to `num_batches` items — first from the cache,
+  then by continuing to iterate the underlying source (caching as it goes).
+  Once the source is fully exhausted, the source iterator is freed.
+  """
+
+  def __init__(self, source: Iterator[Any], split_name: str = 'eval'):
+    self._split_name = split_name
+    self._source = iter(source)
+    self.cache = []
+
+  def __call__(self, num_batches: int | None = None) -> Iterator[Any]:
+    yield from self.cache[:num_batches]
+
+    # If we have exhausted the source or cached enough batches, we're done.
+    if self._source is None or (
+        num_batches is not None and num_batches <= len(self.cache)
+    ):
+      return
+
+    remaining = None if num_batches is None else num_batches - len(self.cache)
+    before = len(self.cache)
+    yield from _history_keeping_iterator(self._source, self.cache, remaining)
+    if remaining is None or len(self.cache) - before < remaining:
+      self._source = None
+    log_rss(f'{self._split_name} cache {len(self.cache)} batches')
 
 
 def iterator_as_numpy(iterator):

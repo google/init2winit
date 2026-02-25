@@ -37,14 +37,16 @@ import tensorflow_datasets as tfds
 
 # Change to the path to raw dataset files.
 RAW_CRITEO1TB_FILE_PATH = ''
-CRITEO1TB_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    input_shape=(13 + 26,),
-    train_size=4_195_197_692,
-    # We assume the tie breaking example went to the validation set, because
-    # the test set in the mlperf version has 89_137_318 examples.
-    valid_size=89_137_319,
-    test_size=89_137_318,
-))
+CRITEO1TB_DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        input_shape=(13 + 26,),
+        train_size=4_195_197_692,
+        # We assume the tie breaking example went to the validation set, because
+        # the test set in the mlperf version has 89_137_318 examples.
+        valid_size=89_137_319,
+        test_size=89_137_318,
+    )
+)
 CRITEO1TB_METADATA = {
     'apply_one_hot_in_loss': True,
 }
@@ -155,17 +157,26 @@ def criteo_tsv_reader(
   return ds
 
 
-def _convert_to_numpy_iterator_fn(
-    num_batches, per_host_eval_batch_size, tf_dataset, split_size):
-  """Make eval iterator. This function is called at the start of each eval."""
-  # Some hosts could see different numbers of examples, which in some cases
-  # could lead to some hosts not having enough examples to make the same number
-  # of batches. This makes pmap hang because it is waiting for a batch that will
-  # never come from the host with less data.
-  #
-  # We assume that all files have the same number of examples in them, and while
-  # this may not always be true, it dramatically simplifies/speeds up the logic
-  # because the alternative is to run the same iterator (without data file
+def _eval_numpy_iterator(
+    num_batches, per_host_eval_batch_size, tf_dataset, split_size
+):
+  """Yields padded numpy batches from a tf.data eval split.
+
+  Caps the number of batches to the split size divided across hosts. If the
+  source runs out before `num_batches`, yields zero-filled batches so every
+  host sees the same count.
+  
+  Args:
+    num_batches (int): number of batches to process.
+    per_host_eval_batch_size (int): batch size per host.
+    tf_dataset (tfds.Dataset): source tensorflow dataset.
+    split_size (int): total number of examples in the eval split.
+    
+  Yields:
+    Padded numpy batches.
+  """
+  # We assume all files have the same number of examples. This simplifies the
+  # logic because the alternative is to run the same iterator (without data file
   # sharding) on each host, skipping (num_hosts - 1) / num_hosts batches.
   #
   # Any final partial batches are padded to be the full batch size, so we can
@@ -218,6 +229,8 @@ def get_criteo1tb(shuffle_rng,
   num_batches_to_prefetch = (hps.num_tf_data_prefetches
                              if hps.num_tf_data_prefetches > 0 else tf.data.AUTOTUNE)
 
+  num_device_prefetches = hps.get('num_device_prefetches', 0)
+
   train_dataset = criteo_tsv_reader(
       split='train',
       shuffle_rng=shuffle_rng,
@@ -225,7 +238,16 @@ def get_criteo1tb(shuffle_rng,
       num_dense_features=hps.num_dense_features,
       batch_size=per_host_batch_size,
       num_batches_to_prefetch=num_batches_to_prefetch)
-  train_iterator_fn = lambda: tfds.as_numpy(train_dataset)
+  data_utils.log_rss('train dataset created')
+  if num_device_prefetches > 0:
+    train_iterator_fn = lambda: data_utils.prefetch_iterator(
+        tfds.as_numpy(train_dataset), num_device_prefetches
+    )
+    data_utils.log_rss(
+        f'using prefetching with {num_device_prefetches} in the train dataset'
+    )
+  else:
+    train_iterator_fn = lambda: tfds.as_numpy(train_dataset)
   eval_train_dataset = criteo_tsv_reader(
       split='eval_train',
       shuffle_rng=None,
@@ -234,10 +256,12 @@ def get_criteo1tb(shuffle_rng,
       batch_size=per_host_eval_batch_size,
       num_batches_to_prefetch=num_batches_to_prefetch)
   eval_train_iterator_fn = functools.partial(
-      _convert_to_numpy_iterator_fn,
+      _eval_numpy_iterator,
       per_host_eval_batch_size=per_host_eval_batch_size,
       tf_dataset=eval_train_dataset,
-      split_size=hps.train_size)
+      split_size=hps.train_size,
+  )
+  data_utils.log_rss('eval_train dataset created')
   validation_dataset = criteo_tsv_reader(
       split='validation',
       shuffle_rng=None,
@@ -246,10 +270,12 @@ def get_criteo1tb(shuffle_rng,
       batch_size=per_host_eval_batch_size,
       num_batches_to_prefetch=num_batches_to_prefetch)
   validation_iterator_fn = functools.partial(
-      _convert_to_numpy_iterator_fn,
+      _eval_numpy_iterator,
       per_host_eval_batch_size=per_host_eval_batch_size,
       tf_dataset=validation_dataset,
-      split_size=hps.valid_size)
+      split_size=hps.valid_size,
+  )
+  data_utils.log_rss('validation dataset created')
   test_dataset = criteo_tsv_reader(
       split='test',
       shuffle_rng=None,
@@ -258,10 +284,24 @@ def get_criteo1tb(shuffle_rng,
       batch_size=per_host_eval_batch_size,
       num_batches_to_prefetch=num_batches_to_prefetch)
   test_iterator_fn = functools.partial(
-      _convert_to_numpy_iterator_fn,
+      _eval_numpy_iterator,
       per_host_eval_batch_size=per_host_eval_batch_size,
       tf_dataset=test_dataset,
-      split_size=hps.test_size)
+      split_size=hps.test_size,
+  )
+  data_utils.log_rss('test dataset created')
+
+  # Cache all the eval_train/validation/test iterators to avoid re-processing the same data files.
+  eval_train_iterator_fn = data_utils.CachedIteratorFactory(
+      eval_train_iterator_fn(None), 'eval_train'
+  )
+  validation_iterator_fn = data_utils.CachedIteratorFactory(
+      validation_iterator_fn(None), 'validation'
+  )
+  test_iterator_fn = data_utils.CachedIteratorFactory(
+      test_iterator_fn(None), 'test'
+  )
+
   return data_utils.Dataset(
       train_iterator_fn,
       eval_train_iterator_fn,

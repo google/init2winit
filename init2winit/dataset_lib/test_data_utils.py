@@ -36,6 +36,32 @@ input_shapes = [
 test_parameters = zip(test_names, image_formats, batch_axes, input_shapes)
 
 
+class PrefetchIteratorTest(absltest.TestCase):
+  """Unit tests for data_utils.prefetch_iterator."""
+
+  def test_output_matches_original(self):
+    """Test that the output matches the original iterator."""
+    sizes = [0, 1, 20]
+    for size in sizes:
+      data = list(range(size))
+      result = list(data_utils.prefetch_iterator(iter(data), num_prefetch=4))
+      self.assertEqual(result, data)
+
+  def test_various_buffer_sizes(self):
+    """Test that the output matches the original iterator for various buffer sizes."""
+    data = list(range(10))
+    for buf_size in [1, 2, 5, 10, 20]:
+      result = list(data_utils.prefetch_iterator(iter(data), buf_size))
+      self.assertEqual(result, data, f'Failed with buffer_size={buf_size}')
+
+  def test_numpy_arrays(self):
+    """Test that the output matches the original iterator for numpy arrays."""
+    arrays = [np.arange(i, i + 3) for i in range(5)]
+    result = list(data_utils.prefetch_iterator(iter(arrays), num_prefetch=2))
+    for expected, actual in zip(arrays, result):
+      np.testing.assert_array_equal(actual, expected)
+
+
 class DataUtilsTest(parameterized.TestCase):
   """Unit tests for datasets.py."""
 
@@ -79,6 +105,50 @@ class DataUtilsTest(parameterized.TestCase):
     expected_weights_array[:, target_len_true:] = 0
     self.assertTrue(
         np.array_equal(padded_batch['weights'], expected_weights_array))
+
+
+class CachedIteratorFactoryTest(absltest.TestCase):
+  """Tests that CachedIteratorFactory caches correctly and frees memory."""
+
+  def _make_cached_iter_factory(self, data):
+    """Helper function to create a CachedIteratorFactory."""
+    return data_utils.CachedIteratorFactory(iter(data), split_name='test')
+
+  def test_progressive_caching(self):
+    """Test that the factory correctly caches progressively."""
+    data = list(range(20))
+    cached_iter_factory = self._make_cached_iter_factory(data)
+    self.assertEqual(list(cached_iter_factory(num_batches=5)), [0, 1, 2, 3, 4])
+    self.assertEqual(list(cached_iter_factory(num_batches=10)), list(range(10)))
+    self.assertEqual(list(cached_iter_factory(num_batches=3)), [0, 1, 2])
+
+  def test_varying_num_batches(self):
+    """Test varying num_batches with a 10-element source."""
+    data = list(range(10))
+    cached_iter_factory = self._make_cached_iter_factory(data)
+    self.assertEqual(list(cached_iter_factory(num_batches=5)), list(range(5)))
+    self.assertLen(cached_iter_factory.cache, 5)
+    self.assertEqual(list(cached_iter_factory(num_batches=10)), list(range(10)))
+    self.assertLen(cached_iter_factory.cache, 10)
+    # If we request more batches than available, we get all that is available.
+    self.assertEqual(list(cached_iter_factory(num_batches=12)), list(range(10)))
+
+  def test_full_iteration(self):
+    """Test that the factory correctly caches the full dataset."""
+    data = list(range(10))
+    cached_iter_factory = self._make_cached_iter_factory(data)
+    first = list(cached_iter_factory(num_batches=None))
+    self.assertEqual(first, data)
+    second = list(cached_iter_factory(num_batches=None))
+    self.assertEqual(second, data)
+
+  def test_source_freed_after_exhaustion(self):
+    """Test that the source iterator is freed after exhaustion."""
+    data = list(range(5))
+    cached_iter_factory = self._make_cached_iter_factory(data)
+    self.assertIsNotNone(cached_iter_factory._source)  # pylint: disable=protected-access
+    list(cached_iter_factory(num_batches=None))
+    self.assertIsNone(cached_iter_factory._source)  # pylint: disable=protected-access
 
 
 if __name__ == '__main__':
