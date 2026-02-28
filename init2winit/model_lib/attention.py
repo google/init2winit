@@ -50,37 +50,40 @@ def tag_attention_probs(softmax_probs):
   this_module.sow('attn_prob9999', 'attn_prob9999', num_bad)
 
 
-def dot_product_attention_weights(query: Array,
-                                  key: Array,
-                                  bias: Optional[Array] = None,
-                                  mask: Optional[Array] = None,
-                                  broadcast_dropout: bool = True,
-                                  dropout_rng: Optional[PRNGKey] = None,
-                                  dropout_rate: float = 0.,
-                                  deterministic: bool = False,
-                                  dtype: Optional[Dtype] = None,
-                                  precision: PrecisionLike = None,
-                                  attn_temp: float = 1.0):
+def _dot_product_attention(
+    query: Array,
+    key: Array,
+    value: Array,
+    bias: Optional[Array] = None,
+    mask: Optional[Array] = None,
+    broadcast_dropout: bool = True,
+    dropout_rng: Optional[PRNGKey] = None,
+    dropout_rate: float = 0.0,
+    deterministic: bool = False,
+    dtype: Optional[Dtype] = None,
+    precision: PrecisionLike = None,
+    attn_temp: float = 1.0,
+):
   """Computes dot-product attention weights given query and key.
 
-  Used by :func:`dot_product_attention`, which is what you'll most likely use.
-  But if you want access to the attention weights for introspection, then
-  you can directly call this function and call einsum yourself.
+  Computes the dot product attention weights given query and key. This function
+  is not very efficient as it computes the attention weights explicitly, but is
+  useful for e.g. applying dropout on the attention weights.
 
   Args:
-    query: queries for calculating attention with shape of
-      `[batch..., q_length, num_heads, qk_depth_per_head]`.
-    key: keys for calculating attention with shape of
-      `[batch..., kv_length, num_heads, qk_depth_per_head]`.
+    query: queries for calculating attention with shape of `[batch..., q_length,
+      num_heads, qk_depth_per_head]`.
+    key: keys for calculating attention with shape of `[batch..., kv_length,
+      num_heads, qk_depth_per_head]`.
+    value: values to be used in attention with shape of `[batch..., kv_length,
+      num_heads, v_depth_per_head]`.
     bias: bias for the attention weights. This should be broadcastable to the
-      shape `[batch..., num_heads, q_length, kv_length]`.
-      This can be used for incorporating causal masks, padding masks,
-      proximity bias, etc.
+      shape `[batch..., num_heads, q_length, kv_length]`. This can be used for
+      incorporating causal masks, padding masks, proximity bias, etc.
     mask: mask for the attention weights. This should be broadcastable to the
-      shape `[batch..., num_heads, q_length, kv_length]`.
-      This can be used for incorporating causal masks.
-      Attention weights are masked out if their corresponding mask value
-      is `False`.
+      shape `[batch..., num_heads, q_length, kv_length]`. This can be used for
+      incorporating causal masks. Attention weights are masked out if their
+      corresponding mask value is `False`.
     broadcast_dropout: bool: use a broadcasted dropout along batch dims.
     dropout_rng: JAX PRNGKey: to be used for dropout
     dropout_rate: dropout rate
@@ -88,12 +91,13 @@ def dot_product_attention_weights(query: Array,
     dtype: the dtype of the computation (default: infer from inputs and params)
     precision: numerical precision of the computation see `jax.lax.Precision`
       for details.
-    attn_temp: Attention logits will be normalized by C / sqrt{d} where C is
-      the attn_temp.
+    attn_temp: Attention logits will be normalized by C / sqrt{d} where C is the
+      attn_temp.
 
   Returns:
     Output of shape `[batch..., num_heads, q_length, kv_length]`.
   """
+
   query, key = promote_dtype(query, key, dtype=dtype)
   dtype = query.dtype
 
@@ -138,7 +142,9 @@ def dot_product_attention_weights(query: Array,
                   jnp.asarray(keep_prob, dtype=dtype))
     attn_weights = attn_weights * multiplier
 
-  return attn_weights
+  # return weighted sum over values for each query position
+  return jnp.einsum('...hqk,...khd->...qhd', attn_weights, value,
+                    precision=precision)
 
 
 def dot_product_attention(query: Array,
@@ -190,23 +196,32 @@ def dot_product_attention(query: Array,
   Returns:
     Output of shape `[batch..., q_length, num_heads, v_depth_per_head]`.
   """
-  query, key, value = promote_dtype(query, key, value, dtype=dtype)
-  dtype = query.dtype
-  assert key.ndim == query.ndim == value.ndim, 'q, k, v must have same rank.'
-  assert query.shape[:-3] == key.shape[:-3] == value.shape[:-3], (
-      'q, k, v batch dims must match.')
-  assert query.shape[-2] == key.shape[-2] == value.shape[-2], (
-      'q, k, v num_heads must match.')
-  assert key.shape[-3] == value.shape[-3], 'k, v lengths must match.'
-
-  # compute attention weights
-  attn_weights = dot_product_attention_weights(
-      query, key, bias, mask, broadcast_dropout, dropout_rng, dropout_rate,
-      deterministic, dtype, precision, attn_temp)
-
-  # return weighted sum over values for each query position
-  return jnp.einsum('...hqk,...khd->...qhd', attn_weights, value,
-                    precision=precision)
+  if not deterministic and dropout_rate > 0.0:
+    return _dot_product_attention(
+        query=query,
+        key=key,
+        value=value,
+        bias=bias,
+        mask=mask,
+        broadcast_dropout=broadcast_dropout,
+        dropout_rng=dropout_rng,
+        dropout_rate=dropout_rate,
+        deterministic=deterministic,
+        dtype=dtype,
+        precision=precision,
+        attn_temp=attn_temp,
+    )
+  else:
+    query, key, value = promote_dtype(query, key, value, dtype=dtype)
+    mask = mask.astype(jnp.bool) if mask is not None else None
+    if attn_temp != 1.0:
+      scale = attn_temp / jnp.sqrt(query.shape[-1])
+    else:
+      scale = None
+    result = jax.nn.dot_product_attention(
+        query=query, key=key, value=value, bias=bias, mask=mask, scale=scale
+    )
+    return result
 
 
 class MultiHeadDotProductAttention(Module):
