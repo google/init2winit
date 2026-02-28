@@ -93,6 +93,7 @@ def _get_dataset(shuffle_seed, additional_hps=None):
     hps.train_size = 4
     hps.valid_size = 4
     hps.test_size = 4
+    hps.output_shape = (NUM_LABELS,)
     hps.avg_nodes_per_graph = NODES_SIZE_MULTIPLIER
     hps.avg_edges_per_graph = EDGES_SIZE_MULTIPLIER
     hps.batch_nodes_multiplier = 1.0

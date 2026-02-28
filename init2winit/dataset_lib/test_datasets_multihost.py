@@ -37,8 +37,8 @@ def ogbg_molpcba_mock(*args, **kwargs):
   num_examples = 10
   num_nodes = 8
   num_edges = 8
-  node_dim = 3
-  edge_dim = 2
+  node_dim = 9
+  edge_dim = 3
   return tf.data.Dataset.from_generator(
       lambda: (
           {
