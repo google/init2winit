@@ -57,7 +57,7 @@ DATA_HPS = {
         'num_layers': 1,
         'growth_rate': 1,
         'output_shape': (5,),
-        'batch_size': 1
+        'batch_size': 1,
     },
     'adabelief_resnet': {
         'input_shape': (32, 32, 3),
@@ -81,31 +81,23 @@ DATA_HPS = {
     # TODO(kasimbeg): fix issue with tokenizer_vocab_path
     'conformer': {
         'input_shape': (64,),
-        'max_eval_target_length':
-            64,
-        'max_target_length':
-            64,
+        'max_eval_target_length': 64,
+        'max_target_length': 64,
         'output_shape': (16,),
-        'vocab_size':
-            16,
-        'tokenizer_type':
-            'WPM',
+        'vocab_size': 16,
+        'tokenizer_type': 'WPM',
     },
     'mlcommons_conformer': {
         'input_shape': (64,),
-        'max_eval_target_length':
-            64,
-        'max_target_length':
-            64,
+        'max_eval_target_length': 64,
+        'max_target_length': 64,
         'output_shape': (16,),
-        'vocab_size':
-            16,
-        'tokenizer_type':
-            'WPM',
+        'vocab_size': 16,
+        'tokenizer_type': 'WPM',
     },
     'convolutional_autoencoder': {
-        'input_shape': ((28, 28, 1)),
-        'output_shape': ((28, 28, 1)),
+        'input_shape': (28, 28, 1),
+        'output_shape': (28, 28, 1),
     },
     'deepspeech': {
         'max_input_length': 64,
@@ -267,7 +259,7 @@ DATA_HPS = {
         'max_target_length': 64,
         'output_shape': (16,),
         'vocab_size': 16,
-    }
+    },
 }
 
 LOSS_NAME = {

@@ -371,7 +371,12 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
         else:
           raise ValueError(
               f'Unrecognized batch norm parameter: {parent_name}/{name}.')
-      elif 'layernorm' in parent_name or 'ln' in parent_name or 'encoder_norm' in parent_name:
+      elif (
+          'layernorm' in parent_name
+          or 'layer_norm_' in parent_name
+          or 'ln' in parent_name
+          or 'encoder_norm' in parent_name
+      ):
         if name == 'scale':
           param_types_dict[original_name] = ParameterType.LAYER_NORM_SCALE
         elif name == 'bias':
@@ -404,7 +409,11 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
       elif ('embedding' in name or
             ('embedding' in parent_name and name == 'kernel')):
         param_types_dict[original_name] = ParameterType.EMBEDDING
-      elif 'attention' in parent_name or 'causalattn' in parent_name:
+      elif (
+          'attention' in parent_name
+          or 'causalattn' in parent_name
+          or 'bidirectionalattn' in parent_name
+      ):
         if 'key' in parent_name and name == 'kernel':
           param_types_dict[original_name] = ParameterType.ATTENTION_K
         elif 'query' in parent_name and name == 'kernel':
