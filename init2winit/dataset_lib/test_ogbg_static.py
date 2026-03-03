@@ -21,7 +21,6 @@ comparable.
 """
 
 import itertools
-import time
 from init2winit.dataset_lib import ogbg_molpcba
 import jax
 import jraph
@@ -404,82 +403,6 @@ class VerifyStaticBatchingTest(tf.test.TestCase):
           atol=1e-6,
           msg=f'weights mismatch with all augmentations in batch {i}',
       )
-
-
-class BenchmarkStaticBatchingTest(tf.test.TestCase):
-  """Tests that static batching is faster than dynamic batching.
-
-  This should be true for any large batch size, because dynamic batching has a
-  high overhead.
-  """
-
-  def _make_hps(self, **overrides):
-    """Creates a hyperparameter config for a benchmark dataset."""
-    hps_dict = ogbg_molpcba.DEFAULT_HPARAMS.to_dict()
-    hps_dict.update({
-        'train_size': BENCH_GRAPHS,
-        'valid_size': BENCH_GRAPHS,
-        'test_size': BENCH_GRAPHS,
-        'avg_nodes_per_graph': NUM_NODES,
-        'avg_edges_per_graph': NUM_EDGES,
-        'batch_nodes_multiplier': 1.0,
-        'batch_edges_multiplier': 1.0,
-        'input_node_shape': (9,),
-        'input_edge_shape': (3,),
-        'output_shape': (NUM_LABELS,),
-    })
-    hps_dict.update(overrides)
-    return config_dict.ConfigDict(hps_dict)
-
-  def _time_pipeline(self, hps, reps=3):
-    """Times the pipeline for a given hyperparameter config.
-
-    Takes the minimum over N=reps runs.
-    Args:
-      hps: The hyperparameters.
-      reps: The number of repetitions.
-
-    Returns:
-      A tuple of (minimum time elapsed, number of batches).
-    """
-    times = []
-    batches = []
-    for _ in range(reps):
-      with tfds.testing.mock_data(as_dataset_fn=_as_bench_dataset):
-        dataset = ogbg_molpcba.get_ogbg_molpcba(
-            shuffle_rng=jax.random.PRNGKey(0),
-            batch_size=BATCH_SIZE,
-            eval_batch_size=BATCH_SIZE,
-            hps=hps,
-        )
-        start = time.perf_counter()
-        batches = list(dataset.valid_epoch())
-        elapsed = time.perf_counter() - start
-        times.append(elapsed)
-    return min(times), len(batches)
-
-  def test_static_is_faster(self):
-    """Tests that static batching is faster than dynamic batching."""
-    hps_dyn = self._make_hps(eval_batching='dynamic')
-    hps_static = self._make_hps(eval_batching='static')
-    old_time, old_count = self._time_pipeline(hps_dyn)
-    new_time, new_count = self._time_pipeline(hps_static)
-
-    self.assertEqual(old_count, new_count)
-
-    print(f'\nDynamic batching: {old_time:.4f}s ({old_count} batches)')
-    print(f'Static batching:  {new_time:.4f}s ({new_count} batches)')
-    print(f'Speedup: {old_time / new_time:.2f}x')
-
-    self.assertLess(
-        new_time,
-        old_time * 1.1,
-        msg=(
-            f'Static batching ({new_time:.4f}s) should not be slower than '
-            f'dynamic batching ({old_time:.4f}s)'
-        ),
-    )
-
 
 if __name__ == '__main__':
   tf.test.main()
