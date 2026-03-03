@@ -481,12 +481,53 @@ def average_ctc_loss():
   return _Metric
 
 
-def compute_wer(decoded,
-                decoded_paddings,
-                targets,
-                target_paddings,
-                tokenizer,
-                tokenizer_type='SPM'):
+def mdlm_perplexity():
+  """Returns a clu.Metric for MDLM perplexity.
+
+  This metric calculates perplexity as exp(cross_entropy). It is specifically
+  designed for the Masked Diffusion Language Model (MDLM) workload.
+
+  Unlike the standard autoregressive perplexity metric (perplexity_fun), which
+  expects raw logits, targets, and weights to compute the cross-entropy loss,
+  this metric expects a pre-computed 'normalized_loss' from the model's
+  evaluate_batch method.
+
+  In MDLM, the cross-entropy loss (or ELBO) calculation is complex, involving
+  noise schedules and masking, and is performed within the model itself.
+  Therefore, the model's evaluate_batch returns the already-normalized loss,
+  and this metric simply aggregates it and computes the exponential.
+  """
+
+  @flax.struct.dataclass
+  class _MDLMPerplexity(metrics.Metric):
+    """Calculates MDLM perplexity from the provided cross-entropy."""
+
+    total: np.float32
+    weight: np.float32
+
+    @classmethod
+    def from_model_output(cls, normalized_loss, **_):
+      return cls(total=normalized_loss, weight=1.0)
+
+    def merge(self, other):
+      return type(self)(
+          total=self.total + other.total, weight=self.weight + other.weight
+      )
+
+    def compute(self):
+      return jnp.exp(self.total / self.weight)
+
+  return _MDLMPerplexity
+
+
+def compute_wer(
+    decoded,
+    decoded_paddings,
+    targets,
+    target_paddings,
+    tokenizer,
+    tokenizer_type='SPM',
+):
   """Computes word error rate."""
   word_errors = 0.0
   num_words = 0.0
@@ -606,6 +647,9 @@ _METRICS = {
             ssim=weighted_average_metric(ssim),
             num_examples=NumExamples,
         ),
+    'mdlm_metrics': metrics.Collection.create(
+        ce_loss=average_ctc_loss(), perplexity=mdlm_perplexity()
+    ),
 }
 
 

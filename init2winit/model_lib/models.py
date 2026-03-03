@@ -28,6 +28,7 @@ from init2winit.model_lib import gnn
 from init2winit.model_lib import local_attention_transformer
 from init2winit.model_lib import lstm_lm
 from init2winit.model_lib import max_pooling_cnn
+from init2winit.model_lib import mdlm_rope_nanodo
 from init2winit.model_lib import mlperf_resnet
 from init2winit.model_lib import nanodo
 from init2winit.model_lib import nqm
@@ -90,6 +91,10 @@ _ALL_MODELS = {
     'nanodo': (
         nanodo.NanodoModel,
         nanodo.DEFAULT_HPARAMS,
+    ),
+    'mdlm_rope_nanodo': (
+        mdlm_rope_nanodo.MDLMModel,
+        mdlm_rope_nanodo.DEFAULT_HPARAMS,
     ),
     'rope_nanodo': (
         rope_nanodo.RoPENanodoModel,
