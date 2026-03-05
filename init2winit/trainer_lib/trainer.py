@@ -138,3 +138,7 @@ class Trainer(base_trainer.BaseTrainer):
     """Finalize the batch by making a global array out of the shards."""
 
     return trainer_utils.make_finalize_batch_fn(self._mesh)(batch)
+
+  def get_params(self):
+    """Returns the model parameters."""
+    return self._params
