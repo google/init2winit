@@ -59,12 +59,6 @@ def orthogonalize_via_newton_schulz(
   Returns:
     The orthogonalized matrix.
   """
-  was_reshaped = False
-  original_shape = updates.shape
-
-  if updates.ndim == 3:
-    updates = updates.reshape(updates.shape[0], -1)
-    was_reshaped = True
 
   if updates.ndim != 2:
     raise ValueError(f'Input must be 2D, got {updates.shape}')
@@ -99,18 +93,15 @@ def orthogonalize_via_newton_schulz(
   fan_in = orthogonalized_updates.shape[0]
 
   # Scaling factor taken from https://jeremybernste.in/writing/deriving-muon
-  # and https://github.com/KellerJordan/modded-nanogpt/blame/822ab2dd79140ed34ae43a20450f0bdc36457a24/train_gpt.py#L184 # pylint: disable=line-too-long
   scale_factor = jnp.maximum(1.0, jnp.sqrt(fan_out / fan_in))
   orthogonalized_updates *= scale_factor
-
-  if was_reshaped:
-    orthogonalized_updates = orthogonalized_updates.reshape(original_shape)
 
   return orthogonalized_updates
 
 
 class MuonState(NamedTuple):
-  """State for the Adam algorithm."""
+  """State for Muon."""
+
   count: chex.Array  # shape=(), dtype=jnp.int32.
   momentum: optax.Updates
 
@@ -128,8 +119,13 @@ def _bias_correction(moment, decay, count):
   return jax.tree.map(lambda t: t / beta.astype(t.dtype), moment)
 
 
+def _default_reshape_fn(x):
+  return x.reshape(x.shape[0], -1)
+
+
 def scale_by_muon(
     learning_rate: float = 0.0,
+    lr_multiplier: float = 1.0,
     beta: float = 0.95,
     weight_decay: float = 0.01,
     ns_coeffs: tuple[float, float, float] = (3.4445, -4.7750, 2.0315),
@@ -137,11 +133,22 @@ def scale_by_muon(
     eps: float = 1e-7,
     nesterov: bool = True,
     bias_correction: bool = False,
+    reshape_fn=_default_reshape_fn,
 ) -> optax.GradientTransformation:
   r"""Rescale updates according to the Muon algorithm.
 
+  This is the pure Muon transformation: momentum followed by Newton-Schulz
+  orthogonalization and decoupled weight decay. It does **not** include a
+  pair optimizer or masking logic. The caller is responsible for partitioning
+  parameters (e.g. via ``optax.masked``) and constructing a separate
+  optimizer for non-Muon parameters.
+
   Args:
     learning_rate: Learning rate.
+    lr_multiplier: Multiplier applied to ``learning_rate``. The effective
+      learning rate is ``learning_rate * lr_multiplier``. This allows Muon to
+      use a different magnitude than a pair optimizer while sharing the same
+      schedule shape.
     beta: Decay rate for the gradient momentum.
     weight_decay: Weight decay coefficient.
     ns_coeffs: Coefficients for the Newton-schulz method.
@@ -149,6 +156,10 @@ def scale_by_muon(
     eps: Term added to denominators to improve numerical stability.
     nesterov: Whether to use Nesterov momentum.
     bias_correction: Whether to perform bias correction.
+    reshape_fn: A function ``(jnp.ndarray,) -> jnp.ndarray`` that reshapes a >2D
+      parameter to 2D for orthogonalization. The result is reshaped back to the
+      original shape afterwards. Defaults to ``lambda x: x.reshape(x.shape[0],
+      -1)``. Pass ``None`` to disable (will error on >2D inputs).
 
   Returns:
     A `GradientTransformation` object.
@@ -165,7 +176,7 @@ def scale_by_muon(
   def init_fn(params):
     momentum = jax.tree_util.tree_map(
         lambda p: jnp.zeros_like(p, jnp.float32), params
-    )  # First moment
+    )
 
     return MuonState(
         count=jnp.zeros([], jnp.int32),
@@ -184,19 +195,23 @@ def scale_by_muon(
     if bias_correction:
       momentum = _bias_correction(momentum, beta, new_count)
 
-    # Apply Newton-schulz orthogonalization.
+    def _orthogonalize(x):
+      orig_shape = x.shape
+      if x.ndim > 2 and reshape_fn is not None:
+        x = reshape_fn(x)
+      x = orthogonalize_via_newton_schulz(x, ns_coeffs, ns_steps, eps)
+      return x.reshape(orig_shape)
+
     scaled_orthogonalized_momentum = jax.tree_util.tree_map(
-        lambda x: orthogonalize_via_newton_schulz(
-            x, ns_coeffs, ns_steps, eps
-        ),
+        _orthogonalize,
         momentum,
     )
 
-    # Apply weight decay similar to how it's being applied here :
-    # https://github.com/KellerJordan/Muon/commit/e0ffefd4f7ea88f2db724caa2c7cfe859155995d#diff-ff0575a769b2390ce3256edb1c20e4d741d514a77c4f0697c2fa628f810f46b1R60-R80
+    effective_lr = learning_rate * lr_multiplier
     new_updates = jax.tree_util.tree_map(
-        lambda u, p: -learning_rate * (u + weight_decay * p),
-        scaled_orthogonalized_momentum, params
+        lambda u, p: -effective_lr * (u + weight_decay * p),
+        scaled_orthogonalized_momentum,
+        params,
     )
 
     return new_updates, MuonState(
