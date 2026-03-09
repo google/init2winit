@@ -22,7 +22,6 @@ Preprocessing and tokenization script to generate data saved to CNS:
 https://github.com/mlcommons/algorithmic-efficiency/blob/main/datasets/dataset_setup.py.
 """
 
-# import tensorflow.compat.v2 as tf
 import os
 from absl import logging
 from ml_collections.config_dict import config_dict
@@ -35,8 +34,7 @@ MAX_CORPUS_CHARS = 1_000_000_000
 SHUFFLE_BUFFER_SIZE = 100_000
 VOCAB_SIZE = 50_257
 
-PAD_ID = tf.constant(-1, dtype=tf.int64)
-# PAD_ID = -1
+PAD_ID = -1
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
@@ -61,6 +59,8 @@ def batch_with_padding(
 
   # tf.data.Dataset.padded.batch pads elements in the batch so we call it
   # again with batch_size=1 to pad each element in original batch.
+  if isinstance(padding_id, int):
+    padding_id = tf.constant(padding_id, dtype=tf.int64)
   padded_batched_dataset = batched_dataset.padded_batch(
       1, padded_shapes=padded_shapes, padding_values=padding_id
   )
@@ -95,7 +95,6 @@ def get_fineweb_edu_dataset(
   train_path = os.path.join(DATA_DIR, TRAIN_DIR)
   val_path = os.path.join(DATA_DIR, VAL_DIR)
 
-  # Load datasets and cast to int32.
   train_dataset = tf.data.Dataset.load(train_path)
   val_dataset = tf.data.Dataset.load(val_path)
 
