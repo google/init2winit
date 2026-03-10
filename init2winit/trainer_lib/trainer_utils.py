@@ -21,6 +21,7 @@ import time
 from absl import logging
 from init2winit import utils
 from init2winit.dataset_lib import data_utils
+from init2winit.model_lib.metrics import Collection
 import jax
 from jax.experimental.multihost_utils import process_allgather  # pylint: disable=g-importing-member
 import numpy as np
@@ -181,7 +182,7 @@ def evaluate(
     A dictionary of aggregated metrics. The keys will match the keys returned by
     evaluate_batch_jitted.
   """
-  metrics = None
+  metrics: Collection = None
 
   for batch_idx, batch in enumerate(batch_iter):
     batch = finalize_batch_fn(batch)
@@ -189,13 +190,12 @@ def evaluate(
       batch['eval_rng'] = jax.random.fold_in(eval_rng, batch_idx)
     # Returns a clu.metrics.Collection object. We assume that
     # `evaluate_batch_jitted` calls CLU's `single_from_model_outputs`.
-    computed_metrics = evaluate_batch_jitted(
+    computed_metrics: Collection = evaluate_batch_jitted(
         params=params, batch_stats=batch_stats, batch=batch
     )
     if metrics is None:
       metrics = computed_metrics
     else:
-      # `merge` aggregates the metrics across batches.
       metrics = metrics.merge(computed_metrics)
 
   # Note: process_allgather is a no-op for fully replicated metrics like

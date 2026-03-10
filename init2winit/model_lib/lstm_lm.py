@@ -215,8 +215,9 @@ class LSTMModel(base_model.BaseModel):
 
     # We don't use CLU's `mask` argument here, we handle it ourselves through
     # `weights`.
-    return self.metrics_bundle.gather_from_model_output(
-        logits=logits, targets=targets, weights=weights, axis_name='batch')
+    return self.metrics_bundle.single_from_model_output(
+        logits=logits, targets=targets, weights=weights
+    )
 
   def build_flax_module(self):
 
