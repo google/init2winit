@@ -26,7 +26,7 @@ class FinewebEdu10bInputPipelineTest(absltest.TestCase):
 
   def test_batch_with_padding(self):
     """Test batching with padding."""
-    arr = np.arange(18, dtype=np.int32)
+    arr = np.arange(18, dtype=np.int64)
     ds = tf.data.Dataset.from_tensor_slices(arr)
     ds = ds.batch(
         6,

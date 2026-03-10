@@ -133,7 +133,7 @@ class PaddingTest(absltest.TestCase):
     self.assertLen(batches, 2)
 
     padded_batch = batches[1]
-    pad_id = int(input_pipeline.PAD_ID.numpy())
+    pad_id = input_pipeline.PAD_ID
 
     # The second row of the padded batch should be all PAD_ID.
     np.testing.assert_array_equal(padded_batch['inputs'][1], np.full(4, pad_id))
@@ -157,7 +157,7 @@ class PaddingTest(absltest.TestCase):
 
     batches = list(valid_ds.as_numpy_iterator())
     full_batch = batches[0]
-    pad_id = int(input_pipeline.PAD_ID.numpy())
+    pad_id = input_pipeline.PAD_ID
 
     # No element in the full batch should be PAD_ID.
     self.assertTrue(np.all(full_batch['inputs'] != pad_id))
