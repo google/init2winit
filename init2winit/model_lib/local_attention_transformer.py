@@ -2035,11 +2035,11 @@ class LocalAttentionTransformer(base_model.BaseModel):
     if self.dataset_meta_data['apply_one_hot_in_loss']:
       targets = jax.nn.one_hot(targets, logits.shape[-1])
 
-    return self.metrics_bundle.gather_from_model_output(
+    return self.metrics_bundle.single_from_model_output(
         logits=logits,
         targets=targets,
         weights=weights,
-        axis_name='batch')
+    )
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Returns loss."""

@@ -21,6 +21,7 @@ from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
+from init2winit.model_lib import losses
 from init2winit.model_lib import metrics
 import jax.numpy as jnp
 import numpy as np
@@ -186,6 +187,309 @@ class MetricsTest(parameterized.TestCase):
                                                      tokenizer_type)
         self.assertEqual(word_errors, 0)
         self.assertEqual(num_words, 6.0)
+
+
+class NumExamplesTest(absltest.TestCase):
+  """Tests for the NumExamples metric."""
+
+  def test_counts_without_weights(self):
+    """Without weights, counts the batch size."""
+    m = metrics.NumExamples.from_model_output(
+        logits=jnp.ones((8, 10)), targets=jnp.ones((8, 10)), weights=None
+    )
+    np.testing.assert_allclose(m.compute(), 8.0)
+
+  def test_counts_weighted_examples(self):
+    """With weights, computes the sum of weights."""
+    m = metrics.NumExamples.from_model_output(
+        logits=jnp.ones((5, 3)),
+        targets=jnp.ones((5, 3)),
+        weights=jnp.array([1.0, 1.0, 0.0, 0.0, 1.0]),
+    )
+    np.testing.assert_allclose(m.compute(), 3.0)
+
+  def test_merge_sums_counts(self):
+    """Merging two metrics sums their counts."""
+    m1 = metrics.NumExamples.from_model_output(
+        logits=jnp.ones((3, 2)), targets=jnp.ones((3, 2)), weights=jnp.ones(3)
+    )
+    m2 = metrics.NumExamples.from_model_output(
+        logits=jnp.ones((4, 2)), targets=jnp.ones((4, 2)), weights=jnp.ones(4)
+    )
+    np.testing.assert_allclose(m1.merge(m2).compute(), 7.0)
+
+
+class CollectingMetricTest(absltest.TestCase):
+  """Tests for CollectingMetric and from_outputs."""
+
+  def test_stores_and_computes(self):
+    """from_model_output stores values; compute() concatenates them."""
+    cls = metrics.CollectingMetric.from_outputs(('x',))
+    m1 = cls.from_model_output(x=jnp.array([1.0, 2.0]))
+    m2 = cls.from_model_output(x=jnp.array([3.0, 4.0]))
+    result = m1.merge(m2).compute()
+    np.testing.assert_array_equal(result['x'], [1.0, 2.0, 3.0, 4.0])
+
+  def test_multidimensional_concat(self):
+    """2D arrays are concatenated along axis 0."""
+    cls = metrics.CollectingMetric.from_outputs(('x',))
+    m1 = cls.from_model_output(x=jnp.ones((2, 3)))
+    m2 = cls.from_model_output(x=jnp.ones((4, 3)))
+    self.assertEqual(m1.merge(m2).compute()['x'].shape, (6, 3))
+
+
+class CollectionTest(absltest.TestCase):
+  """Tests for Collection.create and the collection lifecycle."""
+
+  def _make_cls(self):
+    return metrics.Collection.create(
+        error_rate=metrics.weighted_average_metric(
+            metrics.weighted_misclassifications
+        ),
+        ce_loss=metrics.weighted_average_metric(
+            losses.weighted_unnormalized_cross_entropy
+        ),
+        num_examples=metrics.NumExamples,
+    )
+
+  def test_compute_returns_all_metric_keys(self):
+    """compute() returns a dict with one entry per metric."""
+    cls = self._make_cls()
+    c = cls.single_from_model_output(
+        logits=jnp.array([[0.0, 1.0]]),
+        targets=jnp.array([[0.0, 1.0]]),
+        weights=jnp.array([1.0]),
+    )
+    self.assertEqual(
+        set(c.compute().keys()), {'error_rate', 'ce_loss', 'num_examples'}
+    )
+
+  def test_perfect_and_full_misclassification(self):
+    """Perfect predictions yield 0% error; wrong yield 100%."""
+    cls = self._make_cls()
+    perfect = cls.single_from_model_output(
+        logits=jnp.array([[0.0, 100.0], [100.0, 0.0]]),
+        targets=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        weights=jnp.array([1.0, 1.0]),
+    )
+    wrong = cls.single_from_model_output(
+        logits=jnp.array([[100.0, 0.0], [0.0, 100.0]]),
+        targets=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        weights=jnp.array([1.0, 1.0]),
+    )
+    np.testing.assert_allclose(perfect.compute()['error_rate'], 0.0)
+    np.testing.assert_allclose(wrong.compute()['error_rate'], 1.0)
+
+  def test_merge_accumulates(self):
+    """Merging two collections produces correct averages."""
+    cls = self._make_cls()
+    c1 = cls.single_from_model_output(
+        logits=jnp.array([[0.0, 100.0], [100.0, 0.0]]),
+        targets=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        weights=jnp.array([1.0, 1.0]),
+    )
+    c2 = cls.single_from_model_output(
+        logits=jnp.array([[100.0, 0.0]]),
+        targets=jnp.array([[0.0, 1.0]]),
+        weights=jnp.array([1.0]),
+    )
+    result = c1.merge(c2).compute()
+    np.testing.assert_allclose(result['num_examples'], 3.0)
+    np.testing.assert_allclose(result['error_rate'], 1.0 / 3.0, rtol=1e-5)
+
+  def test_different_batch_sizes(self):
+    """Aggregation is correct across batches of sizes 1, 4, and 8."""
+    cls = self._make_cls()
+    b1 = cls.single_from_model_output(
+        logits=jnp.array([[0.0, 100.0]]),
+        targets=jnp.array([[0.0, 1.0]]),
+        weights=jnp.array([1.0]),
+    )
+    b4 = cls.single_from_model_output(
+        logits=jnp.tile(jnp.array([[100.0, 0.0]]), (4, 1)),
+        targets=jnp.tile(jnp.array([[0.0, 1.0]]), (4, 1)),
+        weights=jnp.ones(4),
+    )
+    b8 = cls.single_from_model_output(
+        logits=jnp.tile(jnp.array([[0.0, 100.0]]), (8, 1)),
+        targets=jnp.tile(jnp.array([[0.0, 1.0]]), (8, 1)),
+        weights=jnp.ones(8),
+    )
+    result = b1.merge(b4).merge(b8).compute()
+    np.testing.assert_allclose(result['num_examples'], 13.0)
+    np.testing.assert_allclose(result['error_rate'], 4.0 / 13.0, rtol=1e-5)
+
+  def test_multi_batch_eval_loop(self):
+    """Simulates a multiple batch size eval loop."""
+    cls = self._make_cls()
+    batches = [
+        dict(
+            logits=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+            targets=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+            weights=jnp.array([1.0, 1.0]),
+        ),
+        dict(
+            logits=jnp.array([[1.0, 0.0]]),
+            targets=jnp.array([[0.0, 1.0]]),
+            weights=jnp.array([1.0]),
+        ),
+        dict(
+            logits=jnp.array([[0.0, 1.0], [0.0, 1.0], [0.0, 1.0]]),
+            targets=jnp.array([[0.0, 1.0], [0.0, 1.0], [0.0, 1.0]]),
+            weights=jnp.array([1.0, 1.0, 1.0]),
+        ),
+    ]
+    collection = None
+    for batch in batches:
+      update = cls.single_from_model_output(**batch)
+      collection = update if collection is None else collection.merge(update)
+    result = collection.compute()
+    np.testing.assert_allclose(result['num_examples'], 6.0)
+    np.testing.assert_allclose(result['error_rate'], 1.0 / 6.0, rtol=1e-5)
+
+  def test_with_collecting_metric_end_to_end(self):
+    """Collection containing a CollectingMetric computes all keys."""
+    cls = metrics.Collection.create(
+        ce_loss=metrics.weighted_average_metric(
+            losses.unnormalized_sigmoid_binary_cross_entropy
+        ),
+        num_examples=metrics.NumExamples,
+        average_precision=metrics.OGBGMeanAveragePrecision,
+    )
+    c = cls.single_from_model_output(
+        logits=jnp.array([[0.5, 0.5], [0.5, 0.5]]),
+        targets=jnp.array([[1.0, 0.0], [0.0, 1.0]]),
+        weights=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
+    )
+    result = c.compute()
+    self.assertEqual(
+        set(result.keys()), {'ce_loss', 'num_examples', 'average_precision'}
+    )
+
+
+class OGBGMeanAveragePrecisionUnitTest(absltest.TestCase):
+  """Unit tests for OGBGMeanAveragePrecision."""
+
+  def test_perfect_predictions(self):
+    """Perfect predictions yield mAP of 1.0."""
+    m = metrics.OGBGMeanAveragePrecision.from_model_output(
+        logits=jnp.array([[100.0, -100.0], [-100.0, 100.0]]),
+        targets=jnp.array([[1.0, 0.0], [0.0, 1.0]]),
+        weights=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
+    )
+    np.testing.assert_allclose(m.compute(), 1.0, rtol=1e-5)
+
+  def test_all_same_class_returns_nan(self):
+    """If all targets are the same class, mAP is NaN."""
+    m = metrics.OGBGMeanAveragePrecision.from_model_output(
+        logits=jnp.array([[0.5, 0.5], [0.3, 0.3]]),
+        targets=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
+        weights=jnp.array([[1.0, 1.0], [1.0, 1.0]]),
+    )
+    self.assertTrue(np.isnan(m.compute()))
+
+  def test_masked_weights_change_result(self):
+    """Masking out a wrong prediction improves mAP."""
+    logits = jnp.array([[100.0, -100.0], [-100.0, 100.0], [-100.0, 100.0]])
+    targets = jnp.array([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]])
+    m_full = metrics.OGBGMeanAveragePrecision.from_model_output(
+        logits=logits,
+        targets=targets,
+        weights=jnp.array([[1.0, 1.0], [1.0, 1.0], [1.0, 1.0]]),
+    )
+    m_partial = metrics.OGBGMeanAveragePrecision.from_model_output(
+        logits=logits,
+        targets=targets,
+        weights=jnp.array([[1.0, 1.0], [1.0, 1.0], [0.0, 0.0]]),
+    )
+    self.assertLess(m_full.compute(), m_partial.compute())
+
+
+class WeightedAverageMetricUnitTest(absltest.TestCase):
+  """Tests for the weighted_average_metric factory."""
+
+  def test_correct_average(self):
+    """Computes correct weighted average for a single batch."""
+    cls = metrics.weighted_average_metric(metrics.weighted_misclassifications)
+    m = cls.from_model_output(
+        logits=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        targets=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        weights=jnp.array([1.0, 1.0]),
+    )
+    np.testing.assert_allclose(m.compute(), 0.0)
+
+  def test_merge_accumulates(self):
+    """Merge sums total and weight; compute returns global average."""
+    cls = metrics.weighted_average_metric(metrics.weighted_misclassifications)
+    m1 = cls.from_model_output(
+        logits=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        targets=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        weights=jnp.array([1.0, 1.0]),
+    )
+    m2 = cls.from_model_output(
+        logits=jnp.array([[1.0, 0.0], [0.0, 1.0]]),
+        targets=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        weights=jnp.array([1.0, 1.0]),
+    )
+    np.testing.assert_allclose(m1.merge(m2).compute(), 0.5)
+
+
+class PerplexityUnitTest(absltest.TestCase):
+  """Tests for perplexity_fun."""
+
+  def test_perplexity_is_exp_of_cross_entropy(self):
+    """Perplexity equals exp(cross-entropy)."""
+    cls = metrics.perplexity_fun()
+    logits = jnp.array([[0.0, 1.0], [1.0, 0.0]])
+    targets = jnp.array([[0.0, 1.0], [1.0, 0.0]])
+    weights = jnp.array([1.0, 1.0])
+    m = cls.from_model_output(logits=logits, targets=targets, weights=weights)
+    ce = (
+        losses.weighted_unnormalized_cross_entropy(
+            logits, targets, weights
+        ).sum()
+        / weights.sum()
+    )
+    np.testing.assert_allclose(m.compute(), jnp.exp(ce), rtol=1e-5)
+
+
+class MDLMMetricsTest(absltest.TestCase):
+  """Tests for the MDLM metrics bundle."""
+
+  def test_mdlm_bundle(self):
+    """MDLM bundle passes through correct ce_loss and perplexity."""
+    bundle = metrics.get_metrics('mdlm_metrics')
+    result = bundle.single_from_model_output(
+        normalized_loss=jnp.float32(2.0)
+    ).compute()
+    np.testing.assert_allclose(result['ce_loss'], 2.0)
+    np.testing.assert_allclose(result['perplexity'], jnp.exp(2.0), rtol=1e-5)
+
+
+class MetricsBundleRegistryTest(parameterized.TestCase):
+  """Tests for the metric bundle registry (get_metrics)."""
+
+  @parameterized.parameters(
+      'classification_metrics',
+      'autoregressive_language_model_metrics',
+  )
+  def test_bundle_merge_and_compute(self, metrics_name):
+    """Bundles can be merged, computed, and produce correct num_examples."""
+    bundle = metrics.get_metrics(metrics_name)
+    c1 = bundle.single_from_model_output(
+        logits=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        targets=jnp.array([[0.0, 1.0], [1.0, 0.0]]),
+        weights=jnp.array([1.0, 1.0]),
+    )
+    c2 = bundle.single_from_model_output(
+        logits=jnp.array([[0.5, 0.5]]),
+        targets=jnp.array([[0.0, 1.0]]),
+        weights=jnp.array([1.0]),
+    )
+    result = c1.merge(c2).compute()
+    self.assertIn('num_examples', result)
+    np.testing.assert_allclose(result['num_examples'], 3.0)
+
 
 if __name__ == '__main__':
   absltest.main()

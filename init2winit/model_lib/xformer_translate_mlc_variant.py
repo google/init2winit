@@ -1058,8 +1058,8 @@ class TransformerTranslate(base_model.BaseModel):
       targets = one_hot(batch['targets'], logits.shape[-1])
 
     # Add log-perplexity metric.
-    return self.metrics_bundle.gather_from_model_output(
-        logits=logits, targets=targets, weights=weights, axis_name='batch')
+    return self.metrics_bundle.single_from_model_output(
+        logits=logits, targets=targets, weights=weights)
 
   def apply_on_batch(self,
                      params,

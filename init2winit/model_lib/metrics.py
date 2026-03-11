@@ -13,16 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Registry for the available metrics we can use for evaluating models.
+"""Metrics for evaluating models during training and evaluation.
 
-Metric functions take a batch of (logits, targets, weights) as input and
-return a batch of loss values. This is for safe aggregation across
-different-sized eval batches.
+Provides base classes (Metric, CollectingMetric, Collection) and concrete
+metric implementations (error rate, cross-entropy, perplexity, AUC, etc.)
+for aggregating evaluation results across batches. Metric functions take
+batches of (logits, targets, weights) and return a scalar metric value.
 """
 
 import functools
+import inspect
 from absl import logging
-from clu import metrics
 import flax
 from init2winit import utils
 from init2winit.model_lib import losses
@@ -40,24 +41,209 @@ except ImportError:
 # pylint: enable=g-import-not-at-top
 
 
+class Metric:
+  """Abstract base class for all metrics.
+
+  A metric defers computation of the metric value until the `compute` method
+  is called. This allows for handling multiple batch sizes and also supports
+  using jax sharding until compute time.
+
+  Subclasses must be decorated with @flax.struct.dataclass and implement:
+    - from_model_output(cls, **kwargs): create a metric from model outputs.
+    - merge(self, other): merge two metrics.
+    - compute(self): compute the metric value as a numpy array.
+    - reduce(self): compacts the metric to a single value.
+  """
+
+  @classmethod
+  def from_model_output(cls, **kwargs):
+    raise NotImplementedError
+
+  def merge(self, other):
+    raise NotImplementedError
+
+  def compute(self):
+    raise NotImplementedError
+
+  def reduce(self):
+    return self
+
+
 @flax.struct.dataclass
-class NumExamples(metrics.Metric):
+class CollectingMetric(Metric):
+  """A metric that collects raw model outputs for deferred computation.
+
+  Stores intermediate values as tuples of arrays. The `merge` method
+  concatenates value tuples. The `compute` method concatenates all
+  collected arrays into a single array per output name.
+  """
+
+  values: dict[str, tuple[jnp.ndarray, ...]]
+
+  @classmethod
+  def empty(cls):
+    return cls(values={})
+
+  def merge(self, other):
+    if other.values and not self.values:
+      return other
+    if self.values and not other.values:
+      return self
+    values = {
+        name: (*value, *other.values[name])
+        for name, value in self.values.items()
+    }
+    return type(self)(values)
+
+  def reduce(self):
+    return type(self)(
+        {name: (jnp.concatenate(vals),) for name, vals in self.values.items()}
+    )
+
+  def compute(self):
+    return {k: np.concatenate(v) for k, v in self.values.items()}
+
+  @classmethod
+  def from_outputs(cls, names):
+    """Returns a metric class that collects model outputs named `names`."""
+
+    @flax.struct.dataclass
+    class _FromOutputs(cls):  # pylint:disable=missing-class-docstring
+
+      @classmethod
+      def from_model_output(cls, **model_output):
+        def make_array(value):
+          if value is None:
+            value = jnp.nan
+          return jnp.atleast_1d(jnp.array(value))
+
+        return cls(
+            values={name: (make_array(model_output[name]),) for name in names}
+        )
+
+    return _FromOutputs
+
+
+@flax.struct.dataclass
+class _ReductionCounter(Metric):
+  value: jnp.ndarray
+
+  @classmethod
+  def empty(cls):
+    return cls(value=jnp.array(1, jnp.int32))
+
+  def merge(self, other):
+    return _ReductionCounter(self.value + other.value)
+
+
+@flax.struct.dataclass
+class Collection:
+  """Bundles multiple Metric instances into a single aggregatable unit.
+
+  Use `Collection.create(name=MetricClass, ...)` to define a collection,
+  then `single_from_model_output(**batch)` to create instances from data.
+  Supports `merge` across batches and `compute` to produce a results dict.
+  """
+
+  _reduction_counter: _ReductionCounter
+
+  @classmethod
+  def create(cls, **metric_types):
+    """Creates a new class whose elements are the metric types passed in.
+
+    Args:
+      **metric_types: A dictionary of metric types.
+
+    Returns:
+      A new class whose elements are the metric types passed in.
+    """
+    return flax.struct.dataclass(
+        type(
+            '_InlineCollection',
+            (Collection,),
+            {'__annotations__': metric_types},
+        )
+    )
+
+  @classmethod
+  def _from_model_output(cls, **kwargs):
+    """Creates a new instance of the collection from model outputs.
+
+    This works like, e.g. if we call
+      collection.single_from_model_output(logits=..., targets=..., weights=...)
+    This is creates something like
+      _InlineCollection(
+          _reduction_counter=_ReductionCounter(jnp.array(1, dtype=jnp.int32)),
+          logits=...,
+          targets=...,
+          weights=...,
+      )
+
+    Args:
+      **kwargs: Model outputs.
+
+    Returns:
+      A new instance of the collection.
+    """
+    return cls(
+        _reduction_counter=_ReductionCounter(jnp.array(1, dtype=jnp.int32)),
+        **{
+            metric_name: metric.from_model_output(**kwargs)
+            for metric_name, metric in inspect.get_annotations(
+                cls, eval_str=True
+            ).items()
+        },
+    )
+
+  @classmethod
+  def single_from_model_output(cls, **kwargs):
+    """Creates a new instance of the collection from model outputs."""
+    return cls._from_model_output(**kwargs)
+
+  def merge(self, other):
+    """Merges two collections of metrics."""
+    return type(self)(**{
+        metric_name: metric.merge(getattr(other, metric_name))
+        for metric_name, metric in vars(self).items()
+    })
+
+  def reduce(self):
+    """Reduces the collection of metrics."""
+    return type(self)(**{
+        metric_name: metric.reduce()
+        for metric_name, metric in vars(self).items()
+    })
+
+  def compute(self):
+    """Computes the collection of metrics."""
+    return {
+        metric_name: metric.compute()
+        for metric_name, metric in vars(self).items()
+        if metric_name != '_reduction_counter'
+    }
+
+
+@flax.struct.dataclass
+class NumExamples(Metric):
   """Computes the number of examples used for evaluation."""
 
-  count: np.float32
+  count: jnp.float32
 
   @classmethod
   def from_model_output(cls, logits, targets, weights, **_):
+    del logits
     if weights is None:
-      count = targets.shape[0]
+      count = jnp.float32(targets.shape[0])
     else:
       count = weights.sum()
     return cls(count=count)
 
   def merge(self, other):
+    """Merges two NumExamples metrics."""
     return type(self)(count=self.count + other.count)
 
   def compute(self):
+    """Computes the number of examples."""
     return self.count
 
 
@@ -65,7 +251,7 @@ class NumExamples(metrics.Metric):
 # https://github.com/google/flax/blob/main/examples/ogbg_molpcba/train.py
 @flax.struct.dataclass
 class OGBGMeanAveragePrecision(
-    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))
+    CollectingMetric.from_outputs(('logits', 'targets', 'weights'))
 ):
   """Computes the mean average precision (mAP) over different tasks on CPU.
 
@@ -78,21 +264,21 @@ class OGBGMeanAveragePrecision(
   def compute(self):
     values = super().compute()
     # Ensure the arrays are numpy and not jax.numpy.
-    values = {k: np.array(v) for k, v in values.items()}
+    values = {k: jnp.array(v) for k, v in values.items()}
     targets = values['targets']
     logits = values['logits']
     weights = values['weights']
 
-    if np.any(np.isnan(logits)):
+    if jnp.any(jnp.isnan(logits)):
       raise utils.TrainingDivergedError('NaN detected in logits')
 
     if weights.shape != targets.shape:
       # This happens if weights are None
-      if np.all(np.isnan(weights)):
+      if jnp.all(jnp.isnan(weights)):
         weights = None
       # We need weights to be the exact same shape as targets, not just
       # compatible for broadcasting, so multiply by ones of the right shape.
-      weights = np.ones(targets.shape) * losses.conform_weights_to_targets(
+      weights = jnp.ones(targets.shape) * losses.conform_weights_to_targets(
           weights, targets
       )
 
@@ -103,18 +289,18 @@ class OGBGMeanAveragePrecision(
       )
     if len(logits.shape) != 2:
       raise ValueError(f'Rank of logits ({logits.shape}) must be 2.')
-    if not np.logical_or(weights == 1, weights == 0).all():
+    if not jnp.logical_or(weights == 1, weights == 0).all():
       raise ValueError(f'Weights must be {0, 1}, received {weights}.')
 
     weights = weights.astype(bool)
 
-    probs = expit(logits)  # Sigmoid.
+    probs = expit(np.asarray(logits))
+    targets = np.asarray(targets)
+    weights = np.asarray(weights)
     num_tasks = targets.shape[1]
     average_precisions = np.full(num_tasks, np.nan)
 
     for task in range(num_tasks):
-      # AP is only defined when there is at least one negative data
-      # and at least one positive data.
       if (
           np.sum(targets[:, task] == 0) > 0
           and np.sum(targets[:, task] == 1) > 0
@@ -124,9 +310,8 @@ class OGBGMeanAveragePrecision(
             targets[is_labeled, task], probs[is_labeled, task]
         )
 
-    # When all APs are NaNs, return NaN. This avoids raising a RuntimeWarning.
     if np.isnan(average_precisions).all():
-      return np.nan
+      return jnp.nan
     return np.nanmean(average_precisions)
 
 
@@ -137,7 +322,7 @@ def _binary_auc_shape_fix_check(x, shape_error_msg):
     if x.shape[1] > 2:
       raise ValueError(shape_error_msg)
     if x.shape[1] == 1:
-      x = np.squeeze(x, axis=1)
+      x = jnp.squeeze(x, axis=1)
     elif x.shape[1] == 2:
       # Binary AUC wants the labels/probabilities for the positive class, which
       # is the second element in the (n, 2) shaped array.
@@ -151,14 +336,14 @@ def _binary_auc_shape_fix(targets, logits, weights, metric_name):
   """Ensure shapes are valid and convert them to dense shapes for sklearn.
 
   If inputs are shape (n, 2), we slice out the second column via x[:, 1]. If the
-  inputs are shape (n, 1), we np.squeeze only the second dimension away. If the
+  inputs are shape (n, 1), we jnp.squeeze only the second dimension away. If the
   inputs are shape (n.), they are left untouched. If they are any other shape
   then a ValueError is raised.
 
   Args:
-    targets: np.array of target labels, of shape (n,) or (n, 2).
-    logits: np.array of model logits, of shape (n,) or (n, 2).
-    weights: np.array of example weights, of shape (n,) or (n, 2).
+    targets: jnp.array of target labels, of shape (n,) or (n, 2).
+    logits: jnp.array of model logits, of shape (n,) or (n, 2).
+    weights: jnp.array of example weights, of shape (n,) or (n, 2).
     metric_name: the name of the metrics being checked, used for error messages.
 
   Returns:
@@ -173,11 +358,11 @@ def _binary_auc_shape_fix(targets, logits, weights, metric_name):
   logits = _binary_auc_shape_fix_check(logits, shape_error_msg)
   weights = _binary_auc_shape_fix_check(weights, shape_error_msg)
   # This happens if weights are None
-  if np.all(np.isnan(weights)):
+  if jnp.all(jnp.isnan(weights)):
     weights = None
   # We need weights to be the exact same shape as targets, not just
   # compatible for broadcasting, so multiply by ones of the right shape.
-  weights = np.ones(targets.shape) * losses.conform_weights_to_targets(
+  weights = jnp.ones(targets.shape) * losses.conform_weights_to_targets(
       weights, targets
   )
   return targets, logits, weights
@@ -185,27 +370,24 @@ def _binary_auc_shape_fix(targets, logits, weights, metric_name):
 
 @flax.struct.dataclass
 class BinaryMeanAveragePrecision(
-    metrics.CollectingMetric.from_outputs(('logits', 'targets', 'weights'))
+    CollectingMetric.from_outputs(('logits', 'targets', 'weights'))
 ):
   """Computes the mean average precision for a binary classifier on CPU."""
 
   def compute(self):
     values = super().compute()
     # Ensure the arrays are numpy and not jax.numpy.
-    values = {k: np.array(v) for k, v in values.items()}
+    values = {k: jnp.array(v) for k, v in values.items()}
     targets, logits, weights = _binary_auc_shape_fix(
         values['targets'],
         values['logits'],
         values['weights'],
         'BinaryMeanAveragePrecision',
     )
-
-    if np.any(np.isnan(logits)):
+    if jnp.any(jnp.isnan(logits)):
       raise utils.TrainingDivergedError('NaN detected in logits')
-
-    # TODO(mbadura): The np.array call should not be needed after numpy upgrade.
-    valid_targets = targets[np.array(weights > 0)]
-    targets_sum = np.sum(valid_targets)
+    valid_targets = targets[jnp.array(weights > 0)]
+    targets_sum = jnp.sum(valid_targets)
     # Do not compute AUC if positives only have one class.
     if targets_sum == 0 or targets_sum == len(valid_targets):
       return 0.0
@@ -217,20 +399,19 @@ class BinaryMeanAveragePrecision(
 
 @flax.struct.dataclass
 class BinaryAUCROC(
-    metrics.CollectingMetric.from_outputs(('targets', 'logits', 'weights'))
+    CollectingMetric.from_outputs(('targets', 'logits', 'weights'))
 ):
   """Compute the AUC-ROC for binary classification on the CPU."""
 
   def compute(self):
     values = super().compute()
     # Ensure the arrays are numpy and not jax.numpy.
-    values = {k: np.array(v) for k, v in values.items()}
+    values = {k: jnp.array(v) for k, v in values.items()}
     targets, logits, weights = _binary_auc_shape_fix(
         values['targets'], values['logits'], values['weights'], 'BinaryAUCROC'
     )
-    # TODO(mbadura): The np.array call should not be needed after numpy upgrade.
-    valid_targets = targets[np.array(weights > 0)]
-    targets_sum = np.sum(valid_targets)
+    valid_targets = targets[jnp.array(weights > 0)]
+    targets_sum = jnp.sum(valid_targets)
     # Do not compute AUC if all labels are the same.
     if targets_sum == 0 or targets_sum == len(valid_targets):
       return 0.0
@@ -242,25 +423,26 @@ class BinaryAUCROC(
 
 # TODO(mbadura): Check if we can use metrics.Average with a mask
 def weighted_average_metric(fun):
-  """Returns a clu.Metric that uses `weights` to average the values.
+  """Returns a Metric that computes a weighted average of `fun`'s output.
 
-  We can't use CLU `metrics.Average` directly, because it would ignore
-  `weights`.
+  The returned metric accumulates `fun(logits, targets, weights).sum()` as the
+  numerator and `weights.sum()` as the denominator across batches.  On
+  `compute()`, it returns `total / weight`.
 
   Args:
     fun: function with the API fun(logits, targets, weights)
 
   Returns:
-    clu.Metric that maintains a weighted average of the values.
+    A Metric subclass that maintains a weighted running average.
   """
   arg_names = fun.__code__.co_varnames
 
   @flax.struct.dataclass
-  class _Metric(metrics.Metric):
+  class _Metric(Metric):
     """Applies `fun` and computes the average."""
 
-    total: np.float32
-    weight: np.float32
+    total: jnp.float32
+    weight: jnp.float32
 
     @classmethod
     def from_model_output(cls, logits, targets, weights, **kwargs):
@@ -486,11 +668,11 @@ def average_ctc_loss():
   """Returns a clu.Metric that computes average CTC loss taking padding into account."""
 
   @flax.struct.dataclass
-  class _Metric(metrics.Metric):
+  class _Metric(Metric):
     """Applies `fun` and computes the average."""
 
-    total: np.float32
-    weight: np.float32
+    total: jnp.float32
+    weight: jnp.float32
 
     @classmethod
     def from_model_output(cls, normalized_loss, **_):
@@ -525,11 +707,11 @@ def mdlm_perplexity():
   """
 
   @flax.struct.dataclass
-  class _MDLMPerplexity(metrics.Metric):
+  class _MDLMPerplexity(Metric):
     """Calculates MDLM perplexity from the provided cross-entropy."""
 
-    total: np.float32
-    weight: np.float32
+    total: jnp.float32
+    weight: jnp.float32
 
     @classmethod
     def from_model_output(cls, normalized_loss, **_):
@@ -559,8 +741,8 @@ def compute_wer(
   num_words = 0.0
 
   if tokenizer_type == 'SPM':
-    decoded_lengths = np.sum(decoded_paddings == 0.0, axis=-1)
-    target_lengths = np.sum(target_paddings == 0.0, axis=-1)
+    decoded_lengths = jnp.sum(decoded_paddings == 0.0, axis=-1)
+    target_lengths = jnp.sum(target_paddings == 0.0, axis=-1)
 
     batch_size = targets.shape[0]
 
@@ -571,8 +753,8 @@ def compute_wer(
       decoded_i = decoded[i][:decoded_length]
       target_i = targets[i][:target_length]
 
-      decoded_i = str(tokenizer.detokenize(decoded_i.astype(np.int32)))
-      target_i = str(tokenizer.detokenize(target_i.astype(np.int32)))
+      decoded_i = str(tokenizer.detokenize(decoded_i.astype(jnp.int32)))
+      target_i = str(tokenizer.detokenize(target_i.astype(jnp.int32)))
 
       target_i = ' '.join(target_i.split())
       target_num_words = len(target_i.split(' '))
@@ -604,7 +786,7 @@ def wer(hps):
 
   @flax.struct.dataclass
   class WER(
-      metrics.CollectingMetric.from_outputs(
+      CollectingMetric.from_outputs(
           ('hyps', 'hyp_paddings', 'targets', 'target_paddings')
       )
   ):
@@ -613,7 +795,7 @@ def wer(hps):
     def compute(self):
       values = super().compute()
       # Ensure the arrays are numpy and not jax.numpy.
-      values = {k: np.array(v) for k, v in values.items()}
+      values = {k: jnp.array(v) for k, v in values.items()}
 
       word_errors, num_words = compute_wer(
           values['hyps'],
@@ -633,7 +815,7 @@ def wer(hps):
 # that information from `weights`. The total weight for calculating the average
 # is `weights.sum()`.
 _METRICS = {
-    'autoregressive_language_model_metrics': metrics.Collection.create(
+    'autoregressive_language_model_metrics': Collection.create(
         error_rate=weighted_average_metric(weighted_misclassifications),
         ce_loss=weighted_average_metric(
             losses.weighted_unnormalized_cross_entropy
@@ -641,7 +823,7 @@ _METRICS = {
         perplexity=perplexity_fun(),
         num_examples=NumExamples,
     ),
-    'binary_autoencoder_metrics': metrics.Collection.create(
+    'binary_autoencoder_metrics': Collection.create(
         sigmoid_binary_cross_entropy=weighted_average_metric(
             losses.unnormalized_sigmoid_binary_cross_entropy
         ),
@@ -650,21 +832,21 @@ _METRICS = {
         ),
         num_examples=NumExamples,
     ),
-    'classification_metrics': metrics.Collection.create(
+    'classification_metrics': Collection.create(
         error_rate=weighted_average_metric(weighted_misclassifications),
         ce_loss=weighted_average_metric(
             losses.weighted_unnormalized_cross_entropy
         ),
         num_examples=NumExamples,
     ),
-    'binary_classification_metrics_ogbg_map': metrics.Collection.create(
+    'binary_classification_metrics_ogbg_map': Collection.create(
         ce_loss=weighted_average_metric(
             losses.unnormalized_sigmoid_binary_cross_entropy
         ),
         num_examples=NumExamples,
         average_precision=OGBGMeanAveragePrecision,
     ),
-    'binary_classification_metrics': metrics.Collection.create(
+    'binary_classification_metrics': Collection.create(
         ce_loss=weighted_average_metric(
             losses.unnormalized_sigmoid_binary_cross_entropy
         ),
@@ -672,20 +854,20 @@ _METRICS = {
         average_precision=BinaryMeanAveragePrecision,
         auc_roc=BinaryAUCROC,
     ),
-    'binary_classification_metrics_dlrm_no_auc': metrics.Collection.create(
+    'binary_classification_metrics_dlrm_no_auc': Collection.create(
         ce_loss=weighted_average_metric(
             losses.unnormalized_sigmoid_binary_cross_entropy
         ),
         num_examples=NumExamples,
     ),
-    'image_reconstruction_metrics': metrics.Collection.create(
+    'image_reconstruction_metrics': Collection.create(
         l1_loss=weighted_average_metric(
             losses.weighted_unnormalized_mean_absolute_error
         ),
         ssim=weighted_average_metric(ssim),
         num_examples=NumExamples,
     ),
-    'mdlm_metrics': metrics.Collection.create(
+    'mdlm_metrics': Collection.create(
         ce_loss=average_ctc_loss(), perplexity=mdlm_perplexity()
     ),
 }
@@ -704,7 +886,7 @@ def get_metrics(metrics_name, hps=None):
     ValueError if the metrics is unrecognized.
   """
   if metrics_name == 'ctc_metrics':
-    return metrics.Collection.create(ctc_loss=average_ctc_loss(), wer=wer(hps))
+    return Collection.create(ctc_loss=average_ctc_loss(), wer=wer(hps))
   try:
     return _METRICS[metrics_name]
   except KeyError as metric_not_found_error:
