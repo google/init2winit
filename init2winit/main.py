@@ -302,9 +302,6 @@ def _run(
             training_metrics_config=training_metrics_config,
             callback_configs=callback_configs,
             external_checkpoint_path=external_checkpoint_path,
-            dataset_meta_data=dataset_meta_data,
-            loss_name=loss_name,
-            metrics_name=metrics_name,
             data_selector=data_selector,
             training_algorithm_class=training_algorithm_class,
         ).train()
