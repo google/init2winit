@@ -366,15 +366,6 @@ class BaseModel(object):
       variables['batch_stats'] = batch_stats
     return self.flax_module.apply(variables, batch['inputs'], **apply_kwargs)
 
-  def predict_batch(self,
-                    params,
-                    batch_stats,
-                    batch):
-    """Returns predictions from all the model outputs on the given batch."""
-    logits = self.apply_on_batch(params, batch_stats, batch, mutable=False)
-
-    return self.output_activation_fn(logits)
-
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return loss with an optional L2 penalty on the weights."""
     apply_kwargs = {'train': True}
