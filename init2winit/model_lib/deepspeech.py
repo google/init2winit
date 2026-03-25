@@ -343,7 +343,7 @@ class LayerNorm(nn.Module):
     var = jnp.mean(jnp.square(inputs - mean), axis=-1, keepdims=True)
 
     normed_inputs = (inputs - mean) * jax.lax.rsqrt(var + self.epsilon)
-    normed_inputs *= (1 + self.scale)
+    normed_inputs *= 1 + self.scale
     normed_inputs += self.bias
 
     return normed_inputs
@@ -962,6 +962,17 @@ class DeepSpeechModel(base_model.BaseModel):
         hyp_paddings=hyp_paddings,
         targets=labels,
         target_paddings=label_paddings)
+
+  def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
+    """Wrapper around flax_module.apply."""
+    return self.flax_module.apply(
+        {
+            'params': params,
+            'batch_stats': batch_stats
+        },
+        batch['inputs'],
+        batch['input_paddings'],
+        **apply_kwargs)
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return CTC loss."""
