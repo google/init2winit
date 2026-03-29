@@ -107,7 +107,6 @@ def dot_product_attention(query,
                           broadcast_dropout=True,
                           dropout_rng=None,
                           dropout_rate=0.,
-                          deterministic=False,
                           dtype=jnp.float32,
                           precision=None,
                           temperature=1.0):
@@ -138,7 +137,6 @@ def dot_product_attention(query,
     broadcast_dropout: bool: use a broadcasted dropout along batch dims.
     dropout_rng: JAX PRNGKey: to be used for dropout
     dropout_rate: dropout rate
-    deterministic: bool, deterministic or not (to apply dropout)
     dtype: the dtype of the computation (default: infer from inputs)
     precision: numerical precision of the computation see `jax.lax.Precision`
       for details.
@@ -156,8 +154,16 @@ def dot_product_attention(query,
 
   # compute attention weights
   attn_weights = nn.dot_product_attention_weights(
-      query, key, bias, mask, broadcast_dropout, dropout_rng, dropout_rate,
-      deterministic, dtype, precision)
+      query,
+      key,
+      bias,
+      mask,
+      broadcast_dropout,
+      dropout_rng,
+      dropout_rate,
+      dtype,
+      precision,
+  )
 
   # return weighted sum over values for each query position
   return jnp.einsum('...hqk,...khd->...qhd', attn_weights, value,
