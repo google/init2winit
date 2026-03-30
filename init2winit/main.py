@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-r"""Main file for the init2winit project, updated to use config_flags.
+r"""Main file for the init2winit project.
 
 """
 
