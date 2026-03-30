@@ -678,7 +678,6 @@ class TrainerTest(parameterized.TestCase):
         model_name,
         initializer_name,
         dataset_name,
-        hparam_file=None,
         hparam_overrides=hparam_overrides,
         input_pipeline_hps=input_pipeline_hps)
 
@@ -980,7 +979,6 @@ class TrainerTest(parameterized.TestCase):
         model_name,
         initializer_name,
         dataset_name,
-        hparam_file=None,
         hparam_overrides=hparam_overrides,
         input_pipeline_hps=input_pipeline_hps)
 

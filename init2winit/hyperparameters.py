@@ -22,7 +22,6 @@ from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
 from ml_collections.config_dict import config_dict
-from tensorflow.io import gfile
 
 
 def expand_key(hparams, key_pieces, index, value):
@@ -99,7 +98,6 @@ def expand_dot_keys(d):
 def build_hparams(model_name,
                   initializer_name,
                   dataset_name,
-                  hparam_file,
                   hparam_overrides,
                   input_pipeline_hps=None,
                   allowed_unrecognized_hparams=None):
@@ -109,8 +107,6 @@ def build_hparams(model_name,
     model_name: the string model name.
     initializer_name: the string initializer name.
     dataset_name: the string dataset name.
-    hparam_file: the string to the hyperparameter override file (possibly on
-      CNS).
     hparam_overrides: a dict of hyperparameter override names/values, or a JSON
       string encoding of this hyperparameter override dict. Note that this is
       applied after the hyperparameter file overrides.
@@ -162,12 +158,6 @@ def build_hparams(model_name,
 
   for key in ['opt_hparams', 'lr_hparams']:
     merged[key].unlock()
-
-  if hparam_file:
-    logging.info('Loading hparams from %s', hparam_file)
-    with gfile.GFile(hparam_file, 'r') as f:
-      hparam_dict = json.load(f)
-      merged.update_from_flattened_dict(hparam_dict)
 
   if hparam_overrides:
     if isinstance(hparam_overrides, str):

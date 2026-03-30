@@ -17,7 +17,6 @@
 
 from absl.testing import absltest
 from init2winit import hyperparameters
-import tensorflow.compat.v1 as tf
 
 
 class HyperParameterTest(absltest.TestCase):
@@ -39,7 +38,6 @@ class HyperParameterTest(absltest.TestCase):
         model_name='transformer',
         initializer_name='noop',
         dataset_name='lm1b_v2',
-        hparam_file=None,
         hparam_overrides=hps_overrides,
     )
 
@@ -62,7 +60,6 @@ class HyperParameterTest(absltest.TestCase):
           model_name='transformer',
           initializer_name='noop',
           dataset_name='lm1b_v2',
-          hparam_file=None,
           hparam_overrides=hps_overrides,
           allowed_unrecognized_hparams=[],
       )
@@ -70,7 +67,6 @@ class HyperParameterTest(absltest.TestCase):
         model_name='transformer',
         initializer_name='noop',
         dataset_name='lm1b_v2',
-        hparam_file=None,
         hparam_overrides=hps_overrides,
         allowed_unrecognized_hparams=['lr_hparamsTYPO'],
     )
@@ -85,7 +81,6 @@ class HyperParameterTest(absltest.TestCase):
         model_name='transformer',
         initializer_name='noop',
         dataset_name='lm1b_v2',
-        hparam_file=None,
         hparam_overrides=hps_overrides,
     )
 
@@ -124,7 +119,6 @@ class HyperParameterTest(absltest.TestCase):
         model_name='transformer',
         initializer_name='noop',
         dataset_name='lm1b_v2',
-        hparam_file=None,
         hparam_overrides=hps_overrides,
     )
 
@@ -228,5 +222,4 @@ class HyperParameterTest(absltest.TestCase):
 
 
 if __name__ == '__main__':
-  tf.enable_v2_behavior()
   absltest.main()

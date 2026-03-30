@@ -127,7 +127,6 @@ def _run(
     early_stopping_mode,
     early_stopping_min_steps,
     eval_steps,
-    hparam_file,
     allowed_unrecognized_hparams,
     hparam_overrides,
     initializer_name,
@@ -163,7 +162,6 @@ def _run(
       model_name=model_name,
       initializer_name=initializer_name,
       dataset_name=dataset_name,
-      hparam_file=hparam_file,
       hparam_overrides=hparam_overrides,
       input_pipeline_hps=input_pipeline_hps,
       allowed_unrecognized_hparams=allowed_unrecognized_hparams)
@@ -315,7 +313,6 @@ def main(unused_argv):
         early_stopping_mode=config.early_stopping_mode,
         early_stopping_min_steps=config.early_stopping_min_steps,
         eval_steps=eval_steps,
-        hparam_file=None,  # Deprecated. TODO(gdahl): Needs to be removed.
         allowed_unrecognized_hparams=config.allowed_unrecognized_hparams,
         hparam_overrides=config.hparam_overrides,
         initializer_name=config.initializer,

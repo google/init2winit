@@ -96,7 +96,6 @@ class GenericMultiOptimizerTest(absltest.TestCase):
         experiment_config.model,
         experiment_config.initializer,
         experiment_config.dataset,
-        hparam_file=None,
         hparam_overrides=experiment_config.hparam_overrides)
 
     model = model_cls(

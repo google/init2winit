@@ -72,7 +72,6 @@ def main(unused_argv):
         model_name=model_name,
         initializer_name=initializer_name,
         dataset_name=dataset_name,
-        hparam_file=None,
         hparam_overrides=hparam_overrides)
 
     rng = jax.random.PRNGKey(0)
