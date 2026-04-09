@@ -223,17 +223,33 @@ class MDLMModel(base_model.BaseModel):
     total_loss = jnp.sum(weighted_loss_BxL)
     if pad_weights is not None:
       num_tokens = jnp.sum(pad_weights)
+      effective_num_tokens = jnp.sum(
+          is_masked_BxL.astype(jnp.float32) * pad_weights
+      )
     else:
       num_tokens = jnp.array(B * L, dtype=jnp.float32)
-    return total_loss / (num_tokens + self.hps['epsilon'])
+      effective_num_tokens = jnp.sum(is_masked_BxL.astype(jnp.float32))
+    return (
+        total_loss / (num_tokens + self.hps['epsilon']),
+        num_tokens,
+        effective_num_tokens,
+    )
 
   def evaluate_batch(self, params, batch_stats, batch):
     rng = batch['eval_rng']
-    loss = self._compute_elbo(params, batch, rng, train=False)
-    return self.metrics_bundle.single_from_model_output(normalized_loss=loss)
+    loss, num_tokens, effective_num_tokens = self._compute_elbo(
+        params, batch, rng, train=False
+    )
+    return self.metrics_bundle.single_from_model_output(
+        normalized_loss=loss,
+        num_tokens=num_tokens,
+        effective_num_tokens=effective_num_tokens,
+    )
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
-    loss = self._compute_elbo(params, batch, dropout_rng, train=True)
+    loss, num_tokens, effective_num_tokens = self._compute_elbo(
+        params, batch, dropout_rng, train=True
+    )
 
     if self.hps.get('l2_decay_factor'):
       l2_loss = model_utils.l2_regularization(
@@ -241,4 +257,7 @@ class MDLMModel(base_model.BaseModel):
       )
       loss += 0.5 * self.hps.l2_decay_factor * l2_loss
 
-    return loss, {}
+    return loss, {
+        'num_tokens': num_tokens,
+        'effective_num_tokens': effective_num_tokens,
+    }
