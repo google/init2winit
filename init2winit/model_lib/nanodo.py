@@ -41,23 +41,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         num_heads=8,  # num attention heads
         num_layers=6,  # number of transformer block layers
         mlp_dim=2048,  # FF inner dimension
-        rng_seed=-1,
         computation_dtype='bfloat16',
         model_dtype='float32',
-        optimizer='adam',
-        batch_size=256,
-        lr_hparams={'base_lr': 0.01, 'schedule': 'constant'},
-        opt_hparams={
-            'beta1': 0.9,
-            'beta2': 0.999,
-            'epsilon': 1e-8,
-            'weight_decay': 0.0,
-        },
-        l2_decay_factor=0.0005,
-        l2_decay_rank_threshold=2,
-        grad_clip=None,
-        label_smoothing=0.0,
-        use_shallue_label_smoothing=False,
     )
 )
 

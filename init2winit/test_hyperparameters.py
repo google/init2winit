@@ -84,18 +84,14 @@ class HyperParameterTest(absltest.TestCase):
         hparam_overrides=hps_overrides,
     )
 
-    self.assertEqual(
-        merged_hps.lr_hparams['schedule'], 'rsqrt_normalized_decay_warmup'
-    )
+    self.assertEqual(merged_hps.lr_hparams['schedule'], 'constant')
     expected_lr_hparams = {
         'base_lr': 77.0,
-        'warmup_steps': 1000,
-        'squash_steps': 1000,
-        'schedule': 'rsqrt_normalized_decay_warmup',
+        'schedule': 'constant',
     }
     self.assertEqual(
         set(merged_hps.lr_hparams.keys()),
-        set(['schedule', 'warmup_steps', 'base_lr', 'squash_steps']),
+        set(['schedule', 'base_lr']),
     )
     self.assertEqual(merged_hps.lr_hparams.to_dict(), expected_lr_hparams)
 

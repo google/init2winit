@@ -48,27 +48,12 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         # results in a large Dense matrix in the readout layer and unstable
         # training.
         use_kernel_size_as_stride_in_pooling=True,
-        layer_rescale_factors={},
-        lr_hparams={
-            'schedule': 'constant',
-            'base_lr': 0.2,
-        },
         normalizer='batch_norm',
-        optimizer='momentum',
-        opt_hparams={
-            'momentum': 0.9,
-        },
-        batch_size=128,
-        l2_decay_factor=0.0001,
-        l2_decay_rank_threshold=2,
-        label_smoothing=None,
-        rng_seed=-1,
-        use_shallue_label_smoothing=False,
         model_dtype='float32',
-        grad_clip=None,
         normalize_classifier_input='none',
         classification_scale_factor=1.0,
-    ))
+    )
+)
 
 
 class BottleneckBlock(nn.Module):

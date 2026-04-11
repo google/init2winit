@@ -24,6 +24,32 @@ from init2winit.model_lib import models
 from ml_collections.config_dict import config_dict
 
 
+# Default hyperparameters for training and optimization.
+DEFAULT_TRAINING_HPARAMS = config_dict.ConfigDict(
+    dict(
+        optimizer='adam',
+        opt_hparams={
+            'beta1': 0.9,
+            'beta2': 0.999,
+            'epsilon': 1e-8,
+            'grad_clip': None,
+        },
+        lr_hparams={
+            'base_lr': 0.01,
+            'schedule': 'constant',
+        },
+        batch_size=128,
+        total_accumulated_batch_size=None,
+        l2_decay_factor=None,
+        l2_decay_rank_threshold=2,
+        label_smoothing=None,
+        rng_seed=-1,
+        use_shallue_label_smoothing=False,
+        layer_rescale_factors={},
+    )
+)
+
+
 def expand_key(hparams, key_pieces, index, value):
   """Util to safely expand dotted keys in a dictionary.
 
@@ -125,22 +151,31 @@ def build_hparams(model_name,
   initializer_hps = initializers.get_initializer_hparams(initializer_name)
   dataset_hps = datasets.get_dataset_hparams(dataset_name)
   input_pipeline_hps = input_pipeline_hps or config_dict.ConfigDict()
+  training_hps = DEFAULT_TRAINING_HPARAMS
 
   merged_dict = {}
 
   hps_dicts = [
       hps.to_dict()
-      for hps in [model_hps, initializer_hps, dataset_hps, input_pipeline_hps]
+      for hps in [
+          training_hps,
+          model_hps,
+          initializer_hps,
+          dataset_hps,
+          input_pipeline_hps,
+      ]
   ]
 
-  total_hps = 0
   for hps_dict in hps_dicts:
     merged_dict.update(hps_dict)
-    total_hps += len(hps_dict.keys())
 
-  # Check that all provided have no overlap.
-  if total_hps != len(merged_dict.keys()):
-    raise ValueError('There is overlap in the provided hparams.')
+  # Check that all provided hps have no overlap.
+  seen_keys = set()
+  for hps_dict in hps_dicts:
+    overlap = seen_keys.intersection(hps_dict.keys())
+    if overlap:
+      raise ValueError(f'There is overlap in the provided hparams: {overlap}')
+    seen_keys.update(hps_dict.keys())
 
   # Convert to the Shallue and Lee label smoothing style.
   if merged_dict.get('use_shallue_label_smoothing', False):
