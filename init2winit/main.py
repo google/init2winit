@@ -118,6 +118,7 @@ def _run(
     test_num_batches,
     eval_train_num_batches,
     eval_frequency,
+    log_frequency,
     checkpoint_steps,
     num_tf_data_prefetches,
     num_device_prefetches,
@@ -127,6 +128,7 @@ def _run(
     early_stopping_mode,
     early_stopping_min_steps,
     eval_steps,
+    log_steps,
     allowed_unrecognized_hparams,
     hparam_overrides,
     initializer_name,
@@ -218,12 +220,14 @@ def _run(
             test_num_batches,
             eval_train_num_batches,
             eval_frequency,
+            log_frequency,
             checkpoint_steps,
             early_stopping_target_name,
             early_stopping_target_value,
             early_stopping_mode,
             early_stopping_min_steps,
             eval_steps,
+            log_steps,
             metrics_logger,
             init_logger,
             training_metrics_config=training_metrics_config,
@@ -271,6 +275,7 @@ def main(unused_argv):
 
   checkpoint_steps = [int(s.strip()) for s in config.checkpoint_steps]
   eval_steps = [int(s.strip()) for s in config.eval_steps]
+  log_steps = [int(s.strip()) for s in config.log_steps]
   if jax.process_index() == 0:
     # We don't need to tie the root experiment_dir to any specific worker's
     # CNS2 cell, as it's just the parent for the trial directories.
@@ -292,6 +297,7 @@ def main(unused_argv):
       logging.info('host_id : %d', jax.process_index())
       logging.info('checkpoint_steps: %r', checkpoint_steps)
       logging.info('eval_steps: %r', eval_steps)
+      logging.info('log_steps: %r', log_steps)
 
     trainer_cls = trainers.get_trainer_cls(config.trainer)
     _run(
@@ -304,6 +310,7 @@ def main(unused_argv):
         test_num_batches=config.test_num_batches,
         eval_train_num_batches=config.eval_train_num_batches,
         eval_frequency=config.eval_frequency,
+        log_frequency=config.log_frequency,
         checkpoint_steps=checkpoint_steps,
         num_tf_data_prefetches=config.num_tf_data_prefetches,
         num_device_prefetches=config.num_device_prefetches,
@@ -313,6 +320,7 @@ def main(unused_argv):
         early_stopping_mode=config.early_stopping_mode,
         early_stopping_min_steps=config.early_stopping_min_steps,
         eval_steps=eval_steps,
+        log_steps=log_steps,
         allowed_unrecognized_hparams=config.allowed_unrecognized_hparams,
         hparam_overrides=config.hparam_overrides,
         initializer_name=config.initializer,

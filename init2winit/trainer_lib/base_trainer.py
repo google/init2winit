@@ -62,6 +62,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       early_stopping_mode=None,
       early_stopping_min_steps=0,
       eval_steps=None,
+      log_frequency=None,
+      log_steps=None,
       metrics_logger=None,
       init_logger=None,
       training_metrics_config=None,
@@ -119,6 +121,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         provided, eval_frequency will be ignored. Performing an eval implies
         saving a checkpoint that will be used to resume training in the case of
         preemption.
+      log_frequency: (int) Log every k steps.
+      log_steps: List of integers indicating which steps to perform logging. If
+        provided, log_frequency will be ignored.
       metrics_logger: Used to log all eval metrics during training. See
         utils.MetricLogger for API definition.
       init_logger: Used for black box initializers that have learning curves.
@@ -245,6 +250,16 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._training_algorithm_class = training_algorithm_class
     logging.info('Using training algorithm class: %s',
                  self._training_algorithm_class)
+
+    if log_frequency is not None:
+      self._log_frequency = log_frequency
+    else:
+      self._log_frequency = self._eval_frequency
+
+    if log_steps is not None:
+      self._log_steps = log_steps
+    else:
+      self._log_steps = self._eval_steps
 
   def wait_until_orbax_checkpointer_finished(self):
     self._orbax_checkpoint_manager.wait_until_finished()
@@ -428,6 +443,16 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           comparison_string,
           self._early_stopping_target_value)
     return early_stopping_condition
+
+  def _log_training_metrics(self):
+    """Log training_algorithm metrics."""
+    report = dict(global_step=self._global_step)
+    report.update(self.training_algorithm.eval_report_metrics)
+    if jax.process_index() == 0:
+      logging.info('Step %d, training metrics: %r', self._global_step, report)
+      if self._metrics_logger:
+        self._metrics_logger.append_scalar_metrics(report)
+    return report
 
   def _eval(self, start_step, start_time, eval_rng, save=True):
     """Evaluate.
@@ -710,9 +735,13 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         # TODO(gdahl, gilmer): consider moving this test up.
         # NB: Since this test is after we increment self._global_step, having 0
         # in eval_steps does nothing.
-        if trainer_utils.should_eval(
+        should_eval = trainer_utils.should_trigger(
             self._global_step, self._eval_frequency, self._eval_steps
-        ):
+        )
+        should_log_train_metrics = trainer_utils.should_trigger(
+            self._global_step, self._log_frequency, self._log_steps
+        )
+        if should_eval:
           try:
             report = self._eval(start_step, start_time, eval_rng)
           except utils.TrainingDivergedError as e:
@@ -724,6 +753,9 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           if self._check_early_stopping(report):
             self.wait_until_orbax_checkpointer_finished()
             return
+        elif should_log_train_metrics:
+          report = self._log_training_metrics()
+          yield report
 
     # Always log and checkpoint on host 0 at the end of training.
     # If we moved where in the loop body evals happen then we would not need
