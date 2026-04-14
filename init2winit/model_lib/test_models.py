@@ -25,6 +25,7 @@ import os
 from absl.testing import absltest
 from absl.testing import parameterized
 import flax.linen as nn
+from init2winit import hyperparameters
 from init2winit.init_lib import initializers
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
@@ -425,7 +426,8 @@ def _get_fake_inputs_for_initialization(model, hps):
 def _initialize_model(model_str, model_dtype):
   """Initialize a model given a registry name and dtype."""
   model_cls = models.get_model(model_str)
-  hps = models.get_model_hparams(model_str)
+  hps = copy.deepcopy(hyperparameters.DEFAULT_TRAINING_HPARAMS)
+  hps.update(models.get_model_hparams(model_str))
   hps.update(DATA_HPS[model_str])
   if 'input_edge_shape' in hps and 'input_node_shape' in hps:
     hps.input_shape = (hps.input_node_shape, hps.input_edge_shape)
@@ -462,7 +464,8 @@ class ModelsTest(parameterized.TestCase):
     model_hps = models.get_model_hparams(model_str)
     loss = 'cross_entropy'
     metrics = 'classification_metrics'
-    hps = copy.copy(model_hps)
+    hps = copy.deepcopy(hyperparameters.DEFAULT_TRAINING_HPARAMS)
+    hps.update(model_hps)
     hps.update({'output_shape': OUTPUT_SHAPE['classification']})
     rng = jax.random.PRNGKey(0)
     dropout_rng, params_rng = jax.random.split(rng)

@@ -389,7 +389,8 @@ class TrainerTest(parameterized.TestCase):
     rng = jax.random.PRNGKey(1337)
     model_str = 'gnn'
     model_cls = models.get_model(model_str)
-    hps = models.get_model_hparams(model_str)
+    hps = copy.deepcopy(hyperparameters.DEFAULT_TRAINING_HPARAMS)
+    hps.update(models.get_model_hparams(model_str))
     hps.update({
         'batch_size': 2,
         'input_edge_shape': (7,),
@@ -455,7 +456,8 @@ class TrainerTest(parameterized.TestCase):
     model_str = 'dlrm'
     dataset_str = 'criteo1tb'
     model_cls = models.get_model(model_str)
-    model_hps = models.get_model_hparams(model_str)
+    model_hps = copy.deepcopy(hyperparameters.DEFAULT_TRAINING_HPARAMS)
+    model_hps.update(models.get_model_hparams(model_str))
     model_hps.vocab_size = 1024
     dataset_hps = datasets.get_dataset_hparams(dataset_str)
     dataset_hps.update({
@@ -961,9 +963,10 @@ class TrainerTest(parameterized.TestCase):
     initializer = initializers.get_initializer(initializer_name)
     dataset_builder = datasets.get_dataset(dataset_name)
     hparam_overrides = {
-        'lr_hparams': {
-            'base_lr': 0.1,
-            'schedule': 'cosine'
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'cosine'},
+        'optimizer': 'momentum',
+        'opt_hparams': {
+            'momentum': 0.9,
         },
         'batch_size': 8,
         'train_size': 160,

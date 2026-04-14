@@ -29,33 +29,16 @@ from ml_collections.config_dict import config_dict
 DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     num_filters=16,
     num_layers=18,  # Must be one of [18, 34, 50, 101, 152, 200]
-    layer_rescale_factors={},
-    lr_hparams={
-        'schedule': 'constant',
-        'base_lr': 0.2,
-    },
-    optimizer='momentum',
-    opt_hparams={
-        'momentum': 0.9,
-    },
-    batch_size=128,
-    l2_decay_factor=0.0001,
-    l2_decay_rank_threshold=2,
-    label_smoothing=None,
-    rng_seed=-1,
-    use_shallue_label_smoothing=False,
     batch_norm_momentum=0.9,
     batch_norm_epsilon=1e-5,
     # Make this a string to avoid having to import jnp into the configs.
     model_dtype='float32',
     virtual_batch_size=64,
-    total_accumulated_batch_size=None,
     data_format='NHWC',
     block_type='post_activation',  # either pre_activation or post_activation
     bn_relu_conv=True,  # only used for block_type='pre_activation'
     use_bn=True,
     dropout_rate=0.0,
-    grad_clip=None,
     activation_function='relu',
     extra_norm_on_residual=False,
 ))

@@ -29,22 +29,7 @@ from ml_collections.config_dict import config_dict
 DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     num_filters=[20, 10],
     kernel_sizes=[3, 3],
-    lr_hparams={
-        'base_lr': 0.001,
-        'schedule': 'constant'
-    },
-    layer_rescale_factors={},
-    optimizer='momentum',
-    opt_hparams={
-        'momentum': 0.9,
-    },
-    batch_size=128,
     activation_function='relu',
-    l2_decay_factor=.0005,
-    l2_decay_rank_threshold=2,
-    label_smoothing=None,
-    rng_seed=-1,
-    use_shallue_label_smoothing=False,
     model_dtype='float32',
 ))
 
