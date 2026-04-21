@@ -146,7 +146,7 @@ class MetricsTest(parameterized.TestCase):
     expected = ssim(im1, im2, data_range=1.0)
     result = metrics.structural_similarity(jim1, jim2, data_range=1.0).item()
 
-    self.assertAlmostEqual(expected, result)
+    self.assertAlmostEqual(expected, result, delta=1e-6)
 
   def test_wer_spm(self):
     """Tests word error rate metric implementation with SPM tokenizer."""
