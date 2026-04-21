@@ -93,7 +93,8 @@ def _get_trial_dir(experiment_dir, trial_id):
 def _write_trial_meta_data(meta_data_path, meta_data):
   d = meta_data.copy()
   d['timestamp'] = time.time()
-  with gfile.GFile(meta_data_path, 'w') as f:
+  gfile_kwargs = {}
+  with gfile.GFile(meta_data_path, 'w', **gfile_kwargs) as f:
     f.write(json.dumps(d, indent=2))
 
 
@@ -287,7 +288,8 @@ def main(unused_argv):
   log_path = os.path.join(
       trial_dir, 'worker{}_{}.log'.format(worker_id, jax.process_index())
   )
-  with gfile.GFile(log_path, 'a') as logfile:
+  gfile_kwargs = {}
+  with gfile.GFile(log_path, 'a', **gfile_kwargs) as logfile:
     utils.add_log_file(logfile)
     if jax.process_index() == 0:
       logging.info('argv:\n%s', ' '.join(sys.argv))
