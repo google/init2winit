@@ -19,6 +19,7 @@ r"""Main file for the init2winit project.
 
 import json
 import os
+import random
 import struct
 import sys
 import time
