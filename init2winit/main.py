@@ -51,9 +51,10 @@ makedirs = tf.io.gfile.makedirs
 # Allow caching for any size executables since we had a small executable that
 # took 50 minutes to compile.
 jax.config.update('jax_persistent_cache_min_entry_size_bytes', -1)
-# Since we don't restrict caching by executable size, set a slightly higher
-# minimum compile time threshold than the default of 1 second.
-jax.config.update('jax_persistent_cache_min_compile_time_secs', 10)
+# Cache all compilations regardless of compile time. The optimizer init
+# produces ~50 small compilations (~1.2s each) that collectively add ~60s
+# to startup; caching them eliminates this on preemption restarts.
+jax.config.update('jax_persistent_cache_min_compile_time_secs', 0)
 jax.config.update('jax_log_compiles', True)
 # Setting jax default prng implementation to protect against jax defaults
 # change.

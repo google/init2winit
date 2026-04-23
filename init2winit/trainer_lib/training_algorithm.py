@@ -307,7 +307,9 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     optimizer_init_fn, optax_optimizer_update_fn = optimizers.get_optimizer(
         self.hps, self.model, batch_axis_name='batch'
     )
-    optax_optimizer_state = optimizer_init_fn(params)
+    # Wrapping init in jax.jit fuses per-parameter state creation ops into
+    # a single compilation instead of compiling each one individually.
+    optax_optimizer_state = jax.jit(optimizer_init_fn)(params)
     self._optimizer_state = optax_optimizer_state
     self._update_fn = optax_optimizer_update_fn
     return optax_optimizer_state
