@@ -39,8 +39,6 @@ import optax
 
 
 
-
-
 def _filtering(path, _) -> bool:
   """Filter to ensure that we inject/fetch lrs from 'InjectHyperparamsState'-like states."""
   if (
