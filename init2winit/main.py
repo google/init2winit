@@ -19,7 +19,6 @@ r"""Main file for the init2winit project.
 
 import json
 import os
-import random
 import struct
 import sys
 import time
@@ -95,8 +94,7 @@ def _get_trial_dir(experiment_dir, trial_id):
 def _write_trial_meta_data(meta_data_path, meta_data):
   d = meta_data.copy()
   d['timestamp'] = time.time()
-  gfile_kwargs = {}
-  with gfile.GFile(meta_data_path, 'w', **gfile_kwargs) as f:
+  with gfile.GFile(meta_data_path, 'w') as f:
     f.write(json.dumps(d, indent=2))
 
 
@@ -285,10 +283,12 @@ def main(unused_argv):
     # The trial directories themselves will get the correct cell placement.
     kwargs = {}
     makedirs(experiment_dir, mode=0o775, **kwargs)
-  trial_dir = _get_trial_dir(experiment_dir, worker_id)
-  makedirs(trial_dir, mode=0o775)
+  log_dir = os.path.join(
+      experiment_dir, CNS_LOGS_ENCODING, 'logs', str(worker_id)
+  )
+  makedirs(log_dir, mode=0o775)
   log_path = os.path.join(
-      trial_dir, 'worker{}_{}.log'.format(worker_id, jax.process_index())
+      log_dir, 'worker{}_{}.log'.format(worker_id, jax.process_index())
   )
   gfile_kwargs = {}
   with gfile.GFile(log_path, 'a', **gfile_kwargs) as logfile:
