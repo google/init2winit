@@ -221,19 +221,23 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
       end = hps.num_test_h5_files + hps.num_valid_h5_files
 
   data_dir = hps.data_dir
+  list_data_dir = data_dir  # Path for directory listing
 
   if split in ['train', 'eval_train']:
     data_dir = os.path.join(data_dir, hps.train_dir)
+    list_data_dir = os.path.join(list_data_dir, hps.train_dir)
   elif split == 'test':
     data_dir = os.path.join(data_dir, hps.test_dir)
+    list_data_dir = os.path.join(list_data_dir, hps.test_dir)
     start += hps.num_valid_h5_files
     if end != hps.num_test_h5_files + hps.num_valid_h5_files:
       end += hps.num_valid_h5_files
   else:  # split == 'val'
     data_dir = os.path.join(data_dir, hps.val_dir)
+    list_data_dir = os.path.join(list_data_dir, hps.val_dir)
 
   try:
-    all_files = listdir(data_dir)
+    all_files = sorted(listdir(list_data_dir))
   except tf.errors.NotFoundError as e:
     raise FileNotFoundError(
         f'FastMRI data directory not found: {data_dir}.'
