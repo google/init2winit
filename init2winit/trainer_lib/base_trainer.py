@@ -221,6 +221,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # Initialized in train() when training starts.
     self._time_at_prev_eval_end = None
     self._prev_eval_step = None
+    self._time_at_prev_log_end = None
+    self._prev_log_step = None
 
     assert hps.batch_size % (jax.device_count()) == 0
     assert eval_batch_size % (jax.device_count()) == 0
@@ -446,12 +448,27 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
   def _log_training_metrics(self):
     """Log training_algorithm metrics."""
-    report = dict(global_step=self._global_step)
+    time_since_last_log = time.time() - self._time_at_prev_log_end
+    steps_since_last_log = self._global_step - self._prev_log_step
+
+    mean_train_cost = self._sum_train_cost / max(
+        1, self._global_step - self._prev_eval_step
+    )
+    train_steps_per_sec = steps_since_last_log / time_since_last_log
+
+    report = dict(
+        global_step=self._global_step)
     report.update(self.training_algorithm.eval_report_metrics)
+    report.update(
+        train_cost=mean_train_cost,
+        train_steps_per_sec=train_steps_per_sec,
+    )
     if jax.process_index() == 0:
       logging.info('Step %d, training metrics: %r', self._global_step, report)
       if self._metrics_logger:
         self._metrics_logger.append_scalar_metrics(report)
+    self._time_at_prev_log_end = time.time()
+    self._prev_log_step = self._global_step
     return report
 
   def _eval(self, start_step, start_time, eval_rng, save=True):
@@ -540,6 +557,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     self._time_at_prev_eval_end = time.time()
     self._prev_eval_step = self._global_step
+    self._time_at_prev_log_end = self._time_at_prev_eval_end
+    self._prev_log_step = self._global_step
     return report
 
   def setup_and_maybe_restore(self, init_rng, data_rng, callback_rng):
@@ -691,6 +710,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # that we can increment as in the case of train_time.
     self._time_at_prev_eval_end = start_time
     self._prev_eval_step = self._global_step
+    self._time_at_prev_log_end = start_time
+    self._prev_log_step = self._global_step
 
     if self._global_step in self._checkpoint_steps:
       self._save(checkpoint_manager=self._orbax_checkpoint_manager_extra)

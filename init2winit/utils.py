@@ -280,20 +280,22 @@ class MetricLogger(object):
       metrics: a Dict of metric names to scalar values. 'global_step' is the
         only required key.
     """
-    try:
-      with gfile.GFile(self._csv_path) as csv_file:
-        measurements = pd.read_csv(csv_file)
-        measurements = pd.concat([measurements, pd.DataFrame([metrics])])
-    except (pd.errors.EmptyDataError, gfile.FileError) as e:
-      measurements = pd.DataFrame([metrics], columns=sorted(metrics.keys()))
-      if isinstance(e, pd.errors.EmptyDataError):
-        # TODO(ankugarg): Identify root cause for the corrupted file.
-        # Most likely it's preemptions or file-write error.
-        logging.info('Measurements file is empty. Create a new one, starting '
-                     'with metrics from this step.')
-    # TODO(gdahl,gilmer): Should this be an atomic file?
-    with gfile.GFile(self._csv_path, 'w') as csv_file:
-      measurements.to_csv(csv_file, index=False)
+
+    def _read_and_write_csv():
+      try:
+        with gfile.GFile(self._csv_path) as csv_file:
+          measurements = pd.read_csv(csv_file)
+          measurements = pd.concat([measurements, pd.DataFrame([metrics])])
+      except (pd.errors.EmptyDataError, gfile.FileError) as e:
+        measurements = pd.DataFrame([metrics], columns=sorted(metrics.keys()))
+        if isinstance(e, pd.errors.EmptyDataError):
+          logging.info(
+              'Measurements file is empty. Creating a new one,'
+              ' starting with metrics from this step.'
+          )
+      with gfile.GFile(self._csv_path, 'w') as csv_file:
+        measurements.to_csv(csv_file, index=False)
+
 
     if 'global_step' in metrics:
       metrics['global_step'] = int(reduce_to_scalar(metrics['global_step']))
