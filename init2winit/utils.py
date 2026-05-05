@@ -338,7 +338,11 @@ class MetricLogger(object):
 
 
 def _summary_str(param):
-  total_norm = jnp.linalg.norm(param.reshape(-1))
+  # Use numpy (not jax.numpy) to avoid triggering a separate XLA compilation
+  # for every unique parameter shape. Each jnp.linalg.norm call on a different
+  # shape would compile a new XLA program, adding ~6s per shape on TPU.
+  param_np = np.asarray(param)
+  total_norm = np.linalg.norm(param_np.reshape(-1))
   return '{} - {} - {}'.format(str(param.shape), param.size, total_norm)
 
 
