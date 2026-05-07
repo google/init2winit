@@ -54,12 +54,12 @@ See the [`dataset_lib`](https://github.com/google/init2winit/tree/master/init2wi
 To cite this repository:
 
 ```bibtex
-@software{init2winit2021github,
-  author = {Justin M. Gilmer and George E. Dahl and Zachary Nado and Priya Kasimbeg and Sourabh Medapati},
+@software{init2winit2026github,
+  author = {Justin M. Gilmer and George E. Dahl and Zachary Nado and Priya Kasimbeg and Sourabh Medapati and Ahmed Khaled},
   title = {{init2winit}: a JAX codebase for initialization, optimization, and tuning research},
   url = {http://github.com/google/init2winit},
-  version = {0.0.2},
-  year = {2023},
+  version = {0.0.3},
+  year = {2026},
 }
 ```
 
@@ -89,4 +89,5 @@ Contributors (past and present):
 - Bilal Khan
 - Jeremy Cohen
 - Kacper Krasowiak
+- Ahmed Khaled
 

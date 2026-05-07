@@ -9,7 +9,7 @@ from setuptools import setup
 
 setup(
     name='init2winit',
-    version='0.0.1',
+    version='0.0.3',
     description='init2winit',
     author='init2winit Team',
     author_email='znado@google.com',
