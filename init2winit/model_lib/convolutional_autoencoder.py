@@ -49,25 +49,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
             'paddings': ['SAME', ((1, 0), (1, 0)), 'SAME', 'SAME'],
             'activations': ['relu', 'relu', 'relu', 'id'],
         },
-
         activation_function='relu',
-        lr_hparams={
-            'base_lr': 0.02,
-            'schedule': 'constant'
-        },
-        layer_rescale_factors={},
-        optimizer='momentum',
-        opt_hparams={
-            'momentum': 0,
-        },
-        batch_size=128,
-        l2_decay_factor=None,
-        l2_decay_rank_threshold=0,
-        label_smoothing=None,
-        rng_seed=-1,
-        use_shallue_label_smoothing=False,
         model_dtype='float32',
-        grad_clip=None,
     ))
 
 

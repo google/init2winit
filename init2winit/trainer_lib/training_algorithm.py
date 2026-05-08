@@ -18,12 +18,14 @@
 import abc
 import collections
 
+from absl import logging
 from init2winit import schedules
 from init2winit.model_lib import model_utils
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import optimizers
 import jax
 import jax.numpy as jnp
+from ml_collections.config_dict import config_dict
 import optax
 
 
@@ -111,6 +113,27 @@ class TrainingAlgorithm(metaclass=abc.ABCMeta):
     self.hps = hps
     self.eval_report_metrics = collections.defaultdict()
 
+  @classmethod
+  def get_default_training_hparams(cls):
+    """Returns default training hyperparameters.
+
+    The base class provides infrastructure-level defaults. Subclasses should
+    call super() and merge in their own optimizer/lr defaults.
+
+    Returns:
+      A ConfigDict of default training hyperparameters.
+    """
+    return config_dict.ConfigDict({
+        'batch_size': None,
+        'total_accumulated_batch_size': None,
+        'l2_decay_factor': None,
+        'l2_decay_rank_threshold': 2,
+        'label_smoothing': None,
+        'rng_seed': -1,
+        'use_shallue_label_smoothing': False,
+        'layer_rescale_factors': {},
+    })
+
   @abc.abstractmethod
   def update_params(
       self,
@@ -175,8 +198,648 @@ class TrainingAlgorithm(metaclass=abc.ABCMeta):
     """
 
 
+# Per-optimizer default opt_hparams for OptaxTrainingAlgorithm.
+# These consolidate all the inline defaults from get_optimizer() in
+# optimizer_lib/optimizers.py so that configs don't need to redundantly
+# specify values that match the defaults.
+_OPTAX_OPTIMIZER_DEFAULTS = {
+    'adam': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'epsilon': 1e-8,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'sgd': {
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'momentum': {
+        'momentum': 0.9,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'nesterov': {
+        'momentum': 0.9,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'nadam': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'epsilon': 1e-8,
+        'epsilon_root': 0.0,
+        'debias': True,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'generalized_adam': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'epsilon': 1e-8,
+        'nesterov': True,
+        'power': 2.0,
+        'disable_preconditioning': False,
+        'epsilon_root': 0.0,
+        'debias': True,
+        'weight_decay': 0.0,
+        'disable_multiply_wd_by_base_lr': False,
+        'grad_clip': None,
+    },
+    'nadamp': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'epsilon': 1e-8,
+        'epsilon_root': 0.0,
+        'debias': True,
+        'power': 2.0,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'adaprop': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'beta3': 1.0,
+        'beta4': 0.999,
+        'epsilon': 1e-8,
+        'power': 2.0,
+        'nesterov': True,
+        'quantized_dtype': 'float32',
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'adafactor': {
+        'min_dim_size_to_factor': 128,
+        'adafactor_decay_rate': 0.8,
+        'decay_offset': 0,
+        'multiply_by_parameter_scale': True,
+        'clipping_threshold': 1.0,
+        'momentum': None,
+        'epsilon': 1e-30,
+        'factored': True,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'lamb': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'epsilon': 1e-6,
+        'epsilon_root': 0.0,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'lars': {
+        'trust_coefficient': 0.001,
+        'epsilon': 1e-6,
+        'momentum': 0.9,
+        'nesterov': False,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'adabelief': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'epsilon': 1e-8,
+        'epsilon_root': 0.0,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'radam': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'epsilon': 1e-8,
+        'epsilon_root': 0.0,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'adam_relative_update': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'epsilon': 1e-8,
+        'epsilon_root': 0.0,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'herolion': {
+        'beta1': 0.9,
+        'beta2': 0.99,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'bubbles': {
+        'weight_decay': 0.01,
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'nesterov': True,
+        'min_steps': 100,
+        'grad_rms_threshold': 10.0,
+        'precond_grad_clip': None,
+        'bias_correction': True,
+        'grad_clip': None,
+    },
+    'lora_bubbles': {
+        'weight_decay': 0.01,
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'nesterov': True,
+        'eps': 1e-7,
+        'lora_min_steps': 100,
+        'lora_update_steps': 20,
+        'lora_rank': 64,
+        'grad_rms_threshold': 10.0,
+        'precond_grad_clip': None,
+        'bias_correction': True,
+        'grad_clip': None,
+    },
+    'diag_bubbles': {
+        'beta1': None,
+        'beta2': 0.999,
+        'eps': 1e-8,
+        'precond_grad_clip': None,
+        'nesterov': False,
+        'bias_correction': True,
+        'weight_decay': 1e-4,
+        'grad_clip': None,
+    },
+    'decoupled_adam': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'epsilon': 1e-8,
+        'epsilon_root': 0.0,
+        'weight_decay': 0.0,
+        'grad_clip': None,
+    },
+    'adan': {
+        'beta1': 0.98,
+        'beta2': 0.92,
+        'beta3': 0.99,
+        'epsilon': 1e-8,
+        'epsilon_root': 0.0,
+        'weight_decay': 0.0,
+        'use_adamw_wd': True,
+        'tie_b1_b2': False,
+        'grad_clip': None,
+    },
+    'sm3': {
+        'beta1': 0.9,
+        'beta2': 0.999,
+        'diagonal_epsilon': 1e-10,
+        'weight_decay': 0.0,
+        'normalize_grads': False,
+        'grad_clip': None,
+    },
+}
+
+# UNet piecewise_constant schedule constants (originally in unet.py).
+_FASTMRI_TRAIN_SIZE = 34742
+_UNET_BATCH_SIZE = 8
+_UNET_NUM_EPOCHS = 50
+_UNET_STEPS_PER_EPOCH = int(_FASTMRI_TRAIN_SIZE / _UNET_BATCH_SIZE)
+_UNET_NUM_TRAIN_STEPS = _UNET_NUM_EPOCHS * _UNET_STEPS_PER_EPOCH
+_UNET_LR_GAMMA = 0.1
+_UNET_LR_STEP_SIZE = 40 * _UNET_STEPS_PER_EPOCH
+_UNET_DECAY_EVENTS = list(
+    range(_UNET_LR_STEP_SIZE, _UNET_NUM_TRAIN_STEPS, _UNET_LR_STEP_SIZE)
+)
+_UNET_DECAY_FACTORS = [
+    _UNET_LR_GAMMA**i for i in range(1, len(_UNET_DECAY_EVENTS) + 1)
+]
+
+# Per-model training defaults, preserving the historical optimizer configuration
+# that each model was originally tuned with. These are used as Tier 2 fallback
+# when no explicit optimizer is specified in hparam_overrides.
+_MODEL_TRAINING_DEFAULTS = {
+    # Vision models with momentum
+    'adabelief_densenet': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.9},
+        'lr_hparams': {'base_lr': 0.2, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 0.0001,
+    },
+    'adabelief_resnet': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.9},
+        'lr_hparams': {'base_lr': 0.2, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 0.0001,
+    },
+    'adabelief_vgg': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.9},
+        'lr_hparams': {'base_lr': 0.2, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 0.0001,
+    },
+    'resnet': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.9},
+        'lr_hparams': {'base_lr': 0.2, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 0.0001,
+    },
+    'fully_connected': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.9},
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 0.0005,
+    },
+    'simple_cnn': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.9},
+        'lr_hparams': {'base_lr': 0.001, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 0.0005,
+    },
+    'max_pooling_cnn': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.9},
+        'lr_hparams': {'base_lr': 0.001, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 0.0005,
+    },
+    'wide_resnet': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.9},
+        'lr_hparams': {'base_lr': 0.001, 'schedule': 'cosine'},
+        'batch_size': 128,
+        'l2_decay_factor': 0.0001,
+    },
+    'convolutional_autoencoder': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.0},
+        'lr_hparams': {'base_lr': 0.02, 'schedule': 'constant'},
+        'batch_size': 128,
+    },
+    'nqm': {
+        'optimizer': 'momentum',
+        'opt_hparams': {'momentum': 0.0},
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'constant'},
+        'batch_size': 128,
+    },
+    # Vision models with adam
+    'vit': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.1},
+        'lr_hparams': {'base_lr': 1e-3, 'schedule': 'cosine_warmup'},
+        'batch_size': 1024,
+    },
+    # Speech models
+    'conformer': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0, 'grad_clip': 5.0},
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'constant'},
+        'batch_size': 256,
+        'l2_decay_factor': 1e-6,
+        'l2_decay_rank_threshold': 0,
+    },
+    'mlcommons_conformer': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0, 'grad_clip': 5.0},
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'constant'},
+        'batch_size': 256,
+        'l2_decay_factor': 1e-6,
+        'l2_decay_rank_threshold': 0,
+    },
+    'deepspeech': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0, 'grad_clip': 10.0},
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'constant'},
+        'batch_size': 256,
+        'l2_decay_factor': 1e-6,
+        'l2_decay_rank_threshold': 0,
+    },
+    'mlcommons_deepspeech': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0, 'grad_clip': 10.0},
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'constant'},
+        'batch_size': 256,
+        'l2_decay_factor': 1e-6,
+        'l2_decay_rank_threshold': 0,
+    },
+    'transformer': {
+        'optimizer': 'adam',
+        'opt_hparams': {
+            'beta1': 0.9,
+            'beta2': 0.98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.1,
+        },
+        'lr_hparams': {
+            'base_lr': 0.0016,
+            'warmup_steps': 1000,
+            'squash_steps': 1000,
+            'schedule': 'rsqrt_normalized_decay_warmup',
+        },
+        'batch_size': 512,
+        'l2_decay_rank_threshold': 0,
+    },
+    'performer': {
+        'optimizer': 'adam',
+        'opt_hparams': {
+            'beta1': 0.9,
+            'beta2': 0.98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.1,
+        },
+        'lr_hparams': {
+            'base_lr': 0.0016,
+            'warmup_steps': 1000,
+            'squash_steps': 1000,
+            'schedule': 'rsqrt_normalized_decay_warmup',
+        },
+        'batch_size': 512,
+        'l2_decay_rank_threshold': 0,
+    },
+    'transformer_stu': {
+        'optimizer': 'adam',
+        'opt_hparams': {
+            'beta1': 0.9,
+            'beta2': 0.98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.1,
+        },
+        'lr_hparams': {
+            'base_lr': 0.0016,
+            'warmup_steps': 1000,
+            'squash_steps': 1000,
+            'schedule': 'rsqrt_normalized_decay_warmup',
+        },
+        'batch_size': 512,
+        'l2_decay_rank_threshold': 0,
+    },
+    'transformer_stu_tensordot': {
+        'optimizer': 'adam',
+        'opt_hparams': {
+            'beta1': 0.9,
+            'beta2': 0.98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.1,
+        },
+        'lr_hparams': {
+            'base_lr': 0.0016,
+            'warmup_steps': 1000,
+            'squash_steps': 1000,
+            'schedule': 'rsqrt_normalized_decay_warmup',
+        },
+        'batch_size': 512,
+        'l2_decay_rank_threshold': 0,
+    },
+    'xformer_translate': {
+        'optimizer': 'adam',
+        'opt_hparams': {
+            'beta1': 0.9,
+            'beta2': 0.98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.0,
+        },
+        'lr_hparams': {
+            'base_lr': 0.05,
+            'warmup_steps': 8000,
+            'factors': 'constant * linear_warmup * rsqrt_decay',
+            'schedule': 'compound',
+        },
+        'batch_size': 64,
+        'l2_decay_rank_threshold': 0,
+    },
+    'mlcommons_xformer_translate': {
+        'optimizer': 'adam',
+        'opt_hparams': {
+            'beta1': 0.9,
+            'beta2': 0.98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.0,
+        },
+        'lr_hparams': {
+            'base_lr': 0.05,
+            'warmup_steps': 8000,
+            'factors': 'constant * linear_warmup * rsqrt_decay',
+            'schedule': 'compound',
+        },
+        'batch_size': 64,
+        'l2_decay_rank_threshold': 0,
+    },
+    'xformer_translate_binary': {
+        'optimizer': 'adam',
+        'opt_hparams': {
+            'beta1': 0.9,
+            'beta2': 0.98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.0,
+        },
+        'lr_hparams': {
+            'base_lr': 0.05,
+            'warmup_steps': 8000,
+            'factors': 'constant * linear_warmup * rsqrt_decay',
+            'schedule': 'compound',
+        },
+        'batch_size': 64,
+        'l2_decay_rank_threshold': 0,
+    },
+    'xformer_translate_mlc_variant': {
+        'optimizer': 'adam',
+        'opt_hparams': {
+            'beta1': 0.9,
+            'beta2': 0.98,
+            'epsilon': 1e-9,
+            'weight_decay': 0.0,
+        },
+        'lr_hparams': {
+            'base_lr': 0.05,
+            'warmup_steps': 8000,
+            'factors': 'constant * linear_warmup * rsqrt_decay',
+            'schedule': 'compound',
+        },
+        'batch_size': 64,
+        'l2_decay_rank_threshold': 0,
+    },
+    'lstm': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0},
+        'lr_hparams': {'base_lr': 1e-3, 'schedule': 'constant'},
+        'batch_size': 256,
+    },
+    'local_attention_transformer': {
+        'optimizer': 'adafactor',
+        'opt_hparams': {},
+        'lr_hparams': {
+            'base_lr': 0.01,
+            'defer_steps': 10000,
+            'schedule': 't2t_rsqrt_normalized_decay',
+        },
+        'batch_size': 8,
+    },
+    # GNN / tabular
+    'gnn': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0},
+        'lr_hparams': {'base_lr': 0.01, 'schedule': 'constant'},
+        'batch_size': 256,
+        'l2_decay_factor': 0.0005,
+    },
+    'dlrm': {
+        'optimizer': 'adam',
+        'opt_hparams': {},
+        'lr_hparams': {'base_lr': 0.01, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 1e-5,
+    },
+    'dlrm_resnet': {
+        'optimizer': 'adam',
+        'opt_hparams': {},
+        'lr_hparams': {'base_lr': 0.01, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 1e-5,
+    },
+    # Nanodo family
+    'nanodo': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0},
+        'lr_hparams': {'base_lr': 0.01, 'schedule': 'constant'},
+        'batch_size': 256,
+        'l2_decay_factor': 0.0005,
+    },
+    'rope_nanodo': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0},
+        'lr_hparams': {'base_lr': 0.01, 'schedule': 'constant'},
+        'batch_size': 256,
+        'l2_decay_factor': 0.0005,
+    },
+    'mdlm_rope_nanodo': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0},
+        'lr_hparams': {'base_lr': 0.01, 'schedule': 'constant'},
+        'batch_size': 256,
+        'l2_decay_factor': 0.0005,
+    },
+    # Special
+    'autoencoder': {
+        'optimizer': 'hessian_free',
+        'opt_hparams': {'damping_lb': 1e-6},
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'constant'},
+        'batch_size': 128,
+        'l2_decay_factor': 2e-5,
+        'l2_decay_rank_threshold': 1,
+    },
+    'mlperf_resnet': {
+        'optimizer': 'lars',
+        'opt_hparams': {'weight_decay': 2e-4, 'momentum': 0.9},
+        'lr_hparams': {
+            'base_lr': 10.0,
+            'schedule': 'mlperf_polynomial',
+            'start_lr': 0.0,
+            'end_lr': 1e-4,
+            'power': 2.0,
+            'decay_end': -1,
+            'warmup_steps': 18,
+            'warmup_power': 1,
+        },
+        'batch_size': 128,
+    },
+    'fake_resnet': {
+        'optimizer': 'lars',
+        'opt_hparams': {'weight_decay': 2e-4, 'momentum': 0.9},
+        'lr_hparams': {
+            'base_lr': 10.0,
+            'schedule': 'mlperf_polynomial',
+            'start_lr': 0.0,
+            'end_lr': 1e-4,
+            'power': 2.0,
+            'decay_end': -1,
+            'warmup_steps': 18,
+            'warmup_power': 1,
+        },
+        'batch_size': 128,
+    },
+    'unet': {
+        'optimizer': 'adam',
+        'opt_hparams': {'weight_decay': 0.0},
+        'lr_hparams': {
+            'schedule': 'piecewise_constant',
+            'base_lr': 1e-3,
+            'decay_events': _UNET_DECAY_EVENTS,
+            'decay_factors': _UNET_DECAY_FACTORS,
+        },
+        'batch_size': 8,
+    },
+}
+
+
 class OptaxTrainingAlgorithm(TrainingAlgorithm):
   """Class for training algorithms implemented with optax and defined in optimizer_lib.optimizers.py."""
+
+  @classmethod
+  def get_default_training_hparams(cls, optimizer_name=None, model_name=None):
+    """Returns default training hparams for optax-based training.
+
+    Resolution hierarchy:
+      1. If optimizer_name is provided, use optimizer-specific defaults.
+      2. Else if model_name is in _MODEL_TRAINING_DEFAULTS, use model-specific
+         defaults (which include the model's historical optimizer choice).
+      3. Else fall back to 'adam' defaults.
+
+    Args:
+      optimizer_name: Optional name of the optimizer to get defaults for. When
+        provided, takes precedence over model_name.
+      model_name: Optional name of the model. Used to look up historical
+        per-model training defaults when no optimizer_name is specified.
+
+    Returns:
+      A ConfigDict of default training hyperparameters including
+      optimizer-specific opt_hparams looked up from the per-optimizer defaults
+      table.
+    """
+    training_hparams = super().get_default_training_hparams()
+
+    if optimizer_name is not None:
+      # Tier 1: explicit optimizer override.
+      logging.info(
+          'Using optimizer-specific defaults for optimizer=%s',
+          optimizer_name,
+      )
+      opt_defaults = dict(_OPTAX_OPTIMIZER_DEFAULTS.get(optimizer_name, {}))
+      training_hparams.update({
+          'optimizer': optimizer_name,
+          'opt_hparams': opt_defaults,
+          'lr_hparams': {
+              'base_lr': 0.001,
+              'schedule': 'cosine',
+          },
+      })
+    elif model_name is not None and model_name in _MODEL_TRAINING_DEFAULTS:
+      # Tier 2: model-specific historical defaults.
+      logging.info(
+          'Using model-specific training defaults for model=%s', model_name
+      )
+      model_defaults = dict(_MODEL_TRAINING_DEFAULTS[model_name])
+      model_optimizer = model_defaults.pop('optimizer', 'adam')
+      # Start with the optimizer's own defaults, then overlay model-specific.
+      opt_defaults = dict(_OPTAX_OPTIMIZER_DEFAULTS.get(model_optimizer, {}))
+      opt_defaults.update(model_defaults.pop('opt_hparams', {}))
+      training_hparams.update({
+          'optimizer': model_optimizer,
+          'opt_hparams': opt_defaults,
+          'lr_hparams': model_defaults.pop(
+              'lr_hparams', {'base_lr': 0.001, 'schedule': 'cosine'}
+          ),
+      })
+      # Apply remaining model-level overrides (batch_size, l2_decay, etc.)
+      training_hparams.update(model_defaults)
+    else:
+      # Tier 3: generic adam fallback.
+      opt_defaults = dict(_OPTAX_OPTIMIZER_DEFAULTS.get('adam', {}))
+      training_hparams.update({
+          'optimizer': 'adam',
+          'opt_hparams': opt_defaults,
+          'lr_hparams': {
+              'base_lr': 0.001,
+              'schedule': 'cosine',
+          },
+      })
+
+    return training_hparams
 
   def __init__(self, hps, model, num_train_steps):
     super().__init__(hps, model, num_train_steps)

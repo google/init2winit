@@ -37,32 +37,13 @@ from ml_collections.config_dict import config_dict
 # small hparams used for unit tests
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        rng_seed=-1,
         model_dtype='float32',
         latent_dim=256,
-        optimizer='adam',
         hidden_dims=(256,),
-        batch_size=256,
-        lr_hparams={
-            'base_lr': 0.01,
-            'schedule': 'constant'
-        },
-        opt_hparams={
-            'beta1': 0.9,
-            'beta2': 0.999,
-            'epsilon': 1e-8,
-            'weight_decay': 0.0,
-        },
         activation_function='relu',
-        l2_decay_factor=.0005,
-        l2_decay_rank_threshold=2,
         num_message_passing_steps=5,
         normalizer='layer_norm',
         dropout_rate=0.1,
-        total_accumulated_batch_size=None,
-        grad_clip=None,
-        label_smoothing=0.0,
-        use_shallue_label_smoothing=False,
     ))
 
 

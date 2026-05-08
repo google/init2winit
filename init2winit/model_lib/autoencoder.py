@@ -37,27 +37,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         hid_sizes=[128, 64, 32, 64, 128],
         activation_function=['relu', 'relu', 'relu', 'relu', 'relu'],
         kernel_scales=[1.0] * 6,
-        lr_hparams={
-            'base_lr': 0.1,
-            'schedule': 'constant'
-        },
-        layer_rescale_factors={},
-        optimizer='hessian_free',
-        opt_hparams={
-            'cg_max_iter': 250,
-            'cg_iter_tracking_method': 'back_tracking',
-            'use_line_search': True,
-            'init_damping': 50.0,
-            'damping_ub': 10 ** 2,
-            'damping_lb': 10 ** -6,
-        },
-        batch_size=128,
-        label_smoothing=None,
-        rng_seed=-1,
-        use_shallue_label_smoothing=False,
         model_dtype='float32',
-        l2_decay_factor=2e-5,
-        l2_decay_rank_threshold=1,
     ))
 
 
@@ -82,4 +62,3 @@ class AutoEncoderModel(base_model.BaseModel):
         jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
         ]
     return dummy_inputs
-  

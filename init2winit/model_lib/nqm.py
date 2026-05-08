@@ -27,22 +27,11 @@ from scipy.stats import ortho_group
 
 # small hparams used for unit tests
 DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    optimizer='momentum',
-    opt_hparams={
-        'momentum': 0.0,
-    },
-    lr_hparams={
-        'base_lr': 0.1,
-        'schedule': 'constant'
-    },
-    batch_size=128,
-    rng_seed=-1,
     # Note the dimension is set by input_shape.
     hessian_decay_power=1,
     noise_decay_power=1,
     nqm_mode='diagH_diagC',
     model_dtype='float32',
-    l2_decay_factor=None,
 ))
 
 

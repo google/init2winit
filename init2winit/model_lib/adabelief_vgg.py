@@ -39,25 +39,10 @@ from ml_collections.config_dict import config_dict
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         num_layers=11,  # Must be one of [11, 13, 16, 19]
-        layer_rescale_factors={},
-        lr_hparams={
-            'schedule': 'constant',
-            'base_lr': 0.2,
-        },
         normalizer='none',
-        optimizer='momentum',
-        opt_hparams={
-            'momentum': 0.9,
-        },
-        batch_size=128,
-        l2_decay_factor=0.0001,
-        l2_decay_rank_threshold=2,
-        label_smoothing=None,
-        rng_seed=-1,
-        use_shallue_label_smoothing=False,
         model_dtype='float32',
-        grad_clip=None,
-    ))
+    )
+)
 
 
 def classifier(x, num_outputs, dropout_rate, deterministic):

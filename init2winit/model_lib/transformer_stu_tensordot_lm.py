@@ -40,7 +40,6 @@ Array = Any
 # These reproduce the flax example.
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        batch_size=512,
         emb_dim=128,
         num_heads=8,
         num_layers=6,
@@ -48,28 +47,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         mlp_dim=512,
         dropout_rate=0.1,
         attention_dropout_rate=0.1,
-        optimizer='adam',
-        opt_hparams={
-            'beta1': .9,
-            'beta2': .98,
-            'epsilon': 1e-9,
-            'weight_decay': 0.1
-        },
-        layer_rescale_factors={},
         normalizer='layer_norm',
-        lr_hparams={
-            'base_lr': 0.0016,
-            'warmup_steps': 1000,
-            'squash_steps': 1000,
-            'schedule': 'rsqrt_normalized_decay_warmup'
-        },
-        label_smoothing=None,
-        l2_decay_factor=None,
-        l2_decay_rank_threshold=0,
-        rng_seed=-1,
-        use_shallue_label_smoothing=False,
         model_dtype='float32',
-        grad_clip=None,
         decode=False,
         normalize_attention=False,
         input_len=128,

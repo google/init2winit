@@ -79,31 +79,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         feedforward_dropout=0.0,
         feedforward_depths=[4096, 1032],
         model_dtype='float32',
-        batch_size=8,
-        grad_clip=None,
-        lr_hparams={
-            'base_lr': 0.01,
-            'defer_steps': 10000,
-            'schedule': 't2t_rsqrt_normalized_decay',
-        },
-        optimizer='adafactor',
-        opt_hparams={
-            'adafactor_decay_rate': 0.8,
-            'clipping_threshold': 1.0,
-            'factored': True,
-            'min_dim_size_to_factor': 128,
-            # The 2 hyperparameters cause errors with optax.inject_hyperparams
-            # In this case it is not relevant since the default
-            # adafactors values are needed
-            # 'adafactor_momentum': 0.0,
-            # 'multiply_by_parameter_scale': True,
-        },
-        # Below hyperparameters needed only to make the model
-        # compatible with init2winit library
-        rng_seed=-1,
-        label_smoothing=None,
-        weight_decay=None,
-        l2_decay_factor=None,))
+    )
+)
 
 Tensor = Union[np.array, jnp.ndarray]
 

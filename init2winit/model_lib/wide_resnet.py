@@ -30,31 +30,14 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         blocks_per_group=3,
         channel_multiplier=2,
-        lr_hparams={
-            'base_lr': 0.001,
-            'schedule': 'cosine'
-        },
         normalizer='batch_norm',
-        layer_rescale_factors={},
         conv_kernel_scale=1.0,
         dense_kernel_scale=1.0,
         dropout_rate=0.0,
         conv_kernel_init='lecun_normal',
         dense_kernel_init='lecun_normal',
-        optimizer='momentum',
-        opt_hparams={
-            'momentum': 0.9,
-        },
-        batch_size=128,
         virtual_batch_size=None,
-        total_accumulated_batch_size=None,
-        l2_decay_factor=0.0001,
-        l2_decay_rank_threshold=2,
-        label_smoothing=None,
-        rng_seed=-1,
-        use_shallue_label_smoothing=False,
         model_dtype='float32',
-        grad_clip=None,
         activation_function='relu',
         group_strides=[(1, 1), (2, 2), (2, 2)])
 )

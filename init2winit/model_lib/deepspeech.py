@@ -47,21 +47,8 @@ Dtype = Any
 MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation='relu',
-        optimizer='adam',
-        opt_hparams={
-            'beta1': .9,
-            'beta2': .98,
-            'epsilon': 1e-9,
-            'weight_decay': 0.0
-        },
-        batch_size=256,
         eval_batch_size=128,
-        l2_decay_factor=1e-6,
-        l2_decay_rank_threshold=0,
-        use_shallue_label_smoothing=False,
-        rng_seed=-1,
         model_dtype='float32',
-        grad_clip=10.0,
         num_lstm_layers=4,
         num_ffn_layers=3,
         encoder_dim=512,
@@ -79,7 +66,6 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         enable_residual_connections=False,
         enable_decoder_layer_norm=False,
         bidirectional=True,
-        total_accumulated_batch_size=None,
         enable_subsampling_batchnorm=False,
         enable_synced_batchnorm=False,
         layernorm_everywhere=False))
@@ -88,21 +74,8 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation='relu',
-        optimizer='adam',
-        opt_hparams={
-            'beta1': .9,
-            'beta2': .98,
-            'epsilon': 1e-9,
-            'weight_decay': 0.0
-        },
-        batch_size=256,
         eval_batch_size=128,
-        l2_decay_factor=1e-6,
-        l2_decay_rank_threshold=0,
-        use_shallue_label_smoothing=False,
-        rng_seed=-1,
         model_dtype='float32',
-        grad_clip=10.0,
         num_lstm_layers=4,
         num_ffn_layers=3,
         encoder_dim=512,
@@ -119,7 +92,6 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         enable_residual_connections=False,
         enable_decoder_layer_norm=False,
         bidirectional=True,
-        total_accumulated_batch_size=None,
         enable_subsampling_batchnorm=False,
         enable_synced_batchnorm=False,
         layernorm_everywhere=False))

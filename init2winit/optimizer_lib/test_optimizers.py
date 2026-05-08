@@ -72,6 +72,7 @@ class GenericMultiOptimizerTest(absltest.TestCase):
         'loss': 'cross_entropy',
         'metrics': 'classification_metrics',
         'initializer': 'noop',
+        'training_algorithm': 'optax_training_algorithm',
         'hparam_overrides': config_dict.ConfigDict({
             'optimizer': 'generic_multi_optimizer',
             'l2_decay_factor': None,
@@ -96,7 +97,9 @@ class GenericMultiOptimizerTest(absltest.TestCase):
         experiment_config.model,
         experiment_config.initializer,
         experiment_config.dataset,
-        hparam_overrides=experiment_config.hparam_overrides)
+        experiment_config.training_algorithm,
+        hparam_overrides=experiment_config.hparam_overrides,
+    )
 
     model = model_cls(
         merged_hps,

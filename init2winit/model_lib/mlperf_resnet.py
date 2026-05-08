@@ -30,33 +30,10 @@ from ml_collections.config_dict import config_dict
 FAKE_MODEL_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     num_filters=16,
     num_layers=18,  # Must be one of [18, 34, 50, 101, 152, 200]
-    layer_rescale_factors={},
-    lr_hparams={
-        'batch_size': 128,
-        'base_lr': 10.0,
-        'decay_end': -1,
-        'end_lr': 1e-4,
-        'power': 2.0,
-        'schedule': 'mlperf_polynomial',
-        'start_lr': 0.0,
-        'steps_per_epoch': 10009.250000000002,
-        'warmup_steps': 18,
-    },
-    optimizer='mlperf_lars_resnet',
-    opt_hparams={
-        'weight_decay': 2e-4,
-        'beta': 0.9
-    },
-    batch_size=128,
-    l2_decay_factor=None,
-    l2_decay_rank_threshold=2,
-    label_smoothing=.1,
-    use_shallue_label_smoothing=False,
     model_dtype='float32',
     virtual_batch_size=64,
     data_format='NHWC',
     activation_function='relu',
-    grad_clip=None,
     dropout_rate=0.0,
 ))
 
@@ -66,30 +43,13 @@ MLPERF_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
     num_filters=16,
     # We set default to 18 for faster unit tests.
     num_layers=18,  # Must be one of [18, 34, 50, 101, 152, 200]
-    layer_rescale_factors={},
-    lr_hparams={
-        'schedule': 'constant',
-        'base_lr': 0.2,
-    },
-    optimizer='momentum',
-    opt_hparams={
-        'momentum': 0.9,
-    },
-    batch_size=128,
     bn_output_scale=0.0,
-    l2_decay_factor=None,
-    l2_decay_rank_threshold=2,
-    label_smoothing=None,
-    rng_seed=-1,
-    use_shallue_label_smoothing=False,
     batch_norm_momentum=0.9,
     batch_norm_epsilon=1e-5,
     model_dtype='float32',
     virtual_batch_size=64,
-    total_accumulated_batch_size=None,
     data_format='NHWC',
     activation_function='relu',
-    grad_clip=None,
     dropout_rate=0.0,
 ))
 

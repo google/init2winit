@@ -21,6 +21,8 @@ from absl import logging
 from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
+from init2winit.trainer_lib import training_algorithm
+from init2winit.trainer_lib import training_algorithms
 from ml_collections.config_dict import config_dict
 
 
@@ -95,18 +97,24 @@ def expand_dot_keys(d):
   return expanded_dict
 
 
-def build_hparams(model_name,
-                  initializer_name,
-                  dataset_name,
-                  hparam_overrides,
-                  input_pipeline_hps=None,
-                  allowed_unrecognized_hparams=None):
+def build_hparams(
+    model_name,
+    initializer_name,
+    dataset_name,
+    training_algorithm_name,
+    hparam_overrides,
+    input_pipeline_hps=None,
+    allowed_unrecognized_hparams=None,
+):
   """Build experiment hyperparameters.
 
   Args:
     model_name: the string model name.
     initializer_name: the string initializer name.
     dataset_name: the string dataset name.
+    training_algorithm_name: the string name of the training algorithm. Used to
+      look up algorithm-specific default training hyperparameters (optimizer,
+      opt_hparams, lr_hparams).
     hparam_overrides: a dict of hyperparameter override names/values, or a JSON
       string encoding of this hyperparameter override dict. Note that this is
       applied after the hyperparameter file overrides.
@@ -125,22 +133,49 @@ def build_hparams(model_name,
   initializer_hps = initializers.get_initializer_hparams(initializer_name)
   dataset_hps = datasets.get_dataset_hparams(dataset_name)
   input_pipeline_hps = input_pipeline_hps or config_dict.ConfigDict()
+  overrides_dict = hparam_overrides or {}
+  if isinstance(overrides_dict, str):
+    overrides_dict = json.loads(overrides_dict)
+
+  # Training hparams come from the training algorithm.
+  algo_cls = training_algorithms.get_training_algorithm(training_algorithm_name)
+
+  # For OptaxTrainingAlgorithm, pass optimizer_name (if overridden) and
+  # model_name so it can resolve defaults using the 3-tier hierarchy.
+  if issubclass(algo_cls, training_algorithm.OptaxTrainingAlgorithm):
+    optimizer_name = (
+        None if not overrides_dict else overrides_dict.get('optimizer')
+    )
+    training_hps = algo_cls.get_default_training_hparams(
+        optimizer_name=optimizer_name,
+        model_name=model_name,
+    )
+  else:
+    training_hps = algo_cls.get_default_training_hparams()
 
   merged_dict = {}
 
   hps_dicts = [
       hps.to_dict()
-      for hps in [model_hps, initializer_hps, dataset_hps, input_pipeline_hps]
+      for hps in [
+          training_hps,
+          model_hps,
+          initializer_hps,
+          dataset_hps,
+          input_pipeline_hps,
+      ]
   ]
 
-  total_hps = 0
+  # Check that all provided hps have no overlap.
+  seen_keys = set()
+  for hps_dict in hps_dicts:
+    overlap = seen_keys.intersection(hps_dict.keys())
+    if overlap:
+      raise ValueError(f'There is overlap in the provided hparams: {overlap}')
+    seen_keys.update(hps_dict.keys())
+
   for hps_dict in hps_dicts:
     merged_dict.update(hps_dict)
-    total_hps += len(hps_dict.keys())
-
-  # Check that all provided have no overlap.
-  if total_hps != len(merged_dict.keys()):
-    raise ValueError('There is overlap in the provided hparams.')
 
   # Convert to the Shallue and Lee label smoothing style.
   if merged_dict.get('use_shallue_label_smoothing', False):
@@ -159,34 +194,33 @@ def build_hparams(model_name,
   for key in ['opt_hparams', 'lr_hparams']:
     merged[key].unlock()
 
-  if hparam_overrides:
-    if isinstance(hparam_overrides, str):
-      hparam_overrides = json.loads(hparam_overrides)
-
+  if overrides_dict:
     # If the user is changing the learning rate schedule or optimizer. We must
     # wipe all of the keys from the old dictionary.
     merged_schedule = None
     if merged.get('lr_hparams'):
       merged_schedule = merged['lr_hparams'].get('schedule')
     overrides_schedule = None
-    if hparam_overrides.get('lr_hparams'):
-      overrides_schedule = hparam_overrides['lr_hparams'].get('schedule')
+    if overrides_dict.get('lr_hparams'):
+      overrides_schedule = overrides_dict['lr_hparams'].get('schedule')
     if overrides_schedule and merged_schedule != overrides_schedule:
       merged['lr_hparams'] = {}
-    if ('optimizer' in hparam_overrides and
-        merged['optimizer'] != hparam_overrides['optimizer']):
+    if (
+        'optimizer' in overrides_dict
+        and merged['optimizer'] != overrides_dict['optimizer']
+    ):
       merged['opt_hparams'] = {}
-    hparam_overrides = expand_dot_keys(hparam_overrides)
+    overrides_dict = expand_dot_keys(overrides_dict)
     if allowed_unrecognized_hparams:
-      new_keys = [k for k in hparam_overrides if k not in merged]
+      new_keys = [k for k in overrides_dict if k not in merged]
       if new_keys:
         logging.warning('Unrecognized top-level hparams: %s', new_keys)
       if any(k not in allowed_unrecognized_hparams for k in new_keys):
         raise ValueError(
             f'Unrecognized top-level hparams not in allowlist: {new_keys}')
       with merged.unlocked():
-        merged.update(hparam_overrides)
+        merged.update(overrides_dict)
     else:
-      merged.update(hparam_overrides)
+      merged.update(overrides_dict)
 
   return merged

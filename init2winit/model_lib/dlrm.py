@@ -33,7 +33,6 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation_function='relu',
         embedding_init_multiplier=None,
-        rng_seed=-1,
         model_dtype='float32',
         vocab_size=32 * 128 * 1024,
         mlp_bottom_dims=[128, 128],
@@ -41,22 +40,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         output_shape=(1,),
         embed_dim=64,
         keep_diags=True,
-        optimizer='adam',
-        batch_size=128,
         num_dense_features=13,
-        lr_hparams={
-            'base_lr': 0.01,
-            'schedule': 'constant'
-        },
-        opt_hparams={
-            'beta1': 0.9,
-            'beta2': 0.999,
-            'epsilon': 1e-8,
-        },
-        l2_decay_factor=1e-5,
-        l2_decay_rank_threshold=2,
-        total_accumulated_batch_size=None,
-        grad_clip=None,
         dropout_rate=0.0,
         normalizer='none',
         # dropout will exist only if there are at least two top mlp layers

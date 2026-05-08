@@ -62,6 +62,7 @@ def main(unused_argv):
     num_batches = FLAGS.num_batches
     dataset_name = FLAGS.dataset
     model_name = FLAGS.model
+    training_algorithm_name = 'optax_training_algorithm'
     initializer_name = 'noop'
 
     hparam_overrides = {
@@ -72,7 +73,9 @@ def main(unused_argv):
         model_name=model_name,
         initializer_name=initializer_name,
         dataset_name=dataset_name,
-        hparam_overrides=hparam_overrides)
+        hparam_overrides=hparam_overrides,
+        training_algorithm_name=training_algorithm_name,
+    )
 
     rng = jax.random.PRNGKey(0)
     rng, data_rng = jax.random.split(rng)

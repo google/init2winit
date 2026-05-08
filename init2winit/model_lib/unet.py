@@ -33,43 +33,6 @@ import jax.numpy as jnp
 from ml_collections import config_dict
 
 
-# NOTE(dsuo): We use the Kitchen Sink optimizer to match the RMSProp
-# implementation found in the reference FastMRI U-Net code. Specifically,
-# epsilon in optax's scale_by_rms places its epsilon inside the square root,
-# whereas the reference code epsilon outside.
-opt_hparams = {
-    'weight_decay': 0.0,
-    'beta1': 0.9,
-    'beta2': 0.999,
-    'epsilon': 1e-8,
-}
-
-# NOTE(dsuo): This lives here because decay_events / decay_factors is too large
-# to pass via the config file.
-_FASTMRI_TRAIN_SIZE = 34742
-_FASTMRI_VALID_SIZE = 7135
-
-batch_size = 8
-num_epochs = 50
-steps_per_epoch = int(_FASTMRI_TRAIN_SIZE / batch_size)
-num_train_steps = num_epochs * steps_per_epoch
-lr_gamma = 0.1
-lr_step_size = 40 * steps_per_epoch
-decay_events = list(range(lr_step_size, num_train_steps, lr_step_size))
-decay_factors = [lr_gamma] * len(decay_events)
-decay_factors = [
-    decay_factor**i
-    for decay_factor, i in zip(decay_factors, range(1,
-                                                    len(decay_events) + 1))
-]
-
-lr_hparams = {
-    'schedule': 'piecewise_constant',
-    'base_lr': 1e-3,
-    'decay_events': decay_events,
-    'decay_factors': decay_factors
-}
-
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         out_chans=1,
@@ -77,15 +40,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         num_pool_layers=4,
         dropout_rate=0.0,
         activation='leaky_relu',
-        optimizer='adam',
-        opt_hparams=opt_hparams,
-        lr_hparams=lr_hparams,
-        l2_decay_factor=None,
-        batch_size=batch_size,
-        rng_seed=-1,
         model_dtype='float32',
-        grad_clip=None,
-        total_accumulated_batch_size=None,
         normalizer='unet_instance_norm',
     ))
 

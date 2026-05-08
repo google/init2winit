@@ -38,6 +38,7 @@ class HyperParameterTest(absltest.TestCase):
         model_name='transformer',
         initializer_name='noop',
         dataset_name='lm1b_v2',
+        training_algorithm_name='optax_training_algorithm',
         hparam_overrides=hps_overrides,
     )
 
@@ -60,6 +61,7 @@ class HyperParameterTest(absltest.TestCase):
           model_name='transformer',
           initializer_name='noop',
           dataset_name='lm1b_v2',
+          training_algorithm_name='optax_training_algorithm',
           hparam_overrides=hps_overrides,
           allowed_unrecognized_hparams=[],
       )
@@ -67,6 +69,7 @@ class HyperParameterTest(absltest.TestCase):
         model_name='transformer',
         initializer_name='noop',
         dataset_name='lm1b_v2',
+        training_algorithm_name='optax_training_algorithm',
         hparam_overrides=hps_overrides,
         allowed_unrecognized_hparams=['lr_hparamsTYPO'],
     )
@@ -81,6 +84,7 @@ class HyperParameterTest(absltest.TestCase):
         model_name='transformer',
         initializer_name='noop',
         dataset_name='lm1b_v2',
+        training_algorithm_name='optax_training_algorithm',
         hparam_overrides=hps_overrides,
     )
 
@@ -95,7 +99,7 @@ class HyperParameterTest(absltest.TestCase):
     }
     self.assertEqual(
         set(merged_hps.lr_hparams.keys()),
-        set(['schedule', 'warmup_steps', 'base_lr', 'squash_steps']),
+        set(['schedule', 'base_lr', 'warmup_steps', 'squash_steps']),
     )
     self.assertEqual(merged_hps.lr_hparams.to_dict(), expected_lr_hparams)
 
@@ -119,6 +123,7 @@ class HyperParameterTest(absltest.TestCase):
         model_name='transformer',
         initializer_name='noop',
         dataset_name='lm1b_v2',
+        training_algorithm_name='optax_training_algorithm',
         hparam_overrides=hps_overrides,
     )
 

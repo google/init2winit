@@ -43,7 +43,6 @@ def _default_binarize_hparams():
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        batch_size=64,
         share_embeddings=False,
         logits_via_embedding=False,
         emb_dim=512,
@@ -54,33 +53,12 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         mlp_dim=512,
         dropout_rate=0.1,
         attention_dropout_rate=0.1,
-        optimizer='adam',
-        opt_hparams={
-            'beta1': 0.9,
-            'beta2': 0.98,
-            'epsilon': 1e-9,
-            'weight_decay': 0.0,
-        },
-        layer_rescale_factors={},
         normalizer='layer_norm',
-        lr_hparams={
-            'base_lr': 0.05,
-            'warmup_steps': 8000,
-            'factors': 'constant * linear_warmup * rsqrt_decay',
-            'schedule': 'compound',
-        },
-        label_smoothing=0.1,
-        l2_decay_factor=None,
-        l2_decay_rank_threshold=0,
-        rng_seed=-1,
-        use_shallue_label_smoothing=False,
         model_dtype='float32',
-        grad_clip=None,
         enc_self_attn_kernel_init='xavier_uniform',
         dec_self_attn_kernel_init='xavier_uniform',
         dec_cross_attn_kernel_init='xavier_uniform',
         decode=False,
-        total_accumulated_batch_size=None,
         binarize_hparams=_default_binarize_hparams(),
         quant_steps={  # training step at which model is partially binarized
             'ff_weights': 90e3,

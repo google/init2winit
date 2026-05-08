@@ -165,9 +165,11 @@ def _run(
       model_name=model_name,
       initializer_name=initializer_name,
       dataset_name=dataset_name,
+      training_algorithm_name=training_algorithm_name,
       hparam_overrides=hparam_overrides,
       input_pipeline_hps=input_pipeline_hps,
-      allowed_unrecognized_hparams=allowed_unrecognized_hparams)
+      allowed_unrecognized_hparams=allowed_unrecognized_hparams,
+  )
 
   # Note that one should never tune an RNG seed!!! The seed is only included in
   # the hparams for convenience of running hparam trials with multiple seeds per

@@ -35,9 +35,6 @@ MASK_TOKEN = 0
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
-        # training params
-        batch_size=256,
-        rng_seed=-1,
         # model architecture params
         model_dtype='float32',
         bidirectional=False,
@@ -49,20 +46,6 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         recurrent_dropout_rate=0.1,
         tie_embeddings=False,
         projection_layer=False,
-        # optimizer params
-        lr_hparams={
-            'schedule': 'constant',
-            'base_lr': 1e-3,
-        },
-        l2_decay_factor=None,
-        grad_clip=None,
-        optimizer='adam',
-        opt_hparams={
-            'beta1': 0.9,
-            'beta2': 0.999,
-            'epsilon': 1e-8,
-            'weight_decay': 0,
-        },
     )
 )
 

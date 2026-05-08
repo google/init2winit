@@ -36,6 +36,7 @@ from init2winit.model_lib import metrics
 from init2winit.model_lib import models
 from init2winit.trainer_lib import trainer
 from init2winit.trainer_lib import trainer_utils
+from init2winit.trainer_lib import training_algorithm
 import jax
 from jax.experimental import mesh_utils
 import jax.numpy as jnp
@@ -389,7 +390,10 @@ class TrainerTest(parameterized.TestCase):
     rng = jax.random.PRNGKey(1337)
     model_str = 'gnn'
     model_cls = models.get_model(model_str)
-    hps = models.get_model_hparams(model_str)
+    hps = (
+        training_algorithm.OptaxTrainingAlgorithm.get_default_training_hparams()
+    )
+    hps.update(models.get_model_hparams(model_str))
     hps.update({
         'batch_size': 2,
         'input_edge_shape': (7,),
@@ -455,11 +459,14 @@ class TrainerTest(parameterized.TestCase):
     model_str = 'dlrm'
     dataset_str = 'criteo1tb'
     model_cls = models.get_model(model_str)
-    model_hps = models.get_model_hparams(model_str)
+    model_hps = (
+        training_algorithm.OptaxTrainingAlgorithm.get_default_training_hparams()
+    )
+    model_hps.update(models.get_model_hparams(model_str))
     model_hps.vocab_size = 1024
     dataset_hps = datasets.get_dataset_hparams(dataset_str)
     dataset_hps.update({
-        'batch_size': model_hps.batch_size,
+        'batch_size': 128,
         'num_dense_features': model_hps.num_dense_features,
         'vocab_size': model_hps.vocab_size,
     })
@@ -479,6 +486,7 @@ class TrainerTest(parameterized.TestCase):
         'l2_decay_factor': 1e-4,
         'l2_decay_rank_threshold': 2,
         'num_device_prefetches': 0,
+        'batch_size': dataset_hps.batch_size,
     })
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
     initializer = initializers.get_initializer('noop')
@@ -678,8 +686,10 @@ class TrainerTest(parameterized.TestCase):
         model_name,
         initializer_name,
         dataset_name,
+        training_algorithm_name='optax_training_algorithm',
         hparam_overrides=hparam_overrides,
-        input_pipeline_hps=input_pipeline_hps)
+        input_pipeline_hps=input_pipeline_hps,
+    )
 
     eval_batch_size = 16
     num_examples = 256
@@ -961,9 +971,10 @@ class TrainerTest(parameterized.TestCase):
     initializer = initializers.get_initializer(initializer_name)
     dataset_builder = datasets.get_dataset(dataset_name)
     hparam_overrides = {
-        'lr_hparams': {
-            'base_lr': 0.1,
-            'schedule': 'cosine'
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'cosine'},
+        'optimizer': 'momentum',
+        'opt_hparams': {
+            'momentum': 0.9,
         },
         'batch_size': 8,
         'train_size': 160,
@@ -979,8 +990,10 @@ class TrainerTest(parameterized.TestCase):
         model_name,
         initializer_name,
         dataset_name,
+        training_algorithm_name='optax_training_algorithm',
         hparam_overrides=hparam_overrides,
-        input_pipeline_hps=input_pipeline_hps)
+        input_pipeline_hps=input_pipeline_hps,
+    )
 
     eval_batch_size = 16
     num_examples = 256
