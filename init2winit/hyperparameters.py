@@ -22,7 +22,7 @@ from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
 from init2winit.trainer_lib import training_algorithm
-from init2winit.trainer_lib import training_algorithms
+from init2winit.trainer_lib import training_algorithms_registry
 from ml_collections.config_dict import config_dict
 
 
@@ -138,7 +138,9 @@ def build_hparams(
     overrides_dict = json.loads(overrides_dict)
 
   # Training hparams come from the training algorithm.
-  algo_cls = training_algorithms.get_training_algorithm(training_algorithm_name)
+  algo_cls = training_algorithms_registry.get_training_algorithm(
+      training_algorithm_name
+  )
 
   # For OptaxTrainingAlgorithm, pass optimizer_name (if overridden) and
   # model_name so it can resolve defaults using the 3-tier hierarchy.

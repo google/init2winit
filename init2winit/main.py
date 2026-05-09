@@ -31,7 +31,7 @@ from init2winit.dataset_lib import datasets
 from init2winit.init_lib import initializers
 from init2winit.model_lib import models
 from init2winit.trainer_lib import trainers
-from init2winit.trainer_lib import training_algorithms
+from init2winit.trainer_lib import training_algorithms_registry
 import jax
 from jax.experimental import multihost_utils
 from ml_collections import config_flags
@@ -157,8 +157,10 @@ def _run(
       num_device_prefetches=num_device_prefetches,
       num_tf_data_map_parallel_calls=num_tf_data_map_parallel_calls,
   ))
-  training_algorithm_class = training_algorithms.get_training_algorithm(
-      training_algorithm_name
+  training_algorithm_class = (
+      training_algorithms_registry.get_training_algorithm(
+          training_algorithm_name
+      )
   )
 
   merged_hps = hyperparameters.build_hparams(

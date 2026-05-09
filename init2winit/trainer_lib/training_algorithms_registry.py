@@ -16,6 +16,7 @@
 """Module for registering and retrieving training algorithms."""
 
 from init2winit.trainer_lib import training_algorithm
+
 # pylint: disable=g-bad-import-order
 
 
@@ -34,4 +35,5 @@ def register_training_algorithm(name):
   def decorator(cls):
     _ALGORITHMS[name] = cls
     return cls
+
   return decorator
