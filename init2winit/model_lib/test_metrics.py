@@ -457,13 +457,17 @@ class MDLMMetricsTest(absltest.TestCase):
   """Tests for the MDLM metrics bundle."""
 
   def test_mdlm_bundle(self):
-    """MDLM bundle passes through correct ce_loss and perplexity."""
+    """MDLM bundle passes through correct metrics."""
     bundle = metrics.get_metrics('mdlm_metrics')
     result = bundle.single_from_model_output(
-        normalized_loss=jnp.float32(2.0)
+        normalized_loss=jnp.float32(2.0),
+        num_tokens=jnp.float32(100.0),
+        effective_num_tokens=jnp.float32(50.0),
     ).compute()
     np.testing.assert_allclose(result['ce_loss'], 2.0)
     np.testing.assert_allclose(result['perplexity'], jnp.exp(2.0), rtol=1e-5)
+    np.testing.assert_allclose(result['num_tokens'], 100.0)
+    np.testing.assert_allclose(result['effective_num_tokens'], 50.0)
 
 
 class MetricsBundleRegistryTest(parameterized.TestCase):
