@@ -84,6 +84,7 @@ def get_column_names():
       'train_cost',
       'grad_norm',
       'update_norm',
+      'train_steps_per_sec'
   ]
   return column_names
 

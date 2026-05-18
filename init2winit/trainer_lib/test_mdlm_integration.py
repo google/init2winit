@@ -189,6 +189,7 @@ class MDLMIntegrationTest(absltest.TestCase):
         test_num_batches=0,
         eval_train_num_batches=_EVAL_NUM_BATCHES,
         eval_frequency=eval_frequency,
+        log_frequency=eval_frequency,
         checkpoint_steps=[],
         metrics_logger=metrics_logger,
         init_logger=init_logger,
