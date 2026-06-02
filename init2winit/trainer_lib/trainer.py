@@ -105,10 +105,18 @@ class Trainer(base_trainer.BaseTrainer):
     _, params = data_utils.shard_pytree(
         unreplicated_params, self._mesh, params_sharding
     )
+
+    def _get_sharding(x):
+      """Returns the sharding for the given pytree node."""
+      if isinstance(x, data_utils.CpuOffloaded):
+        return None
+      elif isinstance(x, jax.Array) and isinstance(x.sharding, NamedSharding):
+        return x.sharding
+      else:
+        return NamedSharding(self._mesh, P())
+
     optimizer_state_sharding = jax.tree_util.tree_map(
-        lambda x: x.sharding
-        if isinstance(x.sharding, NamedSharding)
-        else NamedSharding(self._mesh, P()),
+        _get_sharding,
         unreplicated_optimizer_state,
     )
 

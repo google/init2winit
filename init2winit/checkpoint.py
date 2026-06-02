@@ -18,12 +18,14 @@
 This is useful for training neural networks with stax, where model parameters
 are nested numpy arrays.
 """
+
 from absl import flags
 from absl import logging
+from init2winit.dataset_lib import data_utils
 import jax
-# pylint: disable=g-importing-member
-from jax.experimental.multihost_utils import process_allgather
+from jax.experimental import multihost_utils
 import orbax.checkpoint as ocp
+
 
 FLAGS = flags.FLAGS
 
@@ -49,7 +51,8 @@ def maybe_restore_checkpoint(
     unreplicated_batch_stats,
     unreplicated_training_metrics_state,
     orbax_checkpoint_manager=None,
-    orbax_checkpoint_manager_external=None):
+    orbax_checkpoint_manager_external=None,
+):
   """Optionally restores from a checkpoint.
 
   The checkpoint logic is as follows: if `orbax_checkpoint_manager` contains
@@ -77,9 +80,16 @@ def maybe_restore_checkpoint(
                         in train_dir.
   """
   uninitialized_global_step = -1
+  # Unwrap CpuOffloaded leaves before passing to Orbax — it only accepts
+  # numpy/jax arrays as target leaves. The training algorithm's
+  # restore_optimizer_state() hook re-wraps them after restore.
+  unwrapped_optimizer_state = jax.tree.map(
+      lambda x: x.array if isinstance(x, data_utils.CpuOffloaded) else x,
+      unreplicated_optimizer_state,
+  )
   unreplicated_checkpoint_state = dict(
       params=unreplicated_params,
-      optimizer_state=unreplicated_optimizer_state,
+      optimizer_state=unwrapped_optimizer_state,
       batch_stats=unreplicated_batch_stats,
       training_metrics_grabber=unreplicated_training_metrics_state,
       global_step=uninitialized_global_step,
@@ -96,7 +106,7 @@ def maybe_restore_checkpoint(
   # train_dir does not exist or if it exists and contains no checkpoints.
   # Note that we could likely change the below line to:
   # found_checkpoint = latest_ckpt != unreplicated_checkpoint_state
-  found_checkpoint = (latest_ckpt['global_step'] != uninitialized_global_step)
+  found_checkpoint = latest_ckpt['global_step'] != uninitialized_global_step
 
   # If there's a latest checkpoint in the train_dir, restore from that.
   if found_checkpoint:
@@ -123,7 +133,8 @@ def maybe_restore_checkpoint(
           0,  # global_step
           0,  # sum_train_cost
           0,  # preemption_count
-          False)  # is_restored
+          False,
+      )  # is_restored
   else:  # Else, don't restore from any checkpoint.
     return (
         unreplicated_optimizer_state,
@@ -133,7 +144,8 @@ def maybe_restore_checkpoint(
         0,  # global_step
         0,  # sum_train_cost
         0,  # preemption_count
-        False)  # is_restored
+        False,
+    )  # is_restored
 
   return (
       ckpt_to_return['optimizer_state'],
@@ -143,7 +155,8 @@ def maybe_restore_checkpoint(
       ckpt_to_return['global_step'],  # global_step
       ckpt_to_return['sum_train_cost'],
       ckpt_to_return['preemption_count'],  # preemption_count
-      is_restored)  # is_restored
+      is_restored,
+  )  # is_restored
 
 
 def unreplicate_and_save_checkpoint(
@@ -154,38 +167,56 @@ def unreplicate_and_save_checkpoint(
     global_step,
     preemption_count,
     sum_train_cost,
-    orbax_checkpoint_manager):
+    orbax_checkpoint_manager,
+):
   """Saves pytree, step, preemption_count, and sum_train_cost to train_dir."""
   logging.info('Saving checkpoint to ckpt_%d', global_step)
   # jax.device_get doesn't work if jax.Array lives on multiple hosts.
   # So we first all_gather it to the host and then call jax.device_get
   if jax.process_count() > 1:
-    unreplicated_optimizer_state = jax.device_get(
-        process_allgather(optimizer_state, tiled=True))
-    unreplicated_params = jax.device_get(process_allgather(params, tiled=True))
+    unreplicated_optimizer_state = jax.tree.map(
+        lambda x: x
+        if isinstance(x, data_utils.CpuOffloaded)
+        else jax.device_get(multihost_utils.process_allgather(x, tiled=True)),
+        optimizer_state,
+    )
+    unreplicated_params = jax.device_get(
+        multihost_utils.process_allgather(params, tiled=True)
+    )
   else:
-    unreplicated_optimizer_state = jax.device_get(optimizer_state)
+    unreplicated_optimizer_state = jax.tree.map(
+        lambda x: x
+        if isinstance(x, data_utils.CpuOffloaded)
+        else jax.device_get(x),
+        optimizer_state,
+    )
     unreplicated_params = jax.device_get(params)
   unreplicated_batch_stats = jax.device_get(batch_stats)
-  unreplicated_training_metrics_state = jax.device_get(
-      training_metrics_state)
+  unreplicated_training_metrics_state = jax.device_get(training_metrics_state)
   unreplicated_sum_train_cost = jax.device_get(sum_train_cost)
-  state = dict(global_step=global_step,
-               preemption_count=preemption_count,
-               sum_train_cost=unreplicated_sum_train_cost,
-               optimizer_state=unreplicated_optimizer_state,
-               params=unreplicated_params,
-               batch_stats=unreplicated_batch_stats,
-               training_metrics_grabber=unreplicated_training_metrics_state)
-  save_checkpoint(global_step,
-                  state,
-                  orbax_checkpoint_manager=orbax_checkpoint_manager)
+  # Unwrap CpuOffloaded leaves to plain numpy arrays for Orbax serialization.
+  # CpuOffloaded is a runtime-only wrapper for sharding control; on disk the
+  # wrapped arrays are stored as regular numpy arrays.
+  unreplicated_optimizer_state = jax.tree.map(
+      lambda x: x.array if isinstance(x, data_utils.CpuOffloaded) else x,
+      unreplicated_optimizer_state,
+  )
+  state = dict(
+      global_step=global_step,
+      preemption_count=preemption_count,
+      sum_train_cost=unreplicated_sum_train_cost,
+      optimizer_state=unreplicated_optimizer_state,
+      params=unreplicated_params,
+      batch_stats=unreplicated_batch_stats,
+      training_metrics_grabber=unreplicated_training_metrics_state,
+  )
+  save_checkpoint(
+      global_step, state, orbax_checkpoint_manager=orbax_checkpoint_manager
+  )
   logging.info('Done saving checkpoint.')
 
 
-def save_checkpoint(step,
-                    state,
-                    orbax_checkpoint_manager):
+def save_checkpoint(step, state, orbax_checkpoint_manager):
   """Saves checkpoint to train_dir.
 
   A list of checkpoints will be stored in train_dir/step.
@@ -229,9 +260,10 @@ def load_latest_checkpoint(target=None, orbax_checkpoint_manager=None):
   """Loads the most recent checkpoint listed in train_dir.
 
   Args:
-    target: used for checkpointing, a pytree whose structure will be used
-      to structure the restored checkpoint data.
+    target: used for checkpointing, a pytree whose structure will be used to
+      structure the restored checkpoint data.
     orbax_checkpoint_manager: An orbax.CheckpointManager instance.
+
   Returns:
     The state restored from the checkpoint. If using Flax checkpointing and
     target=None, this will return a unstructured dictionary containing the

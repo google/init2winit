@@ -30,13 +30,15 @@ from jax.sharding import PartitionSpec as P
 import jraph
 import numpy as np
 
-
-Dataset = collections.namedtuple('Dataset', [
-    'train_iterator_fn',
-    'eval_train_epoch',
-    'valid_epoch',
-    'test_epoch',
-])
+Dataset = collections.namedtuple(
+    'Dataset',
+    [
+        'train_iterator_fn',
+        'eval_train_epoch',
+        'valid_epoch',
+        'test_epoch',
+    ],
+)
 
 
 def log_rss(msg: str):
@@ -45,8 +47,9 @@ def log_rss(msg: str):
   logging.info('%s — RSS: %.1f MB', msg, rss_mb)
 
 
-def prefetch_iterator(source_iter: Iterator[jax.typing.ArrayLike],
-                      num_prefetch: int) -> Iterator[jax.typing.ArrayLike]:
+def prefetch_iterator(
+    source_iter: Iterator[jax.typing.ArrayLike], num_prefetch: int
+) -> Iterator[jax.typing.ArrayLike]:
   """Wraps the given iterator with prefetching.
 
   Args:
@@ -121,14 +124,16 @@ def iterator_as_numpy(iterator):
     yield jax.tree.map(lambda y: y._numpy(), x)  # pylint: disable=protected-access
 
 
-def image_iterator(data,
-                   rescale,
-                   output_shape,
-                   is_one_hot,
-                   autoencoder,
-                   shuffle_rng=None,
-                   augment_fn=None,
-                   include_example_keys=False):
+def image_iterator(
+    data,
+    rescale,
+    output_shape,
+    is_one_hot,
+    autoencoder,
+    shuffle_rng=None,
+    augment_fn=None,
+    include_example_keys=False,
+):
   """Preprocesses the batch data arrays in the data generator.
 
   Rescales inputs. One hot encode targets if is_one_hot is true.
@@ -166,11 +171,13 @@ def image_iterator(data,
       yield {'inputs': inputs, 'targets': targets}
 
 
-def maybe_pad_batch(batch,
-                    desired_batch_size,
-                    data_format=None,
-                    mask_key=None,
-                    padding_value=0.0):
+def maybe_pad_batch(
+    batch,
+    desired_batch_size,
+    data_format=None,
+    mask_key=None,
+    padding_value=0.0,
+):
   """Zero pad the batch on the right to desired_batch_size.
 
   All keys in the batch dictionary will have their corresponding arrays padded.
@@ -187,9 +194,9 @@ def maybe_pad_batch(batch,
       dimension to pad. If not provided then it is assumed the first dimension
       is the batch dimension.
     mask_key: Typically used for text datasets, it's either 'inputs' (for
-      encoder only models like language models) or 'targets'
-      (for encoder-decoder models like seq2seq tasks) to decide weights for
-      padded sequence. For Image datasets, this will be (most likely) unused.
+      encoder only models like language models) or 'targets' (for
+      encoder-decoder models like seq2seq tasks) to decide weights for padded
+      sequence. For Image datasets, this will be (most likely) unused.
     padding_value: value to be used as padding.
 
   Returns:
@@ -247,7 +254,7 @@ def make_global_array(local_data, mesh):
   """Util to combine per-host batches into a global batch array.
 
   Args:
-    local_data: local data batch on host. 
+    local_data: local data batch on host.
     mesh: mesh specification to shard the data.
 
   Returns:
@@ -265,13 +272,46 @@ def make_global_array(local_data, mesh):
   return global_array
 
 
+class CpuOffloaded:
+  """Marker wrapper for arrays that should remain on CPU.
+
+  Wraps a numpy array to signal to the trainer's sharding and checkpoint
+  code that this leaf should be skipped during JAX sharding operations
+  and device transfers. Used by optimizers that offload state to host
+  memory (e.g., single-worker DiLoCo's slow_params and nesterov_b).
+
+  The wrapped array is accessible via the `array` attribute.
+  """
+
+  def __init__(self, array):
+    self.array = array
+
+  @property
+  def shape(self):
+    return self.array.shape
+
+  @property
+  def dtype(self):
+    return self.array.dtype
+
+  def __repr__(self):
+    return f'CpuOffloaded(shape={self.shape}, dtype={self.dtype})'
+
+
 def shard_pytree(pytree, mesh, shardings=None):
+  """Shards a pytree with the given shardings and mesh."""
+
   if shardings is None:
     shardings = nn.get_sharding(pytree, mesh)
+
+  def _maybe_shard(arr, sharding):
+    """Shards the given array if the sharding is not None."""
+    if sharding is None:
+      return arr
+    return jax.make_array_from_process_local_data(sharding, arr, arr.shape)
+
   pytree = jax.tree_util.tree_map(
-      lambda arr, sharding: jax.make_array_from_process_local_data(
-          sharding, arr, arr.shape
-      ),
+      _maybe_shard,
       pytree,
       shardings,
   )
