@@ -217,9 +217,9 @@ class Attention(nn.Module):
     q_BxLxHxDh, k_BxLxHxDh = apply_rope(q_BxLxHxDh, k_BxLxHxDh, self.freqs_cis)
 
     out_BxLxHxDh = jax.nn.dot_product_attention(
-        q_BxLxHxDh,
-        k_BxLxHxDh,
-        v_BxLxHxDh,
+        q_BxLxHxDh.astype(cfg.dtype),
+        k_BxLxHxDh.astype(cfg.dtype),
+        v_BxLxHxDh.astype(cfg.dtype),
         is_causal=cfg.is_causal,
         scale=1.0,
     )
