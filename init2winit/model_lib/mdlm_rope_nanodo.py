@@ -91,18 +91,7 @@ class MDLMTransformer(nn.Module):
     )
 
     self.blocks = [rope_nanodo.TBlock(cfg) for _ in range(cfg.N)]
-    if cfg.normalization == 'layernorm':
-      self.out_ln = nn.LayerNorm(
-          dtype=cfg.dtype, param_dtype=cfg.param_dtype, use_bias=False
-      )
-    elif cfg.normalization == 'rmsnorm':
-      self.out_ln = nn.RMSNorm(
-          dtype=cfg.dtype,
-          param_dtype=cfg.param_dtype,
-          epsilon=cfg.rmsnorm_epsilon,
-      )
-    else:
-      raise ValueError(f'Unknown normalization: {cfg.normalization}')
+    self.out_ln = cfg.make_norm()
 
     if cfg.tie_embeddings:
       self.output_proj = None
