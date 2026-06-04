@@ -67,6 +67,7 @@ class PreprocessForTrainTransform(grain.RandomMapTransform):
   use_randaug: bool
   randaug_magnitude: int
   randaug_num_layers: int
+  num_classes: int = imagenet_preprocessing.NUM_CLASSES
 
   def random_map(self, features, seed):
     inputs = imagenet_preprocessing.preprocess_for_train(
@@ -80,7 +81,7 @@ class PreprocessForTrainTransform(grain.RandomMapTransform):
         randaug_magnitude=self.randaug_magnitude,
         randaug_num_layers=self.randaug_num_layers,
     )
-    targets = tf.one_hot(features['label'], imagenet_preprocessing.NUM_CLASSES)
+    targets = tf.one_hot(features['label'], self.num_classes)
     result = {'inputs': inputs, 'targets': targets, 'weights': 1}
     for k in grain.META_FEATURES:
       if k in features:
@@ -95,12 +96,13 @@ class PreprocessForEvalTransform(grain.MapTransform):
   dtype: Any
   image_size: int
   include_example_keys: bool
+  num_classes: int = imagenet_preprocessing.NUM_CLASSES
 
   def map(self, features):
     inputs = imagenet_preprocessing.preprocess_for_eval(
         features['image'], self.dtype, self.image_size
     )
-    targets = tf.one_hot(features['label'], imagenet_preprocessing.NUM_CLASSES)
+    targets = tf.one_hot(features['label'], self.num_classes)
     result = {
         'inputs': inputs,
         'targets': targets,
@@ -155,6 +157,7 @@ def load_split_grain(
     dtype=tf.float32,
     shuffle_rng=None,
     tfds_dataset_name='imagenet2012:5.*.*',
+    num_classes=imagenet_preprocessing.NUM_CLASSES,
 ):
   """Uses Grain to load the data. See documentation for `load_split`."""
   # Grain starts counting at 1
@@ -181,6 +184,7 @@ def load_split_grain(
             use_randaug=hps.use_randaug,
             randaug_magnitude=hps.randaug.magnitude,
             randaug_num_layers=hps.randaug.num_layers,
+            num_classes=num_classes,
         )
     ]
   elif split == 'eval_train':
@@ -192,6 +196,7 @@ def load_split_grain(
             dtype=dtype,
             image_size=image_size,
             include_example_keys=hps.get('include_example_keys'),
+            num_classes=num_classes,
         ),
     ]
   else:
@@ -201,6 +206,7 @@ def load_split_grain(
             dtype=dtype,
             image_size=image_size,
             include_example_keys=hps.get('include_example_keys'),
+            num_classes=num_classes,
         ),
         transforms.CacheTransform(),
     ]
@@ -257,7 +263,9 @@ def load_split(
     dtype=tf.float32,
     image_size=224,
     shuffle_rng=None,
-    tfds_dataset_name='imagenet2012:5.*.*'):  # pyformat: disable
+    tfds_dataset_name='imagenet2012:5.*.*',
+    num_classes=imagenet_preprocessing.NUM_CLASSES,
+):  # pyformat: disable
   """Creates a split from the ImageNet dataset using TensorFlow Datasets.
 
   The dataset returned by this function will repeat forever if split == 'train',
@@ -281,6 +289,7 @@ def load_split(
       'train'`.
     tfds_dataset_name: The name of the dataset to load from TFDS. Used to reuse
       this same logic for imagenet-v2.
+    num_classes: The number of classes to one-hot encode target labels.
 
   Returns:
     A `tf.data.Dataset`.
@@ -326,12 +335,16 @@ def load_split(
           hps.use_randaug,
           hps.randaug.magnitude,
           hps.randaug.num_layers,
+          num_classes=num_classes,
       )
       example_dict = transform.random_map(example, preprocess_rng)
 
     else:
       transform = PreprocessForEvalTransform(
-          dtype, image_size, hps.get('include_example_keys')
+          dtype,
+          image_size,
+          hps.get('include_example_keys'),
+          num_classes=num_classes,
       )
       example_dict = transform.map(example)
 
@@ -393,7 +406,15 @@ def load_split(
   return ds
 
 
-def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps, global_step=0):
+def get_imagenet(
+    shuffle_rng,
+    batch_size,
+    eval_batch_size,
+    hps,
+    global_step=0,
+    tfds_dataset_name='imagenet2012:5.*.*',
+    num_classes=imagenet_preprocessing.NUM_CLASSES,
+):
   """Data generators for imagenet."""
   per_host_batch_size = batch_size // jax.process_count()
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
@@ -414,6 +435,8 @@ def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps, global_step=0):
       image_size=image_size,
       shuffle_rng=shuffle_rng,
       global_step=global_step,
+      tfds_dataset_name=tfds_dataset_name,
+      num_classes=num_classes,
   )
   train_ds = tfds.as_numpy(train_ds)
   logging.info('Loading eval_train split')
@@ -423,6 +446,8 @@ def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps, global_step=0):
       hps=hps,
       image_size=image_size,
       global_step=global_step,
+      tfds_dataset_name=tfds_dataset_name,
+      num_classes=num_classes,
   )
   eval_train_ds = tfds.as_numpy(eval_train_ds)
   logging.info('Loading eval split')
@@ -432,11 +457,13 @@ def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps, global_step=0):
       hps=hps,
       image_size=image_size,
       global_step=global_step,
+      tfds_dataset_name=tfds_dataset_name,
+      num_classes=num_classes,
   )
   validation_ds = tfds.as_numpy(validation_ds)
 
   test_ds = None
-  if hps.use_imagenetv2_test:
+  if hps.get('use_imagenetv2_test'):
     test_ds = load_split_fn(
         per_host_eval_batch_size,
         'test',
@@ -444,6 +471,7 @@ def get_imagenet(shuffle_rng, batch_size, eval_batch_size, hps, global_step=0):
         image_size=image_size,
         tfds_dataset_name='imagenet_v2/matched-frequency',
         global_step=global_step,
+        num_classes=num_classes,
     )
     test_ds = tfds.as_numpy(test_ds)
 

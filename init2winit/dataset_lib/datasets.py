@@ -23,6 +23,7 @@ from init2winit.dataset_lib import data_selectors
 from init2winit.dataset_lib import fake_dataset
 from init2winit.dataset_lib import fastmri_dataset
 from init2winit.dataset_lib import imagenet_dataset
+from init2winit.dataset_lib import imagenette_dataset
 from init2winit.dataset_lib import librispeech
 from init2winit.dataset_lib import lm1b_v2
 # We get TF v2 eager execution error if we import fineweb_edu_10b
@@ -111,6 +112,12 @@ _ALL_DATASETS = {
         imagenet_dataset.DEFAULT_HPARAMS,
         imagenet_dataset.METADATA,
         imagenet_dataset.get_fake_batch,
+    ),
+    'imagenette': _Dataset(
+        imagenette_dataset.get_imagenette,
+        imagenette_dataset.DEFAULT_HPARAMS,
+        imagenette_dataset.METADATA,
+        imagenette_dataset.get_fake_batch,
     ),
     'translate_wmt': _Dataset(
         translate_wmt.get_translate_wmt,
