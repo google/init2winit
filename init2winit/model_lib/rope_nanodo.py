@@ -66,7 +66,8 @@ class DoConfig:
   embed_init: nn.initializers.Initializer = nn.initializers.variance_scaling(
       1.0, 'fan_in', 'normal', out_axis=0
   )
-  dtype: jnp.dtype = jnp.float32
+  dtype: jnp.dtype = jnp.bfloat16
+  param_dtype: jnp.dtype = jnp.float32
   rmsnorm_epsilon: float = 1e-6
   multiple_of: int = 256
   tie_embeddings: bool = True  # Whether to tie input and output embeddings
@@ -87,7 +88,11 @@ class Mlp(nn.Module):
     cfg = self.cfg
     # Use Xavier uniform initialization explicitly
     linear = partial(
-        nn.Dense, kernel_init=cfg.kernel_init, use_bias=False, dtype=cfg.dtype
+        nn.Dense,
+        kernel_init=cfg.kernel_init,
+        use_bias=False,
+        dtype=cfg.dtype,
+        param_dtype=cfg.param_dtype,
     )
     if cfg.mlp_activation == 'gelu':
       mlp_activation = nn.gelu
@@ -176,6 +181,7 @@ class Attention(nn.Module):
         kernel_init=cfg.kernel_init,
         use_bias=False,
         dtype=cfg.dtype,
+        param_dtype=cfg.param_dtype,
     )
 
     self.multilinear_query = self.multilinear(name='query')
@@ -188,13 +194,14 @@ class Attention(nn.Module):
         kernel_init=cfg.kernel_init,
         use_bias=False,
         dtype=cfg.dtype,
+        param_dtype=cfg.param_dtype,
     )
     if cfg.qk_norm:
       self.eps = cfg.eps
-    attn_scale0 = jnp.log2(cfg.L**2 - cfg.L).astype(cfg.dtype)
+    attn_scale0 = jnp.log2(cfg.L**2 - cfg.L).astype(cfg.param_dtype)
     self.attn_scale = self.param(
         'attn_scale',
-        nn.initializers.constant(attn_scale0, dtype=cfg.dtype),
+        nn.initializers.constant(attn_scale0, dtype=cfg.param_dtype),
         (),
     )
 
@@ -212,7 +219,7 @@ class Attention(nn.Module):
       k_BxLxHxDh /= (
           jnp.linalg.norm(k_BxLxHxDh, axis=-1, keepdims=True) + self.eps
       )
-    q_BxLxHxDh = q_BxLxHxDh * self.attn_scale
+    q_BxLxHxDh = q_BxLxHxDh * self.attn_scale.astype(cfg.dtype)
 
     q_BxLxHxDh, k_BxLxHxDh = apply_rope(q_BxLxHxDh, k_BxLxHxDh, self.freqs_cis)
 
@@ -241,11 +248,15 @@ class TBlock(nn.Module):
 
     # "pre-layernorm"
     if cfg.normalization == 'layernorm':
-      x_BxLxD = nn.LayerNorm(dtype=cfg.dtype, use_bias=False)(in_BxLxD)
+      x_BxLxD = nn.LayerNorm(
+          dtype=cfg.dtype, param_dtype=cfg.param_dtype, use_bias=False
+      )(in_BxLxD)
     elif cfg.normalization == 'rmsnorm':
-      x_BxLxD = nn.RMSNorm(dtype=cfg.dtype, epsilon=cfg.rmsnorm_epsilon)(
-          in_BxLxD
-      )
+      x_BxLxD = nn.RMSNorm(
+          dtype=cfg.dtype,
+          param_dtype=cfg.param_dtype,
+          epsilon=cfg.rmsnorm_epsilon,
+      )(in_BxLxD)
     else:
       raise ValueError(f'Unknown normalization: {cfg.normalization}')
 
@@ -268,18 +279,28 @@ class TransformerDo(nn.Module):
         num_embeddings=cfg.V,
         features=cfg.D,
         embedding_init=cfg.embed_init,
+        dtype=cfg.dtype,
+        param_dtype=cfg.param_dtype,
     )
     self.pos_embed = nn.Embed(
         num_embeddings=cfg.L,
         features=cfg.D,
         embedding_init=cfg.embed_init,
+        dtype=cfg.dtype,
+        param_dtype=cfg.param_dtype,
     )
 
     self.blocks = [TBlock(cfg) for _ in range(cfg.N)]
     if cfg.normalization == 'layernorm':
-      self.out_ln = nn.LayerNorm(dtype=cfg.dtype, use_bias=False)
+      self.out_ln = nn.LayerNorm(
+          dtype=cfg.dtype, param_dtype=cfg.param_dtype, use_bias=False
+      )
     elif cfg.normalization == 'rmsnorm':
-      self.out_ln = nn.RMSNorm(dtype=cfg.dtype, epsilon=cfg.rmsnorm_epsilon)
+      self.out_ln = nn.RMSNorm(
+          dtype=cfg.dtype,
+          param_dtype=cfg.param_dtype,
+          epsilon=cfg.rmsnorm_epsilon,
+      )
     else:
       raise ValueError(f'Unknown normalization: {cfg.normalization}')
 
@@ -288,7 +309,11 @@ class TransformerDo(nn.Module):
       self.output_proj = lambda x: self.embed.attend(x.astype(jnp.float32))
     else:
       self.output_proj = nn.Dense(
-          cfg.V, kernel_init=cfg.embed_init, dtype=cfg.dtype, name='output_proj'
+          cfg.V,
+          kernel_init=cfg.embed_init,
+          dtype=cfg.dtype,
+          param_dtype=cfg.param_dtype,
+          name='output_proj',
       )
 
   def __call__(self, y_BxL: jax.Array, train: bool):
@@ -314,6 +339,7 @@ class RoPENanodoModel(base_model.BaseModel):
         L=self.hps['input_shape'][0],
         F=self.hps['mlp_dim'],
         dtype=utils.dtype_from_str(self.hps['computation_dtype']),
+        param_dtype=utils.dtype_from_str(self.hps['model_dtype']),
         mlp_activation=self.hps['mlp_activation'],
         normalization=self.hps['normalization'],
         qk_norm=self.hps['qk_norm'],

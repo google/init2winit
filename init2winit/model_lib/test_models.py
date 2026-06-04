@@ -25,6 +25,7 @@ import os
 from absl.testing import absltest
 from absl.testing import parameterized
 import flax.linen as nn
+from init2winit import utils
 from init2winit.init_lib import initializers
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
@@ -1220,6 +1221,90 @@ class ModelsTest(parameterized.TestCase):
             'kernel': model_utils.ParameterType.CONV_WEIGHT,
         }
     self.assertEqual(model.params_types, expected)
+
+  @parameterized.product(
+      model_name=['mdlm_rope_nanodo', 'rope_nanodo']
+  )
+  def test_nanodo_parameter_and_activation_dtypes(self, model_name):
+    """Verify that parameters are in model_dtype and activations are in computation_dtype."""
+    model_dtype_str = 'float32'
+    computation_dtype_str = 'bfloat16'
+    model_dtype = utils.dtype_from_str(model_dtype_str)
+    computation_dtype = utils.dtype_from_str(computation_dtype_str)
+
+    model_cls = models.get_model(model_name)
+    hps = copy.deepcopy(
+        training_algorithm.OptaxTrainingAlgorithm.get_default_training_hparams()
+    )
+    hps.update(models.get_model_hparams(model_name))
+    hps.update(DATA_HPS[model_name])
+    hps.model_dtype = model_dtype_str
+    hps.computation_dtype = computation_dtype_str
+
+    model = model_cls(
+        hps,
+        dataset_meta_data={'shift_inputs': True, 'causal': True},
+        loss_name=LOSS_NAME[model_name],
+        metrics_name=METRICS_NAME[model_name],
+    )
+
+    rng = jax.random.PRNGKey(0)
+    initializer = initializers.get_initializer('noop')
+    params, _ = model.initialize(initializer, hps, rng, metrics_logger=None)
+
+    # 1. Verify all parameters are initialized in model_dtype
+    mismatched_params = []
+    flat_params, _ = jax.tree_util.tree_flatten_with_path(params)
+    for path, val in flat_params:
+      if hasattr(val, 'dtype') and val.dtype != model_dtype:
+        mismatched_params.append((
+            jax.tree_util.keystr(path, simple=True, separator='/'),
+            str(val.dtype),
+        ))
+
+    self.assertEmpty(
+        mismatched_params,
+        msg=(
+            f'Model {model_name} parameters not in model_dtype'
+            f' {model_dtype_str}\n: {mismatched_params}'
+        ),
+    )
+
+    # 2. Run forward pass and capture intermediates to verify activation dtypes
+    fake_inputs = _get_fake_inputs_for_initialization(model, hps)
+    _, state = model.flax_module.apply(
+        {'params': params},
+        *fake_inputs,
+        train=False,
+        capture_intermediates=True,
+    )
+
+    # Verify all captured intermediates (activations) are in computation_dtype
+    # Note: This checks Embed outputs, TBlock outputs, Attention outputs,
+    # Mlp outputs, etc.
+    intermediates = state.get('intermediates', {})
+    self.assertNotEmpty(
+        intermediates, msg=f'No intermediates captured for {model_name}'
+    )
+
+    # We check all leaves in the intermediates tree and report detailed
+    # mismatches
+    mismatched = []
+    flat_intermediates, _ = jax.tree_util.tree_flatten_with_path(intermediates)
+    for path, val in flat_intermediates:
+      if hasattr(val, 'dtype') and val.dtype != computation_dtype:
+        mismatched.append((
+            jax.tree_util.keystr(path, simple=True, separator='/'),
+            str(val.dtype),
+        ))
+
+    self.assertEmpty(
+        mismatched,
+        msg=(
+            f'Model {model_name} has mismatched intermediate dtypes:\n'
+            f' {mismatched}'
+        ),
+    )
 
 
 if __name__ == '__main__':

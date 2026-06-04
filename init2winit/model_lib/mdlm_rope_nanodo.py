@@ -54,6 +54,7 @@ class TimestepEmbedding(nn.Module):
 
   D: int
   dtype: jnp.dtype = jnp.float32
+  param_dtype: jnp.dtype = jnp.float32
 
   @nn.compact
   def __call__(self, t_B: jax.Array):
@@ -64,9 +65,9 @@ class TimestepEmbedding(nn.Module):
     angles = t_B[:, None] * freq[None, :]
     sincos = jnp.concatenate([jnp.sin(angles), jnp.cos(angles)], axis=-1)
 
-    h = nn.Dense(self.D, dtype=self.dtype)(sincos)
+    h = nn.Dense(self.D, dtype=self.dtype, param_dtype=self.param_dtype)(sincos)
     h = nn.gelu(h)
-    h = nn.Dense(self.D, dtype=self.dtype)(h)
+    h = nn.Dense(self.D, dtype=self.dtype, param_dtype=self.param_dtype)(h)
     return h
 
 
@@ -81,15 +82,25 @@ class MDLMTransformer(nn.Module):
         num_embeddings=cfg.V + 1,
         features=cfg.D,
         embedding_init=cfg.embed_init,
+        dtype=cfg.dtype,
+        param_dtype=cfg.param_dtype,
     )
 
-    self.time_embed = TimestepEmbedding(D=cfg.D, dtype=cfg.dtype)
+    self.time_embed = TimestepEmbedding(
+        D=cfg.D, dtype=cfg.dtype, param_dtype=cfg.param_dtype
+    )
 
     self.blocks = [rope_nanodo.TBlock(cfg) for _ in range(cfg.N)]
     if cfg.normalization == 'layernorm':
-      self.out_ln = nn.LayerNorm(dtype=cfg.dtype, use_bias=False)
+      self.out_ln = nn.LayerNorm(
+          dtype=cfg.dtype, param_dtype=cfg.param_dtype, use_bias=False
+      )
     elif cfg.normalization == 'rmsnorm':
-      self.out_ln = nn.RMSNorm(dtype=cfg.dtype, epsilon=cfg.rmsnorm_epsilon)
+      self.out_ln = nn.RMSNorm(
+          dtype=cfg.dtype,
+          param_dtype=cfg.param_dtype,
+          epsilon=cfg.rmsnorm_epsilon,
+      )
     else:
       raise ValueError(f'Unknown normalization: {cfg.normalization}')
 
@@ -97,7 +108,11 @@ class MDLMTransformer(nn.Module):
       self.output_proj = None
     else:
       self.output_proj = nn.Dense(
-          cfg.V, kernel_init=cfg.embed_init, dtype=cfg.dtype, name='output_proj'
+          cfg.V,
+          kernel_init=cfg.embed_init,
+          dtype=cfg.dtype,
+          param_dtype=cfg.param_dtype,
+          name='output_proj',
       )
 
   def __call__(self, z_BxL: jax.Array, t_B: jax.Array, train: bool):
@@ -117,7 +132,7 @@ class MDLMTransformer(nn.Module):
       logits_BxLxV = self.output_proj(z_BxLxD)
     else:
       embed_matrix = self.embed.embedding[: cfg.V]
-      logits_BxLxV = z_BxLxD.astype(jnp.float32) @ embed_matrix.T
+      logits_BxLxV = z_BxLxD @ embed_matrix.astype(cfg.dtype).T
 
     return logits_BxLxV
 
@@ -134,6 +149,7 @@ class MDLMModel(base_model.BaseModel):
         L=self.hps['input_shape'][0],
         F=self.hps['mlp_dim'],
         dtype=utils.dtype_from_str(self.hps['computation_dtype']),
+        param_dtype=utils.dtype_from_str(self.hps['model_dtype']),
         mlp_activation=self.hps['mlp_activation'],
         normalization=self.hps['normalization'],
         qk_norm=self.hps['qk_norm'],
