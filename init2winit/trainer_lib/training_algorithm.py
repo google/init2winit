@@ -902,6 +902,7 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
         static_argnames=(
             'training_cost_fn',
             'optimizer_update_fn',
+            'grad_clip',
         ),
         donate_argnums=(0, 1, 2),
     )

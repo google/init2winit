@@ -652,7 +652,8 @@ class TrainerTest(parameterized.TestCase):
 
     self.assertEqual(set(df.columns.values), set(get_column_names()))
 
-  def test_trainer(self):
+  @parameterized.parameters(None, 1.0)
+  def test_trainer(self, grad_clip):
     """Test training for two epochs on MNIST with a small model."""
     rng = jax.random.PRNGKey(0)
 
@@ -678,6 +679,9 @@ class TrainerTest(parameterized.TestCase):
         'valid_size': 96,
         'test_size': 80,
     }
+    if grad_clip is not None:
+      hparam_overrides['opt_hparams.grad_clip'] = grad_clip
+
     input_pipeline_hps = config_dict.ConfigDict(dict(
         num_tf_data_prefetches=-1,
         num_device_prefetches=0,
