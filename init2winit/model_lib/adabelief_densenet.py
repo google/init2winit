@@ -120,7 +120,7 @@ class TransitionBlock(nn.Module):
 class DenseNet(nn.Module):
   """Adabelief DenseNet.
 
-  The network consists of an inital convolutaional layer, four dense blocks
+  The network consists of an initial convolutional layer, four dense blocks
   connected by transition blocks, a pooling layer and a classification layer.
   """
   num_layers: int

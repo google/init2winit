@@ -27,7 +27,7 @@ year = {2019},
 
 This module implements a preprocessed PG-19 dataset from TFRecords. The PG-19
 textfiles were tokenized and encoded with SubwordTextEncoder and aggregated into
-tensors of maximum lenght of 8192.
+tensors of maximum length of 8192.
 """
 
 import functools

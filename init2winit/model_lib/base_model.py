@@ -308,7 +308,7 @@ class BaseModel(object):
     return overriden_shardings
 
   def get_sharding(self, params, mesh):
-    """Returns the overriden sharding annotations for the model.
+    """Returns the overridden sharding annotations for the model.
 
     The default sharding strategy is to replicate all layers on all devices.
     Models can override get_sharding_overrides() to specify sharding overrides
