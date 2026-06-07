@@ -197,6 +197,21 @@ class TrainingAlgorithm(metaclass=abc.ABCMeta):
       Optimizer state: Pytree of optimizer state.
     """
 
+  def restore_optimizer_state(self, optimizer_state):
+    """Post-processes optimizer state after checkpoint restore.
+
+    Override this method in subclasses that use runtime wrappers (e.g.,
+    CpuOffloaded) which are stripped during serialization and need to be
+    re-applied after deserialization.
+
+    Args:
+      optimizer_state: The restored optimizer state pytree (plain numpy arrays).
+
+    Returns:
+      The post-processed optimizer state, ready for sharding.
+    """
+    return optimizer_state
+
 
 # Per-optimizer default opt_hparams for OptaxTrainingAlgorithm.
 # These consolidate all the inline defaults from get_optimizer() in
