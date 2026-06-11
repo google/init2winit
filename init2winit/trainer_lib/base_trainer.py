@@ -653,6 +653,13 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     logging.info(
         'Checkpoint restored in %f seconds', time.time() - start_time
     )
+    # Allow training algorithms to post-process restored optimizer state
+    # (e.g., re-wrap CpuOffloaded leaves stripped during serialization).
+    unreplicated_optimizer_state = (
+        self.training_algorithm.restore_optimizer_state(
+            unreplicated_optimizer_state
+        )
+    )
     start_time = time.time()
     (
         self._params,
