@@ -142,9 +142,10 @@ class Mlp(nn.Module):
       # parameters instead of 2 * hidden_dim * D parameters.
       hidden_dim = cfg.F * 2 / 3
       # Round up to the nearest multiple of cfg.multiple_of
-      hidden_dim = int(cfg.multiple_of * (
-          (hidden_dim + cfg.multiple_of - 1) // cfg.multiple_of
-      ))
+      hidden_dim = int(
+          cfg.multiple_of
+          * ((hidden_dim + cfg.multiple_of - 1) // cfg.multiple_of)
+      )
       # Double the hidden dimension for GLU
       x_BxLxF = linear(2 * hidden_dim)(x_BxLxD)
     else:

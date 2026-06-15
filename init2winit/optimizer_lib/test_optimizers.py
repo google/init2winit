@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Tests for optimizers."""
+
 import shutil
 import tempfile
 
@@ -119,8 +120,8 @@ class GenericMultiOptimizerTest(absltest.TestCase):
 
     unreplicated_optimizer_state = opt_init_fn(unreplicated_params)
     self.assertIsInstance(
-        unreplicated_optimizer_state,
-        optax.transforms.PartitionState)
+        unreplicated_optimizer_state, optax.transforms.PartitionState
+    )
 
     # unreplicated_optimizer_state should be a Dict mapping param type
     # to opt_state where only params mapping to that param_type have non-empty
@@ -158,6 +159,7 @@ class OptimizersTrainerTest(absltest.TestCase):
     self.trainer.wait_until_orbax_checkpointer_finished()
     shutil.rmtree(self.test_dir)
     super().tearDown()
+
 
 
 

@@ -29,7 +29,6 @@ from init2winit.optimizer_lib.kitchen_sink._src.transform import transformation_
 import ml_collections
 import optax
 
-
 # TODO(dsuo): document config syntax.
 
 
@@ -82,8 +81,9 @@ def _kitchen_sink_helper(config):
   return tx
 
 
-def kitchen_sink(config: Dict[str, Any],
-                 learning_rate: float = None) -> optax.GradientTransformation:
+def kitchen_sink(
+    config: Dict[str, Any], learning_rate: float = None
+) -> optax.GradientTransformation:
   """Runs a list of GradientTransforms in parallel and combines.
 
   Args:
@@ -99,7 +99,8 @@ def kitchen_sink(config: Dict[str, Any],
     config = config.to_dict()
   elif not isinstance(config, dict):
     raise ValueError(
-        'Kitchen Sink configuration needs to be a config dict or a python dict')
+        'Kitchen Sink configuration needs to be a config dict or a python dict'
+    )
 
   # Syntactic sugar. If we have an implied chain, make it explicitly a chain.
   if all([str(i) in config for i in range(len(config))]):

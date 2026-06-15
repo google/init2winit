@@ -26,18 +26,24 @@ import jax
 from ml_collections.config_dict import config_dict
 import numpy as np
 
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(non_zero_connection_weights=15,))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        non_zero_connection_weights=15,
+    )
+)
 
 
-def sparse_init(loss_fn,
-                flax_module,
-                params,
-                hps,
-                input_shape,
-                output_shape,
-                rng_key,
-                metrics_logger=None,
-                log_every=10):
+def sparse_init(
+    loss_fn,
+    flax_module,
+    params,
+    hps,
+    input_shape,
+    output_shape,
+    rng_key,
+    metrics_logger=None,
+    log_every=10,
+):
   """Implements SparseInit initializer.
 
   Args:
@@ -73,8 +79,11 @@ def sparse_init(loss_fn,
     for k in range(num_units_in):
       if num_units_out > hps.non_zero_connection_weights:
         non_zero_units_out = jax.random.choice(
-            rng_keys_in[k], num_units_out, (hps.non_zero_connection_weights,),
-            replace=False)
+            rng_keys_in[k],
+            num_units_out,
+            (hps.non_zero_connection_weights,),
+            replace=False,
+        )
         mask[k, non_zero_units_out] = False
       else:
         mask[k, :] = False
@@ -84,8 +93,11 @@ def sparse_init(loss_fn,
     for k in range(num_units_out):
       if num_units_in > hps.non_zero_connection_weights:
         non_zero_units_in = jax.random.choice(
-            rng_keys_out[k], num_units_in, (hps.non_zero_connection_weights,),
-            replace=False)
+            rng_keys_out[k],
+            num_units_in,
+            (hps.non_zero_connection_weights,),
+            replace=False,
+        )
         mask[non_zero_units_in, k] = False
       else:
         mask[:, k] = False

@@ -70,7 +70,8 @@ class DataUtilsTest(parameterized.TestCase):
     """Test that the shape is the expected padded shape."""
     batch = {'inputs': np.ones(input_shape)}
     padded_batch = data_utils.maybe_pad_batch(
-        batch, desired_batch_size, image_format)
+        batch, desired_batch_size, image_format
+    )
     expected_shapes = list(input_shape)
     expected_shapes[batch_axis] = desired_batch_size
     self.assertEqual(padded_batch['inputs'].shape, tuple(expected_shapes))
@@ -92,7 +93,8 @@ class DataUtilsTest(parameterized.TestCase):
     expected_targets_shape = (desired_batch_size, target_len_max)
     expected_weights_shape = (desired_batch_size, target_len_max)
     padded_batch = data_utils.maybe_pad_batch(
-        batch, desired_batch_size, data_format=None, mask_key='targets')
+        batch, desired_batch_size, data_format=None, mask_key='targets'
+    )
     self.assertEqual(padded_batch['inputs'].shape, expected_inputs_shape)
     self.assertEqual(padded_batch['targets'].shape, expected_targets_shape)
     self.assertEqual(padded_batch['weights'].shape, expected_weights_shape)
@@ -104,7 +106,8 @@ class DataUtilsTest(parameterized.TestCase):
     # # pad at sequence_len axis
     expected_weights_array[:, target_len_true:] = 0
     self.assertTrue(
-        np.array_equal(padded_batch['weights'], expected_weights_array))
+        np.array_equal(padded_batch['weights'], expected_weights_array)
+    )
 
 
 class CachedIteratorFactoryTest(absltest.TestCase):

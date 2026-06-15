@@ -55,9 +55,32 @@ CRITEO1TB_METADATA = {
 # Raw vocab sizes from
 # https://cloud.google.com/tpu/docs/tutorials/dlrm-dcn-2.x#run-model.
 _VOCAB_SIZES = [
-    39884406, 39043, 17289, 7420, 20263, 3, 7120, 1543, 63, 38532951, 2953546,
-    403346, 10, 2208, 11938, 155, 4, 976, 14, 39979771, 25641295, 39664984,
-    585935, 12972, 108, 36
+    39884406,
+    39043,
+    17289,
+    7420,
+    20263,
+    3,
+    7120,
+    1543,
+    63,
+    38532951,
+    2953546,
+    403346,
+    10,
+    2208,
+    11938,
+    155,
+    4,
+    976,
+    14,
+    39979771,
+    25641295,
+    39664984,
+    585935,
+    12972,
+    108,
+    36,
 ]
 
 
@@ -69,7 +92,8 @@ def _parse_example_fn(num_dense_features, example):
   categorical_defaults = [['00000000'] for _ in range(len(_VOCAB_SIZES))]
   record_defaults = label_defaults + int_defaults + categorical_defaults
   fields = tf.io.decode_csv(
-      example, record_defaults, field_delim='\t', na_value='-1')
+      example, record_defaults, field_delim='\t', na_value='-1'
+  )
 
   num_labels = 1
   features = {}
@@ -87,9 +111,11 @@ def _parse_example_fn(num_dense_features, example):
     # We append the column index to the string to make the same id in different
     # columns unique.
     cat_features.append(
-        tf.strings.to_hash_bucket_fast(field + str(idx), _VOCAB_SIZES[idx]))
+        tf.strings.to_hash_bucket_fast(field + str(idx), _VOCAB_SIZES[idx])
+    )
   cat_features = tf.cast(
-      tf.stack(cat_features, axis=1), dtype=int_features.dtype)
+      tf.stack(cat_features, axis=1), dtype=int_features.dtype
+  )
   features['inputs'] = tf.concat([int_features, cat_features], axis=1)
   return features
 
@@ -100,7 +126,8 @@ def criteo_tsv_reader(
     file_path,
     num_dense_features,
     batch_size,
-    num_batches_to_prefetch):
+    num_batches_to_prefetch,
+):
   """Input reader fn for pre-processed Criteo data.
 
   Raw Criteo data is assumed to be preprocessed in the following way:
@@ -110,13 +137,14 @@ def criteo_tsv_reader(
   4. Categorical data is bucketized and are hence tf.int32.
 
   Args:
-    split: a text string indicating which split, one of
-      {'train', 'eval_train', 'validation', 'test'}.
+    split: a text string indicating which split, one of {'train', 'eval_train',
+      'validation', 'test'}.
     shuffle_rng: jax.random.PRNGKey used for shuffling, only used in training.
     file_path: filepath to the criteo dataset.
     num_dense_features: number of dense features.
     batch_size: per-host batch size.
     num_batches_to_prefetch: number of batches to prefetch.
+
   Returns:
     A tf.data.Dataset object.
   """
@@ -128,16 +156,20 @@ def criteo_tsv_reader(
   is_training = split == 'train'
   if is_training:
     file_shuffle_seed, data_shuffle_seed = jax.random.split(shuffle_rng, 2)
-    file_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(file_shuffle_seed)
-    data_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(data_shuffle_seed)
+    file_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(
+        file_shuffle_seed
+    )
+    data_shuffle_seed = data_utils.convert_jax_to_tf_random_seed(
+        data_shuffle_seed
+    )
 
     file_shuffle_seed = multihost_utils.broadcast_one_to_all(
-        file_shuffle_seed,
-        is_source=jax.process_index() == 0
+        file_shuffle_seed, is_source=jax.process_index() == 0
     )
 
   ds = tf.data.Dataset.list_files(
-      file_path, shuffle=is_training, seed=file_shuffle_seed)
+      file_path, shuffle=is_training, seed=file_shuffle_seed
+  )
   index = jax.process_index()
   num_hosts = jax.process_count()
   ds = ds.shard(num_hosts, index)
@@ -148,7 +180,8 @@ def criteo_tsv_reader(
       cycle_length=64,
       block_length=batch_size // 8,
       num_parallel_calls=64,
-      deterministic=False)
+      deterministic=False,
+  )
   if is_training:
     ds = ds.shuffle(buffer_size=524_288 * 100, seed=data_shuffle_seed)
   ds = ds.batch(batch_size, drop_remainder=is_training)
@@ -253,13 +286,13 @@ def _eval_numpy_iterator(
   Caps the number of batches to the split size divided across hosts. If the
   source runs out before `num_batches`, yields zero-filled batches so every
   host sees the same count.
-  
+
   Args:
     num_batches (int): number of batches to process.
     per_host_eval_batch_size (int): batch size per host.
     tf_dataset (tfds.Dataset): source tensorflow dataset.
     split_size (int): total number of examples in the eval split.
-    
+
   Yields:
     Padded numpy batches.
   """
@@ -271,9 +304,13 @@ def _eval_numpy_iterator(
   # treat them all as being the same batch size.
   num_hosts = jax.process_count()
   num_batches_in_split = math.ceil(
-      split_size / (per_host_eval_batch_size * num_hosts))
-  if (num_batches is None or num_batches < 0 or
-      num_batches > num_batches_in_split):
+      split_size / (per_host_eval_batch_size * num_hosts)
+  )
+  if (
+      num_batches is None
+      or num_batches < 0
+      or num_batches > num_batches_in_split
+  ):
     logging.info('Setting num_batches to %d.', num_batches_in_split)
     num_batches = num_batches_in_split
 
@@ -285,28 +322,33 @@ def _eval_numpy_iterator(
     except StopIteration:
       if zeros_batch is None:
         zeros_batch = jax.tree.map(
-            lambda x: np.zeros_like(x, dtype=x.dtype), batch)
+            lambda x: np.zeros_like(x, dtype=x.dtype), batch
+        )
       yield zeros_batch
       continue
     batch = data_utils.maybe_pad_batch(
-        batch, desired_batch_size=per_host_eval_batch_size)
+        batch, desired_batch_size=per_host_eval_batch_size
+    )
     yield batch
 
 
-def get_criteo1tb(shuffle_rng,
-                  batch_size,
-                  eval_batch_size,
-                  hps):
+def get_criteo1tb(shuffle_rng, batch_size, eval_batch_size, hps):
   """Get the Criteo 1TB train and eval iterators."""
   process_count = jax.process_count()
   if batch_size % process_count != 0:
-    raise ValueError('process_count={} must divide batch_size={}.'.format(
-        process_count, batch_size))
+    raise ValueError(
+        'process_count={} must divide batch_size={}.'.format(
+            process_count, batch_size
+        )
+    )
   if eval_batch_size is None:
     eval_batch_size = batch_size
   if eval_batch_size % process_count != 0:
-    raise ValueError('process_count={} must divide eval_batch_size={}.'.format(
-        process_count, eval_batch_size))
+    raise ValueError(
+        'process_count={} must divide eval_batch_size={}.'.format(
+            process_count, eval_batch_size
+        )
+    )
   per_host_eval_batch_size = eval_batch_size // process_count
   per_host_batch_size = batch_size // process_count
 
@@ -446,7 +488,8 @@ def _get_criteo1tb_tsv(
   """Load Criteo 1TB from raw TSV files (legacy path)."""
   train_file_path = os.path.join(RAW_CRITEO1TB_FILE_PATH, 'train/*/*')
   validation_file_path = os.path.join(
-      RAW_CRITEO1TB_FILE_PATH, 'val_set_second_half_of_day23_not_used/*')
+      RAW_CRITEO1TB_FILE_PATH, 'val_set_second_half_of_day23_not_used/*'
+  )
   test_file_path = os.path.join(RAW_CRITEO1TB_FILE_PATH, 'eval/day_23/*')
 
   train_dataset = criteo_tsv_reader(
@@ -455,7 +498,8 @@ def _get_criteo1tb_tsv(
       file_path=train_file_path,
       num_dense_features=hps.num_dense_features,
       batch_size=per_host_batch_size,
-      num_batches_to_prefetch=num_batches_to_prefetch)
+      num_batches_to_prefetch=num_batches_to_prefetch,
+  )
   data_utils.log_rss('train dataset created')
   if num_device_prefetches > 0:
     train_iterator_fn = lambda: data_utils.prefetch_iterator(
@@ -472,7 +516,8 @@ def _get_criteo1tb_tsv(
       file_path=train_file_path,
       num_dense_features=hps.num_dense_features,
       batch_size=per_host_eval_batch_size,
-      num_batches_to_prefetch=num_batches_to_prefetch)
+      num_batches_to_prefetch=num_batches_to_prefetch,
+  )
   eval_train_iterator_fn = functools.partial(
       _eval_numpy_iterator,
       per_host_eval_batch_size=per_host_eval_batch_size,
@@ -486,7 +531,8 @@ def _get_criteo1tb_tsv(
       file_path=validation_file_path,
       num_dense_features=hps.num_dense_features,
       batch_size=per_host_eval_batch_size,
-      num_batches_to_prefetch=num_batches_to_prefetch)
+      num_batches_to_prefetch=num_batches_to_prefetch,
+  )
   validation_iterator_fn = functools.partial(
       _eval_numpy_iterator,
       per_host_eval_batch_size=per_host_eval_batch_size,
@@ -500,7 +546,8 @@ def _get_criteo1tb_tsv(
       file_path=test_file_path,
       num_dense_features=hps.num_dense_features,
       batch_size=per_host_eval_batch_size,
-      num_batches_to_prefetch=num_batches_to_prefetch)
+      num_batches_to_prefetch=num_batches_to_prefetch,
+  )
   test_iterator_fn = functools.partial(
       _eval_numpy_iterator,
       per_host_eval_batch_size=per_host_eval_batch_size,
@@ -524,13 +571,14 @@ def _get_criteo1tb_tsv(
       train_iterator_fn,
       eval_train_iterator_fn,
       validation_iterator_fn,
-      test_iterator_fn)
+      test_iterator_fn,
+  )
 
 
 def get_fake_batch(hps):
   return {
-      'inputs':
-          np.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype),
-      'targets':
-          np.zeros((hps.batch_size,), dtype=hps.model_dtype),
+      'inputs': np.zeros(
+          (hps.batch_size, *hps.input_shape), dtype=hps.model_dtype
+      ),
+      'targets': np.zeros((hps.batch_size,), dtype=hps.model_dtype),
   }

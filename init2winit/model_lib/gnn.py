@@ -25,6 +25,7 @@ https://ogb.stanford.edu/docs/leader_graphprop/#ogbg-molpcba, the model is the
 closest to the GIN+Virtual Node (Xu et al., 2018) model, and it reaches
 equivalent performance on the ogbg-molpcba dataset.
 """
+
 from typing import Tuple
 
 from flax import linen as nn
@@ -44,7 +45,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         num_message_passing_steps=5,
         normalizer='layer_norm',
         dropout_rate=0.1,
-    ))
+    )
+)
 
 
 def _make_embed(latent_dim):
@@ -77,6 +79,7 @@ class GNN(nn.Module):
   The model assumes the input data is a jraph.GraphsTuple without global
   variables. The final prediction will be encoded in the globals.
   """
+
   num_outputs: int
   latent_dim: int
   hidden_dims: Tuple[int]
@@ -92,11 +95,13 @@ class GNN(nn.Module):
     activation = model_utils.ACTIVATIONS[self.activation_function]
 
     graph = graph._replace(
-        globals=jnp.zeros([graph.n_node.shape[0], self.num_outputs]))
+        globals=jnp.zeros([graph.n_node.shape[0], self.num_outputs])
+    )
 
     embedder = jraph.GraphMapFeatures(
         embed_node_fn=_make_embed(self.latent_dim),
-        embed_edge_fn=_make_embed(self.latent_dim))
+        embed_edge_fn=_make_embed(self.latent_dim),
+    )
     graph = embedder(graph)
 
     for _ in range(self.num_message_passing_steps):
@@ -105,17 +110,21 @@ class GNN(nn.Module):
               self.hidden_dims,
               maybe_normalize_fn=maybe_normalize_fn,
               dropout=dropout,
-              activation=activation),
+              activation=activation,
+          ),
           update_node_fn=_make_mlp(
               self.hidden_dims,
               maybe_normalize_fn=maybe_normalize_fn,
               dropout=dropout,
-              activation=activation),
+              activation=activation,
+          ),
           update_global_fn=_make_mlp(
               self.hidden_dims,
               maybe_normalize_fn=maybe_normalize_fn,
               dropout=dropout,
-              activation=activation))
+              activation=activation,
+          ),
+      )
 
       graph = net(graph)
 
@@ -139,7 +148,8 @@ class GNNModel(base_model.BaseModel):
         edges=jnp.ones((1,) + hps.input_edge_shape),
         globals=jnp.zeros((1,) + hps.output_shape),
         senders=jnp.asarray([0]),
-        receivers=jnp.asarray([0]))
+        receivers=jnp.asarray([0]),
+    )
     # We need to wrap the GraphsTuple in a list so that it can be passed as
     # *inputs to the model init function.
     return [graph]
@@ -152,4 +162,5 @@ class GNNModel(base_model.BaseModel):
         normalizer=self.hps['normalizer'],
         dropout_rate=self.hps['dropout_rate'],
         num_message_passing_steps=self.hps['num_message_passing_steps'],
-        activation_function=self.hps['activation_function'],)
+        activation_function=self.hps['activation_function'],
+    )

@@ -50,12 +50,22 @@ import jax
 from ml_collections.config_dict import config_dict
 import numpy as np
 
-
 _REQUIRED_KEYS = [
-    'dataset_name', 'model_name', 'tfds_dataset_key', 'tfds_eval_dataset_key',
-    'tfds_predict_dataset_key', 'reverse_translation', 'eval_batch_size',
-    'eval_train_num_batches', 'eval_num_batches', 'eval_splits',
-    'max_decode_length', 'tl_code', 'beam_size', 'decoding_type']
+    'dataset_name',
+    'model_name',
+    'tfds_dataset_key',
+    'tfds_eval_dataset_key',
+    'tfds_predict_dataset_key',
+    'reverse_translation',
+    'eval_batch_size',
+    'eval_train_num_batches',
+    'eval_num_batches',
+    'eval_splits',
+    'max_decode_length',
+    'tl_code',
+    'beam_size',
+    'decoding_type',
+]
 _SPLITS = ['train', 'valid', 'test']
 
 
@@ -115,16 +125,20 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
 
   def _validate_callback_config(self):
     assert all(key in self.callback_config for key in _REQUIRED_KEYS), (
-        'callback config must contain these required keys:', _REQUIRED_KEYS)
-    assert ('vocab_path' not in self.callback_config), (
+        'callback config must contain these required keys:',
+        _REQUIRED_KEYS,
+    )
+    assert 'vocab_path' not in self.callback_config, (
         'Eval must use same vocab file as used in training. No need to specify'
         ' vocab file. One from training config will be used.'
     )
     assert all(
         split_name in set(_SPLITS)
         for split_name in self.callback_config['eval_splits']
-    ), ('callback_config.eval_splits must contain only subset of these splits:',
-        _SPLITS)
+    ), (
+        'callback_config.eval_splits must contain only subset of these splits:',
+        _SPLITS,
+    )
 
   def _get_dataset(self, hps, rng):
     """Sets ups dataset builders."""
@@ -134,19 +148,17 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
 
     dataset_builder = datasets.get_dataset(self.callback_config['dataset_name'])
     dataset_metadata = datasets.get_dataset_meta_data(
-        self.callback_config['dataset_name'])
+        self.callback_config['dataset_name']
+    )
     dataset = dataset_builder(
         rng,
         hparams.batch_size,
         eval_batch_size=self.callback_config['eval_batch_size'],
-        hps=hparams)
+        hps=hparams,
+    )
     return dataset, dataset_metadata
 
-  def _evaluate(self,
-                params,
-                batch_stats,
-                batch_iter,
-                evaluate_batch_jitted):
+  def _evaluate(self, params, batch_stats, batch_iter, evaluate_batch_jitted):
     """Compute aggregated metrics on the given data iterator.
 
     This function is taken as is from trainer.py to avoid circular dependency.
@@ -155,8 +167,7 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     Args:
       params: model params.
       batch_stats: A dict of batch_stats.
-      batch_iter: Generator which yields batches. Must support the API
-        for b in batch_iter:
+      batch_iter: Generator which yields batches.
       evaluate_batch_jitted: A function with API evaluate_batch_jitted(params,
         batch_stats, batch). Returns a dictionary mapping keys to the metric
         values across the sharded batch.
@@ -199,11 +210,10 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     """
     d1 = d1.copy()
     for key in d2:
-      d1[prefix+key] = d2[key]
+      d1[prefix + key] = d2[key]
     return d1
 
-  def run_eval(
-      self, params, batch_stats, optimizer_state, global_step):
+  def run_eval(self, params, batch_stats, optimizer_state, global_step):
     """Runs the MT models to evals specified by MT model.
 
     Args:
@@ -225,13 +235,16 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
     for eval_split in self.callback_config['eval_splits']:
       if 'train' in eval_split:
         ds_splits_dict[eval_split] = self.dataset.eval_train_epoch(
-            self.callback_config['eval_train_num_batches'])
+            self.callback_config['eval_train_num_batches']
+        )
       elif 'valid' in eval_split:
         ds_splits_dict[eval_split] = self.dataset.valid_epoch(
-            self.callback_config['eval_num_batches'])
+            self.callback_config['eval_num_batches']
+        )
       else:
         ds_splits_dict[eval_split] = self.dataset.test_epoch(
-            self.callback_config['eval_num_batches'])
+            self.callback_config['eval_num_batches']
+        )
 
     metrics = {}
 
@@ -240,19 +253,31 @@ class MTEvaluationCallback(base_callback.BaseCallBack):
       try:
         decoding_output = (
             self.inference_manager.translate_and_calculate_bleu_single_model(
-                params, split_name))
-        split_metrics = self._evaluate(params, batch_stats, split_iter,
-                                       self.evaluate_batch_jitted)
+                params, split_name
+            )
+        )
+        split_metrics = self._evaluate(
+            params, batch_stats, split_iter, self.evaluate_batch_jitted
+        )
         split_metrics['bleu_score'] = decoding_output.bleu_score
 
         metrics = self._merge_and_apply_prefix(
-            metrics, split_metrics, 'callback/' +
-            self.callback_config['tfds_dataset_key'] + '/' + split_name + '/')
+            metrics,
+            split_metrics,
+            'callback/'
+            + self.callback_config['tfds_dataset_key']
+            + '/'
+            + split_name
+            + '/',
+        )
       except utils.TrainingDivergedError as err:
         # we don't want to stop training.
         del err
-        logging.info('Callback evaluation diverged for dataset %s at step:%d',
-                     self.tfds_dataset_key, global_step)
+        logging.info(
+            'Callback evaluation diverged for dataset %s at step:%d',
+            self.tfds_dataset_key,
+            global_step,
+        )
         continue
 
     return metrics

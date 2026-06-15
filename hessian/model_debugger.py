@@ -34,7 +34,7 @@ exists = gfile.exists
 
 
 def qvalue(array):
-  return jnp.linalg.norm(array.reshape(-1))**2 / array.size
+  return jnp.linalg.norm(array.reshape(-1)) ** 2 / array.size
 
 
 def cvalue(activations):
@@ -55,10 +55,9 @@ def tag_qcvalue(module, activations, name):
   module.sow('qcvalues', name, qc_value)
 
 
-def tag_residual_activations(module,
-                             identity_path,
-                             other_path,
-                             name='residual'):
+def tag_residual_activations(
+    module, identity_path, other_path, name='residual'
+):
   """Used in inspecting the forward pass and residual networks.
 
   Residual connections involve adding x + F(x) for some function F. This
@@ -79,7 +78,8 @@ def tag_residual_activations(module,
       'qvalues',
       name + 'q',  # avoid scope collision with the cvalue
       jnp.array((res_values_q, add_values_q)),
-      reduce_fn=lambda x, y: y)
+      reduce_fn=lambda x, y: y,
+  )
 
   res_values_c = cvalue(identity_path)
   add_values_c = cvalue(other_path)
@@ -87,7 +87,8 @@ def tag_residual_activations(module,
       'cvalues',
       name + 'c',
       jnp.array((res_values_c, add_values_c)),
-      reduce_fn=lambda x, y: y)
+      reduce_fn=lambda x, y: y,
+  )
 
 
 def pmap_then_unreplicate(leaf_fn, axis_name='batch'):
@@ -106,10 +107,12 @@ def pmap_then_unreplicate(leaf_fn, axis_name='batch'):
       the values on device 0.
   """
   p_leaf_fn = jax.pmap(leaf_fn, axis_name=axis_name)
+
   def tree_fn(*args):
     vals = p_leaf_fn(*args)
     vals_on_host = jax.tree.map(lambda x: x[0], vals)
     return vals_on_host
+
   return tree_fn
 
 
@@ -138,9 +141,9 @@ def append_pytree_leaves(full_pytree, to_append):
   return jax.tree.map(lambda x, y: array_append(y, x), to_append, full_pytree)
 
 
-def create_forward_pass_stats_fn(apply_fn,
-                                 capture_activation_norms=False,
-                                 sown_collection_names=None):
+def create_forward_pass_stats_fn(
+    apply_fn, capture_activation_norms=False, sown_collection_names=None
+):
   """Creates a function which grabs intermediate values from forward pass.
 
   If capture_activation_norms=True then we run the forward pass with
@@ -168,6 +171,7 @@ def create_forward_pass_stats_fn(apply_fn,
   mutables = ['intermediates', 'batch_stats']
   if sown_collection_names is not None:
     mutables.extend(sown_collection_names)
+
   def get_forward_pass_statistics(params, batch, rng):
     _, forward_pass_statistics = apply_fn(
         params=params,
@@ -176,7 +180,8 @@ def create_forward_pass_stats_fn(apply_fn,
         rngs={'dropout': rng},
         capture_intermediates=capture_activation_norms,
         mutable=mutables,
-        train=True)
+        train=True,
+    )
     forward_pass_statistics = flax.core.unfreeze(forward_pass_statistics)
 
     # We run in train mode but throw away the updated batch stats because we
@@ -186,14 +191,17 @@ def create_forward_pass_stats_fn(apply_fn,
     if 'intermediates' in forward_pass_statistics:
       # This calculation corresponds to the average q-value across the batch.
       forward_pass_statistics['intermediate_qvalue'] = jax.tree.map(
-          qvalue, forward_pass_statistics['intermediates'])
+          qvalue, forward_pass_statistics['intermediates']
+      )
       forward_pass_statistics['intermediate_cvalue'] = jax.tree.map(
-          cvalue, forward_pass_statistics['intermediates'])
+          cvalue, forward_pass_statistics['intermediates']
+      )
 
       # Don't want to store the full activations.
       forward_pass_statistics.pop('intermediates')
 
     return forward_pass_statistics
+
   return get_forward_pass_statistics
 
 
@@ -215,7 +223,9 @@ def remove_leaf_tuples(tree):
 def unflatten(d):
   return flax.core.freeze(
       flax.traverse_util.unflatten_dict(
-          {tuple(k.split('/')): v for k, v in d.items()}))
+          {tuple(k.split('/')): v for k, v in d.items()}
+      )
+  )
 
 
 # Not a JAX Array Type - just an empty holder of static information:
@@ -282,15 +292,17 @@ def build_skip_flags(paths_to_skip):
 class ModelDebugger:
   """Debugging tool for internal layers of a model."""
 
-  def __init__(self,
-               forward_pass=None,
-               grad_fn=None,
-               use_pmap=True,
-               save_every=1,
-               metrics_logger=None,
-               pytree_metrics_logger=None,
-               skip_flags=None,
-               skip_groups=None):
+  def __init__(
+      self,
+      forward_pass=None,
+      grad_fn=None,
+      use_pmap=True,
+      save_every=1,
+      metrics_logger=None,
+      pytree_metrics_logger=None,
+      skip_flags=None,
+      skip_groups=None,
+  ):
     """Used to inspect a models forward and backward pass.
 
     The following keys are required in config -
@@ -315,8 +327,10 @@ class ModelDebugger:
         attention layer jacobians contribute to the vanishing gradient problem"?
     """
     if metrics_logger and (metrics_logger._json_path is None):
-      raise ValueError('To use the ModelDebugger with a metrics_logger, a json'
-                       ' path must be specified when building metrics_logger')
+      raise ValueError(
+          'To use the ModelDebugger with a metrics_logger, a json'
+          ' path must be specified when building metrics_logger'
+      )
     self._save_every = save_every
     self._metrics_logger = metrics_logger
     self._pytree_metrics_logger = pytree_metrics_logger
@@ -349,31 +363,36 @@ class ModelDebugger:
     ):
       self._stored_metrics = pytree_metrics_logger.load_latest_pytree()
 
-  def _grab_statistics(self,
-                       step,
-                       batch=None,
-                       rng=None,
-                       params=None,
-                       grad=None,
-                       update=None,
-                       grad_norms_sql2=None,
-                       update_norms_sql2=None,
-                       param_norms_sql2=None):
+  def _grab_statistics(
+      self,
+      step,
+      batch=None,
+      rng=None,
+      params=None,
+      grad=None,
+      update=None,
+      grad_norms_sql2=None,
+      update_norms_sql2=None,
+      param_norms_sql2=None,
+  ):
     """Computes layerwise gradient and parameter norm statistics."""
     metrics_dict = {'step': step}
     if grad is None and grad_norms_sql2 is None and self.grad_fn is not None:
       grad = self.grad_fn(params, batch, rng)
 
-    for tup in zip([params, grad, update],
-                   [param_norms_sql2, grad_norms_sql2, update_norms_sql2],
-                   ['param', 'grad', 'update']):
+    for tup in zip(
+        [params, grad, update],
+        [param_norms_sql2, grad_norms_sql2, update_norms_sql2],
+        ['param', 'grad', 'update'],
+    ):
       variable_tree, norm_tree_sql2, key = tup
       if variable_tree and not norm_tree_sql2:
         norm_tree_sql2 = self._tree_norm_fn_sql2(variable_tree)
       if norm_tree_sql2:
         metrics_dict['{}_norms_sql2'.format(key)] = norm_tree_sql2
         metrics_dict['global_{}_norm_sql2'.format(key)] = sum(
-            jax.tree.leaves(norm_tree_sql2))
+            jax.tree.leaves(norm_tree_sql2)
+        )
 
     return metrics_dict
 
@@ -451,18 +470,20 @@ class ModelDebugger:
     grad_dict['unmodified_gradient'] = self._tree_norm_fn_sql2(new_g)
     return {'skip_analysis': grad_dict}
 
-  def full_eval(self,
-                step,
-                params=None,
-                grad=None,
-                update=None,
-                fwd_pass_summaries=None,
-                param_norms_sql2=None,
-                grad_norms_sql2=None,
-                update_norms_sql2=None,
-                extra_scalar_metrics=None,
-                batch=None,
-                rng=None):
+  def full_eval(
+      self,
+      step,
+      params=None,
+      grad=None,
+      update=None,
+      fwd_pass_summaries=None,
+      param_norms_sql2=None,
+      grad_norms_sql2=None,
+      update_norms_sql2=None,
+      extra_scalar_metrics=None,
+      batch=None,
+      rng=None,
+  ):
     """Computes statistics of the forward and backward pass and save to disk.
 
     Currently what is written to disk is a pytree, with a dict at the top level
@@ -511,8 +532,13 @@ class ModelDebugger:
     """
     all_metrics = {'step': step}
     if any([
-        params, grad, update, param_norms_sql2, grad_norms_sql2,
-        update_norms_sql2, self.grad_fn
+        params,
+        grad,
+        update,
+        param_norms_sql2,
+        grad_norms_sql2,
+        update_norms_sql2,
+        self.grad_fn,
     ]):
       metrics_dict = self._grab_statistics(
           step=step,
@@ -523,7 +549,8 @@ class ModelDebugger:
           update=update,
           grad_norms_sql2=grad_norms_sql2,
           update_norms_sql2=update_norms_sql2,
-          param_norms_sql2=param_norms_sql2)
+          param_norms_sql2=param_norms_sql2,
+      )
       all_metrics.update(metrics_dict)
 
     if extra_scalar_metrics:
@@ -535,7 +562,8 @@ class ModelDebugger:
     if self.forward_pass and not fwd_pass_summaries:
       if batch is None:
         raise ValueError(
-            'Must supply a batch when computing forward pass stats.')
+            'Must supply a batch when computing forward pass stats.'
+        )
 
       fwd_pass_summaries = self.forward_pass(params, batch, rng)
 
@@ -554,7 +582,8 @@ class ModelDebugger:
 
     self._stored_metrics = append_pytree_leaves(
         self._stored_metrics,
-        remove_leaf_tuples(flax.core.unfreeze(all_metrics)))
+        remove_leaf_tuples(flax.core.unfreeze(all_metrics)),
+    )
 
     if self._metrics_logger and jax.process_index() == 0:
       self._maybe_save_metrics(step)

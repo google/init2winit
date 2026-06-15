@@ -20,7 +20,6 @@ from typing import Any, List, Optional
 import flax.linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
-
 import jax
 from jax import nn as jnn
 import jax.numpy as jnp
@@ -44,7 +43,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         dropout_rate=0.0,
         normalizer='none',
         # dropout will exist only if there are at least two top mlp layers
-    ))
+    )
+)
 
 DEFAULT_RESNET_HPARAMS = DEFAULT_HPARAMS.copy_and_resolve_references()
 DEFAULT_RESNET_HPARAMS.mlp_top_dims = [128, 128, 1]
@@ -106,7 +106,8 @@ class DLRM(nn.Module):
   def get_embeddings(self, embedding_table_block, indices_block):
     """Get embeddings for a block of indices."""
     embedding_table_block = jax.lax.all_gather(
-        embedding_table_block, 'devices', axis=1, tiled=True)
+        embedding_table_block, 'devices', axis=1, tiled=True
+    )
     embeddings = jnp.take(embedding_table_block, indices_block, axis=0)
     return embeddings
 
@@ -117,9 +118,13 @@ class DLRM(nn.Module):
         mesh=model_utils.get_default_mesh(),
         in_specs=(
             P(None, 'devices'),
-            P('devices',),
+            P(
+                'devices',
+            ),
         ),
-        out_specs=P('devices',),
+        out_specs=P(
+            'devices',
+        ),
     )
     bot_mlp_input, cat_features = jnp.split(x, [self.num_dense_features], 1)
     cat_features = jnp.asarray(cat_features, dtype=jnp.int32)
@@ -138,8 +143,9 @@ class DLRM(nn.Module):
       bot_mlp_input = normalizer_layer()(bot_mlp_input)
     bot_mlp_output = bot_mlp_input
     batch_size = bot_mlp_output.shape[0]
-    feature_stack = jnp.reshape(bot_mlp_output,
-                                [batch_size, -1, self.embed_dim])
+    feature_stack = jnp.reshape(
+        bot_mlp_output, [batch_size, -1, self.embed_dim]
+    )
 
     base_init_fn = jnn.initializers.uniform(scale=1.0)
     if self.embedding_init_multiplier is None:
@@ -148,21 +154,23 @@ class DLRM(nn.Module):
       embedding_init_multiplier = self.embedding_init_multiplier
     # Embedding table init and lookup for a single unified table.
     idx_lookup = cat_features % self.vocab_size
+
     def scaled_init(key, shape, dtype=jnp.float_):
       return base_init_fn(key, shape, dtype) * embedding_init_multiplier
 
     embedding_table = self.param(
-        'embedding_table',
-        scaled_init,
-        [self.vocab_size, self.embed_dim])
+        'embedding_table', scaled_init, [self.vocab_size, self.embed_dim]
+    )
 
     embed_features = shmapped_get_embeddings(embedding_table, idx_lookup)
     embed_features = normalizer_layer()(embed_features)
     feature_stack = jnp.concatenate([feature_stack, embed_features], axis=1)
     dot_interact_output = dot_interact(
-        concat_features=feature_stack, keep_diags=self.keep_diags)
-    top_mlp_input = jnp.concatenate([bot_mlp_output, dot_interact_output],
-                                    axis=-1)
+        concat_features=feature_stack, keep_diags=self.keep_diags
+    )
+    top_mlp_input = jnp.concatenate(
+        [bot_mlp_output, dot_interact_output], axis=-1
+    )
     mlp_input_dim = top_mlp_input.shape[1]
     mlp_top_dims = self.mlp_top_dims
     num_layers_top = len(mlp_top_dims)
@@ -171,17 +179,19 @@ class DLRM(nn.Module):
       top_mlp_input = nn.Dense(
           fan_out,
           kernel_init=jnn.initializers.normal(
-              stddev=(2.0 / (fan_in + fan_out))**0.5),
+              stddev=(2.0 / (fan_in + fan_out)) ** 0.5
+          ),
           bias_init=jnn.initializers.normal(
-              stddev=(1.0 / mlp_top_dims[layer_idx])**0.5))(
-                  top_mlp_input)
+              stddev=(1.0 / mlp_top_dims[layer_idx]) ** 0.5
+          ),
+      )(top_mlp_input)
       if layer_idx < (num_layers_top - 1):
         top_mlp_input = activation_fn(top_mlp_input)
         top_mlp_input = normalizer_layer()(top_mlp_input)
       if self.dropout_rate > 0.0 and layer_idx == num_layers_top - 2:
         top_mlp_input = nn.Dropout(
-            rate=self.dropout_rate, deterministic=not train)(
-                top_mlp_input)
+            rate=self.dropout_rate, deterministic=not train
+        )(top_mlp_input)
     logits = top_mlp_input
     return logits
 
@@ -210,7 +220,8 @@ class DLRMModel(base_model.BaseModel):
         embed_dim=self.hps.embed_dim,
         keep_diags=self.hps.keep_diags,
         dropout_rate=self.hps.dropout_rate,
-        normalizer=self.hps.normalizer)
+        normalizer=self.hps.normalizer,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for purpose of initalizing the model."""
@@ -267,7 +278,8 @@ class DLRMResNet(nn.Module):
         mlp_bottom_dims[0],
         kernel_init=jnn.initializers.glorot_uniform(),
         bias_init=jnn.initializers.normal(
-            stddev=1.0 / mlp_bottom_dims[0]**0.5),
+            stddev=1.0 / mlp_bottom_dims[0] ** 0.5
+        ),
     )(bot_mlp_input)
     bot_mlp_input = activation_fn(bot_mlp_input)
 
@@ -286,18 +298,19 @@ class DLRMResNet(nn.Module):
       embedding_init_multiplier = self.embedding_init_multiplier
     # Embedding table init and lookup for a single unified table.
     idx_lookup = jnp.reshape(cat_features, [-1]) % self.vocab_size
+
     def scaled_init(key, shape, dtype=jnp.float_):
       return base_init_fn(key, shape, dtype) * embedding_init_multiplier
 
     embedding_table = self.param(
-        'embedding_table',
-        scaled_init,
-        [self.vocab_size, self.embed_dim])
+        'embedding_table', scaled_init, [self.vocab_size, self.embed_dim]
+    )
 
     embed_features = embedding_table[idx_lookup]
     batch_size = bot_mlp_input.shape[0]
     embed_features = jnp.reshape(
-        embed_features, (batch_size, 26 * self.embed_dim))
+        embed_features, (batch_size, 26 * self.embed_dim)
+    )
     top_mlp_input = jnp.concatenate([bot_mlp_input, embed_features], axis=1)
     mlp_input_dim = top_mlp_input.shape[1]
     mlp_top_dims = self.mlp_top_dims
@@ -305,33 +318,37 @@ class DLRMResNet(nn.Module):
     top_mlp_input = nn.Dense(
         mlp_top_dims[0],
         kernel_init=jnn.initializers.normal(
-            stddev=(2.0 / (mlp_input_dim + mlp_top_dims[0]))**0.5),
+            stddev=(2.0 / (mlp_input_dim + mlp_top_dims[0])) ** 0.5
+        ),
         bias_init=jnn.initializers.normal(
-            stddev=(1.0 / mlp_top_dims[0])**0.5))(
-                top_mlp_input)
+            stddev=(1.0 / mlp_top_dims[0]) ** 0.5
+        ),
+    )(top_mlp_input)
     top_mlp_input = activation_fn(top_mlp_input)
     for layer_idx, fan_out in list(enumerate(mlp_top_dims))[1:-1]:
       fan_in = mlp_top_dims[layer_idx - 1]
       x = nn.Dense(
           fan_out,
           kernel_init=jnn.initializers.normal(
-              stddev=(2.0 / (fan_in + fan_out))**0.5),
+              stddev=(2.0 / (fan_in + fan_out)) ** 0.5
+          ),
           bias_init=jnn.initializers.normal(
-              stddev=(1.0 / mlp_top_dims[layer_idx])**0.5))(
-                  top_mlp_input)
+              stddev=(1.0 / mlp_top_dims[layer_idx]) ** 0.5
+          ),
+      )(top_mlp_input)
       x = activation_fn(x)
       if self.dropout_rate > 0.0 and layer_idx == num_layers_top - 2:
-        x = nn.Dropout(
-            rate=self.dropout_rate, deterministic=not train)(x)
+        x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
       top_mlp_input += x
     # In the DLRM model the last layer width is always 1. We can hardcode that
     # below.
     logits = nn.Dense(
         1,
         kernel_init=jnn.initializers.normal(
-            stddev=(2.0 / (mlp_top_dims[-2] + 1))**0.5),
-        bias_init=jnn.initializers.normal(
-            stddev=1.0))(top_mlp_input)
+            stddev=(2.0 / (mlp_top_dims[-2] + 1)) ** 0.5
+        ),
+        bias_init=jnn.initializers.normal(stddev=1.0),
+    )(top_mlp_input)
     return logits
 
 
@@ -349,7 +366,8 @@ class DLRMResNetModel(base_model.BaseModel):
         num_dense_features=self.hps.num_dense_features,
         embed_dim=self.hps.embed_dim,
         keep_diags=self.hps.keep_diags,
-        dropout_rate=self.hps.dropout_rate)
+        dropout_rate=self.hps.dropout_rate,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for purpose of initalizing the model."""

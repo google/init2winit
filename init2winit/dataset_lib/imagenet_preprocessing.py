@@ -26,13 +26,15 @@ STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
 NUM_CLASSES = 1000
 
 
-def distorted_bounding_box_crop(image_bytes,
-                                bbox,
-                                rng_seed,
-                                min_object_covered=0.1,
-                                aspect_ratio_range=(0.75, 1.33),
-                                area_range=(0.05, 1.0),
-                                max_attempts=10):
+def distorted_bounding_box_crop(
+    image_bytes,
+    bbox,
+    rng_seed,
+    min_object_covered=0.1,
+    aspect_ratio_range=(0.75, 1.33),
+    area_range=(0.05, 1.0),
+    max_attempts=10,
+):
   """Generates cropped_image using one of the bboxes randomly distorted.
 
   See `tf.image.sample_distorted_bounding_box` for more documentation.
@@ -58,15 +60,18 @@ def distorted_bounding_box_crop(image_bytes,
     cropped image `Tensor`
   """
   shape = tf.image.extract_jpeg_shape(image_bytes)
-  sample_distorted_bounding_box = tf.image.stateless_sample_distorted_bounding_box(
-      shape,
-      seed=rng_seed,
-      bounding_boxes=bbox,
-      min_object_covered=min_object_covered,
-      aspect_ratio_range=aspect_ratio_range,
-      area_range=area_range,
-      max_attempts=max_attempts,
-      use_image_if_no_bounding_boxes=True)
+  sample_distorted_bounding_box = (
+      tf.image.stateless_sample_distorted_bounding_box(
+          shape,
+          seed=rng_seed,
+          bounding_boxes=bbox,
+          min_object_covered=min_object_covered,
+          aspect_ratio_range=aspect_ratio_range,
+          area_range=area_range,
+          max_attempts=max_attempts,
+          use_image_if_no_bounding_boxes=True,
+      )
+  )
   bbox_begin, bbox_size, _ = sample_distorted_bounding_box
 
   # Crop the image to the specified bounding box.
@@ -79,8 +84,9 @@ def distorted_bounding_box_crop(image_bytes,
 
 
 def _resize(image, image_size):
-  return tf.image.resize([image], [image_size, image_size],
-                         method=tf.image.ResizeMethod.BICUBIC)[0]
+  return tf.image.resize(
+      [image], [image_size, image_size], method=tf.image.ResizeMethod.BICUBIC
+  )[0]
 
 
 def _at_least_x_are_equal(a, b, x):
@@ -90,8 +96,13 @@ def _at_least_x_are_equal(a, b, x):
   return tf.greater_equal(tf.reduce_sum(match), x)
 
 
-def _decode_and_random_crop(image_bytes, image_size, rng_seed, area_range,
-                            use_center_crop_if_random_failed):
+def _decode_and_random_crop(
+    image_bytes,
+    image_size,
+    rng_seed,
+    area_range,
+    use_center_crop_if_random_failed,
+):
   """Make a random crop of image_size."""
   bbox = tf.constant([0.0, 0.0, 1.0, 1.0], dtype=tf.float32, shape=[1, 1, 4])
   image = distorted_bounding_box_crop(
@@ -99,15 +110,18 @@ def _decode_and_random_crop(image_bytes, image_size, rng_seed, area_range,
       bbox,
       rng_seed=rng_seed,
       min_object_covered=0.1,
-      aspect_ratio_range=(3. / 4, 4. / 3.),
+      aspect_ratio_range=(3.0 / 4, 4.0 / 3.0),
       area_range=area_range,
-      max_attempts=10)
+      max_attempts=10,
+  )
   original_shape = tf.image.extract_jpeg_shape(image_bytes)
   bad = _at_least_x_are_equal(original_shape, tf.shape(image), 3)
 
-  image = tf.cond(bad and use_center_crop_if_random_failed,
-                  lambda: _decode_and_center_crop(image_bytes, image_size),
-                  lambda: _resize(image, image_size))
+  image = tf.cond(
+      bad and use_center_crop_if_random_failed,
+      lambda: _decode_and_center_crop(image_bytes, image_size),
+      lambda: _resize(image, image_size),
+  )
 
   return image
 
@@ -143,11 +157,9 @@ def _resize_for_inception(image, size, method='bilinear'):
   return tf.cast(image, dtype)
 
 
-def _decode_and_inception_crop(image_data,
-                               size,
-                               area_min=5,
-                               area_max=100,
-                               method='bilinear'):
+def _decode_and_inception_crop(
+    image_data, size, area_min=5, area_max=100, method='bilinear'
+):
   """Decode jpeg and add inception crop.
 
   Args:
@@ -166,7 +178,8 @@ def _decode_and_inception_crop(image_data,
       tf.zeros([0, 0, 4], tf.float32),
       area_range=(area_min / 100, area_max / 100),
       min_object_covered=0,  # Don't enforce a minimum area.
-      use_image_if_no_bounding_boxes=True)
+      use_image_if_no_bounding_boxes=True,
+  )
 
   # Crop the image to the specified bounding box.
   offset_y, offset_x, _ = tf.unstack(begin)
@@ -185,14 +198,20 @@ def _decode_and_center_crop(image_bytes, image_size):
   image_width = shape[1]
 
   padded_center_crop_size = tf.cast(
-      ((image_size / (image_size + CROP_PADDING)) *
-       tf.cast(tf.minimum(image_height, image_width), tf.float32)), tf.int32)
+      (
+          (image_size / (image_size + CROP_PADDING))
+          * tf.cast(tf.minimum(image_height, image_width), tf.float32)
+      ),
+      tf.int32,
+  )
 
   offset_height = ((image_height - padded_center_crop_size) + 1) // 2
   offset_width = ((image_width - padded_center_crop_size) + 1) // 2
   crop_window = tf.stack([
-      offset_height, offset_width, padded_center_crop_size,
-      padded_center_crop_size
+      offset_height,
+      offset_width,
+      padded_center_crop_size,
+      padded_center_crop_size,
   ])
   image = tf.image.decode_and_crop_jpeg(image_bytes, crop_window, channels=3)
   image = _resize(image, image_size)
@@ -206,17 +225,19 @@ def normalize_image(image):
   return image
 
 
-def preprocess_for_train(image_bytes,
-                         rng_seed,
-                         dtype=tf.float32,
-                         image_size=224,
-                         crop='random',
-                         random_crop_area_range=(0.08, 1.0),
-                         use_center_crop_if_random_failed=False,
-                         random_flip=True,
-                         use_randaug=False,
-                         randaug_magnitude=0,
-                         randaug_num_layers=0):
+def preprocess_for_train(
+    image_bytes,
+    rng_seed,
+    dtype=tf.float32,
+    image_size=224,
+    crop='random',
+    random_crop_area_range=(0.08, 1.0),
+    use_center_crop_if_random_failed=False,
+    random_flip=True,
+    use_randaug=False,
+    randaug_magnitude=0,
+    randaug_num_layers=0,
+):
   """Preprocesses the given image for training.
 
   Args:
@@ -245,7 +266,8 @@ def preprocess_for_train(image_bytes,
         image_size,
         crop_rng,
         random_crop_area_range,
-        use_center_crop_if_random_failed=use_center_crop_if_random_failed)
+        use_center_crop_if_random_failed=use_center_crop_if_random_failed,
+    )
   elif crop == 'inception':
     image = _decode_and_inception_crop(image_bytes, image_size)
   elif crop == 'center':
@@ -261,10 +283,9 @@ def preprocess_for_train(image_bytes,
     # NOTE(dsuo): autoaugment code expects uint8 image; not sure why we use
     # float32[0, 255], but just making sure pipeline runs.
     image = tf.cast(tf.clip_by_value(image, 0, 255), tf.uint8)
-    image = autoaugment.distort_image_with_randaugment(image,
-                                                       randaug_num_layers,
-                                                       randaug_magnitude,
-                                                       randaug_rng)
+    image = autoaugment.distort_image_with_randaugment(
+        image, randaug_num_layers, randaug_magnitude, randaug_rng
+    )
 
   image = tf.cast(image, tf.float32)
   image = normalize_image(image)

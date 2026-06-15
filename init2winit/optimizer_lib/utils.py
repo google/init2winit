@@ -219,7 +219,7 @@ def overwrite_hparam_names(
 def append_hparam_name(
     base_opt: optax.GradientTransformationExtraArgs,
     hparam_name: str,
-    default_value: float = 0.,
+    default_value: float = 0.0,
 ) -> optax.GradientTransformationExtraArgs:
   """Create artificicial hparam name to comply with pipeline.
 
@@ -243,8 +243,8 @@ def append_hparam_name(
       state must be 'InjectHyperparamsState'-like such that a hyperparams
       attribute is present in its state.
     hparam_name: hyperparameter name to add.
-    default_value: default value for the new hyperparameter
-      (never used, simply there to fill the entry)
+    default_value: default value for the new hyperparameter (never used, simply
+      there to fill the entry)
 
   Returns:
     new_opt: new ``optax.GradientTransformationExtraArgs`` with new

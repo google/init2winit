@@ -87,7 +87,7 @@ def preconditioner(
         'updates': updates,
         'variables': {},
         'moments': {},
-        'output': None
+        'output': None,
     }
     new_state = []
     for s, transform in zip(state, [variable_creator, accumulator, updater]):
@@ -100,7 +100,8 @@ def preconditioner(
 
 
 def nth_power(
-    power: Union[int, Tuple[int]] = 2) -> optax.GradientTransformation:
+    power: Union[int, Tuple[int, ...]] = 2,
+) -> optax.GradientTransformation:
   """Create nth power(s) from gradients."""
 
   if not hasattr(power, '__iter__'):
@@ -117,7 +118,7 @@ def nth_power(
   def update(
       updates: optax.Updates,
       state: optax.OptState,
-      params: Optional[optax.Params] = None
+      params: Optional[optax.Params] = None,
   ) -> Tuple[optax.Updates, optax.OptState]:
     del params
 
@@ -133,8 +134,9 @@ def nth_power(
   return optax.GradientTransformation(init, update)
 
 
-def ema_accumulator(decay: float = 0.999,
-                    debias: bool = False) -> optax.GradientTransformation:
+def ema_accumulator(
+    decay: float = 0.999, debias: bool = False
+) -> optax.GradientTransformation:
   """Create accumulator that computes EMA on all updates."""
 
   def init(params: optax.Params) -> optax.OptState:
@@ -143,7 +145,7 @@ def ema_accumulator(decay: float = 0.999,
   def update(
       updates: optax.Updates,
       state: optax.OptState,
-      params: Optional[optax.Params] = None
+      params: Optional[optax.Params] = None,
   ) -> Tuple[optax.Updates, optax.OptState]:
     del params
 
@@ -153,8 +155,11 @@ def ema_accumulator(decay: float = 0.999,
 
     count = count + jnp.array(1, dtype=jnp.int32)
     beta = jnp.array(1, dtype=jnp.int32) - decay**count
-    updates['moments'] = moments if not debias else jax.tree.map(
-        lambda t: t / beta.astype(t.dtype), moments)
+    updates['moments'] = (
+        moments
+        if not debias
+        else jax.tree.map(lambda t: t / beta.astype(t.dtype), moments)
+    )
 
     return updates, (moments, count)
 
@@ -164,14 +169,20 @@ def ema_accumulator(decay: float = 0.999,
 # TODO(dsuo): from namanagarwal@: revisit `initial_accumulator_value`.
 #             `tensorflow` defaults to this value, but perhaps should consider
 #             0 or 1e-8 to match rms-type accumulators.
-def yogi_accumulator(b2: float = 0.999,
-                     initial_accumulator_value: float = 1e-6,
-                     debias: bool = False) -> optax.GradientTransformation:
+def yogi_accumulator(
+    b2: float = 0.999,
+    initial_accumulator_value: float = 1e-6,
+    debias: bool = False,
+) -> optax.GradientTransformation:
   """Create yogi accumulator."""
 
   def init(params: optax.Params) -> optax.OptState:
-    return (jax.tree.map(lambda p: jnp.full_like(p, initial_accumulator_value),
-                         params), jnp.zeros([], dtype=jnp.int32))
+    return (
+        jax.tree.map(
+            lambda p: jnp.full_like(p, initial_accumulator_value), params
+        ),
+        jnp.zeros([], dtype=jnp.int32),
+    )
 
   def update(updates, state, params=None):
     del params
@@ -182,8 +193,11 @@ def yogi_accumulator(b2: float = 0.999,
 
     count = count + jnp.array(1, dtype=jnp.int32)
     beta = jnp.array(1, dtype=jnp.float32) - b2**count
-    updates['moments'] = moments if not debias else jax.tree.map(
-        lambda t: t / beta.astype(t.dtype), moments)
+    updates['moments'] = (
+        moments
+        if not debias
+        else jax.tree.map(lambda t: t / beta.astype(t.dtype), moments)
+    )
 
     return updates, (moments, count)
 
@@ -206,15 +220,20 @@ def rexp_updater(
   def update(
       updates: optax.Updates,
       state: optax.OptState,
-      params: Optional[optax.Params] = None
+      params: Optional[optax.Params] = None,
   ) -> Tuple[optax.Updates, optax.OptState]:
     del params
-    grads = updates['updates'] if not use_accumulated_gradient else updates[
-        'moments']['1']
+    grads = (
+        updates['updates']
+        if not use_accumulated_gradient
+        else updates['moments']['1']
+    )
 
     updates['output'] = jax.tree.map(
-        lambda u, v: u / (jnp.power(v + eps_root, exponent) + eps), grads,
-        updates['moments'][str(moment)])
+        lambda u, v: u / (jnp.power(v + eps_root, exponent) + eps),
+        grads,
+        updates['moments'][str(moment)],
+    )
 
     return updates, state
 

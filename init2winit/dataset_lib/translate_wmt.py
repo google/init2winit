@@ -70,7 +70,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         #               max_eval_target_length,
         #               max_predict_length)
         # input_shape = [(max_len,), (max_len,)]
-    ))
+    )
+)
 
 METADATA = {
     'apply_one_hot_in_loss': True,
@@ -83,10 +84,9 @@ def get_translate_wmt(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
 
   per_host_batch_size = batch_size // jax.process_count()
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
-  return _get_translate_wmt(per_host_batch_size,
-                            per_host_eval_batch_size,
-                            hps,
-                            shuffle_rng)
+  return _get_translate_wmt(
+      per_host_batch_size, per_host_eval_batch_size, hps, shuffle_rng
+  )
 
 
 def validate_hparams(hps):
@@ -96,26 +96,32 @@ def validate_hparams(hps):
     if hps.tfds_dataset_keys:  # trains multilingual model
       assert len(hps.tfds_dataset_keys) >= 1
     else:
-      raise ValueError('Either set tfds_dataset_key to train bilingual model' +
-                       'or set tfds_dataset_keys to train multilingual model')
+      raise ValueError(
+          'Either set tfds_dataset_key to train bilingual model'
+          + 'or set tfds_dataset_keys to train multilingual model'
+      )
     if hps.rates:
       assert len(hps.tfds_dataset_keys) == len(hps.rates)
 
 
-def _get_translate_wmt(per_host_batch_size,
-                       per_host_eval_batch_size,
-                       hps,
-                       shuffle_rng):
+def _get_translate_wmt(
+    per_host_batch_size, per_host_eval_batch_size, hps, shuffle_rng
+):
   """Data generators for wmt translate task."""
 
   n_devices = jax.local_device_count()
   if per_host_batch_size % n_devices != 0:
-    raise ValueError('n_devices={} must divide per_host_batch_size={}.'.format(
-        n_devices, per_host_batch_size))
+    raise ValueError(
+        'n_devices={} must divide per_host_batch_size={}.'.format(
+            n_devices, per_host_batch_size
+        )
+    )
   if per_host_eval_batch_size % n_devices != 0:
     raise ValueError(
         'n_devices={} must divide per_host_eval_batch_size={}.'.format(
-            n_devices, per_host_eval_batch_size))
+            n_devices, per_host_eval_batch_size
+        )
+    )
 
   validate_hparams(hps)
 
@@ -128,22 +134,21 @@ def _get_translate_wmt(per_host_batch_size,
       n_devices=jax.local_device_count(),
       per_host_batch_size=per_host_batch_size,
       per_host_eval_batch_size=per_host_eval_batch_size,
-      vocab_path=vocab_path)
+      vocab_path=vocab_path,
+  )
 
   def train_iterator_fn():
     for batch in iter(train_ds):
       yield mt_pipeline.maybe_pad_batch(
-          data_utils.tf_to_numpy(batch),
-          per_host_batch_size,
-          mask_key='targets')
+          data_utils.tf_to_numpy(batch), per_host_batch_size, mask_key='targets'
+      )
 
   def eval_train_epoch(num_batches=None):
     eval_train_iter = iter(train_ds)
     for batch in itertools.islice(eval_train_iter, num_batches):
       yield mt_pipeline.maybe_pad_batch(
-          data_utils.tf_to_numpy(batch),
-          per_host_batch_size,
-          mask_key='targets')
+          data_utils.tf_to_numpy(batch), per_host_batch_size, mask_key='targets'
+      )
 
   def valid_epoch(num_batches=None):
     valid_iter = iter(eval_ds)
@@ -151,7 +156,8 @@ def _get_translate_wmt(per_host_batch_size,
       yield mt_pipeline.maybe_pad_batch(
           data_utils.tf_to_numpy(batch),
           per_host_eval_batch_size,
-          mask_key='targets')
+          mask_key='targets',
+      )
 
   def test_epoch(num_batches=None):
     predict_iter = iter(predict_ds)
@@ -159,7 +165,8 @@ def _get_translate_wmt(per_host_batch_size,
       yield mt_pipeline.maybe_pad_batch(
           data_utils.tf_to_numpy(batch),
           per_host_eval_batch_size,
-          mask_key='targets')
+          mask_key='targets',
+      )
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
 
@@ -167,31 +174,31 @@ def _get_translate_wmt(per_host_batch_size,
 def get_fake_batch(hps):
   """Build fake batch for translate_wmt."""
   batch = {
-      'inputs':
-          np.ones((hps.batch_size, hps.max_target_length),
-                  dtype=np.int32),
-      'targets':
-          np.ones((hps.batch_size, hps.max_target_length),
-                  dtype=np.int32),
-      'weights':
-          np.ones((hps.batch_size, hps.max_target_length),
-                  dtype=np.int64),
+      'inputs': np.ones(
+          (hps.batch_size, hps.max_target_length), dtype=np.int32
+      ),
+      'targets': np.ones(
+          (hps.batch_size, hps.max_target_length), dtype=np.int32
+      ),
+      'weights': np.ones(
+          (hps.batch_size, hps.max_target_length), dtype=np.int64
+      ),
   }
 
   if hps.pack_examples:
     batch.update({
-        'inputs_position':
-            np.ones((hps.batch_size, hps.max_target_length),
-                    dtype=np.int32),
-        'inputs_segmentation':
-            np.ones((hps.batch_size, hps.max_target_length),
-                    dtype=np.int32),
-        'targets_position':
-            np.ones((hps.batch_size, hps.max_target_length),
-                    dtype=np.int32),
-        'targets_segmentation':
-            np.ones((hps.batch_size, hps.max_target_length),
-                    dtype=np.int32),
+        'inputs_position': np.ones(
+            (hps.batch_size, hps.max_target_length), dtype=np.int32
+        ),
+        'inputs_segmentation': np.ones(
+            (hps.batch_size, hps.max_target_length), dtype=np.int32
+        ),
+        'targets_position': np.ones(
+            (hps.batch_size, hps.max_target_length), dtype=np.int32
+        ),
+        'targets_segmentation': np.ones(
+            (hps.batch_size, hps.max_target_length), dtype=np.int32
+        ),
     })
 
     return batch

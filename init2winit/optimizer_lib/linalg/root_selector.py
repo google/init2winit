@@ -72,11 +72,13 @@ def root_selector(
   def _exact_root():
     return f_er(x, p)
 
-  rank_array = np.zeros(np.where(
-      x.shape[-1] < 64,
-      x.shape[-1],
-      np.minimum(x.shape[-1] // 8, rank_estimate),
-  ))
+  rank_array = np.zeros(
+      np.where(
+          x.shape[-1] < 64,
+          x.shape[-1],
+          np.minimum(x.shape[-1] // 8, rank_estimate),
+      )
+  )
   f_ar = functools.partial(
       low_rank_root_update.low_rank_root_update,
       rank_array=rank_array,
@@ -84,6 +86,7 @@ def root_selector(
       block_krylov_dim_multiplier=block_krylov_dim_multiplier,
       verbose=verbose,
   )
+
   def _approx_root():
     return f_ar(sx, isx, up)
 

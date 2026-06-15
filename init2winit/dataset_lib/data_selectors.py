@@ -23,7 +23,8 @@ def noop(
     batch_stats,
     hps,
     global_step,
-    constant_base_rng):
+    constant_base_rng,
+):
   """An example no-op data selector that just yields the next batch.
 
   Args:
@@ -35,8 +36,8 @@ def noop(
     global_step: the current global step.
     constant_base_rng: the RNG used for the experiment. IMPORTANT NOTE: this
       will be constant for all calls to this function, in order to get a unique
-      RNG each time we need to do
-      `rng = jax.random.fold_in(constant_base_rng, global_step)`.
+      RNG each time we need to do `rng = jax.random.fold_in(constant_base_rng,
+      global_step)`.
 
   Yields:
     A batch of data.
@@ -57,7 +58,8 @@ def data_echoing(
     batch_stats,
     hps,
     global_step,
-    constant_base_rng):
+    constant_base_rng,
+):
   """An example data echoing selector.
 
   Args:
@@ -69,8 +71,8 @@ def data_echoing(
     global_step: the current global step.
     constant_base_rng: the RNG used for the experiment. IMPORTANT NOTE: this
       will be constant for all calls to this function, in order to get a unique
-      RNG each time we need to do
-      `rng = jax.random.fold_in(constant_base_rng, global_step)`.
+      RNG each time we need to do `rng = jax.random.fold_in(constant_base_rng,
+      global_step)`.
 
   Yields:
     A batch of data.

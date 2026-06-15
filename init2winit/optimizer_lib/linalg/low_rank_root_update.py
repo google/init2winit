@@ -49,6 +49,7 @@ def chol_inv(m):
   """
   eye = jnp.identity(m.shape[-1], dtype=jnp.float32)
   l_m = jnp.linalg.cholesky(m)
+
   def _get_inv():
     d_m = lax.linalg.triangular_solve(
         l_m, eye, left_side=True, lower=True, transpose_a=False
@@ -62,10 +63,8 @@ def chol_inv(m):
 
 
 def lyapunov_solver(
-    a: chex.Array,
-    c: chex.Array,
-    eps: float,
-    num_terms: int = 5):
+    a: chex.Array, c: chex.Array, eps: float, num_terms: int = 5
+):
   """Solves the Sylvester equation ax + xa = c using R. A. Smith's method.
 
   Args:
@@ -76,7 +75,6 @@ def lyapunov_solver(
 
   Returns:
     solution to the Lyapunov equation
-
   """
   a_norm = norm_upper_bound(a)
   a_norm = jnp.where(a_norm == 0, 1, a_norm)
@@ -103,7 +101,7 @@ def lyapunov_solver(
     xx = xx + vv @ (xx @ vv.T)
     return (vv, xx)
 
-  (vv, xx) = lax.fori_loop(0, num_terms, _loop_body, (vv, xx))
+  vv, xx = lax.fori_loop(0, num_terms, _loop_body, (vv, xx))
   del vv
   return alph * xx
 
@@ -129,14 +127,14 @@ def matrix_sqrt_update(
 
   Returns:
     Gram factor U of the update to the matrix sqrt.
-
   """
+
   # given A^{1/2} and an update of the form ZZ^T, returns U such that
   # (A + ZZ^T)^{1/2} = A^{1/2} + UU^T and
   # actual update is stat_update @ stat_update.T
   def block_krylov_basis(a, q, k):
     pp = (q,)
-    for _ in range(k-1):
+    for _ in range(k - 1):
       pp = pp + (a @ pp[-1],)
     ks = jnp.hstack(pp)
     return jnp.linalg.qr(ks)[0]
@@ -226,7 +224,5 @@ def low_rank_root_update(
         block_krylov_dim_multiplier,
         rng=rng,
     )
-    new_sqrt_x, new_isqrt_x = _update_inv_sqrt(
-        sqrt_x, isqrt_x, u
-    )
+    new_sqrt_x, new_isqrt_x = _update_inv_sqrt(sqrt_x, isqrt_x, u)
   return new_sqrt_x, new_isqrt_x

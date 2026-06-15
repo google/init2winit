@@ -25,7 +25,6 @@ https://github.com/juntang-zhuang/Adabelief-Optimizer/blob/update_0.2.0/PyTorch_
 The original DenseNet paper can be found here:
 
 https://arxiv.org/abs/1608.06993?source=post_page---------------------------
-
 """
 
 import functools
@@ -36,7 +35,6 @@ from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
-
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
@@ -65,6 +63,7 @@ class BottleneckBlock(nn.Module):
   preceded by 1x1 convoluational operation (and the correpsonding batch
   normalization and ReLU).
   """
+
   growth_rate: int
   dtype: model_utils.Dtype = jnp.float32
   normalizer: str = 'batch_norm'
@@ -84,7 +83,8 @@ class BottleneckBlock(nn.Module):
         features=self.growth_rate,
         kernel_size=(3, 3),
         padding=((1, 1), (1, 1)),
-        name='conv2')(y)
+        name='conv2',
+    )(y)
 
     # Concatenate the output and input along the features dimension.
     y = jnp.concatenate([y, x], axis=3)
@@ -97,6 +97,7 @@ class TransitionBlock(nn.Module):
   Downsampling is achieved by a 1x1 convoluationl layer (with the associated
   batch norm and ReLU) and a 2x2 average pooling layer.
   """
+
   num_features: int
   use_kernel_size_as_stride_in_pooling: bool
   dtype: model_utils.Dtype = jnp.float32
@@ -113,7 +114,8 @@ class TransitionBlock(nn.Module):
     y = nn.avg_pool(
         y,
         window_shape=(2, 2),
-        strides=(2, 2) if self.use_kernel_size_as_stride_in_pooling else (1, 1))
+        strides=(2, 2) if self.use_kernel_size_as_stride_in_pooling else (1, 1),
+    )
     return y
 
 
@@ -123,6 +125,7 @@ class DenseNet(nn.Module):
   The network consists of an inital convolutaional layer, four dense blocks
   connected by transition blocks, a pooling layer and a classification layer.
   """
+
   num_layers: int
   num_outputs: int
   growth_rate: int
@@ -153,25 +156,25 @@ class DenseNet(nn.Module):
         features=num_features,
         kernel_size=(3, 3),
         padding=((1, 1), (1, 1)),
-        name='conv1')(x)
+        name='conv1',
+    )(x)
 
     # Internal dense and transtion blocks
     num_blocks = _block_size_options[self.num_layers]
     block = functools.partial(
-        BottleneckBlock,
-        dtype=self.dtype,
-        normalizer=self.normalizer)
+        BottleneckBlock, dtype=self.dtype, normalizer=self.normalizer
+    )
     for i in range(3):
       y = dense_layers(y, block, num_blocks[i], self.growth_rate)
-      num_features = update_num_features(num_features, num_blocks[i],
-                                         self.growth_rate, self.reduction)
+      num_features = update_num_features(
+          num_features, num_blocks[i], self.growth_rate, self.reduction
+      )
       y = TransitionBlock(
           num_features,
           dtype=self.dtype,
           normalizer=self.normalizer,
-          use_kernel_size_as_stride_in_pooling=self
-          .use_kernel_size_as_stride_in_pooling)(
-              y, train=train)
+          use_kernel_size_as_stride_in_pooling=self.use_kernel_size_as_stride_in_pooling,
+      )(y, train=train)
 
     # Final dense block
     y = dense_layers(y, block, num_blocks[3], self.growth_rate)
@@ -183,13 +186,15 @@ class DenseNet(nn.Module):
     y = nn.avg_pool(
         y,
         window_shape=(4, 4),
-        strides=(4, 4) if self.use_kernel_size_as_stride_in_pooling else (1, 1))
+        strides=(4, 4) if self.use_kernel_size_as_stride_in_pooling else (1, 1),
+    )
 
     # Classification layer
     y = jnp.reshape(y, (y.shape[0], -1))
     if self.normalize_classifier_input:
       maybe_normalize = model_utils.get_normalizer(
-          self.normalize_classifier_input, train)
+          self.normalize_classifier_input, train
+      )
       y = maybe_normalize()(y)
     y = y * self.classification_scale_factor
 
@@ -218,8 +223,7 @@ class AdaBeliefDensenetModel(base_model.BaseModel):
         num_outputs=self.hps['output_shape'][-1],
         growth_rate=self.hps.growth_rate,
         reduction=self.hps.reduction,
-        use_kernel_size_as_stride_in_pooling=self.hps
-        .use_kernel_size_as_stride_in_pooling,
+        use_kernel_size_as_stride_in_pooling=self.hps.use_kernel_size_as_stride_in_pooling,
         dtype=self.hps.model_dtype,
         normalizer=self.hps.normalizer,
         normalize_classifier_input=self.hps.normalize_classifier_input,

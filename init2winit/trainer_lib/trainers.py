@@ -17,7 +17,6 @@
 
 from init2winit.trainer_lib import trainer
 
-
 _ALL_TRAINERS = {
     'standard': trainer.Trainer,
 }

@@ -59,12 +59,14 @@ class DoConfig:
   L: int  # sequence length
   kernel_init: nn.initializers.Initializer = nn.initializers.xavier_uniform()
   embed_init: nn.initializers.Initializer = nn.initializers.variance_scaling(
-      1.0, 'fan_in', 'normal', out_axis=0)
+      1.0, 'fan_in', 'normal', out_axis=0
+  )
   dtype: jnp.dtype = jnp.float32
 
 
 class TransformerDo(nn.Module):
   """Transformer decoder-only."""
+
   docfg: DoConfig
 
   def setup(self):
@@ -97,14 +99,14 @@ class TransformerDo(nn.Module):
 
 class Mlp(nn.Module):
   """Multilayer perceptron."""
+
   cfg: DoConfig
 
   @nn.compact
   def __call__(self, x_BxLxD: jax.Array):
     cfg = self.cfg
     linear = functools.partial(
-        nn.Dense, kernel_init=cfg.kernel_init, use_bias=False,
-        dtype=cfg.dtype
+        nn.Dense, kernel_init=cfg.kernel_init, use_bias=False, dtype=cfg.dtype
     )
     x_BxLxF = linear(cfg.F)(x_BxLxD)
     x_BxLxF = jax.nn.gelu(x_BxLxF)
@@ -114,6 +116,7 @@ class Mlp(nn.Module):
 
 class TBlock(nn.Module):
   """Transformer Block."""
+
   docfg: DoConfig
 
   @nn.compact
@@ -133,6 +136,7 @@ class TBlock(nn.Module):
 
 class CausalAttn(nn.Module):
   """Causal attention layer."""
+
   cfg: DoConfig
 
   @nn.compact

@@ -27,7 +27,6 @@ import jax.random
 import numpy as np
 import tensorflow_datasets as tfds
 
-
 FLAGS = flags.FLAGS
 
 
@@ -57,91 +56,124 @@ class DatasetTest(parameterized.TestCase):
           shuffle_rng=jax.random.PRNGKey(0),
           batch_size=batch_size,
           eval_batch_size=eval_batch_size,
-          hps=hps)
+          hps=hps,
+      )
       dataset_copy = dataset_builder(
           shuffle_rng=jax.random.PRNGKey(0),
           batch_size=batch_size,
           eval_batch_size=eval_batch_size,
-          hps=hps)
+          hps=hps,
+      )
     batch_idx_to_test = 1
 
-    saved_batch = next(itertools.islice(
-        dataset.train_iterator_fn(), batch_idx_to_test,
-        batch_idx_to_test + 1))
-    saved_batch_same_epoch = next(itertools.islice(
-        dataset_copy.train_iterator_fn(), batch_idx_to_test,
-        batch_idx_to_test + 1))
-    saved_batch_diff_epoch = next(itertools.islice(
-        dataset.train_iterator_fn(), batch_idx_to_test + 3,
-        batch_idx_to_test + 4))
+    saved_batch = next(
+        itertools.islice(
+            dataset.train_iterator_fn(),
+            batch_idx_to_test,
+            batch_idx_to_test + 1,
+        )
+    )
+    saved_batch_same_epoch = next(
+        itertools.islice(
+            dataset_copy.train_iterator_fn(),
+            batch_idx_to_test,
+            batch_idx_to_test + 1,
+        )
+    )
+    saved_batch_diff_epoch = next(
+        itertools.islice(
+            dataset.train_iterator_fn(),
+            batch_idx_to_test + 3,
+            batch_idx_to_test + 4,
+        )
+    )
 
-    saved_batch_eval = next(itertools.islice(
-        dataset.valid_epoch(), batch_idx_to_test,
-        batch_idx_to_test + 1))
+    saved_batch_eval = next(
+        itertools.islice(
+            dataset.valid_epoch(), batch_idx_to_test, batch_idx_to_test + 1
+        )
+    )
     saved_batch_eval_same_epoch = next(
-        itertools.islice(dataset_copy.valid_epoch(), batch_idx_to_test,
-                         batch_idx_to_test + 1))
+        itertools.islice(
+            dataset_copy.valid_epoch(), batch_idx_to_test, batch_idx_to_test + 1
+        )
+    )
 
     self.assertTrue(
-        jnp.array_equal(saved_batch['inputs'],
-                        saved_batch_same_epoch['inputs']))
+        jnp.array_equal(saved_batch['inputs'], saved_batch_same_epoch['inputs'])
+    )
     self.assertTrue(
-        jnp.array_equal(saved_batch['targets'],
-                        saved_batch_same_epoch['targets']))
+        jnp.array_equal(
+            saved_batch['targets'], saved_batch_same_epoch['targets']
+        )
+    )
     self.assertFalse(
-        jnp.array_equal(saved_batch['inputs'],
-                        saved_batch_diff_epoch['inputs']))
+        jnp.array_equal(saved_batch['inputs'], saved_batch_diff_epoch['inputs'])
+    )
     self.assertFalse(
-        jnp.array_equal(saved_batch['targets'],
-                        saved_batch_diff_epoch['targets']))
+        jnp.array_equal(
+            saved_batch['targets'], saved_batch_diff_epoch['targets']
+        )
+    )
     self.assertTrue(
-        jnp.array_equal(saved_batch_eval['inputs'],
-                        saved_batch_eval_same_epoch['inputs']))
+        jnp.array_equal(
+            saved_batch_eval['inputs'], saved_batch_eval_same_epoch['inputs']
+        )
+    )
 
     # Check shapes
-    expected_shape = jnp.array([
-        batch_size, hps.input_shape[0], hps.input_shape[1], hps.input_shape[2]
-    ])
+    expected_shape = jnp.array(
+        [batch_size, hps.input_shape[0], hps.input_shape[1], hps.input_shape[2]]
+    )
     expected_shape_eval = jnp.array([
-        eval_batch_size, hps.input_shape[0],
-        hps.input_shape[1], hps.input_shape[2],
+        eval_batch_size,
+        hps.input_shape[0],
+        hps.input_shape[1],
+        hps.input_shape[2],
     ])
     self.assertTrue(
-        jnp.array_equal(saved_batch['inputs'].shape, expected_shape))
+        jnp.array_equal(saved_batch['inputs'].shape, expected_shape)
+    )
     self.assertTrue(
-        jnp.array_equal(saved_batch_eval['inputs'].shape, expected_shape_eval))
+        jnp.array_equal(saved_batch_eval['inputs'].shape, expected_shape_eval)
+    )
 
     expected_target_shape = jnp.array(
-        [batch_size, get_dataset_hparams(ds)['output_shape'][-1]])
-    self.assertTrue(jnp.array_equal(saved_batch['targets'].shape,
-                                    expected_target_shape))
+        [batch_size, get_dataset_hparams(ds)['output_shape'][-1]]
+    )
+    self.assertTrue(
+        jnp.array_equal(saved_batch['targets'].shape, expected_target_shape)
+    )
 
     # Check that the training gen drops the last partial batch.
     drop_partial_batches = list(
-        itertools.islice(dataset.train_iterator_fn(), 0, 2))
+        itertools.islice(dataset.train_iterator_fn(), 0, 2)
+    )
 
     # Check that the validation set correctly pads the final partial batch.
     no_drop_partial_batches = list(dataset.test_epoch(num_batches=3))
     self.assertLen(drop_partial_batches, 2)
     self.assertLen(no_drop_partial_batches, 3)
     expected_shape = jnp.array([
-        80 % batch_size, hps.input_shape[0],
-        hps.input_shape[1], hps.input_shape[2],
+        80 % batch_size,
+        hps.input_shape[0],
+        hps.input_shape[1],
+        hps.input_shape[2],
     ])
     self.assertTrue(
-        jnp.array_equal(no_drop_partial_batches[2]['inputs'].shape,
-                        expected_shape))
+        jnp.array_equal(
+            no_drop_partial_batches[2]['inputs'].shape, expected_shape
+        )
+    )
 
     # We expect the partial batch to have 40 % 16 = 8 non padded inputs.
     self.assertEqual(no_drop_partial_batches[2]['weights'].sum(), 8)
 
     # Test number of batches
     num_batches = 1
-    num_generated = len(
-        [
-            b for b in itertools.islice(
-                dataset.train_iterator_fn(), 0, num_batches)
-        ])
+    num_generated = len([
+        b for b in itertools.islice(dataset.train_iterator_fn(), 0, num_batches)
+    ])
     self.assertEqual(num_batches, num_generated)
 
 

@@ -32,7 +32,6 @@ import jax
 import jax.numpy as jnp
 from ml_collections import config_dict
 
-
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         out_chans=1,
@@ -42,7 +41,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         activation='leaky_relu',
         model_dtype='float32',
         normalizer='unet_instance_norm',
-    ))
+    )
+)
 
 
 def _compute_stats(x, axes):
@@ -53,7 +53,7 @@ def _compute_stats(x, axes):
   mean2 = jnp.mean(jnp.square(x), axes)
   # mean2 - _abs_sq(mean) is not guaranteed to be non-negative due
   # to floating point round-off errors.
-  var = jnp.maximum(0., mean2 - jnp.square(mean))
+  var = jnp.maximum(0.0, mean2 - jnp.square(mean))
   return mean, var
 
 
@@ -77,16 +77,17 @@ def _simple_instance_norm2d(x, axes, epsilon=1e-5):
 class UNet(nn.Module):
   """Jax / Flax implementation of a U-Net model.
 
-    O. Ronneberger, P. Fischer, and Thomas Brox. U-net: Convolutional networks
-    for biomedical image segmentation. In International Conference on Medical
-    image computing and computer-assisted intervention, pages 234–241.
-    Springer, 2015.
+  O. Ronneberger, P. Fischer, and Thomas Brox. U-net: Convolutional networks
+  for biomedical image segmentation. In International Conference on Medical
+  image computing and computer-assisted intervention, pages 234–241.
+  Springer, 2015.
 
-    out_chans: Number of channels in the output to the U-Net model.
-    chans: Number of output channels of the first convolution layer.
-    num_pool_layers: Number of down-sampling and up-sampling layers.
-    drop_prob: Dropout probability.
+  out_chans: Number of channels in the output to the U-Net model.
+  chans: Number of output channels of the first convolution layer.
+  num_pool_layers: Number of down-sampling and up-sampling layers.
+  drop_prob: Dropout probability.
   """
+
   out_chans: int
   chans: int = 32
   num_pool_layers: int = 4
@@ -166,6 +167,7 @@ class ConvBlock(nn.Module):
   out_chans: Number of channels in the output.
   drop_prob: Dropout probability.
   """
+
   out_chans: int
   drop_prob: float
   activation: str
@@ -188,8 +190,8 @@ class ConvBlock(nn.Module):
         features=self.out_chans,
         kernel_size=(3, 3),
         strides=(1, 1),
-        use_bias=False)(
-            x)
+        use_bias=False,
+    )(x)
     # InstanceNorm2d was implemented with no learnable params in reference code
     # so this is a simple normalization along channels
     if self.normalizer == 'unet_instance_norm':
@@ -208,14 +210,14 @@ class ConvBlock(nn.Module):
     # Ref code uses dropout2d which applies the same mask for the entire channel
     # Replicated by using broadcast dims to have the same filter on HW
     x = nn.Dropout(
-        self.drop_prob, broadcast_dims=(1, 2), deterministic=not train)(
-            x)
+        self.drop_prob, broadcast_dims=(1, 2), deterministic=not train
+    )(x)
     x = nn.Conv(
         features=self.out_chans,
         kernel_size=(3, 3),
         strides=(1, 1),
-        use_bias=False)(
-            x)
+        use_bias=False,
+    )(x)
     # InstanceNorm2d was implemented with no learnable params in reference code
     # so this is a simple normalization along channels
     if self.normalizer == 'unet_instance_norm':
@@ -232,8 +234,8 @@ class ConvBlock(nn.Module):
     else:
       raise ValueError('Unsupported activation: {}'.format(self.activation))
     x = nn.Dropout(
-        self.drop_prob, broadcast_dims=(1, 2), deterministic=not train)(
-            x)
+        self.drop_prob, broadcast_dims=(1, 2), deterministic=not train
+    )(x)
 
     return x
 
@@ -243,6 +245,7 @@ class TransposeConvBlock(nn.Module):
 
   out_chans: Number of channels in the output.
   """
+
   out_chans: int
   activation: str
 
@@ -257,8 +260,8 @@ class TransposeConvBlock(nn.Module):
         jnp.array: Output tensor of shape `(N, H*2, W*2, out_chans)`.
     """
     x = nn.ConvTranspose(
-        self.out_chans, kernel_size=(2, 2), strides=(2, 2), use_bias=False)(
-            x)
+        self.out_chans, kernel_size=(2, 2), strides=(2, 2), use_bias=False
+    )(x)
     x = _simple_instance_norm2d(x, (1, 2))
     if self.activation == 'leaky_relu':
       x = jax.nn.leaky_relu(x, negative_slope=0.2)
@@ -277,7 +280,8 @@ class UNetModel(base_model.BaseModel):
     """Evaluates metrics under self.metrics_name on the given_batch."""
     variables = {'params': params, 'batch_stats': batch_stats}
     logits = self.flax_module.apply(
-        variables, batch['inputs'], mutable=False, train=False)
+        variables, batch['inputs'], mutable=False, train=False
+    )
     targets = batch['targets']
 
     # map the dict values (which are functions) to function(targets, logits)
@@ -295,7 +299,8 @@ class UNetModel(base_model.BaseModel):
         mean=batch.get('mean'),
         std=batch.get('std'),
         volume_max=batch.get('volume_max'),
-        axis_name='batch')
+        axis_name='batch',
+    )
 
   def build_flax_module(self):
     """Unet implementation."""
@@ -305,7 +310,8 @@ class UNetModel(base_model.BaseModel):
         num_pool_layers=self.hps.num_pool_layers,
         drop_prob=self.hps.dropout_rate,
         activation=self.hps.activation,
-        normalizer=self.hps.normalizer)
+        normalizer=self.hps.normalizer,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initializing the model."""

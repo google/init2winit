@@ -77,7 +77,8 @@ def samuel(
   if num_experts != jax.process_count():
     raise ValueError(
         'This implementation of SAMUEL requires the number of optimizers to be '
-        'equal to the number of hosts (one host per expert).')
+        'equal to the number of hosts (one host per expert).'
+    )
 
   optimizer = optimizers[jax.process_index()]
   hps = hps[jax.process_index()]
@@ -111,7 +112,8 @@ def samuel(
     # jax.experimental.multihost_utils.
     # NOTE(dsuo): train_losses is of shape (jax.process_count(),).
     train_losses = jax.lax.all_gather(train_loss, 'batch').reshape(
-        jax.process_count(), jax.local_device_count())[:, 0]
+        jax.process_count(), jax.local_device_count()
+    )[:, 0]
 
     # Compute loss regret and update expert weights.
     loss_regret = train_losses.at[current_expert].get() - train_losses
@@ -150,4 +152,5 @@ def from_hparams(opt_hparams):
     index += 1
 
   return static_inject_hyperparams(samuel)(
-      optimizers=optimizers, hps=hps, **opt_hparams['args'])
+      optimizers=optimizers, hps=hps, **opt_hparams['args']
+  )

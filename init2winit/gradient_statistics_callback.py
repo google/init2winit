@@ -13,8 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Callback for computing gradient statistics given set of params.
-"""
+"""Callback for computing gradient statistics given set of params."""
 
 import functools
 import itertools
@@ -69,9 +68,7 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
     self.num_updates = 0
     self.orbax_checkpoint_manager = ocp.CheckpointManager(
         self.save_path,
-        options=ocp.CheckpointManagerOptions(
-            max_to_keep=1, create=True
-        ),
+        options=ocp.CheckpointManagerOptions(max_to_keep=1, create=True),
     )
 
     def update(params, batch, batch_stats, dropout_rng):
@@ -88,9 +85,7 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
 
       return grad
 
-    params_sharding = jax.tree_util.tree_map(
-        lambda x: x.sharding, params
-    )
+    params_sharding = jax.tree_util.tree_map(lambda x: x.sharding, params)
     batch_stats_sharding = nn.get_sharding(batch_stats, self.mesh)
 
     self.jitted_update = jax.jit(
@@ -98,16 +93,16 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
         in_shardings=(
             params_sharding,
             jax.sharding.NamedSharding(
-                self.mesh, jax.sharding.PartitionSpec('devices')),
+                self.mesh, jax.sharding.PartitionSpec('devices')
+            ),
             batch_stats_sharding,
-            None
+            None,
         ),
-        out_shardings=(params_sharding)
+        out_shardings=(params_sharding),
     )
 
   def run_eval(self, params, batch_stats, optimizer_state, global_step):
-    """Computes gradient statistics from mini batches over full training data.
-    """
+    """Computes gradient statistics from mini batches over full training data."""
     del optimizer_state
     train_iter = itertools.islice(
         self.dataset.train_iterator_fn(), self.num_batches_in_training_epoch
@@ -149,12 +144,13 @@ class GradientStatisticsCallback(base_callback.BaseCallBack):
     state = dict(
         grad_std=jax.device_get(grad_std),
         grad_mean=jax.device_get(grad_mean),
-        step=global_step
+        step=global_step,
     )
 
     checkpoint.save_checkpoint(
         step=global_step,
         state=state,
-        orbax_checkpoint_manager=self.orbax_checkpoint_manager)
+        orbax_checkpoint_manager=self.orbax_checkpoint_manager,
+    )
 
     return {}

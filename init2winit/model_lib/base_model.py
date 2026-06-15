@@ -34,8 +34,14 @@ NamedSharding = jax.sharding.NamedSharding
 P = jax.sharding.PartitionSpec
 
 
-def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
-                    apply_one_hot_in_loss):
+def _evaluate_batch(
+    flax_module,
+    params,
+    batch_stats,
+    batch,
+    metrics_bundle,
+    apply_one_hot_in_loss,
+):
   """Evaluates metrics on the given batch.
 
   We use the CLU metrics library to evaluate the metrics, and we require that
@@ -46,8 +52,8 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
     flax_module: the Flax linen.nn.Module.
     params: A dict of trainable model parameters. Passed as {'params': params}
       into flax_module.apply().
-    batch_stats: A dict of non-trainable model state. Passed as
-      {'batch_stats': batch_stats} into flax_module.apply().
+    batch_stats: A dict of non-trainable model state. Passed as {'batch_stats':
+      batch_stats} into flax_module.apply().
     batch: A dictionary with keys 'inputs', 'targets', 'weights'.
     metrics_bundle: A group of metrics to use for evaluation.
     apply_one_hot_in_loss: Indicates whether or not the targets are one hot
@@ -59,7 +65,8 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
   """
   variables = {'params': params, 'batch_stats': batch_stats}
   logits = flax_module.apply(
-      variables, batch['inputs'], mutable=False, train=False)
+      variables, batch['inputs'], mutable=False, train=False
+  )
   targets = batch['targets']
 
   if apply_one_hot_in_loss:
@@ -74,7 +81,8 @@ def _evaluate_batch(flax_module, params, batch_stats, batch, metrics_bundle,
   # We don't use CLU's `mask` argument here, we handle it ourselves through
   # `weights`.
   return metrics_bundle.single_from_model_output(
-      logits=logits, targets=targets, weights=weights)
+      logits=logits, targets=targets, weights=weights
+  )
 
 
 class BaseModel(object):
@@ -193,7 +201,8 @@ class BaseModel(object):
       fake_input_batch = fake_inputs
     elif isinstance(hps.input_shape, list):  # Typical case for seq2seq models
       fake_input_batch = [
-          np.zeros((2, *x), model_dtype) for x in hps.input_shape]
+          np.zeros((2, *x), model_dtype) for x in hps.input_shape
+      ]
     else:  # Typical case for classification models
       fake_input_batch = [np.zeros((2, *hps.input_shape), model_dtype)]
     params_rng, init_rng, dropout_rng = jax.random.split(rng, num=3)
@@ -220,8 +229,9 @@ class BaseModel(object):
         functools.partial(self.flax_module.init, train=False), **jit_kwargs
     )
 
-    init_dict = model_init_fn({'params': params_rng, 'dropout': dropout_rng},
-                              *fake_input_batch)
+    init_dict = model_init_fn(
+        {'params': params_rng, 'dropout': dropout_rng}, *fake_input_batch
+    )
 
     logging.info(
         'Flax module init call took %f seconds.',
@@ -332,7 +342,8 @@ class BaseModel(object):
     sharding_overrides = self.get_sharding_overrides(mesh)
 
     overriden_shardings = self._apply_sharding_overrides(
-        params, mesh, default_shardings, sharding_overrides)
+        params, mesh, default_shardings, sharding_overrides
+    )
     return overriden_shardings
 
   def evaluate_batch(self, params, batch_stats, batch):
@@ -343,7 +354,8 @@ class BaseModel(object):
         batch_stats,
         batch,
         self.metrics_bundle,
-        self.dataset_meta_data['apply_one_hot_in_loss'])
+        self.dataset_meta_data['apply_one_hot_in_loss'],
+    )
 
   def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
     """Wrapper around flax_module.apply.
@@ -375,11 +387,14 @@ class BaseModel(object):
     if dropout_rng is not None:
       apply_kwargs['rngs'] = {'dropout': dropout_rng}
 
-    logits, new_batch_stats = self.apply_on_batch(params, batch_stats, batch,
-                                                  **apply_kwargs)
+    logits, new_batch_stats = self.apply_on_batch(
+        params, batch_stats, batch, **apply_kwargs
+    )
     weights = batch.get('weights')
-    return self.training_objective_fn(params, logits, batch['targets'],
-                                      weights), new_batch_stats
+    return (
+        self.training_objective_fn(params, logits, batch['targets'], weights),
+        new_batch_stats,
+    )
 
   def training_objective_fn(self, params, logits, targets, weights):
     """Returns the training objective (loss + regularizer) on a batch of logits.
@@ -399,9 +414,7 @@ class BaseModel(object):
     # is multi-class cross-entropy.
     label_smoothing = self.hps.get('label_smoothing')
     if self._loss_name == 'cross_entropy' and label_smoothing is not None:
-      targets = model_utils.apply_label_smoothing(
-          targets, label_smoothing
-      )
+      targets = model_utils.apply_label_smoothing(targets, label_smoothing)
 
     objective_numerator, objective_denominator = self.loss_fn(
         logits, targets, weights
@@ -427,7 +440,8 @@ class BaseModel(object):
     if self._param_shapes is None:
       raise ValueError(
           'This should not happen, model.initialize() should be called '
-          'before model.param_shapes!')
+          'before model.param_shapes!'
+      )
     return self._param_shapes
 
   @property
@@ -436,7 +450,8 @@ class BaseModel(object):
     if self._param_types is None:
       raise ValueError(
           'This should not happen, model.initialize() should be called '
-          'before model.param_types!')
+          'before model.param_types!'
+      )
     return self._param_types
 
   def is_output_params(self, param_key: str) -> bool:

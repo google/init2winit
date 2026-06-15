@@ -25,7 +25,6 @@ Algorithms Benchmark, so it should not be used (yet).
 from typing import Optional
 
 from init2winit.model_lib import model_utils
-
 import jax
 import jax.numpy as jnp
 import optax
@@ -44,7 +43,8 @@ def dual_vector(y: jnp.ndarray) -> jnp.ndarray:
     y: A pytree of numpy ndarray, vector y in the equation above.
   """
   gradient_norm = jnp.sqrt(
-      sum([jnp.sum(jnp.square(e)) for e in jax.tree_util.tree_leaves(y)]))
+      sum([jnp.sum(jnp.square(e)) for e in jax.tree_util.tree_leaves(y)])
+  )
   normalized_gradient = jax.tree.map(lambda x: x / gradient_norm, y)
   return normalized_gradient
 
@@ -79,7 +79,7 @@ def sharpness_aware_minimization(
     return base_opt_init_fn(params)
 
   def update_fn(updates, state, grad_fn_params_tuple):
-    (grad_fn, params) = grad_fn_params_tuple
+    grad_fn, params = grad_fn_params_tuple
 
     # Updates here have been averaged across devices in Trainer before being
     # sent to the optimizer. We obtain gradients computed on the noised
@@ -87,16 +87,22 @@ def sharpness_aware_minimization(
     # gradients and with the same 1e-6 epsilon that is used when clipping the
     # gradients.
     updates = dual_vector(updates)
-    noised_params = jax.tree_util.tree_map(lambda p, u: p + rho * u, params,
-                                           updates)
+    noised_params = jax.tree_util.tree_map(
+        lambda p, u: p + rho * u, params, updates
+    )
     _, updates = grad_fn(noised_params)
 
     updates_norm = jnp.sqrt(model_utils.l2_regularization(updates, 0))
     if grad_clip:
       scaled_updates = jax.tree.map(
-          lambda x: x / (updates_norm + _GRAD_CLIP_EPS) * grad_clip, updates)
-      updates = jax.lax.cond(updates_norm > grad_clip, lambda _: scaled_updates,
-                             lambda _: updates, None)
+          lambda x: x / (updates_norm + _GRAD_CLIP_EPS) * grad_clip, updates
+      )
+      updates = jax.lax.cond(
+          updates_norm > grad_clip,
+          lambda _: scaled_updates,
+          lambda _: updates,
+          None,
+      )
     updates, state = base_opt_update_fn(updates, state, params)
 
     return updates, state

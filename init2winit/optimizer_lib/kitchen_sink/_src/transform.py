@@ -24,7 +24,6 @@ import jax
 import jax.numpy as jnp
 import optax
 
-
 # pylint:disable=invalid-name
 # pylint:disable=no-value-for-parameter
 
@@ -66,8 +65,7 @@ def _update_preconditioner_moment(updates, moments, decay, order):
   assert order >= 1 and order <= 2
   moment_func = lambda x: jnp.power(jnp.abs(x), order)
   return jax.tree.map(
-      lambda g, t: (1 - decay) * moment_func(g) + decay * t,
-      updates, moments
+      lambda g, t: (1 - decay) * moment_func(g) + decay * t, updates, moments
   )
 
 
@@ -192,7 +190,8 @@ def compute_params_ema_for_eval(
 
   def init_fn(params):
     return optax.EmaState(
-        count=jnp.array(0, dtype=jnp.int32), ema=jax.tree.map(jnp.copy, params))
+        count=jnp.array(0, dtype=jnp.int32), ema=jax.tree.map(jnp.copy, params)
+    )
 
   def update_fn(updates, state, params):
     if params is None:
@@ -200,7 +199,7 @@ def compute_params_ema_for_eval(
 
     if warmup:
       # https://github.com/tensorflow/tensorflow/blob/v2.9.1/tensorflow/python/training/moving_averages.py#L469
-      ema_decay = jnp.minimum(decay, (1. + state.count) / (10. + state.count))
+      ema_decay = jnp.minimum(decay, (1.0 + state.count) / (10.0 + state.count))
     else:
       ema_decay = decay
 
@@ -535,9 +534,7 @@ class BiasCorrectionState(NamedTuple):
   count: chex.Array  # shape=(), dtype=jnp.int32.
 
 
-def bias_correction(
-    decay: float = 0.9
-) -> optax.GradientTransformation:
+def bias_correction(decay: float = 0.9) -> optax.GradientTransformation:
   """Compute the Adam style bias correction.
 
   Args:
@@ -546,6 +543,7 @@ def bias_correction(
   Returns:
     An (init_fn, update_fn) tuple.
   """
+
   def init_fn(params):
     del params
     return BiasCorrectionState(count=jnp.zeros([], jnp.int32))
@@ -587,7 +585,7 @@ def scale_by_adaptive_gd(
         jnp.zeros_like, params
     )  # previous update with step-size/lr included
     return ScaleBy_Adaptive_GD_State(
-        r_squared=init_r_squared*jnp.ones([], jnp.float64),
+        r_squared=init_r_squared * jnp.ones([], jnp.float64),
         lambda_prev=jnp.zeros([], jnp.float64),
         lambda_sum=jnp.zeros([], jnp.float64),
         init_params=init_params,
@@ -679,9 +677,7 @@ def scale_by_layerwise_adaptive_gd(
         state.prev_update,
         state.lambda_prev,
     )
-    new_update_norm_squared = jax.tree.map(
-        lambda u: jnp.sum(u ** 2), new_updates
-    )
+    new_update_norm_squared = jax.tree.map(lambda u: jnp.sum(u**2), new_updates)
     lambda_new = jax.tree.map(
         lambda l, g, r: 0.5 * (jnp.sqrt(l**2 + jnp.divide(g, r)) - l),
         state.lambda_sum,
@@ -751,9 +747,7 @@ def scale_by_coordinate_wise_adaptive_gd(
         state.prev_update,
         state.lambda_prev,
     )
-    new_update_norm_squared = jax.tree.map(
-        jnp.square, new_updates
-    )
+    new_update_norm_squared = jax.tree.map(jnp.square, new_updates)
     lambda_new = jax.tree.map(
         lambda l, g, r: 0.5 * (jnp.sqrt(jnp.square(l) + jnp.divide(g, r)) - l),
         state.lambda_sum,
@@ -763,9 +757,7 @@ def scale_by_coordinate_wise_adaptive_gd(
     lambda_sum_new = jax.tree.map(
         lambda l1, l2: l1 + l2, state.lambda_sum, lambda_new
     )
-    new_updates_with_lr = jax.tree.map(
-        jnp.divide, new_updates, lambda_sum_new
-    )
+    new_updates_with_lr = jax.tree.map(jnp.divide, new_updates, lambda_sum_new)
     negative_new_updates_with_lr = jax.tree.map(
         lambda u: -u, new_updates_with_lr
     )
@@ -821,13 +813,11 @@ def scale_by_adaptive_gd_simple(
     mu_sum_new = 0.5 * (
         jnp.sqrt(
             state.mu_sum**2
-            + jnp.divide((4*update_norm_squared), curr_r_squared)
+            + jnp.divide((4 * update_norm_squared), curr_r_squared)
         )
         + state.mu_sum
     )
-    new_updates_with_lr = jax.tree.map(
-        lambda u: u / mu_sum_new, updates
-    )
+    new_updates_with_lr = jax.tree.map(lambda u: u / mu_sum_new, updates)
     return new_updates_with_lr, ScaleBy_Adaptive_GD_Simple_State(
         r_squared=curr_r_squared,
         mu_sum=mu_sum_new,
@@ -870,18 +860,14 @@ def scale_by_layerwise_adaptive_gd_simple(
         state.r_squared,
         curr_distance_norm_squared,
     )
-    update_norm_squared = jax.tree.map(
-        lambda u: jnp.sum(u ** 2), updates
-    )
+    update_norm_squared = jax.tree.map(lambda u: jnp.sum(u**2), updates)
     mu_sum_new = jax.tree.map(
         lambda l, g, r: 0.5 * (jnp.sqrt(l**2 + 4 * jnp.divide(g, r)) + l),
         state.mu_sum,
         update_norm_squared,
         curr_r_squared,
     )
-    new_updates_with_lr = jax.tree.map(
-        lambda u, l: u / l, updates, mu_sum_new
-    )
+    new_updates_with_lr = jax.tree.map(lambda u, l: u / l, updates, mu_sum_new)
     return new_updates_with_lr, ScaleBy_Adaptive_GD_Simple_State(
         r_squared=curr_r_squared,
         mu_sum=mu_sum_new,
@@ -909,11 +895,9 @@ def scale_by_coordinate_wise_adaptive_gd_simple(
     init_params = jax.tree.map(jnp.copy, params)  # x0
     return ScaleBy_Adaptive_GD_Simple_State(
         r_squared=jax.tree.map(
-            lambda x: init_r_squared*jnp.ones_like(x), params
+            lambda x: init_r_squared * jnp.ones_like(x), params
         ),
-        mu_sum=jax.tree.map(
-            lambda x: eps*jnp.ones_like(x), params
-        ),
+        mu_sum=jax.tree.map(lambda x: eps * jnp.ones_like(x), params),
         init_params=init_params,
     )
 
@@ -926,18 +910,15 @@ def scale_by_coordinate_wise_adaptive_gd_simple(
         state.r_squared,
         curr_distance_norm_squared,
     )
-    update_norm_squared = jax.tree.map(
-        jnp.square, updates
-    )
+    update_norm_squared = jax.tree.map(jnp.square, updates)
     mu_sum_new = jax.tree.map(
-        lambda l, g, r: 0.5*(jnp.sqrt(jnp.square(l) + 4*jnp.divide(g, r)) + l),
+        lambda l, g, r: 0.5
+        * (jnp.sqrt(jnp.square(l) + 4 * jnp.divide(g, r)) + l),
         state.mu_sum,
         update_norm_squared,
         curr_r_squared,
     )
-    new_updates_with_lr = jax.tree.map(
-        jnp.divide, updates, mu_sum_new
-    )
+    new_updates_with_lr = jax.tree.map(jnp.divide, updates, mu_sum_new)
     return new_updates_with_lr, ScaleBy_Adaptive_GD_Simple_State(
         r_squared=curr_r_squared,
         mu_sum=mu_sum_new,
@@ -1220,8 +1201,8 @@ def scale_by_adam_var_preserved(
     eps_root: term added to the denominator inside the square-root to improve
       numerical stability when backpropagating gradients through the rescaling.
     debias: whether to use moment bias correction. Note inspite of
-            implementation Adam style bias correction might not make sense here.
-            So it should not be used.
+      implementation Adam style bias correction might not make sense here. So it
+      should not be used.
     power: the power to use in the preconditioner (0.5 in default adam).
 
   Returns:
@@ -1256,6 +1237,7 @@ def scale_by_adam_var_preserved(
 
 class ScaleByAdapropState(NamedTuple):
   """State for the AdaProp algorithm."""
+
   count: chex.Array  # shape=(), dtype=jnp.int32.
   pp: optax.Updates
   mu: optax.Updates
@@ -1277,8 +1259,8 @@ def scale_by_adaprop(
 
   Args:
     b1: decay rate for the exponentially weighted average of grads.
-    b2: decay rate for the exponentially weighted average of absolute grads
-        is omitted because it is calculated from alpha and b1.
+    b2: decay rate for the exponentially weighted average of absolute grads is
+      omitted because it is calculated from alpha and b1.
     b3: decay rate for the exponentially weighted average of max grads.
     b4: decay rate for the exponentially weighted average of reward.
     eps: term added to the denominator to improve numerical stability.
@@ -1331,11 +1313,16 @@ def scale_by_adaprop(
     pp = _update_moment(params, state.pp, b4, 1)
     pp_hat = _bias_correction(pp, b4, new_count)
     param_change = jax.tree.map(lambda p, i: p - i, params, pp_hat)
-    g_max = jax.tree.map(lambda g, n: jnp.maximum(jnp.abs(g), raise_power(n)),
-                         updates, nu_hat)
+    g_max = jax.tree.map(
+        lambda g, n: jnp.maximum(jnp.abs(g), raise_power(n)), updates, nu_hat
+    )
     gain = jax.tree.map(
-        lambda r, p, g, x: jnp.maximum(b3*r - p*g/(x + eps), 0.0),
-        state.gain, param_change, updates, g_max)
+        lambda r, p, g, x: jnp.maximum(b3 * r - p * g / (x + eps), 0.0),
+        state.gain,
+        param_change,
+        updates,
+        g_max,
+    )
     wealth = jax.tree.map(lambda g: 1.0 + g, gain)
 
     bet_factor = jax.tree.map(
@@ -1343,8 +1330,7 @@ def scale_by_adaprop(
         mu_hat,
         nu_hat,
     )
-    new_updates = jax.tree.map(lambda b, w: b * w,
-                               bet_factor, wealth)
+    new_updates = jax.tree.map(lambda b, w: b * w, bet_factor, wealth)
     return new_updates, ScaleByAdapropState(
         count=new_count,
         pp=pp,
@@ -1522,7 +1508,6 @@ def scale_by_nadam(
     power: the power to use in the preconditioner (the value determines the
       power to which the absolute value of the grads are raised).
     use_nesterov: whether to use nesterov update.
-
 
   Returns:
     An (init_fn, update_fn) tuple.
@@ -1813,12 +1798,11 @@ def project_parameters_by_norm(
   Args:
     projection_radius: The norm of the projected parameters.
     order: Order of the norm used for projection. Default is None, i.e. 2.
-    axis: Axes along which the projection happens.
-          Default is None, i.e. the entire parameter is projected.
+    axis: Axes along which the projection happens. Default is None, i.e. the
+      entire parameter is projected.
     flip_update_sign:
 
   Returns:
-
   """
 
   m = -1 if flip_update_sign else 1

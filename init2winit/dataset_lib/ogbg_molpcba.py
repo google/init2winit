@@ -98,10 +98,9 @@ class _InMemoryDataset:
     return len(self.data)
 
 
-def _load_dataset(split,
-                  should_shuffle=False,
-                  shuffle_seed=None,
-                  shuffle_buffer_size=None):
+def _load_dataset(
+    split, should_shuffle=False, shuffle_seed=None, shuffle_buffer_size=None
+):
   """Loads a dataset split from TFDS."""
   if should_shuffle:
     assert shuffle_seed is not None and shuffle_buffer_size is not None
@@ -113,20 +112,23 @@ def _load_dataset(split,
     dataset_shuffle_seed = None
 
   read_config = tfds.ReadConfig(
-      add_tfds_id=True, shuffle_seed=file_shuffle_seed)
+      add_tfds_id=True, shuffle_seed=file_shuffle_seed
+  )
   dataset = tfds.load(
       'ogbg_molpcba',
       split=split,
       shuffle_files=should_shuffle,
-      read_config=read_config)
+      read_config=read_config,
+  )
   logging.info('Loading in memory dataset...')
   dataset = list(tfds.as_numpy(dataset))
 
   return _InMemoryDataset(dataset, should_shuffle, dataset_shuffle_seed)
 
 
-def _to_jraph(example, add_bidirectional_edges, add_virtual_node,
-              add_self_loops):
+def _to_jraph(
+    example, add_bidirectional_edges, add_virtual_node, add_self_loops
+):
   """Converts an example graph to jraph.GraphsTuple."""
   if hasattr(example['edge_feat'], '_numpy'):
     example = data_utils.tf_to_numpy(example)
@@ -152,16 +154,19 @@ def _to_jraph(example, add_bidirectional_edges, add_virtual_node,
     new_senders = np.concatenate([new_senders, np.arange(num_nodes)])
     new_receivers = np.concatenate([new_receivers, np.arange(num_nodes)])
     edge_feat = np.concatenate(
-        [edge_feat, np.zeros((num_nodes, edge_feat.shape[-1]))])
+        [edge_feat, np.zeros((num_nodes, edge_feat.shape[-1]))]
+    )
     num_edges += num_nodes
 
   if add_virtual_node:
     node_feat = np.concatenate([node_feat, np.zeros_like(node_feat[0, None])])
     new_senders = np.concatenate([new_senders, np.arange(num_nodes)])
     new_receivers = np.concatenate(
-        [new_receivers, np.full((num_nodes,), num_nodes)])
+        [new_receivers, np.full((num_nodes,), num_nodes)]
+    )
     edge_feat = np.concatenate(
-        [edge_feat, np.zeros((num_nodes, edge_feat.shape[-1]))])
+        [edge_feat, np.zeros((num_nodes, edge_feat.shape[-1]))]
+    )
     num_edges += num_nodes
     num_nodes += 1
 
@@ -174,7 +179,8 @@ def _to_jraph(example, add_bidirectional_edges, add_virtual_node,
       receivers=new_receivers,
       # Keep the labels with the graph for batching. They will be removed
       # in the processed batch.
-      globals=np.expand_dims(labels, axis=0))
+      globals=np.expand_dims(labels, axis=0),
+  )
 
 
 def _get_weights_by_nan_and_padding(labels, padding_mask):
@@ -550,11 +556,13 @@ def _get_dynamic_batch_iterator(
       _to_jraph,
       add_bidirectional_edges=add_bidirectional_edges,
       add_virtual_node=add_virtual_node,
-      add_self_loops=add_self_loops)
+      add_self_loops=add_self_loops,
+  )
 
   jraph_iter = map(to_jraph_partial, dataset_iter)
-  batched_iter = jraph.dynamically_batch(jraph_iter, max_n_nodes + 1,
-                                         max_n_edges, max_n_graphs + 1)
+  batched_iter = jraph.dynamically_batch(
+      jraph_iter, max_n_nodes + 1, max_n_edges, max_n_graphs + 1
+  )
 
   count = 0
   graphs_shards = []
@@ -569,7 +577,8 @@ def _get_dynamic_batch_iterator(
     graph = batched_graph._replace(globals={})
 
     replaced_labels, weights = _get_weights_by_nan_and_padding(
-        labels, jraph.get_graph_padding_mask(graph))
+        labels, jraph.get_graph_padding_mask(graph)
+    )
 
     graphs_shards.append(graph)
     labels_shards.append(replaced_labels)
@@ -582,7 +591,7 @@ def _get_dynamic_batch_iterator(
           # It is possible we may be leaking host memory with the np call.
           'inputs': jraph.batch_np(graphs_shards),
           'targets': np.vstack(labels_shards),
-          'weights': np.vstack(weights_shards)
+          'weights': np.vstack(weights_shards),
       }
 
       count = 0
@@ -613,6 +622,7 @@ def get_ogbg_molpcba(shuffle_rng, batch_size, eval_batch_size, hps=None):
 
   shuffle_buffer_size = 2**15
   shuffle_rng_train, shuffle_rng_eval_train = jax.random.split(shuffle_rng)
+
   def _log_mem(label):
     rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     logging.info('[ogbg] %s — RSS: %.1f MB', label, rss_mb)
@@ -623,7 +633,8 @@ def get_ogbg_molpcba(shuffle_rng, batch_size, eval_batch_size, hps=None):
       'train',
       should_shuffle=True,
       shuffle_seed=shuffle_rng_train,
-      shuffle_buffer_size=shuffle_buffer_size)
+      shuffle_buffer_size=shuffle_buffer_size,
+  )
   _log_mem('After loading train split')
   eval_train_size = min(hps.valid_size, len(train_ds))
   # Use a random subset of the training data for eval_train.
@@ -720,8 +731,9 @@ def get_fake_batch(hps):
       num_nodes = int(rng.normal(loc=num_nodes_mean, scale=num_nodes_std))
 
       # NOTE(dsuo): we want at least as many edges as we have nodes.
-      num_edges = max(num_nodes,
-                      int(rng.normal(loc=num_edges_mean, scale=num_edges_std)))
+      num_edges = max(
+          num_nodes, int(rng.normal(loc=num_edges_mean, scale=num_edges_std))
+      )
 
       # NOTE(dsuo): create an edge between pair of consecutive nodes to have
       # a well-formed molecule.
@@ -732,7 +744,8 @@ def get_fake_batch(hps):
       # NOTE(dsuo): create random edges for any remaining.
       if num_edges > num_nodes:
         edge_index[num_nodes:num_edges, :] = rng.choice(
-            num_nodes, (num_edges - num_nodes, 2))
+            num_nodes, (num_edges - num_nodes, 2)
+        )
 
       yield {
           'edge_feat': tf.ones((num_edges, 3), dtype=tf.float32),

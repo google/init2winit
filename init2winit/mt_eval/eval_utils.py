@@ -29,9 +29,12 @@ glob = gfile.glob
 
 def compute_bleu_from_predictions(predictions, references, language_code, name):
   """Computes BLEU score given predictions and references."""
-  sacrebleu_tokenizer = 'zh' if language_code == 'zh' else sacrebleu.DEFAULT_TOKENIZER
+  sacrebleu_tokenizer = (
+      'zh' if language_code == 'zh' else sacrebleu.DEFAULT_TOKENIZER
+  )
   bleu_score = sacrebleu.corpus_bleu(
-      predictions, [references], tokenize=sacrebleu_tokenizer).score
+      predictions, [references], tokenize=sacrebleu_tokenizer
+  ).score
   return {name: bleu_score}
 
 
@@ -60,10 +63,8 @@ def save_evals(ckpt_dir, ckpt_step, eval_split, bleu_score):
 def _load_checkpoint(checkpoint_path, params):
   """Load model (and batch stats) from checkpoint."""
   target = dict(
-      params=params,
-      global_step=-1,
-      preemption_count=0,
-      sum_train_cost=0.0)
+      params=params, global_step=-1, preemption_count=0, sum_train_cost=0.0
+  )
   ckpt = checkpoint.load_checkpoint(
       checkpoint_path,
       target=target,
@@ -78,9 +79,7 @@ def average_checkpoints(checkpoint_paths, params):
   # Sum parameters of separate models together.
   params = _load_checkpoint(checkpoint_paths[0], params)
   for checkpoint_path in checkpoint_paths[1:]:
-    params_update = _load_checkpoint(
-        checkpoint_path, params
-    )
+    params_update = _load_checkpoint(checkpoint_path, params)
     # TODO(dxin): Make this averaging process more numerically stable.
     params = jax.tree.map(lambda x, y: x + y, params, params_update)
 

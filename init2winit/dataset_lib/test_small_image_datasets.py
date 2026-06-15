@@ -29,7 +29,9 @@ class SmallImageDatasetsTest(absltest.TestCase):
   def test_cifar10(self):
     """Test example generation in CIFAR10 is reproducible."""
     dataset = small_image_datasets.get_cifar10(
-        random.PRNGKey(0), 1, 1,
+        random.PRNGKey(0),
+        1,
+        1,
         config_dict.ConfigDict(
             dict(
                 flip_probability=0.5,
@@ -41,24 +43,30 @@ class SmallImageDatasetsTest(absltest.TestCase):
                 test_size=10000,
                 include_example_keys=True,
                 input_shape=(32, 32, 3),
-                output_shape=(10,))))
+                output_shape=(10,),
+            )
+        ),
+    )
 
     examples = itertools.islice(dataset.valid_epoch(), 10)
     example_keys = [
         example['example_key'][0].decode('utf-8') for example in examples
     ]
-    self.assertEqual(example_keys, [
-        'cifar10-train.array_record-00000-of-00001__45000',
-        'cifar10-train.array_record-00000-of-00001__45001',
-        'cifar10-train.array_record-00000-of-00001__45002',
-        'cifar10-train.array_record-00000-of-00001__45003',
-        'cifar10-train.array_record-00000-of-00001__45004',
-        'cifar10-train.array_record-00000-of-00001__45005',
-        'cifar10-train.array_record-00000-of-00001__45006',
-        'cifar10-train.array_record-00000-of-00001__45007',
-        'cifar10-train.array_record-00000-of-00001__45008',
-        'cifar10-train.array_record-00000-of-00001__45009',
-    ])
+    self.assertEqual(
+        example_keys,
+        [
+            'cifar10-train.array_record-00000-of-00001__45000',
+            'cifar10-train.array_record-00000-of-00001__45001',
+            'cifar10-train.array_record-00000-of-00001__45002',
+            'cifar10-train.array_record-00000-of-00001__45003',
+            'cifar10-train.array_record-00000-of-00001__45004',
+            'cifar10-train.array_record-00000-of-00001__45005',
+            'cifar10-train.array_record-00000-of-00001__45006',
+            'cifar10-train.array_record-00000-of-00001__45007',
+            'cifar10-train.array_record-00000-of-00001__45008',
+            'cifar10-train.array_record-00000-of-00001__45009',
+        ],
+    )
 
 
 if __name__ == '__main__':

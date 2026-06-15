@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Simple convnet classifier."""
+
 from typing import Sequence
 
 from flax import linen as nn
@@ -21,17 +22,17 @@ from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
 import jax.numpy as jnp
-
 from ml_collections.config_dict import config_dict
 
-
 # small hparams used for unit tests
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    num_filters=[20, 10],
-    kernel_sizes=[3, 3],
-    activation_function='relu',
-    model_dtype='float32',
-))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        num_filters=[20, 10],
+        kernel_sizes=[3, 3],
+        activation_function='relu',
+        model_dtype='float32',
+    )
+)
 
 
 class SimpleCNN(nn.Module):
@@ -39,6 +40,7 @@ class SimpleCNN(nn.Module):
 
   The model assumes the input shape is [batch, H, W, C].
   """
+
   num_outputs: int
   num_filters: Sequence[int]
   kernel_sizes: Sequence[int]
@@ -50,15 +52,17 @@ class SimpleCNN(nn.Module):
   def __call__(self, x, train):
     for num_filters, kernel_size in zip(self.num_filters, self.kernel_sizes):
       x = nn.Conv(
-          num_filters, (kernel_size, kernel_size), (1, 1),
+          num_filters,
+          (kernel_size, kernel_size),
+          (1, 1),
           kernel_init=self.kernel_init,
-          bias_init=self.bias_init)(x)
+          bias_init=self.bias_init,
+      )(x)
       x = model_utils.ACTIVATIONS[self.activation_function](x)
     x = jnp.reshape(x, (x.shape[0], -1))
     x = nn.Dense(
-        self.num_outputs,
-        kernel_init=self.kernel_init,
-        bias_init=self.bias_init)(x)
+        self.num_outputs, kernel_init=self.kernel_init, bias_init=self.bias_init
+    )(x)
     return x
 
 
@@ -71,7 +75,8 @@ class SimpleCNNModel(base_model.BaseModel):
         num_outputs=self.hps['output_shape'][-1],
         num_filters=self.hps.num_filters,
         kernel_sizes=self.hps.kernel_sizes,
-        activation_function=self.hps.activation_function)
+        activation_function=self.hps.activation_function,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""

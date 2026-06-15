@@ -16,6 +16,7 @@
 """Module with flax LSTM class.
 
 """
+
 import abc
 import functools
 from typing import (Any, Mapping, Optional, Sequence, Tuple, Type, Union)
@@ -64,10 +65,11 @@ def flip_sequences(inputs: Array, lengths: Array) -> Array:
   return inputs[idxs]
 
 
-def sample_recurrent_dropout_mask(rng: Any, rate: float, batch_size: int,
-                                  hidden_size: int) -> Optional[Array]:
+def sample_recurrent_dropout_mask(
+    rng: Any, rate: float, batch_size: int, hidden_size: int
+) -> Optional[Array]:
   """Samples a recurrent dropout mask."""
-  if rate == 0.:
+  if rate == 0.0:
     return None
   mask = random.bernoulli(rng, p=1 - rate, shape=(batch_size, hidden_size))
   # Scale recurrent dropout mask to control for magnitude at test time.
@@ -77,28 +79,34 @@ def sample_recurrent_dropout_mask(rng: Any, rate: float, batch_size: int,
 class RecurrentDropoutCell(abc.ABC):
   """Interface for cells that know how to apply recurrent dropout."""
 
-  def __call__(self,
-               cell_state: StateType,
-               inputs: Array,
-               recurrent_dropout_mask: Optional[Array],
-               deterministic: bool = False):
+  def __call__(
+      self,
+      cell_state: StateType,
+      inputs: Array,
+      recurrent_dropout_mask: Optional[Array],
+      deterministic: bool = False,
+  ):
     pass
 
-  def get_recurrent_dropout_mask(self, rate: float, batch_size: int,
-                                 hidden_size: int):
+  def get_recurrent_dropout_mask(
+      self, rate: float, batch_size: int, hidden_size: int
+  ):
     pass
 
 
-class RecurrentDropoutOptimizedLSTMCell(nn.OptimizedLSTMCell,
-                                        RecurrentDropoutCell):
+class RecurrentDropoutOptimizedLSTMCell(
+    nn.OptimizedLSTMCell, RecurrentDropoutCell
+):
   """An optimized LSTM cell that applies recurrent dropout on h (and not c)."""
 
   @nn.compact
-  def __call__(self,  # pytype: disable=signature-mismatch  # jax-ndarray
-               cell_state: Tuple[Array, Array],
-               inputs: Array,
-               recurrent_dropout_mask: Optional[Array] = None,
-               deterministic: bool = False):
+  def __call__(
+      self,  # pytype: disable=signature-mismatch  # jax-ndarray
+      cell_state: Tuple[Array, Array],
+      inputs: Array,
+      recurrent_dropout_mask: Optional[Array] = None,
+      deterministic: bool = False,
+  ):
     """Applies recurrent dropout on h in the state and performs one step."""
     if not deterministic and recurrent_dropout_mask is not None:
       c, h = cell_state
@@ -106,8 +114,9 @@ class RecurrentDropoutOptimizedLSTMCell(nn.OptimizedLSTMCell,
 
     return super().__call__(cell_state, inputs)  # pylint: disable=no-value-for-parameter
 
-  def get_recurrent_dropout_mask(self, rate: float, batch_size: int,
-                                 hidden_size: int):
+  def get_recurrent_dropout_mask(
+      self, rate: float, batch_size: int, hidden_size: int
+  ):
     """Returns a recurrent dropout mask for this cell."""
     rng = self.make_rng('dropout')
     return sample_recurrent_dropout_mask(rng, rate, batch_size, hidden_size)
@@ -128,6 +137,7 @@ class GenericRNNSequenceEncoder(nn.Module):
       greater than zero, you must use an RNN cell that implements
       `RecurrentDropoutCell` such as RecurrentDropoutOptimizedLSTMCell.
   """
+
   hidden_size: int
   cell_type: Type[nn.RNNCellBase]
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
@@ -141,9 +151,15 @@ class GenericRNNSequenceEncoder(nn.Module):
       variable_broadcast=('params', 'params_axes'),
       in_axes=(1, flax.core.axes_scan.broadcast, flax.core.axes_scan.broadcast),
       out_axes=1,
-      split_rngs={'params': False})
-  def unroll_cell(self, cell_state: StateType, inputs: Array,
-                  recurrent_dropout_mask: Optional[Array], deterministic: bool):
+      split_rngs={'params': False},
+  )
+  def unroll_cell(
+      self,
+      cell_state: StateType,
+      inputs: Array,
+      recurrent_dropout_mask: Optional[Array],
+      deterministic: bool,
+  ):
     """Unrolls a recurrent cell over an input sequence.
 
     Args:
@@ -162,19 +178,22 @@ class GenericRNNSequenceEncoder(nn.Module):
     # This returns both the state and the output, so we can slice out the
     # correct final states later.
     if isinstance(self.cell, RecurrentDropoutCell):
-      new_cell_state, output = self.cell(cell_state, inputs,
-                                         recurrent_dropout_mask, deterministic)
+      new_cell_state, output = self.cell(
+          cell_state, inputs, recurrent_dropout_mask, deterministic
+      )
     else:
       new_cell_state, output = self.cell(cell_state, inputs)
 
     return new_cell_state, (new_cell_state, output)
 
-  def __call__(self,
-               inputs: Array,
-               lengths: Array,
-               initial_state: StateType,
-               reverse: bool = False,
-               deterministic: bool = False):
+  def __call__(
+      self,
+      inputs: Array,
+      lengths: Array,
+      initial_state: StateType,
+      reverse: bool = False,
+      deterministic: bool = False,
+  ):
     """Unrolls the RNN cell over the inputs.
 
     Arguments:
@@ -198,26 +217,29 @@ class GenericRNNSequenceEncoder(nn.Module):
       inputs = flip_sequences(inputs, lengths)
 
     # Sample a recurrent dropout mask if recurrent dropout is requested.
-    if self.recurrent_dropout_rate > 0. and not deterministic:
+    if self.recurrent_dropout_rate > 0.0 and not deterministic:
       if not isinstance(self.cell, RecurrentDropoutCell):
-        raise ValueError(
-            ('The provided cell does not support recurrent dropout, but '
-             f'recurrent_dropout_rate is set to {self.recurrent_dropout_rate}. '
-             'Please provide a cell that implements `RecurrentDropoutCell`.'))
+        raise ValueError((
+            'The provided cell does not support recurrent dropout, but '
+            f'recurrent_dropout_rate is set to {self.recurrent_dropout_rate}. '
+            'Please provide a cell that implements `RecurrentDropoutCell`.'
+        ))
 
       recurrent_dropout_mask = self.cell.get_recurrent_dropout_mask(
           rate=self.recurrent_dropout_rate,
           batch_size=inputs.shape[0],
-          hidden_size=self.hidden_size)
+          hidden_size=self.hidden_size,
+      )
     else:
       recurrent_dropout_mask = None
 
-    _, (cell_states, outputs) = self.unroll_cell(initial_state, inputs,
-                                                 recurrent_dropout_mask,
-                                                 deterministic)
+    _, (cell_states, outputs) = self.unroll_cell(
+        initial_state, inputs, recurrent_dropout_mask, deterministic
+    )
 
     final_state = jax.tree.map(
-        lambda x: x[jnp.arange(inputs.shape[0]), lengths - 1], cell_states)
+        lambda x: x[jnp.arange(inputs.shape[0]), lengths - 1], cell_states
+    )
 
     if reverse:
       outputs = flip_sequences(outputs, lengths)
@@ -246,10 +268,11 @@ class GenericRNN(nn.Module):
     residual_connections: Add residual connection between layers.
     cell_kwargs: Optional keyword arguments to instantiate the cell with.
   """
+
   cell_type: Type[nn.RNNCellBase]
   hidden_sizes: Sequence[int]
-  dropout_rate: float = 0.
-  recurrent_dropout_rate: float = 0.
+  dropout_rate: float = 0.0
+  recurrent_dropout_rate: float = 0.0
   bidirectional: bool = False
   residual_connections: bool = False
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
@@ -260,7 +283,8 @@ class GenericRNN(nn.Module):
       inputs: Array,
       lengths: Array,
       initial_states: Optional[Sequence[StateType]] = None,
-      deterministic: bool = False) -> Tuple[Array, Sequence[StateType]]:
+      deterministic: bool = False,
+  ) -> Tuple[Array, Sequence[StateType]]:
     """Processes the input sequence using the recurrent cell.
 
     Args:
@@ -353,15 +377,16 @@ class GenericRNN(nn.Module):
       if self.residual_connections:
         assert inputs.shape == outputs.shape, (
             f'For residual connections, inputs ({inputs.shape}) and '
-            f'outputs ({outputs.shape}) must be the same shape.')
+            f'outputs ({outputs.shape}) must be the same shape.'
+        )
         inputs += outputs
       else:
         inputs = outputs
 
       # Apply dropout between layers.
-      inputs = nn.Dropout(
-          rate=self.dropout_rate, deterministic=deterministic)(
-              inputs)
+      inputs = nn.Dropout(rate=self.dropout_rate, deterministic=deterministic)(
+          inputs
+      )
 
     return outputs, final_states
 
@@ -384,9 +409,10 @@ class LSTM(nn.Module):
       best for hidden sizes up to 2048.
     cell_kwargs: Optional keyword arguments to instantiate the cell with.
   """
+
   hidden_sizes: Sequence[int]
-  dropout_rate: float = 0.
-  recurrent_dropout_rate: float = 0.
+  dropout_rate: float = 0.0
+  recurrent_dropout_rate: float = 0.0
   bidirectional: bool = False
   residual_connections: bool = False
   cell_type: Any = RecurrentDropoutOptimizedLSTMCell
@@ -398,7 +424,8 @@ class LSTM(nn.Module):
       inputs: Array,
       lengths: Array,
       initial_states: Optional[Sequence[StateType]] = None,
-      deterministic: bool = False) -> Tuple[Array, Sequence[StateType]]:
+      deterministic: bool = False,
+  ) -> Tuple[Array, Sequence[StateType]]:
     """Processes an input sequence with an LSTM cell.
 
     Example usage:

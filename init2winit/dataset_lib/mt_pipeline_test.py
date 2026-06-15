@@ -38,8 +38,9 @@ _SHUFFLE_SEED = 12345
 
 class MTPipelineTest(absltest.TestCase):
 
-  def _get_datasets(self, shuffle_seed=None, sample_seed=None,
-                    pack_examples=False):
+  def _get_datasets(
+      self, shuffle_seed=None, sample_seed=None, pack_examples=False
+  ):
     config = translate_wmt.DEFAULT_HPARAMS
     config.vocab_size = 32
     config.max_corpus_chars = 1000
@@ -48,7 +49,8 @@ class MTPipelineTest(absltest.TestCase):
     config.max_predict_length = _PREDICT_TARGET_LENGTH
     config.pack_examples = pack_examples
     config.tfds_dataset_keys = [
-        'wmt15_translate/de-en', 'wmt15_translate/ru-en'
+        'wmt15_translate/de-en',
+        'wmt15_translate/ru-en',
     ]
     config.tfds_eval_dataset_key = 'wmt14_translate/de-en'
 
@@ -67,7 +69,8 @@ class MTPipelineTest(absltest.TestCase):
           n_devices=2,
           per_host_batch_size=4,
           per_host_eval_batch_size=4,
-          vocab_path=vocab_path)
+          vocab_path=vocab_path,
+      )
     return train_ds, eval_ds, predict_ds
 
   def test_train_ds_golden(self):
@@ -75,10 +78,13 @@ class MTPipelineTest(absltest.TestCase):
     train_ds, _, _ = self._get_datasets(pack_examples=False)
     expected_shape = [4, _TARGET_LENGTH]  # 4 batch_size.
     for batch in train_ds.take(3):
-      self.assertEqual({k: v.shape.as_list() for k, v in batch.items()}, {
-          'inputs': expected_shape,
-          'targets': expected_shape,
-      })
+      self.assertEqual(
+          {k: v.shape.as_list() for k, v in batch.items()},
+          {
+              'inputs': expected_shape,
+              'targets': expected_shape,
+          },
+      )
 
   def test_train_ds_packed(self):
     # packed train dataset
@@ -87,62 +93,80 @@ class MTPipelineTest(absltest.TestCase):
     # For training we pack multiple short examples in one example.
     # *_position and *_segmentation indicate the boundaries.
     for batch in train_ds.take(3):
-      self.assertEqual({k: v.shape.as_list() for k, v in batch.items()}, {
-          'inputs': expected_shape,
-          'inputs_position': expected_shape,
-          'inputs_segmentation': expected_shape,
-          'targets': expected_shape,
-          'targets_position': expected_shape,
-          'targets_segmentation': expected_shape,
-      })
+      self.assertEqual(
+          {k: v.shape.as_list() for k, v in batch.items()},
+          {
+              'inputs': expected_shape,
+              'inputs_position': expected_shape,
+              'inputs_segmentation': expected_shape,
+              'targets': expected_shape,
+              'targets_position': expected_shape,
+              'targets_segmentation': expected_shape,
+          },
+      )
 
   def test_train_ds_determinism(self):
     # unpacked train dataset
-    train_ds, _, _ = self._get_datasets(shuffle_seed=_SHUFFLE_SEED,
-                                        sample_seed=_SAMPLE_SEED)
-    train_ds_copy, _, _ = self._get_datasets(shuffle_seed=_SHUFFLE_SEED,
-                                             sample_seed=_SAMPLE_SEED)
+    train_ds, _, _ = self._get_datasets(
+        shuffle_seed=_SHUFFLE_SEED, sample_seed=_SAMPLE_SEED
+    )
+    train_ds_copy, _, _ = self._get_datasets(
+        shuffle_seed=_SHUFFLE_SEED, sample_seed=_SAMPLE_SEED
+    )
     batch_idx_to_test = 1
     train_ds_batch = next(
-        itertools.islice(train_ds, batch_idx_to_test, batch_idx_to_test + 1))
+        itertools.islice(train_ds, batch_idx_to_test, batch_idx_to_test + 1)
+    )
     train_ds_copy_batch = next(
-        itertools.islice(train_ds_copy, batch_idx_to_test,
-                         batch_idx_to_test + 1))
+        itertools.islice(
+            train_ds_copy, batch_idx_to_test, batch_idx_to_test + 1
+        )
+    )
     self.assertTrue(
-        jnp.array_equal(train_ds_batch['inputs'],
-                        train_ds_copy_batch['inputs']))
+        jnp.array_equal(train_ds_batch['inputs'], train_ds_copy_batch['inputs'])
+    )
     self.assertTrue(
-        jnp.array_equal(train_ds_batch['targets'],
-                        train_ds_copy_batch['targets']))
+        jnp.array_equal(
+            train_ds_batch['targets'], train_ds_copy_batch['targets']
+        )
+    )
 
   def test_eval_ds(self):
     _, eval_ds, _ = self._get_datasets()
     expected_shape = [4, _EVAL_TARGET_LENGTH]  # 4 batch_size.
     for batch in eval_ds.take(3):
-      self.assertEqual({k: v.shape.as_list() for k, v in batch.items()}, {
-          'inputs': expected_shape,
-          'targets': expected_shape,
-      })
+      self.assertEqual(
+          {k: v.shape.as_list() for k, v in batch.items()},
+          {
+              'inputs': expected_shape,
+              'targets': expected_shape,
+          },
+      )
 
   def test_predict_ds(self):
     _, _, predict_ds = self._get_datasets()
     expected_shape = [4, _PREDICT_TARGET_LENGTH]  # 4 batch_size.
     for batch in predict_ds.take(3):
-      self.assertEqual({k: v.shape.as_list() for k, v in batch.items()}, {
-          'inputs': expected_shape,
-          'targets': expected_shape,
-      })
+      self.assertEqual(
+          {k: v.shape.as_list() for k, v in batch.items()},
+          {
+              'inputs': expected_shape,
+              'targets': expected_shape,
+          },
+      )
 
 
 class MTSamplePipelineTest(absltest.TestCase):
 
-  def _get_sampled_datasets(self, rates, num_examples: int, shuffle_seed=None,
-                            sample_seed=None):
+  def _get_sampled_datasets(
+      self, rates, num_examples: int, shuffle_seed=None, sample_seed=None
+  ):
     # Test sampling ratio.
     config = translate_wmt.DEFAULT_HPARAMS
     config.rates = rates
     config.tfds_dataset_keys = [
-        'wmt15_translate/de-en', 'wmt15_translate/ru-en'
+        'wmt15_translate/de-en',
+        'wmt15_translate/ru-en',
     ]
     config.tfds_eval_dataset_key = 'wmt14_translate/de-en'
 
@@ -150,22 +174,30 @@ class MTSamplePipelineTest(absltest.TestCase):
       if config.tfds_dataset_key:
         train_ds_builders = [tfds.builder(config.tfds_dataset_key)]
       else:
-        train_ds_builders = [tfds.builder(tfds_dataset_key) for
-                             tfds_dataset_key in config.tfds_dataset_keys]
+        train_ds_builders = [
+            tfds.builder(tfds_dataset_key)
+            for tfds_dataset_key in config.tfds_dataset_keys
+        ]
 
       sampled_train_data = mt_pipeline.get_sampled_dataset(
-          train_ds_builders, config.train_split, config.rates,
+          train_ds_builders,
+          config.train_split,
+          config.rates,
           reverse_translation=True,
           add_language_token=True,
           loss_weights=config.loss_weights,
           is_training=True,
           sample_seed=sample_seed,
-          shuffle_seed=shuffle_seed)
+          shuffle_seed=shuffle_seed,
+      )
 
     # Get the language task ids.
-    lang_ids = [mt_pipeline.get_user_defined_symbols(train_ds_builder.info,
-                                                     reverse_translation=True)
-                for train_ds_builder in train_ds_builders]
+    lang_ids = [
+        mt_pipeline.get_user_defined_symbols(
+            train_ds_builder.info, reverse_translation=True
+        )
+        for train_ds_builder in train_ds_builders
+    ]
     rates = {lang_id: rate for lang_id, rate in zip(lang_ids, config.rates)}
 
     return sampled_train_data, rates, lang_ids
@@ -173,32 +205,38 @@ class MTSamplePipelineTest(absltest.TestCase):
   def test_sample_batch_ds_ratio(self):
     # Test sampling ratios.
     sampled_train_data, rates, lang_ids = self._get_sampled_datasets(
-        [0.5, 0.5], 20000, _SHUFFLE_SEED, _SAMPLE_SEED)
+        [0.5, 0.5], 20000, _SHUFFLE_SEED, _SAMPLE_SEED
+    )
     counts = {lang_id: 0 for lang_id in lang_ids}
 
     # Establish the counts.
     batch_size = 10000
     for batch in sampled_train_data.batch(batch_size).take(1):
       for input_data in batch['inputs']:
-        counts[input_data.numpy().decode('utf-8')[0:len(lang_ids[0])]] += 1
+        counts[input_data.numpy().decode('utf-8')[0 : len(lang_ids[0])]] += 1
 
     # Check if counts are in line w/ the sampling ratio.
-    self.assertTrue(np.allclose(
-        [rates[lang_id] for lang_id in lang_ids],
-        [counts[lang_id]/batch_size for lang_id in lang_ids], atol=1e-2))
+    self.assertTrue(
+        np.allclose(
+            [rates[lang_id] for lang_id in lang_ids],
+            [counts[lang_id] / batch_size for lang_id in lang_ids],
+            atol=1e-2,
+        )
+    )
 
   def test_sample_batch_ds_repeat(self):
     # Test that the sampled dataset can repeat datasets if the data in one
     # stream is exhausted before the other.
     sampled_train_data, _, lang_ids = self._get_sampled_datasets(
-        [0.9, 0.1], 300, _SHUFFLE_SEED, _SAMPLE_SEED)
+        [0.9, 0.1], 300, _SHUFFLE_SEED, _SAMPLE_SEED
+    )
 
     # Take enough batches to exhaust the dataset with the larger sampling rate.
     batch_size = 100
     counts = {lang_id: 0 for lang_id in lang_ids}
     for batch in sampled_train_data.batch(batch_size).take(20):
       for input_data in batch['inputs']:
-        counts[input_data.numpy().decode('utf-8')[0:len(lang_ids[0])]] += 1
+        counts[input_data.numpy().decode('utf-8')[0 : len(lang_ids[0])]] += 1
       self.assertTrue(all([counts[lang_id] > 0 for lang_id in lang_ids]))
 
 

@@ -43,8 +43,8 @@ class Foo(nn.Module):
         use_running_average=not self.train,
         momentum=0.9,
         epsilon=1e-5,
-        dtype=jnp.float32)(
-            x)
+        dtype=jnp.float32,
+    )(x)
     return x
 
 
@@ -83,44 +83,16 @@ class CreateWeightDecayMaskTest(chex.TestCase):
     """Check that the correct tags are removed."""
     mask = create_weight_decay_mask()
     data = {
-        'bias': {
-            'b': 4
-        },
-        'bias': {
-            'BatchNorm_0': 4,
-            'bias': 5,
-            'a': 0
-        },
-        'BatchNorm_0': {
-            'b': 4
-        },
-        'a': {
-            'b': {
-                'BatchNorm_0': 0,
-                'bias': 0
-            },
-            'c': 0
-        }
+        'bias': {'b': 4},
+        'bias': {'BatchNorm_0': 4, 'bias': 5, 'a': 0},
+        'BatchNorm_0': {'b': 4},
+        'a': {'b': {'BatchNorm_0': 0, 'bias': 0}, 'c': 0},
     }
     truth = {
-        'bias': {
-            'b': False
-        },
-        'bias': {
-            'BatchNorm_0': False,
-            'bias': False,
-            'a': False
-        },
-        'BatchNorm_0': {
-            'b': False
-        },
-        'a': {
-            'b': {
-                'BatchNorm_0': True,
-                'bias': False
-            },
-            'c': True
-        }
+        'bias': {'b': False},
+        'bias': {'BatchNorm_0': False, 'bias': False, 'a': False},
+        'BatchNorm_0': {'b': False},
+        'a': {'b': {'BatchNorm_0': True, 'bias': False}, 'c': True},
     }
 
     chex.assert_equal(mask(data), truth)
@@ -140,9 +112,9 @@ class CreateWeightDecayMaskTest(chex.TestCase):
 
     @self.variant
     def train_step(params, x, y):
-      y1, new_batch_stats = Foo(
-          filters=7, train=True).apply(
-              params, x, mutable=['batch_stats'])
+      y1, new_batch_stats = Foo(filters=7, train=True).apply(
+          params, x, mutable=['batch_stats']
+      )
 
       return jnp.abs(y - y1).sum(), new_batch_stats
 
@@ -150,8 +122,9 @@ class CreateWeightDecayMaskTest(chex.TestCase):
     grads, _ = jax.grad(train_step, has_aux=True)(foo_vars, x, y)
     updates, state = self.variant(tx.update)(dict(grads['params']), state)
 
-    chex.assert_trees_all_close(updates['BatchNorm_0'],
-                                grads['params']['BatchNorm_0'])
+    chex.assert_trees_all_close(
+        updates['BatchNorm_0'], grads['params']['BatchNorm_0']
+    )
 
   @chex.variants(with_jit=True, without_jit=True)
   def test_bias(self):
@@ -174,8 +147,10 @@ class CreateWeightDecayMaskTest(chex.TestCase):
     updates, state = self.variant(tx.update)(dict(grads), state)
 
     for i in range(3):
-      chex.assert_trees_all_close(grads['params'][f'layers_{i}']['bias'],
-                                  updates['params'][f'layers_{i}']['bias'])
+      chex.assert_trees_all_close(
+          grads['params'][f'layers_{i}']['bias'],
+          updates['params'][f'layers_{i}']['bias'],
+      )
 
 
 if __name__ == '__main__':

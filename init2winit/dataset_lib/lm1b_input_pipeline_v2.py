@@ -48,8 +48,9 @@ class NormalizeFeatureNamesOp:
     return features
 
 
-def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
-                    split: str) -> tf.data.Dataset:
+def get_raw_dataset(
+    dataset_builder: tfds.core.DatasetBuilder, split: str
+) -> tf.data.Dataset:
   """Loads a raw text dataset and normalizes feature keys.
 
   Args:
@@ -62,17 +63,20 @@ def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
     'targets'.
   """
   per_host_split = deterministic_data.get_read_instruction_for_host(
-      split, dataset_info=dataset_builder.info, drop_remainder=False)
+      split, dataset_info=dataset_builder.info, drop_remainder=False
+  )
   ds = dataset_builder.as_dataset(split=per_host_split, shuffle_files=False)
   ds = ds.map(
-      NormalizeFeatureNamesOp(dataset_builder.info),
-      num_parallel_calls=AUTOTUNE)
+      NormalizeFeatureNamesOp(dataset_builder.info), num_parallel_calls=AUTOTUNE
+  )
   return ds
 
 
-def pack_dataset(dataset: tf.data.Dataset,
-                 key2length: Union[int, Dict[str, int]],
-                 keys: Optional[List[str]] = None) -> tf.data.Dataset:
+def pack_dataset(
+    dataset: tf.data.Dataset,
+    key2length: Union[int, Dict[str, int]],
+    keys: Optional[List[str]] = None,
+) -> tf.data.Dataset:
   """Creates a 'packed' version of a dataset on-the-fly.
 
   Adapted from the mesh-tf implementation.
@@ -117,8 +121,10 @@ def pack_dataset(dataset: tf.data.Dataset,
     keys = list(shapes.keys())
   for k in keys:
     if k not in shapes:
-      raise ValueError('Key %s not found in dataset.  Available keys are %s' %
-                       (k, shapes.keys()))
+      raise ValueError(
+          'Key %s not found in dataset.  Available keys are %s'
+          % (k, shapes.keys())
+      )
     if not shapes[k].is_compatible_with(tf.TensorShape([None])):
       raise ValueError('Tensors to be packed must be one-dimensional.')
   # make sure that the length dictionary contains all keys as well as the
@@ -131,13 +137,15 @@ def pack_dataset(dataset: tf.data.Dataset,
 
   # trim to length
   dataset = dataset.map(
-      lambda x: {k: x[k][:key2length[k]] for k in keys},
-      num_parallel_calls=AUTOTUNE)
+      lambda x: {k: x[k][: key2length[k]] for k in keys},
+      num_parallel_calls=AUTOTUNE,
+  )
   # Setting batch_size=length ensures that the concatenated sequences (if they
   # have length >=1) are sufficient to fill at least one packed example.
   batch_size = max(key2length.values())
   dataset = dataset.padded_batch(
-      batch_size, padded_shapes={k: [-1] for k in keys})
+      batch_size, padded_shapes={k: [-1] for k in keys}
+  )
   dataset = _pack_with_tf_ops(dataset, keys, key2length)
 
   # Set the Tensor shapes correctly since they get lost in the process.
@@ -147,8 +155,9 @@ def pack_dataset(dataset: tf.data.Dataset,
   return dataset.map(my_fn, num_parallel_calls=AUTOTUNE)
 
 
-def _pack_with_tf_ops(dataset: tf.data.Dataset, keys: List[str],
-                      key2length: Dict[str, int]) -> tf.data.Dataset:
+def _pack_with_tf_ops(
+    dataset: tf.data.Dataset, keys: List[str], key2length: Dict[str, int]
+) -> tf.data.Dataset:
   """Helper-function for packing a dataset which has already been batched.
 
   Helper for pack_dataset()  Uses tf.while_loop.
@@ -173,7 +182,8 @@ def _pack_with_tf_ops(dataset: tf.data.Dataset, keys: List[str],
     for k in keys_etc:
       new_outputs[k] = outputs[k].write(
           outputs[k].size(),
-          tf.pad(partial[k], [[0, key2length[k] - tf.size(partial[k])]]))
+          tf.pad(partial[k], [[0, key2length[k] - tf.size(partial[k])]]),
+      )
     return new_partial, new_outputs
 
   def map_fn(x):
@@ -193,9 +203,11 @@ def _pack_with_tf_ops(dataset: tf.data.Dataset, keys: List[str],
     outputs = {}
     for k in keys:
       outputs[k] = tf.TensorArray(
-          tf.int32, size=0, dynamic_size=True, element_shape=[key2length[k]])
+          tf.int32, size=0, dynamic_size=True, element_shape=[key2length[k]]
+      )
       outputs[k + '_position'] = tf.TensorArray(
-          tf.int32, size=0, dynamic_size=True, element_shape=[key2length[k]])
+          tf.int32, size=0, dynamic_size=True, element_shape=[key2length[k]]
+      )
 
     def body_fn(i, partial, outputs):
       """Body function for while_loop.
@@ -212,13 +224,15 @@ def _pack_with_tf_ops(dataset: tf.data.Dataset, keys: List[str],
       one_example = {}
       for k in keys:
         val = tf.cast(x[k][i], tf.int32)
-        val = val[:tf.reduce_sum(tf.cast(tf.not_equal(val, 0), tf.int32))]
+        val = val[: tf.reduce_sum(tf.cast(tf.not_equal(val, 0), tf.int32))]
         one_example[k] = val
       for k in keys:
         can_append = tf.logical_and(
             can_append,
             tf.less_equal(
-                tf.size(partial[k]) + tf.size(one_example[k]), key2length[k]))
+                tf.size(partial[k]) + tf.size(one_example[k]), key2length[k]
+            ),
+        )
 
       def false_fn():
         return write_packed_example(partial, outputs)
@@ -229,12 +243,12 @@ def _pack_with_tf_ops(dataset: tf.data.Dataset, keys: List[str],
       partial, outputs = tf.cond(can_append, true_fn, false_fn)
       new_partial = {}
       for k in keys:
-        new_seq = one_example[k][:key2length[k]]
+        new_seq = one_example[k][: key2length[k]]
         new_seq_len = tf.size(new_seq)
         new_partial[k] = tf.concat([partial[k], new_seq], 0)
         new_partial[k + '_position'] = tf.concat(
-            [partial[k + '_position'],
-             tf.range(new_seq_len)], 0)
+            [partial[k + '_position'], tf.range(new_seq_len)], 0
+        )
       partial = new_partial
       return i + 1, partial, outputs
 
@@ -248,14 +262,14 @@ def _pack_with_tf_ops(dataset: tf.data.Dataset, keys: List[str],
             {k: tf.TensorShape([None]) for k in keys_etc},
             {k: tf.TensorShape(None) for k in keys_etc},
         ),
-        maximum_iterations=dynamic_batch_size)
+        maximum_iterations=dynamic_batch_size,
+    )
     _, outputs = write_packed_example(partial, outputs)
     packed = {k: outputs[k].stack() for k in keys_etc}
     for k in keys:
-      packed[k + '_segmentation'] = (
-          tf.cumsum(
-              tf.cast(tf.equal(packed[k + '_position'], 0), tf.int32), axis=1) *
-          tf.cast(tf.not_equal(packed[k], 0), tf.int32))
+      packed[k + '_segmentation'] = tf.cumsum(
+          tf.cast(tf.equal(packed[k + '_position'], 0), tf.int32), axis=1
+      ) * tf.cast(tf.not_equal(packed[k], 0), tf.int32)
     return packed
 
   dataset = dataset.map(map_fn, num_parallel_calls=AUTOTUNE)
@@ -265,16 +279,18 @@ def _pack_with_tf_ops(dataset: tf.data.Dataset, keys: List[str],
 # -----------------------------------------------------------------------------
 # Main dataset prep routines.
 # -----------------------------------------------------------------------------
-def preprocess_data(dataset,
-                    train=True,
-                    num_epochs=1,
-                    pack_examples=False,
-                    shuffle_buffer_size=1024,
-                    max_length=512,
-                    batch_size=256,
-                    drop_remainder=True,
-                    prefetch_size=AUTOTUNE,
-                    shuffle_seed=None):
+def preprocess_data(
+    dataset,
+    train=True,
+    num_epochs=1,
+    pack_examples=False,
+    shuffle_buffer_size=1024,
+    max_length=512,
+    batch_size=256,
+    drop_remainder=True,
+    prefetch_size=AUTOTUNE,
+    shuffle_seed=None,
+):
   """Shuffle and batch/pack the given dataset."""
 
   def length_filter(max_len):
@@ -301,15 +317,10 @@ def preprocess_data(dataset,
   else:  # simple (static-shape) padded batching
     dataset = dataset.padded_batch(
         batch_size,
-        padded_shapes={
-            'inputs': max_length,
-            'targets': max_length
-        },
-        padding_values={
-            'inputs': 0,
-            'targets': 0
-        },
-        drop_remainder=drop_remainder)
+        padded_shapes={'inputs': max_length, 'targets': max_length},
+        padding_values={'inputs': 0, 'targets': 0},
+        drop_remainder=drop_remainder,
+    )
 
   repeated_dataset = dataset.repeat(num_epochs)
 
@@ -319,8 +330,9 @@ def preprocess_data(dataset,
   return repeated_dataset, dataset
 
 
-def get_lm1b_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
-                      shuffle_rng):
+def get_lm1b_datasets(
+    hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng
+):
   """Load and return dataset of batched examples for use during training."""
   if hps.vocab_path is None:
     vocab_path = os.path.expanduser('~/lm2b_sentencepiece_model')
@@ -340,11 +352,14 @@ def get_lm1b_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
       train_data,
       vocab_path=vocab_path,
       vocab_size=hps.vocab_size,
-      max_corpus_chars=hps.max_corpus_chars)
+      max_corpus_chars=hps.max_corpus_chars,
+  )
   train_data = train_data.map(
-      spm_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
+      spm_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE
+  )
   eval_data = eval_data.map(
-      spm_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
+      spm_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE
+  )
 
   train_ds, eval_train_ds = preprocess_data(
       train_data,
@@ -353,7 +368,8 @@ def get_lm1b_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
       pack_examples=hps.pack_examples,
       batch_size=per_host_batch_size,
       max_length=hps.max_target_length,
-      shuffle_seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng))
+      shuffle_seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng),
+  )
 
   eval_ds, _ = preprocess_data(
       eval_data,
@@ -361,6 +377,7 @@ def get_lm1b_datasets(hps, per_host_batch_size, per_host_eval_batch_size,
       pack_examples=hps.pack_examples,
       batch_size=per_host_eval_batch_size,
       max_length=hps.max_eval_target_length,
-      drop_remainder=False)
+      drop_remainder=False,
+  )
 
   return train_ds, eval_train_ds, eval_ds

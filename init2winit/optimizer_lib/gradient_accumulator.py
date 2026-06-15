@@ -42,6 +42,7 @@ mean across the batch dimension in our loss functions.
 Note that we only sync gradients when we are about to update the model, in
 order to avoid unnecessary cross replica communications.
 """
+
 from typing import NamedTuple, Optional
 
 from init2winit.optimizer_lib import utils as optimizer_utils
@@ -52,6 +53,7 @@ import optax
 
 class GradientAccumulatorState(NamedTuple):
   """State for the gradient accumulator."""
+
   base_state: NamedTuple  # The state of the base optimizer.
   hyperparams: dict[str, jnp.ndarray]
   num_per_step_batches: jnp.ndarray  # shape=(), dtype=jnp.int32.
@@ -79,23 +81,29 @@ def accumulate_gradients(
       generate updates given the total gradient.
     base_opt_update_fn: The update function for the base optimizer used to
       generate updates given the total gradient.
+
   Returns:
     An (init_fn, update_fn) tuple.
   """
-  if (virtual_batch_size is not None and
-      virtual_batch_size > per_step_batch_size):
+  if (
+      virtual_batch_size is not None
+      and virtual_batch_size > per_step_batch_size
+  ):
     raise ValueError(
         'Gradient accumulation does not currently support using a virtual '
         'batch size ({}) that is larger than the per-step batch size ({}), as '
         'this would require multiple forward steps *up to each batch norm '
         'layer* in order to properly calculate the batch statistics necessary '
         'to simulate a larger batch size.'.format(
-            virtual_batch_size, per_step_batch_size))
+            virtual_batch_size, per_step_batch_size
+        )
+    )
 
   if total_batch_size % per_step_batch_size != 0:
     raise ValueError(
         'Need to step a per-step batch size ({}) that evenly divides the total '
-        'batch size ({}).'.format(per_step_batch_size, total_batch_size))
+        'batch size ({}).'.format(per_step_batch_size, total_batch_size)
+    )
 
   steps_per_update = total_batch_size // per_step_batch_size
 
@@ -105,7 +113,8 @@ def accumulate_gradients(
         base_state=base_state,
         hyperparams=base_state.hyperparams,
         num_per_step_batches=jnp.zeros([], jnp.int32),
-        accumulations=jax.tree.map(jnp.zeros_like, params))
+        accumulations=jax.tree.map(jnp.zeros_like, params),
+    )
 
   @optimizer_utils.no_cross_device_gradient_aggregation
   def update_fn(updates, state, params=None, **extra_args):
@@ -119,15 +128,18 @@ def accumulate_gradients(
       # account any example weighting, which is rarely used for training
       # batches.
       total_gradients = jax.tree.map(
-          lambda x: x / steps_per_update, total_gradients)
+          lambda x: x / steps_per_update, total_gradients
+      )
 
       updates, updated_base_state = base_opt_update_fn(
-          total_gradients, state.base_state, params=params, **extra_args)
+          total_gradients, state.base_state, params=params, **extra_args
+      )
       reset_state = GradientAccumulatorState(
           base_state=updated_base_state,
           hyperparams=updated_base_state.hyperparams,
           num_per_step_batches=0,
-          accumulations=zeros_params)
+          accumulations=zeros_params,
+      )
       return updates, reset_state
 
     def accumulation_continuation(updated_accumulations, _, state):
@@ -135,18 +147,21 @@ def accumulate_gradients(
           base_state=state.base_state,
           hyperparams=state.base_state.hyperparams,
           num_per_step_batches=state.num_per_step_batches + 1,
-          accumulations=updated_accumulations)
+          accumulations=updated_accumulations,
+      )
       return zeros_params, updated_state
 
-    updated_accumulations = jax.tree.map(lambda g, acc: g + acc, updates,
-                                         state.accumulations)
+    updated_accumulations = jax.tree.map(
+        lambda g, acc: g + acc, updates, state.accumulations
+    )
     updates, state = jax.lax.cond(
         state.num_per_step_batches == steps_per_update - 1,
         total_batch_update,
         accumulation_continuation,
         updated_accumulations,
         params,
-        state)
+        state,
+    )
     return updates, state
 
   return optax.GradientTransformation(init_fn, update_fn)

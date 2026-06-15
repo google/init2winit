@@ -27,8 +27,7 @@ from ml_collections import FrozenConfigDict
 import optax
 
 
-def _calculate_adam_preconditioner(gradients, beta2, epsilon,
-                                   bias_correct):
+def _calculate_adam_preconditioner(gradients, beta2, epsilon, bias_correct):
   """Compute the Adam preconditioner after several steps of training.
 
   Args:
@@ -43,9 +42,11 @@ def _calculate_adam_preconditioner(gradients, beta2, epsilon,
   nu = jax.tree.map(lambda x: 0.0, gradients[0])
   for gradient in gradients:
     gradient_sq = jax.tree.map(jnp.square, gradient)
-    nu = jax.tree.map(lambda nu, g: beta2*nu + (1 - beta2)*g, nu, gradient_sq)
+    nu = jax.tree.map(
+        lambda nu, g: beta2 * nu + (1 - beta2) * g, nu, gradient_sq
+    )
   if bias_correct:
-    nu = jax.tree.map(lambda nu: nu / (1 - beta2**(len(gradients))), nu)
+    nu = jax.tree.map(lambda nu: nu / (1 - beta2 ** (len(gradients))), nu)
 
   return jax.tree.map(lambda nu: jnp.sqrt(nu) + epsilon, nu)
 
@@ -61,11 +62,9 @@ class RunPreconditionTest(absltest.TestCase):
     beta2 = 0.999
     epsilon = 1e-7
 
-    opt_hparams = FrozenConfigDict({
-        'beta1': beta1,
-        'beta2': beta2,
-        'epsilon': epsilon
-    })
+    opt_hparams = FrozenConfigDict(
+        {'beta1': beta1, 'beta2': beta2, 'epsilon': epsilon}
+    )
     hparams = FrozenConfigDict({
         'optimizer': 'adam',
         'opt_hparams': opt_hparams,
@@ -77,8 +76,10 @@ class RunPreconditionTest(absltest.TestCase):
     init_fn, update_fn = optimizers.get_optimizer(hparams)
 
     params = {'foo': 1.0, 'bar': {'baz': 3.0}}
-    gradients = [{'foo': 0.5, 'bar': {'baz': 0.1}},
-                 {'foo': 0.2, 'bar': {'baz': 0.6}}]
+    gradients = [
+        {'foo': 0.5, 'bar': {'baz': 0.1}},
+        {'foo': 0.2, 'bar': {'baz': 0.6}},
+    ]
 
     optimizer_state = init_fn(params)
     optimizer_state.hyperparams['learning_rate'] = lr
@@ -89,21 +90,29 @@ class RunPreconditionTest(absltest.TestCase):
 
     # yes bias correction
     expected_preconditioner = _calculate_adam_preconditioner(
-        gradients, beta2, epsilon, bias_correct=True)
+        gradients, beta2, epsilon, bias_correct=True
+    )
 
     preconditioner = make_diag_preconditioner(
-        'adam', opt_hparams, optimizer_state,
-        FrozenConfigDict(dict(bias_correction=True)))
+        'adam',
+        opt_hparams,
+        optimizer_state,
+        FrozenConfigDict(dict(bias_correction=True)),
+    )
 
     self.assertTrue(pytree_allclose(expected_preconditioner, preconditioner))
 
     # no bias correction
     expected_preconditioner = _calculate_adam_preconditioner(
-        gradients, beta2, epsilon, bias_correct=False)
+        gradients, beta2, epsilon, bias_correct=False
+    )
 
     preconditioner = make_diag_preconditioner(
-        'adam', opt_hparams, optimizer_state,
-        FrozenConfigDict(dict(bias_correction=False)))
+        'adam',
+        opt_hparams,
+        optimizer_state,
+        FrozenConfigDict(dict(bias_correction=False)),
+    )
 
     self.assertTrue(pytree_allclose(expected_preconditioner, preconditioner))
 
@@ -116,10 +125,7 @@ class RunPreconditionTest(absltest.TestCase):
 
     optimizer = 'kitchen_sink'
     opt_hparams = FrozenConfigDict({
-        '0': {
-            'element': 'sanitize_values',
-            'hps': {}
-        },
+        '0': {'element': 'sanitize_values', 'hps': {}},
         '1': {
             'element': 'scale_by_adam',
             'hps': {
@@ -127,15 +133,10 @@ class RunPreconditionTest(absltest.TestCase):
                 'b2': beta2,
                 'eps': epsilon,
                 'eps_root': 0.0,
-                'debias': True
-            }
+                'debias': True,
+            },
         },
-        '2': {
-            'element': 'clip_updates',
-            'hps': {
-                'clip_threshold': 1000.0
-            }
-        },
+        '2': {'element': 'clip_updates', 'hps': {'clip_threshold': 1000.0}},
     })
 
     hparams = FrozenConfigDict({
@@ -149,27 +150,28 @@ class RunPreconditionTest(absltest.TestCase):
     init_fn, update_fn = optimizers.get_optimizer(hparams)
 
     params = {'foo': 1.0, 'bar': {'baz': 3.0}}
-    gradients = [{'foo': 0.5, 'bar': {'baz': 0.1}},
-                 {'foo': 0.2, 'bar': {'baz': 0.6}}]
+    gradients = [
+        {'foo': 0.5, 'bar': {'baz': 0.1}},
+        {'foo': 0.2, 'bar': {'baz': 0.6}},
+    ]
 
     optimizer_state = init_fn(params)
     optimizer_state.hyperparams['learning_rate'] = lr
 
     for gradient in gradients:
-      updates, optimizer_state = update_fn(gradient,
-                                           optimizer_state,
-                                           params)
+      updates, optimizer_state = update_fn(gradient, optimizer_state, params)
       params = optax.apply_updates(params, updates)
 
     expected_preconditioner = _calculate_adam_preconditioner(
-        gradients, beta2, epsilon, bias_correct=True)
+        gradients, beta2, epsilon, bias_correct=True
+    )
 
     preconditioner = make_diag_preconditioner(
-        optimizer, opt_hparams, optimizer_state,
-        FrozenConfigDict(dict()))
+        optimizer, opt_hparams, optimizer_state, FrozenConfigDict(dict())
+    )
 
-    self.assertTrue(pytree_allclose(
-        expected_preconditioner, preconditioner))
+    self.assertTrue(pytree_allclose(expected_preconditioner, preconditioner))
+
 
 if __name__ == '__main__':
   absltest.main()

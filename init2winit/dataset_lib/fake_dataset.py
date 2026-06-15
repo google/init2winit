@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Fake image input pipeline. Returns the same batch of ones over and over."""
+
 import copy
 
 from init2winit.dataset_lib import data_utils
@@ -21,7 +22,6 @@ import jax
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import numpy as np
-
 
 TRAIN_IMAGES = 1281167
 EVAL_IMAGES = 50000
@@ -31,11 +31,14 @@ NUM_CLASSES = 1000
 IMAGE_SIZE = 224
 
 
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    input_shape=(224, 224, 3),
-    output_shape=(NUM_CLASSES,),
-    train_size=TRAIN_IMAGES,
-    valid_size=EVAL_IMAGES))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        input_shape=(224, 224, 3),
+        output_shape=(NUM_CLASSES,),
+        train_size=TRAIN_IMAGES,
+        valid_size=EVAL_IMAGES,
+    )
+)
 
 METADATA = {
     'apply_one_hot_in_loss': False,
@@ -49,8 +52,7 @@ def get_fake_batch(hps):
   num_classes = hps.output_shape[0]
   train_input_shape = (batch_size, *input_shape)
   images = jnp.ones(train_input_shape, dtype=jnp.float32)
-  labels = jax.nn.one_hot(
-      np.zeros((batch_size,)), num_classes, dtype=jnp.int32)
+  labels = jax.nn.one_hot(np.zeros((batch_size,)), num_classes, dtype=jnp.int32)
   batch = {
       'inputs': images,
       'targets': labels,
@@ -89,6 +91,7 @@ def get_fake(shuffle_rng, batch_size, eval_batch_size, hps=None):
     del kwargs
     return
     yield  # This yield is needed to make this a valid (null) iterator.
+
   # pylint: enable=unreachable
   # pylint: disable=unreachable
 
@@ -97,7 +100,9 @@ def get_fake(shuffle_rng, batch_size, eval_batch_size, hps=None):
     del kwargs
     return
     yield  # This yield is needed to make this a valid (null) iterator.
+
   # pylint: enable=unreachable
 
   return data_utils.Dataset(
-      train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
+      train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch
+  )

@@ -29,99 +29,121 @@ import numpy as np
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
-
-MNIST_HPARAMS = config_dict.ConfigDict(dict(
-    train_size=50000,
-    valid_size=10000,
-    test_size=10000,
-    input_shape=(28, 28, 1),
-    output_shape=(10,)))
+MNIST_HPARAMS = config_dict.ConfigDict(
+    dict(
+        train_size=50000,
+        valid_size=10000,
+        test_size=10000,
+        input_shape=(28, 28, 1),
+        output_shape=(10,),
+    )
+)
 MNIST_METADATA = {
     'apply_one_hot_in_loss': False,
 }
 
-MNIST_AUTOENCODER_HPARAMS = config_dict.ConfigDict(dict(
-    train_size=50000,
-    valid_size=10000,
-    test_size=10000,
-    input_shape=(28, 28, 1),
-    output_shape=(784,)))
+MNIST_AUTOENCODER_HPARAMS = config_dict.ConfigDict(
+    dict(
+        train_size=50000,
+        valid_size=10000,
+        test_size=10000,
+        input_shape=(28, 28, 1),
+        output_shape=(784,),
+    )
+)
 MNIST_AUTOENCODER_METADATA = {
     'apply_one_hot_in_loss': False,
 }
 
-FASHION_MNIST_HPARAMS = config_dict.ConfigDict(dict(
-    train_size=45000,
-    valid_size=5000,
-    test_size=10000,
-    input_shape=(28, 28, 1),
-    output_shape=(10,)))
+FASHION_MNIST_HPARAMS = config_dict.ConfigDict(
+    dict(
+        train_size=45000,
+        valid_size=5000,
+        test_size=10000,
+        input_shape=(28, 28, 1),
+        output_shape=(10,),
+    )
+)
 FASHION_MNIST_METADATA = {
     'apply_one_hot_in_loss': False,
 }
 
-CIFAR10_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    flip_probability=0.5,
-    alpha=1.0,
-    crop_num_pixels=4,
-    use_mixup=True,
-    train_size=45000,
-    valid_size=5000,
-    test_size=10000,
-    input_shape=(32, 32, 3),
-    output_shape=(10,)))
+CIFAR10_DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        flip_probability=0.5,
+        alpha=1.0,
+        crop_num_pixels=4,
+        use_mixup=True,
+        train_size=45000,
+        valid_size=5000,
+        test_size=10000,
+        input_shape=(32, 32, 3),
+        output_shape=(10,),
+    )
+)
 CIFAR10_METADATA = {
     'apply_one_hot_in_loss': False,
 }
 
-CIFAR100_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    flip_probability=0.5,
-    alpha=1.0,
-    crop_num_pixels=4,
-    use_mixup=True,
-    train_size=45000,
-    valid_size=5000,
-    test_size=10000,
-    input_shape=(32, 32, 3),
-    output_shape=(100,)))
+CIFAR100_DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        flip_probability=0.5,
+        alpha=1.0,
+        crop_num_pixels=4,
+        use_mixup=True,
+        train_size=45000,
+        valid_size=5000,
+        test_size=10000,
+        input_shape=(32, 32, 3),
+        output_shape=(100,),
+    )
+)
 CIFAR100_METADATA = {
     'apply_one_hot_in_loss': False,
 }
 
-SVHN_NO_EXTRA_DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    flip_probability=0.5,
-    alpha=1.0,
-    crop_num_pixels=4,
-    use_mixup=False,
-    train_size=73257 - 7000,
-    valid_size=7000,
-    test_size=26032,
-    input_shape=(32, 32, 3),
-    output_shape=(10,)))
+SVHN_NO_EXTRA_DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        flip_probability=0.5,
+        alpha=1.0,
+        crop_num_pixels=4,
+        use_mixup=False,
+        train_size=73257 - 7000,
+        valid_size=7000,
+        test_size=26032,
+        input_shape=(32, 32, 3),
+        output_shape=(10,),
+    )
+)
 SVHN_NO_EXTRA_METADATA = {
     'apply_one_hot_in_loss': False,
 }
 
 
-def _eval_batches(images,
-                  labels,
-                  per_host_batch_size,
-                  num_batches=None,
-                  valid_example_keys=None):
+def _eval_batches(
+    images,
+    labels,
+    per_host_batch_size,
+    num_batches=None,
+    valid_example_keys=None,
+):
   """Produce a stream of batches for a single evaluation epoch."""
   for idx in itertools.islice(
-      range(0, images.shape[0], per_host_batch_size), num_batches):
-    inputs = jnp.array(images[idx:idx + per_host_batch_size])
-    targets = jnp.array(labels[idx:idx + per_host_batch_size])
+      range(0, images.shape[0], per_host_batch_size), num_batches
+  ):
+    inputs = jnp.array(images[idx : idx + per_host_batch_size])
+    targets = jnp.array(labels[idx : idx + per_host_batch_size])
     data_dict = {
         'inputs': inputs,
         'targets': targets,
         'weights': jnp.ones(inputs.shape[0], dtype=inputs.dtype),
     }
     if valid_example_keys is not None and len(valid_example_keys) == len(
-        images):
-      data_dict['example_key'] = valid_example_keys[idx:idx +
-                                                    per_host_batch_size]
+        images
+    ):
+      data_dict['example_key'] = valid_example_keys[
+          idx : idx + per_host_batch_size
+      ]
     data_dict = data_utils.maybe_pad_batch(data_dict, per_host_batch_size)
     yield data_dict
 
@@ -129,7 +151,7 @@ def _eval_batches(images,
 def _shard_by_host_id(array):
   split_size = len(array) // jax.process_count()
   start = split_size * jax.process_index()
-  return array[start: start+split_size]
+  return array[start : start + split_size]
 
 
 def _prepare_small_image_datasets(
@@ -146,18 +168,21 @@ def _prepare_small_image_datasets(
     augment_fn,
     is_one_hot=True,
     autoencoder=False,
-    include_example_keys=False):
+    include_example_keys=False,
+):
   """Prepare Dataset using tf.data.Datasets of the different splits."""
   if autoencoder and is_one_hot:
     raise ValueError(
-        'One hot encoding cannot be applied to autoencoder datasets.')
+        'One hot encoding cannot be applied to autoencoder datasets.'
+    )
 
   eval_image_iterator = functools.partial(
       data_utils.image_iterator,
       rescale=rescale,
       output_shape=output_shape,
       is_one_hot=is_one_hot,
-      autoencoder=autoencoder)
+      autoencoder=autoencoder,
+  )
 
   # Setup the eval_train split as a copy of the training data, in the form of
   # the first `num_train_batches` batches of the data as an np.array.
@@ -165,24 +190,33 @@ def _prepare_small_image_datasets(
 
   num_train_batches = train_size // per_host_batch_size
   eval_train_data = list(
-      itertools.islice(eval_train_iterator, 0, num_train_batches))
+      itertools.islice(eval_train_iterator, 0, num_train_batches)
+  )
 
   eval_train_inputs = jnp.array([batch['inputs'] for batch in eval_train_data])
-  eval_train_inputs_shape = (num_train_batches * per_host_batch_size,
-                             *input_shape)
+  eval_train_inputs_shape = (
+      num_train_batches * per_host_batch_size,
+      *input_shape,
+  )
   eval_train_inputs = np.reshape(eval_train_inputs, eval_train_inputs_shape)
   eval_train_targets = jnp.array(
-      [batch['targets'] for batch in eval_train_data])
-  eval_train_output_shape = (num_train_batches * per_host_batch_size,
-                             *output_shape)
+      [batch['targets'] for batch in eval_train_data]
+  )
+  eval_train_output_shape = (
+      num_train_batches * per_host_batch_size,
+      *output_shape,
+  )
   eval_train_targets = np.reshape(eval_train_targets, eval_train_output_shape)
 
   valid_inputs = jnp.array([])
   valid_targets = jnp.array([])
   valid_example_keys = jnp.array([])
   if data_valid:
-    valid_data = next(eval_image_iterator(
-        data_valid, include_example_keys=include_example_keys))
+    valid_data = next(
+        eval_image_iterator(
+            data_valid, include_example_keys=include_example_keys
+        )
+    )
     valid_inputs = valid_data['inputs']
     valid_targets = valid_data['targets']
     if include_example_keys:
@@ -212,24 +246,25 @@ def _prepare_small_image_datasets(
       is_one_hot=is_one_hot,
       autoencoder=autoencoder,
       shuffle_rng=shuffle_rng,
-      augment_fn=augment_fn)
+      augment_fn=augment_fn,
+  )
 
   eval_train_epoch = functools.partial(
       _eval_batches,
       eval_train_inputs,
       eval_train_targets,
-      per_host_eval_batch_size)
+      per_host_eval_batch_size,
+  )
   valid_epoch = functools.partial(
       _eval_batches,
       valid_inputs,
       valid_targets,
       per_host_eval_batch_size,
-      valid_example_keys=valid_example_keys)
+      valid_example_keys=valid_example_keys,
+  )
   test_epoch = functools.partial(
-      _eval_batches,
-      test_inputs,
-      test_targets,
-      per_host_eval_batch_size)
+      _eval_batches, test_inputs, test_targets, per_host_eval_batch_size
+  )
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
 
@@ -247,7 +282,8 @@ def _process_small_tfds_image_ds(
     shuffle_rng,
     augment_fn=image_preprocessing.identity_augment,
     is_one_hot=True,
-    autoencoder=False):
+    autoencoder=False,
+):
   """Helper wrapper around tfds which converts the data into the init2winit API.
 
   Returns three data generators, train, validation and test. The API of
@@ -282,8 +318,8 @@ def _process_small_tfds_image_ds(
     input_shape: (tuple) Used to check that the data is of the correct shape.
     output_shape: (tuple) Shape of network output.
     shuffle_rng: jax.random.PRNGKey
-    augment_fn: Function with API (rng, images, labels) -> images, labels.
-      This function will be applied to every training batch.
+    augment_fn: Function with API (rng, images, labels) -> images, labels. This
+      function will be applied to every training batch.
     is_one_hot: (bool) If true, targets are one hot encoded.
     autoencoder: (bool) If true, targets are set to input images.
 
@@ -293,37 +329,57 @@ def _process_small_tfds_image_ds(
   augment_fn = jax.jit(augment_fn)
 
   train_split = tfds.core.ReadInstruction('train', to=train_size, unit='abs')
-  data_train = tfds.load(name=dataset_name, split=train_split,
-                         as_dataset_kwargs={'shuffle_files': False})
+  data_train = tfds.load(
+      name=dataset_name,
+      split=train_split,
+      as_dataset_kwargs={'shuffle_files': False},
+  )
   data_train = data_train.cache()
   # Ensure a different shuffle of the training data on each host.
   shuffle_rng = jax.random.fold_in(shuffle_rng, jax.process_index())
   data_train = data_train.shuffle(
       train_size,
       reshuffle_each_iteration=True,
-      seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng))
+      seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng),
+  )
   data_train = data_train.repeat()
   data_train = data_train.batch(per_host_batch_size)
 
   if valid_size > 0:
     valid_split = tfds.core.ReadInstruction(
-        'train', from_=-valid_size, unit='abs')
-    data_valid = tfds.load(name=dataset_name, split=valid_split,
-                           as_dataset_kwargs={'shuffle_files': False})
+        'train', from_=-valid_size, unit='abs'
+    )
+    data_valid = tfds.load(
+        name=dataset_name,
+        split=valid_split,
+        as_dataset_kwargs={'shuffle_files': False},
+    )
     data_valid = data_valid.batch(valid_size)
   else:
     data_valid = None
 
-  data_test = tfds.load(name=dataset_name, split='test',
-                        as_dataset_kwargs={'shuffle_files': False})
+  data_test = tfds.load(
+      name=dataset_name,
+      split='test',
+      as_dataset_kwargs={'shuffle_files': False},
+  )
   data_test = data_test.batch(test_size)
 
-  return _prepare_small_image_datasets(data_train, data_valid, data_test,
-                                       per_host_batch_size,
-                                       per_host_eval_batch_size, train_size,
-                                       rescale, input_shape, output_shape,
-                                       shuffle_rng, augment_fn,
-                                       is_one_hot, autoencoder)
+  return _prepare_small_image_datasets(
+      data_train,
+      data_valid,
+      data_test,
+      per_host_batch_size,
+      per_host_eval_batch_size,
+      train_size,
+      rescale,
+      input_shape,
+      output_shape,
+      shuffle_rng,
+      augment_fn,
+      is_one_hot,
+      autoencoder,
+  )
 
 
 def _load_deterministic_with_custom_validation(
@@ -338,7 +394,8 @@ def _load_deterministic_with_custom_validation(
     output_shape,
     shuffle_rng,
     augment_fn=image_preprocessing.identity_augment,
-    include_example_keys=False):
+    include_example_keys=False,
+):
   """Load a small image dataset with a deterministic validation set.
 
   This allows users to deterministically load a validation set that is sampled
@@ -375,12 +432,15 @@ def _load_deterministic_with_custom_validation(
   train_ds = tfds.load(
       dataset_name,
       split=tfds.core.ReadInstruction(
-          'train', from_=0, to=train_size, unit='abs'))
+          'train', from_=0, to=train_size, unit='abs'
+      ),
+  )
 
   data_train = train_ds.shuffle(
       train_size,
       reshuffle_each_iteration=True,
-      seed=int(jax.random.randint(shuffle_rng, (), 0, 1000)))
+      seed=int(jax.random.randint(shuffle_rng, (), 0, 1000)),
+  )
   data_train = data_train.repeat()
   data_train = data_train.batch(per_host_batch_size)
 
@@ -389,7 +449,9 @@ def _load_deterministic_with_custom_validation(
         dataset_name,
         read_config=read_config,
         split=tfds.core.ReadInstruction(
-            'train', from_=train_size, to=train_size + valid_size, unit='abs'))
+            'train', from_=train_size, to=train_size + valid_size, unit='abs'
+        ),
+    )
     data_valid = valid_ds.batch(valid_size)
   else:
     valid_ds = tf.data.Dataset.from_tensor_slices([])
@@ -398,7 +460,8 @@ def _load_deterministic_with_custom_validation(
   data_test = tfds.load(
       name=dataset_name,
       split='test',
-      as_dataset_kwargs={'shuffle_files': False})
+      as_dataset_kwargs={'shuffle_files': False},
+  )
   data_test = data_test.batch(test_size)
 
   return _prepare_small_image_datasets(
@@ -413,7 +476,8 @@ def _load_deterministic_with_custom_validation(
       output_shape,
       shuffle_rng,
       augment_fn,
-      include_example_keys=include_example_keys)
+      include_example_keys=include_example_keys,
+  )
 
 
 def get_mnist(shuffle_rng, batch_size, eval_batch_size, hps=None):
@@ -439,19 +503,25 @@ def get_mnist(shuffle_rng, batch_size, eval_batch_size, hps=None):
       size yielded from valid_epoch() and test_epoch().
     hps: Hparams object. hps.train_size, hps.valid_size, and hps.test_size will
       specify the sizes of the various data splits.
+
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
   per_host_batch_size = batch_size // jax.process_count()
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
   rescale = lambda x: x / 255.0
-  return _process_small_tfds_image_ds('mnist',
-                                      per_host_batch_size,
-                                      per_host_eval_batch_size,
-                                      hps.train_size, hps.valid_size,
-                                      hps.test_size, rescale,
-                                      hps.input_shape,
-                                      hps.output_shape, shuffle_rng)
+  return _process_small_tfds_image_ds(
+      'mnist',
+      per_host_batch_size,
+      per_host_eval_batch_size,
+      hps.train_size,
+      hps.valid_size,
+      hps.test_size,
+      rescale,
+      hps.input_shape,
+      hps.output_shape,
+      shuffle_rng,
+  )
 
 
 def get_mnist_autoencoder(shuffle_rng, batch_size, eval_batch_size, hps=None):
@@ -484,19 +554,23 @@ def get_mnist_autoencoder(shuffle_rng, batch_size, eval_batch_size, hps=None):
   per_host_batch_size = batch_size // jax.process_count()
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
   rescale = lambda x: x / 255.0
-  return _process_small_tfds_image_ds('mnist',
-                                      per_host_batch_size,
-                                      per_host_eval_batch_size, hps.train_size,
-                                      hps.valid_size, hps.test_size, rescale,
-                                      hps.input_shape, hps.output_shape,
-                                      shuffle_rng,
-                                      is_one_hot=False, autoencoder=True)
+  return _process_small_tfds_image_ds(
+      'mnist',
+      per_host_batch_size,
+      per_host_eval_batch_size,
+      hps.train_size,
+      hps.valid_size,
+      hps.test_size,
+      rescale,
+      hps.input_shape,
+      hps.output_shape,
+      shuffle_rng,
+      is_one_hot=False,
+      autoencoder=True,
+  )
 
 
-def get_fashion_mnist(shuffle_rng,
-                      batch_size,
-                      eval_batch_size,
-                      hps=None):
+def get_fashion_mnist(shuffle_rng, batch_size, eval_batch_size, hps=None):
   """Returns generators for the Fashion MNIST train, validation, and test set.
 
   Returns three data generators, train, validation and test. The API of
@@ -519,25 +593,28 @@ def get_fashion_mnist(shuffle_rng,
       size yielded from valid_epoch() and test_epoch().
     hps: Hparams object. hps.train_size, hps.valid_size, and hps.test_size will
       specify the sizes of the various data splits.
+
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
   per_host_batch_size = batch_size // jax.process_count()
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
   rescale = lambda x: x / 255.0
-  return _process_small_tfds_image_ds('fashion_mnist',
-                                      per_host_batch_size,
-                                      per_host_eval_batch_size,
-                                      hps.train_size, hps.valid_size,
-                                      hps.test_size, rescale,
-                                      hps.input_shape,
-                                      hps.output_shape, shuffle_rng)
+  return _process_small_tfds_image_ds(
+      'fashion_mnist',
+      per_host_batch_size,
+      per_host_eval_batch_size,
+      hps.train_size,
+      hps.valid_size,
+      hps.test_size,
+      rescale,
+      hps.input_shape,
+      hps.output_shape,
+      shuffle_rng,
+  )
 
 
-def get_cifar10(shuffle_rng,
-                batch_size,
-                eval_batch_size,
-                hps=None):
+def get_cifar10(shuffle_rng, batch_size, eval_batch_size, hps=None):
   """Returns generators for the CIFAR10 train, validation, and test set.
 
   Returns three data generators, train, validation and test. The API of
@@ -578,8 +655,9 @@ def get_cifar10(shuffle_rng,
   augment_fn = functools.partial(image_preprocessing.augment_cifar10, hps=hps)
 
   if hps.train_size + hps.valid_size > 50000:
-    raise ValueError('The sum of train_size and valid_size should not exceed '
-                     '50k.')
+    raise ValueError(
+        'The sum of train_size and valid_size should not exceed 50k.'
+    )
   if hps.test_size > 10000:
     raise ValueError('test_size should not exceed 10k')
 
@@ -595,13 +673,11 @@ def get_cifar10(shuffle_rng,
       hps.output_shape,
       shuffle_rng,
       augment_fn,
-      include_example_keys=hps.get('include_example_keys', False))
+      include_example_keys=hps.get('include_example_keys', False),
+  )
 
 
-def get_cifar100(shuffle_rng,
-                 batch_size,
-                 eval_batch_size,
-                 hps=None):
+def get_cifar100(shuffle_rng, batch_size, eval_batch_size, hps=None):
   """Returns generators for the CIFAR100 train, validation, and test set.
 
   Returns three data generators, train, validation and test. The API of
@@ -625,32 +701,36 @@ def get_cifar100(shuffle_rng,
     hps: Hparams object. hps.train_size, hps.valid_size, and hps.test_size will
       specify the sizes of the various data splits. See image_preprocessing for
       hparams that control the data augmentation.
+
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
   per_host_batch_size = batch_size // jax.process_count()
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
 
-  mean = jnp.array([129.3041658, 124.06996185, 112.4340492])[None, None,
-                                                             None, :]
+  mean = jnp.array([129.3041658, 124.06996185, 112.4340492])[
+      None, None, None, :
+  ]
   std = jnp.array([68.17024395, 65.3918073, 70.41836985])[None, None, None, :]
   rescale = lambda x: (x - mean) / std
   augment_fn = functools.partial(image_preprocessing.augment_cifar10, hps=hps)
-  return _process_small_tfds_image_ds('cifar100',
-                                      per_host_batch_size,
-                                      per_host_eval_batch_size,
-                                      hps.train_size, hps.valid_size,
-                                      hps.test_size, rescale,
-                                      hps.input_shape,
-                                      hps.output_shape, shuffle_rng, augment_fn)
+  return _process_small_tfds_image_ds(
+      'cifar100',
+      per_host_batch_size,
+      per_host_eval_batch_size,
+      hps.train_size,
+      hps.valid_size,
+      hps.test_size,
+      rescale,
+      hps.input_shape,
+      hps.output_shape,
+      shuffle_rng,
+      augment_fn,
+  )
 
 
 # TODO(znado): add version that also has the "extra" training examples.
-def get_svhn_no_extra(
-    shuffle_rng,
-    batch_size,
-    eval_batch_size,
-    hps=None):
+def get_svhn_no_extra(shuffle_rng, batch_size, eval_batch_size, hps=None):
   """Returns generators for the SVHN train, validation, and test set.
 
   Note that we do not include the "extra" 531131 examples which are sometimes
@@ -681,6 +761,7 @@ def get_svhn_no_extra(
     hps: Hparams object. hps.train_size, hps.valid_size, and hps.test_size will
       specify the sizes of the various data splits. See image_preprocessing for
       hparams that control the data augmentation.
+
   Returns:
     train_epoch, valid_epoch, test_epoch: three generators.
   """
@@ -699,4 +780,5 @@ def get_svhn_no_extra(
       hps.input_shape,
       hps.output_shape,
       shuffle_rng,
-      augment_fn=augment_fn)
+      augment_fn=augment_fn,
+  )

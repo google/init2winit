@@ -15,11 +15,11 @@
 
 """Coefficients for pth inverse root iteration.
 
-  The faster schedule allows for a faster convergence of the coupled
-  iteration. The faster schedule is a R_{1,1} approximation to x^{1/p}. For
-  matrices with condition number < 1e+7, this converges in 3 Cholesky steps.
-  The slower schedule is a mixed R_{2,2} andR_{3,3} approximation to x^{1/p}.
-  It takes a total of 5 serial Cholesky steps or 2 parallel Cholesky steps.
+The faster schedule allows for a faster convergence of the coupled
+iteration. The faster schedule is a R_{1,1} approximation to x^{1/p}. For
+matrices with condition number < 1e+7, this converges in 3 Cholesky steps.
+The slower schedule is a mixed R_{2,2} andR_{3,3} approximation to x^{1/p}.
+It takes a total of 5 serial Cholesky steps or 2 parallel Cholesky steps.
 """
 
 from jax import numpy as jnp
@@ -176,7 +176,7 @@ def r11_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.01760681686165901,
-          ])
+          ]),
       },
       "6": {
           "a": jnp.array([
@@ -208,7 +208,7 @@ def r11_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.06767899452107008,
-          ])
+          ]),
       },
       "8": {
           "a": jnp.array([
@@ -240,7 +240,7 @@ def r11_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.13269068114098673,
-          ])
+          ]),
       },
   }
 
@@ -409,7 +409,7 @@ def r12_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.01760681686165901,
-          ])
+          ]),
       },
       "6": {
           "a": jnp.array([
@@ -442,7 +442,7 @@ def r12_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.06767899452107008,
-          ])
+          ]),
       },
       "8": {
           "a": jnp.array([
@@ -475,7 +475,7 @@ def r12_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.13269068114098673,
-          ])
+          ]),
       },
   }
 
@@ -546,7 +546,7 @@ def r23_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.00031,
-          ])
+          ]),
       },
       "2": {
           "a": jnp.array([
@@ -579,7 +579,7 @@ def r23_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.00031,
-          ])
+          ]),
       },
       "3": {
           "a": jnp.array([
@@ -612,7 +612,7 @@ def r23_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.00458,
-          ])
+          ]),
       },
       "4": {
           "a": jnp.array([
@@ -645,7 +645,7 @@ def r23_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.0178,
-          ])
+          ]),
       },
       "6": {
           "a": jnp.array([
@@ -678,7 +678,7 @@ def r23_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.06817314583299908,
-          ])
+          ]),
       },
       "8": {
           "a": jnp.array([
@@ -711,7 +711,7 @@ def r23_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
           ]),
           "alpha": jnp.array([
               0.13341664064126335,
-          ])
+          ]),
       },
   }
 
@@ -723,4 +723,3 @@ def r23_schedule(p: int) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
       pth_inv_root_coeffs[indexstr]["b"],
       pth_inv_root_coeffs[indexstr]["c"],
   )
-

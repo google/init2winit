@@ -26,8 +26,9 @@ def _crop(key, image, hps):
   """Randomly shifts the window viewing the image."""
   pixpad = (hps.crop_num_pixels, hps.crop_num_pixels)
   zero = (0, 0)
-  padded_image = jnp.pad(image, (pixpad, pixpad, zero),
-                         mode='constant', constant_values=0.0)
+  padded_image = jnp.pad(
+      image, (pixpad, pixpad, zero), mode='constant', constant_values=0.0
+  )
   corner = random.randint(key, (2,), 0, 2 * hps.crop_num_pixels)
   corner = jnp.concatenate((corner, jnp.zeros((1,), jnp.int32)))
   cropped_image = lax.dynamic_slice(padded_image, corner, image.shape)
@@ -108,8 +109,10 @@ def mixup(key, alpha, images, labels):
   mixed_labels = weight * labels + (1.0 - weight) * labels[::-1]
 
   weight = jnp.reshape(weight, (1,) * 0 + (batch_size,) + (1,) * (3))
-  reverse = tuple(slice(images.shape[i]) if d != 'N' else slice(-1, None, -1)
-                  for i, d in enumerate(image_format))
+  reverse = tuple(
+      slice(images.shape[i]) if d != 'N' else slice(-1, None, -1)
+      for i, d in enumerate(image_format)
+  )
 
   mixed_images = weight * images + (1.0 - weight) * images[reverse]
 
@@ -123,12 +126,11 @@ def augment_cifar10(key, images, labels, hps):
     key: Rng key.
     images: A batch of images with shape [batch, height, width, channels].
     labels: A batch of labels with shape [batch, ...]
-    hps: HParams object. hps.alpha parameterizes
-      the beta distribution sampling the mixup probabilities.
-      hps.crop_num_pixels determines the max amount of pixels for which the
-      viewing window will be shifted. hps.flip_probability determines the
-      probability of applying a random flip. hps.use_mixup determines whether
-      or not mixup is applied.
+    hps: HParams object. hps.alpha parameterizes the beta distribution sampling
+      the mixup probabilities. hps.crop_num_pixels determines the max amount of
+      pixels for which the viewing window will be shifted. hps.flip_probability
+      determines the probability of applying a random flip. hps.use_mixup
+      determines whether or not mixup is applied.
 
   Returns:
     A tuple containing the augmented images and labels.
@@ -141,9 +143,15 @@ def augment_cifar10(key, images, labels, hps):
   # Random flip
   flip_mask = random.uniform(flip_rng, (1,) * (-1) + (batch_size,) + (1,) * (3))
   images = jnp.where(
-      flip_mask < hps.flip_probability, images[tuple(
-          slice(images.shape[i]) if d != 'W' else slice(-1, None, -1)
-          for i, d in enumerate('NHWC'))], images)
+      flip_mask < hps.flip_probability,
+      images[
+          tuple(
+              slice(images.shape[i]) if d != 'W' else slice(-1, None, -1)
+              for i, d in enumerate('NHWC')
+          )
+      ],
+      images,
+  )
 
   images = crop(crop_rng, images, hps)
 

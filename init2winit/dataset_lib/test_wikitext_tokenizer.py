@@ -52,5 +52,6 @@ class TestWikitextTokenizer(absltest.TestCase):
 
     self.assertEqual(num_unique_tokens, num_unique_words + 2)
 
+
 if __name__ == '__main__':
   absltest.main()

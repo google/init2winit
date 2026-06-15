@@ -28,7 +28,6 @@ from init2winit.model_lib import model_utils
 from jax import numpy as jnp
 from ml_collections.config_dict import config_dict
 
-
 # small test hparams from
 # https://blog.keras.io/building-autoencoders-in-keras.html
 DEFAULT_HPARAMS = config_dict.ConfigDict(
@@ -51,7 +50,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         },
         activation_function='relu',
         model_dtype='float32',
-    ))
+    )
+)
 
 
 class ConvAutoEncoder(nn.Module):
@@ -61,6 +61,7 @@ class ConvAutoEncoder(nn.Module):
   [batch_size_per_device, *input_shape] where input_shape may be of arbitrary
   rank. The model flatten the input before applying a dense layer.
   """
+
   output_shape: Sequence[int]
   encoder: Dict[str, Any]
   decoder: Dict[str, Any]
@@ -79,7 +80,8 @@ class ConvAutoEncoder(nn.Module):
     ]
     if len(set(len(self.encoder[k]) for k in encoder_keys)) > 1:
       raise ValueError(
-          'The elements in encoder dict do not have the same length.')
+          'The elements in encoder dict do not have the same length.'
+      )
 
     decoder_keys = [
         'filter_sizes',
@@ -90,19 +92,23 @@ class ConvAutoEncoder(nn.Module):
     ]
     if len(set(len(self.decoder[k]) for k in decoder_keys)) > 1:
       raise ValueError(
-          'The elements in decoder dict do not have the same length.')
+          'The elements in decoder dict do not have the same length.'
+      )
 
     # encoder
     for i in range(len(self.encoder['filter_sizes'])):
       x = nn.Conv(
           self.encoder['filter_sizes'][i],
           self.encoder['kernel_sizes'][i],
-          padding=self.encoder['kernel_paddings'][i])(x)
+          padding=self.encoder['kernel_paddings'][i],
+      )(x)
       x = model_utils.ACTIVATIONS[self.encoder['activations'][i]](x)
       x = nn.max_pool(
-          x, self.encoder['window_sizes'][i],
+          x,
+          self.encoder['window_sizes'][i],
           strides=self.encoder['strides'][i],
-          padding=self.encoder['window_paddings'][i])
+          padding=self.encoder['window_paddings'][i],
+      )
 
     # decoder
     for i in range(len(self.decoder['filter_sizes'])):
@@ -110,7 +116,8 @@ class ConvAutoEncoder(nn.Module):
           self.decoder['filter_sizes'][i],
           self.decoder['kernel_sizes'][i],
           self.decoder['window_sizes'][i],
-          padding=self.decoder['paddings'][i])(x)
+          padding=self.decoder['paddings'][i],
+      )(x)
       x = model_utils.ACTIVATIONS[self.decoder['activations'][i]](x)
     return x
 
@@ -122,7 +129,8 @@ class ConvAutoEncoderModel(base_model.BaseModel):
     return ConvAutoEncoder(
         output_shape=self.hps.output_shape,
         encoder=self.hps.encoder,
-        decoder=self.hps.decoder)
+        decoder=self.hps.decoder,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""

@@ -16,6 +16,7 @@
 r"""Tests for initializers.py.
 
 """
+
 import copy
 import functools
 
@@ -31,7 +32,6 @@ from init2winit.model_lib import models
 import jax.numpy as jnp
 import jax.tree_util
 
-
 BATCH_SIZE = 10
 OUTPUT_SHAPE = (5,)
 MODEL_TO_INPUT_SHAPE = {
@@ -41,8 +41,10 @@ MODEL_TO_INPUT_SHAPE = {
 }
 
 
-TEST_PARAMETRIZATION = (('test_{}'.format(init), init)
-                        for init in initializers._ALL_INITIALIZERS.keys())  # pylint: disable=protected-access
+TEST_PARAMETRIZATION = (
+    ('test_{}'.format(init), init)
+    for init in initializers._ALL_INITIALIZERS.keys()  # pylint: disable=protected-access
+)
 
 
 def _load_model(model_name):
@@ -88,25 +90,27 @@ class InitializersTest(parameterized.TestCase):
         hps=init_hps,
         input_shape=input_shape[1:],
         output_shape=OUTPUT_SHAPE,
-        rng_key=init_rng)
+        rng_key=init_rng,
+    )
 
     # Check new params are still valid params
     outputs = flax_module.apply(
-        {'params': new_params}, jnp.ones(input_shape), train=True)
+        {'params': new_params}, jnp.ones(input_shape), train=True
+    )
     utils.log_pytree_shape_and_statistics(new_params)
     self.assertEqual(outputs.shape, (input_shape[0], OUTPUT_SHAPE[-1]))
 
-  @parameterized.named_parameters(('test_{}'.format(model_name), model_name)
-                                  for model_name in MODEL_TO_INPUT_SHAPE.keys())
+  @parameterized.named_parameters(
+      ('test_{}'.format(model_name), model_name)
+      for model_name in MODEL_TO_INPUT_SHAPE.keys()
+  )
   def test_meta_loss(self, model_name):
     """Test that meta_init does not update the bias scalars."""
 
     rng = jax.random.PRNGKey(0)
     flax_module, params, input_shape, _ = _load_model(model_name)
-    norms = jax.tree.map(lambda node: jnp.linalg.norm(node.reshape(-1)),
-                         params)
-    normalized_params = jax.tree.map(meta_init.normalize,
-                                     params)
+    norms = jax.tree.map(lambda node: jnp.linalg.norm(node.reshape(-1)), params)
+    normalized_params = jax.tree.map(meta_init.normalize, params)
     loss_name = 'cross_entropy'
     loss_fn = losses.get_loss_fn(loss_name)
     learned_norms, _ = meta_init.meta_optimize_scales(
@@ -117,7 +121,8 @@ class InitializersTest(parameterized.TestCase):
         hps=meta_init.DEFAULT_HPARAMS,
         input_shape=input_shape[1:],
         output_shape=OUTPUT_SHAPE,
-        rng_key=rng)
+        rng_key=rng,
+    )
 
     # Check that all learned bias scales are 0, the meta loss should be
     # independent of these terms.
@@ -145,14 +150,16 @@ class InitializersTest(parameterized.TestCase):
         hps=init_hps,
         input_shape=input_shape[1:],
         output_shape=OUTPUT_SHAPE,
-        rng_key=rng)
+        rng_key=rng,
+    )
 
     # Check new params are sparse
     for key in new_params:
       num_units_in, num_units_out = new_params[key]['kernel'].shape
       self.assertLess(
           jnp.count_nonzero(new_params[key]['kernel']),
-          (num_units_in + num_units_out) * non_zero_connection_weights)
+          (num_units_in + num_units_out) * non_zero_connection_weights,
+      )
       self.assertEqual(jnp.count_nonzero(new_params[key]['bias']), 0)
 
 

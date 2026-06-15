@@ -33,7 +33,6 @@ import numpy as np
 import orbax.checkpoint as ocp
 from tensorflow.io import gfile
 
-
 FLAGS = flags.FLAGS
 
 INPUT_SHAPE = [10, 28, 28, 1]
@@ -57,7 +56,8 @@ class CheckpointTest(parameterized.TestCase):
     xs = jnp.array(np.random.normal(size=INPUT_SHAPE))
     rng, params_rng = jax.random.split(rng)
     model_init_fn = jax.jit(
-        functools.partial(model.flax_module.init, train=False))
+        functools.partial(model.flax_module.init, train=False)
+    )
     init_dict = model_init_fn({'params': params_rng}, xs)
     self.params = init_dict['params']
 
@@ -71,8 +71,7 @@ class CheckpointTest(parameterized.TestCase):
     """Test that saving and loading produces the original state."""
     orbax_checkpoint_manager = ocp.CheckpointManager(
         self.test_dir,
-        options=ocp.CheckpointManagerOptions(
-            max_to_keep=1, create=True),
+        options=ocp.CheckpointManagerOptions(max_to_keep=1, create=True),
     )
     state = dict(params=self.params, global_step=5, completed_epochs=4)
     checkpoint.save_checkpoint(
@@ -93,25 +92,21 @@ class CheckpointTest(parameterized.TestCase):
     """Test that old checkpoints are deleted."""
     orbax_checkpoint_manager = ocp.CheckpointManager(
         self.test_dir,
-        options=ocp.CheckpointManagerOptions(
-            max_to_keep=1, create=True
-        ),
+        options=ocp.CheckpointManagerOptions(max_to_keep=1, create=True),
     )
-    state1 = dict(params=self.params,
-                  global_step=5,
-                  completed_epochs=4,)
+    state1 = dict(
+        params=self.params,
+        global_step=5,
+        completed_epochs=4,
+    )
     checkpoint.save_checkpoint(
-        0,
-        state1,
-        orbax_checkpoint_manager=orbax_checkpoint_manager)
+        0, state1, orbax_checkpoint_manager=orbax_checkpoint_manager
+    )
 
-    state2 = dict(params=self.params,
-                  global_step=10,
-                  completed_epochs=8)
+    state2 = dict(params=self.params, global_step=10, completed_epochs=8)
     checkpoint.save_checkpoint(
-        1,
-        state2,
-        orbax_checkpoint_manager=orbax_checkpoint_manager)
+        1, state2, orbax_checkpoint_manager=orbax_checkpoint_manager
+    )
     orbax_checkpoint_manager.wait_until_finished()
     dir_contents = gfile.glob(os.path.join(self.test_dir, '*'))
 
@@ -142,21 +137,22 @@ class CheckpointTest(parameterized.TestCase):
 
     orbax_checkpoint_manager = ocp.CheckpointManager(
         fresh_train_dir,
-        options=ocp.CheckpointManagerOptions(
-            max_to_keep=1, create=True
-        ),
+        options=ocp.CheckpointManagerOptions(max_to_keep=1, create=True),
     )
 
     checkpoint.save_checkpoint(
         step=global_step,
-        state=dict(global_step=global_step,
-                   preemption_count=preemption_count,
-                   sum_train_cost=sum_train_cost,
-                   optimizer_state=saved_optimizer_state,
-                   params=saved_params,
-                   batch_stats=saved_batch_stats,
-                   training_metrics_grabber=saved_training_metrics),
-        orbax_checkpoint_manager=orbax_checkpoint_manager,)
+        state=dict(
+            global_step=global_step,
+            preemption_count=preemption_count,
+            sum_train_cost=sum_train_cost,
+            optimizer_state=saved_optimizer_state,
+            params=saved_params,
+            batch_stats=saved_batch_stats,
+            training_metrics_grabber=saved_training_metrics,
+        ),
+        orbax_checkpoint_manager=orbax_checkpoint_manager,
+    )
 
     (
         ret_state,
@@ -175,12 +171,8 @@ class CheckpointTest(parameterized.TestCase):
         orbax_checkpoint_manager=orbax_checkpoint_manager,
     )
 
-    assert pytree_equal(
-        ret_state, saved_optimizer_state
-    )
-    assert pytree_equal(
-        ret_params, saved_params
-    )
+    assert pytree_equal(ret_state, saved_optimizer_state)
+    assert pytree_equal(ret_params, saved_params)
     assert pytree_equal(
         ret_batch_stats,
         saved_batch_stats,
@@ -199,13 +191,13 @@ class CheckpointTest(parameterized.TestCase):
   def test_maybe_restore_from_checkpoint_logic(self):
     """Test that the right checkpoint is returned.
 
-      1.  If there is no latest checkpoint in the train_dir, then the function 
-      should returnthe passed-in params, batch_stats, etc.
-      2.  If there is a latest checkpoint in the train_dir, then the function
-      should return the latest checkpoint.
-      In the interest of conciseness, this test only checks the params,
-      not the batch_stats, optimizer_state, or training_metics.  The below test
-      test_all_variables_restored() covers the other three.
+    1.  If there is no latest checkpoint in the train_dir, then the function
+    should returnthe passed-in params, batch_stats, etc.
+    2.  If there is a latest checkpoint in the train_dir, then the function
+    should return the latest checkpoint.
+    In the interest of conciseness, this test only checks the params,
+    not the batch_stats, optimizer_state, or training_metics.  The below test
+    test_all_variables_restored() covers the other three.
     """
     # mock parameters.
     initial_params = {'foo': 1.0}
@@ -215,9 +207,7 @@ class CheckpointTest(parameterized.TestCase):
 
     orbax_checkpoint_manager = ocp.CheckpointManager(
         checkpoint_dir,
-        options=ocp.CheckpointManagerOptions(
-            max_to_keep=1, create=True
-        ),
+        options=ocp.CheckpointManagerOptions(max_to_keep=1, create=True),
     )
 
     # two helper functions

@@ -404,5 +404,6 @@ class VerifyStaticBatchingTest(tf.test.TestCase):
           msg=f'weights mismatch with all augmentations in batch {i}',
       )
 
+
 if __name__ == '__main__':
   tf.test.main()

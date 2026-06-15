@@ -39,7 +39,6 @@ import jraph
 from ml_collections.config_dict import config_dict
 import numpy as np
 
-
 HIDDEN_SIZES = (50, 50)
 
 INPUT_SHAPE = {
@@ -349,8 +348,14 @@ all_models = models._ALL_MODELS.keys()  # pylint: disable=protected-access
 autoencoder_models = ['autoencoder', 'convolutional_autoencoder']
 text_models = ['transformer', 'performer', 'lstm']
 classification_models = [
-    'fully_connected', 'simple_cnn', 'max_pooling_cnn', 'wide_resnet', 'resnet',
-    'adabelief_densenet', 'adabelief_vgg', 'fake_resnet'
+    'fully_connected',
+    'simple_cnn',
+    'max_pooling_cnn',
+    'wide_resnet',
+    'resnet',
+    'adabelief_densenet',
+    'adabelief_vgg',
+    'fake_resnet',
 ]
 binary_classification_models = ['dlrm', 'dlrm_resnet']  # TODO(kasimbeg)
 generative_models = ['unet']  # TODO(kasimbeg)
@@ -371,10 +376,14 @@ skipped_models = [
 ]
 # pylint: disable=g-complex-comprehension
 model_init_keys = [
-    ('test_model_{}_dtype_{}'.format(
+    (
+        'test_model_{}_dtype_{}'.format(
+            model_str,
+            dtype,
+        ),
         model_str,
         dtype,
-    ), model_str, dtype)
+    )
     for model_str, dtype in itertools.product(all_models, dtypes)
     if model_str not in skipped_models
 ]
@@ -385,9 +394,11 @@ classification_keys = [('test_{}'.format(m), m) for m in classification_models]
 binary_classification_keys = [
     ('test_{}'.format(m), m) for m in binary_classification_models
 ]
-text_keys = [('test_{}_{}'.format(m, d), m, d)
-             for m, d in itertools.product(text_models, dtypes)
-             if d != 'bfloat16' or m == 'transformer']
+text_keys = [
+    ('test_{}_{}'.format(m, d), m, d)
+    for m, d in itertools.product(text_models, dtypes)
+    if d != 'bfloat16' or m == 'transformer'
+]
 dtype_keys = [('test_{}'.format(t), t) for t in dtypes]
 remat_scan_keys = [('test_no_remat_scan', None), ('test_remat_scan', (2, 2))]
 dtype_and_remat_scan_keys = [
@@ -419,7 +430,8 @@ def _get_fake_inputs_for_initialization(model, hps):
     return fake_inputs
   else:
     raise NotImplementedError(
-        'Method get_fake_inputs not implemented for model.')
+        'Method get_fake_inputs not implemented for model.'
+    )
 
   return fake_inputs
 
@@ -438,12 +450,10 @@ def _initialize_model(model_str, model_dtype):
 
   model = model_cls(
       hps,
-      dataset_meta_data={
-          'shift_inputs': True,
-          'causal': True
-      },
+      dataset_meta_data={'shift_inputs': True, 'causal': True},
       loss_name=LOSS_NAME[model_str],
-      metrics_name=METRICS_NAME[model_str])
+      metrics_name=METRICS_NAME[model_str],
+  )
   rng = jax.random.PRNGKey(0)
   initializer = initializers.get_initializer('noop')
   init_dict = model.initialize(initializer, hps, rng, metrics_logger=None)
@@ -477,7 +487,8 @@ class ModelsTest(parameterized.TestCase):
     model = model_cls(hps, {}, loss, metrics)
     xs = jnp.array(np.random.normal(size=INPUT_SHAPE['classification']))
     model_init_fn = jax.jit(
-        functools.partial(model.flax_module.init, train=False))
+        functools.partial(model.flax_module.init, train=False)
+    )
     init_dict = model_init_fn({'params': params_rng}, xs)
     params = init_dict['params']
     batch_stats = init_dict.get('batch_stats', {})
@@ -488,9 +499,12 @@ class ModelsTest(parameterized.TestCase):
         xs,
         mutable=['batch_stats'],
         rngs={'dropout': dropout_rng},
-        train=True)
-    self.assertEqual(outputs.shape, (INPUT_SHAPE['classification'][0],
-                                     OUTPUT_SHAPE['classification'][-1]))
+        train=True,
+    )
+    self.assertEqual(
+        outputs.shape,
+        (INPUT_SHAPE['classification'][0], OUTPUT_SHAPE['classification'][-1]),
+    )
 
     # If it's a batch norm model check the batch stats changed.
     if batch_stats:
@@ -500,10 +514,12 @@ class ModelsTest(parameterized.TestCase):
 
     # Test batch_norm in inference mode.
     outputs = model.flax_module.apply(
-        {'params': params, 'batch_stats': batch_stats}, xs, train=False)
+        {'params': params, 'batch_stats': batch_stats}, xs, train=False
+    )
     self.assertEqual(
         outputs.shape,
-        (INPUT_SHAPE['classification'][0], OUTPUT_SHAPE['classification'][-1]))
+        (INPUT_SHAPE['classification'][0], OUTPUT_SHAPE['classification'][-1]),
+    )
 
   @parameterized.named_parameters(*text_keys)
   def test_text_models(self, model_str, dtype_str):
@@ -549,41 +565,45 @@ class ModelsTest(parameterized.TestCase):
     rng = jax.random.PRNGKey(0)
     loss = 'cross_entropy'
     metrics = 'classification_metrics'
-    model = model_cls(small_hps, {
-        'max_len': 64,
-        'shift_inputs': True,
-        'causal': True
-    }, loss, metrics)
+    model = model_cls(
+        small_hps,
+        {'max_len': 64, 'shift_inputs': True, 'causal': True},
+        loss,
+        metrics,
+    )
     xs = jnp.array(
-        np.random.randint(size=text_input_shape, low=1, high=vocab_size))
+        np.random.randint(size=text_input_shape, low=1, high=vocab_size)
+    )
     dropout_rng, params_rng = jax.random.split(rng)
 
     model_init_fn = jax.jit(
-        functools.partial(model.flax_module.init, train=False))
+        functools.partial(model.flax_module.init, train=False)
+    )
     init_dict = model_init_fn({'params': params_rng}, xs)
     params = init_dict['params']
     batch_stats = init_dict.get('batch_stats', {})
 
     param_type_matches_model_type = jax.tree_util.tree_map(
-        lambda x: x.dtype == small_hps.model_dtype, params)
+        lambda x: x.dtype == small_hps.model_dtype, params
+    )
     self.assertTrue(
-        jax.tree_util.tree_reduce(lambda x, y: x and y,
-                                  param_type_matches_model_type))
+        jax.tree_util.tree_reduce(
+            lambda x, y: x and y, param_type_matches_model_type
+        )
+    )
 
     # Check that the forward pass works with mutated batch_stats.
     # Due to a bug in flax, this jit is required, otherwise the model errors.
     @jax.jit
     def forward_pass(params, xs, dropout_rng):
       outputs, new_batch_stats = model.flax_module.apply(
-          {
-              'params': params,
-              'batch_stats': batch_stats
-          },
+          {'params': params, 'batch_stats': batch_stats},
           xs,
           mutable=['batch_stats'],
           capture_intermediates=True,
           rngs={'dropout': dropout_rng},
-          train=True)
+          train=True,
+      )
       return outputs, new_batch_stats
 
     outputs, new_batch_stats = forward_pass(params, xs, dropout_rng)
@@ -655,10 +675,7 @@ class ModelsTest(parameterized.TestCase):
         'dropout_rate': 0.1,
         'attention_dropout_rate': 0.1,
         'momentum': 0.9,
-        'lr_hparams': {
-            'base_lr': 0.005,
-            'schedule': 'constant'
-        },
+        'lr_hparams': {'base_lr': 0.005, 'schedule': 'constant'},
         'vocab_size': vocab_size,
         'output_shape': (vocab_size,),
         'model_dtype': dtype_str,
@@ -676,27 +693,30 @@ class ModelsTest(parameterized.TestCase):
     rng = jax.random.PRNGKey(0)
     loss = 'cross_entropy'
     metrics = 'classification_metrics'
-    model = model_cls(small_hps, {
-        'shift_outputs': True,
-        'causal': True
-    }, loss, metrics)
+    model = model_cls(
+        small_hps, {'shift_outputs': True, 'causal': True}, loss, metrics
+    )
     xs = jnp.array(
-        np.random.randint(size=text_src_input_shape, low=1,
-                          high=vocab_size))
+        np.random.randint(size=text_src_input_shape, low=1, high=vocab_size)
+    )
     ys = jnp.array(
-        np.random.randint(size=text_tgt_input_shape, low=1,
-                          high=vocab_size))
+        np.random.randint(size=text_tgt_input_shape, low=1, high=vocab_size)
+    )
     dropout_rng, params_rng = jax.random.split(rng)
     model_init_fn = jax.jit(
-        functools.partial(model.flax_module.init, train=False))
+        functools.partial(model.flax_module.init, train=False)
+    )
     init_dict = model_init_fn({'params': params_rng}, xs, ys)
     params = init_dict['params']
 
     param_type_matches_model_type = jax.tree_util.tree_map(
-        lambda x: x.dtype == small_hps.model_dtype, params)
+        lambda x: x.dtype == small_hps.model_dtype, params
+    )
     self.assertTrue(
-        jax.tree_util.tree_reduce(lambda x, y: x and y,
-                                  param_type_matches_model_type))
+        jax.tree_util.tree_reduce(
+            lambda x, y: x and y, param_type_matches_model_type
+        )
+    )
 
     # Test forward pass.
     @jax.jit
@@ -707,7 +727,8 @@ class ModelsTest(parameterized.TestCase):
           ys,
           rngs={'dropout': dropout_rng},
           capture_intermediates=True,
-          train=True)
+          train=True,
+      )
       return outputs, intermediates
 
     logits, intermediates = forward_pass(params, xs, ys, dropout_rng)
@@ -715,13 +736,17 @@ class ModelsTest(parameterized.TestCase):
     # TODO(ankugarg): Add tests for individual encoder/decoder (inference mode).
     self.assertEqual(
         logits.shape,
-        (text_tgt_input_shape[0], text_tgt_input_shape[1], vocab_size))
+        (text_tgt_input_shape[0], text_tgt_input_shape[1], vocab_size),
+    )
 
     intermediates_type_matches_model_type = jax.tree_util.tree_map(
-        lambda x: x.dtype == small_hps.model_dtype, intermediates)
+        lambda x: x.dtype == small_hps.model_dtype, intermediates
+    )
     self.assertTrue(
-        jax.tree_util.tree_reduce(lambda x, y: x and y,
-                                  intermediates_type_matches_model_type))
+        jax.tree_util.tree_reduce(
+            lambda x, y: x and y, intermediates_type_matches_model_type
+        )
+    )
 
   def test_nqm(self):
     """Test the noisy quadratic model."""
@@ -736,7 +761,8 @@ class ModelsTest(parameterized.TestCase):
             noise_decay_power=1.0,
             nqm_mode='diagH_diagC',
             model_dtype='float32',
-        ))
+        )
+    )
 
     model_cls = models.get_model('nqm')
     params_rng = jax.random.PRNGKey(0)
@@ -744,7 +770,8 @@ class ModelsTest(parameterized.TestCase):
     noise_eps = jnp.array(np.random.normal(size=(batch_size, dim)))
     xs = np.zeros((batch_size, dim))
     model_init_fn = jax.jit(
-        functools.partial(model.flax_module.init, train=False))
+        functools.partial(model.flax_module.init, train=False)
+    )
     params = model_init_fn({'params': params_rng}, xs)['params']
     model_x = params['x']
 
@@ -757,12 +784,14 @@ class ModelsTest(parameterized.TestCase):
         np.array([
             1.0 / np.power(i, model_hps.hessian_decay_power)
             for i in range(1, dim + 1)
-        ]))
+        ])
+    )
     noise_matrix = np.diag(
         np.array([
             1.0 / np.power(i, model_hps.noise_decay_power / 2.0)
             for i in range(1, dim + 1)
-        ]))
+        ])
+    )
 
     noise = jnp.dot(noise_eps, noise_matrix)
     mean_noise = np.mean(noise, axis=0)
@@ -789,7 +818,8 @@ class ModelsTest(parameterized.TestCase):
     model = model_cls(hps, {}, loss, metrics)
     xs = jnp.array(np.random.normal(size=INPUT_SHAPE[model_str]))
     model_init_fn = jax.jit(
-        functools.partial(model.flax_module.init, train=False))
+        functools.partial(model.flax_module.init, train=False)
+    )
     init_dict = model_init_fn({'params': params_rng}, xs)
     params = init_dict['params']
     batch_stats = init_dict.get('batch_stats', {})
@@ -799,10 +829,12 @@ class ModelsTest(parameterized.TestCase):
         {'params': params, 'batch_stats': batch_stats},
         xs,
         mutable=['batch_stats'],
-        train=True)
+        train=True,
+    )
     self.assertEqual(
         outputs.shape,
-        tuple([INPUT_SHAPE[model_str][0]] + list(OUTPUT_SHAPE[model_str])))
+        tuple([INPUT_SHAPE[model_str][0]] + list(OUTPUT_SHAPE[model_str])),
+    )
 
     # If it's a batch norm model check the batch stats changed.
     if batch_stats:
@@ -812,10 +844,12 @@ class ModelsTest(parameterized.TestCase):
 
     # Test batch_norm in inference mode.
     outputs = model.flax_module.apply(
-        {'params': params, 'batch_stats': batch_stats}, xs, train=False)
+        {'params': params, 'batch_stats': batch_stats}, xs, train=False
+    )
     self.assertEqual(
         outputs.shape,
-        tuple([INPUT_SHAPE[model_str][0]] + list(OUTPUT_SHAPE[model_str])))
+        tuple([INPUT_SHAPE[model_str][0]] + list(OUTPUT_SHAPE[model_str])),
+    )
 
   def test_graph_model(self):
     """Test forward pass of the GNN model."""
@@ -824,11 +858,13 @@ class ModelsTest(parameterized.TestCase):
     output_shape = (5,)
     model_str = 'gnn'
     model_hps = models.get_model_hparams(model_str)
-    model_hps.update({'output_shape': output_shape,
-                      'latent_dim': 10,
-                      'hidden_dims': (10,),
-                      'batch_size': 5,
-                      'normalizer': 'batch_norm'})
+    model_hps.update({
+        'output_shape': output_shape,
+        'latent_dim': 10,
+        'hidden_dims': (10,),
+        'batch_size': 5,
+        'normalizer': 'batch_norm',
+    })
     model_cls = models.get_model(model_str)
     rng = jax.random.PRNGKey(0)
     dropout_rng, params_rng = jax.random.split(rng)
@@ -842,14 +878,17 @@ class ModelsTest(parameterized.TestCase):
     inputs = jraph.get_fully_connected_graph(
         n_node_per_graph=node_per_graph,
         n_graph=num_graphs,
-        node_features=np.ones((num_graphs * node_per_graph,) +
-                              node_input_shape),
+        node_features=np.ones(
+            (num_graphs * node_per_graph,) + node_input_shape
+        ),
     )
     inputs = inputs._replace(
-        edges=np.ones((num_graphs * edge_per_graph,) + edge_input_shape))
+        edges=np.ones((num_graphs * edge_per_graph,) + edge_input_shape)
+    )
     padded_inputs = jraph.pad_with_graphs(inputs, 20, 50, 7)
     model_init_fn = jax.jit(
-        functools.partial(model.flax_module.init, train=False))
+        functools.partial(model.flax_module.init, train=False)
+    )
     init_dict = model_init_fn({'params': params_rng}, padded_inputs)
     params = init_dict['params']
     batch_stats = init_dict['batch_stats']
@@ -860,7 +899,8 @@ class ModelsTest(parameterized.TestCase):
         padded_inputs,
         mutable=['batch_stats'],
         rngs={'dropout': dropout_rng},
-        train=True)
+        train=True,
+    )
     self.assertEqual(outputs.shape, (7,) + output_shape)
 
   def test_local_attention_transformer(self):
@@ -880,19 +920,18 @@ class ModelsTest(parameterized.TestCase):
     model = model_cls(model_hps, {}, loss, metrics)
     inputs = jnp.array(np.random.randint(size=(1, 16), low=1, high=8))
     model_init_fn = jax.jit(
-        functools.partial(model.flax_module.init, train=False))
+        functools.partial(model.flax_module.init, train=False)
+    )
     init_dict = model_init_fn({'params': params_rng}, inputs)
     params = init_dict['params']
     batch_stats = init_dict.get('batch_stats', {})
     outputs, _ = model.flax_module.apply(
-        {
-            'params': params,
-            'batch_stats': batch_stats
-        },
+        {'params': params, 'batch_stats': batch_stats},
         inputs,
         mutable=['batch_stats'],
         rngs={'dropout': dropout_rng},
-        train=True)
+        train=True,
+    )
     self.assertEqual(outputs.shape, (1, 16, 8))
 
   @parameterized.named_parameters(*lstm_keys)
@@ -1017,15 +1056,16 @@ class ModelsTest(parameterized.TestCase):
     # pylint: disable=protected-access
     try:
       _ = model._apply_sharding_overrides(
-          params, host_mesh, nn.get_sharding(params, host_mesh), bad_overrides)
+          params, host_mesh, nn.get_sharding(params, host_mesh), bad_overrides
+      )
     except ValueError as e:
       error = e
 
     self.assertEqual(
         str(error),
         'Param shape (1536,) is not compatible with sharding '
-        'NamedSharding(mesh=Mesh(\'devices\': 8, axis_types=(Auto,)), '
-        'spec=P(None, \'devices\'), memory_kind=device)',
+        "NamedSharding(mesh=Mesh('devices': 8, axis_types=(Auto,)), "
+        "spec=P(None, 'devices'), memory_kind=device)",
     )
 
     good_overrides = {
@@ -1057,7 +1097,12 @@ class ModelsTest(parameterized.TestCase):
         },
         'conv_patch_extract': {
             'bias': model_utils.ShapeTuple((384,)),
-            'kernel': model_utils.ShapeTuple((16, 16, 3, 384,)),
+            'kernel': model_utils.ShapeTuple((
+                16,
+                16,
+                3,
+                384,
+            )),
         },
         'head': {
             'bias': model_utils.ShapeTuple((1000,)),

@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Paterson-Stockmeyer method for polynomial evaluation."""
+
 from typing import Any, Callable, List, Sequence, TypeVar
 
 import numpy as np
@@ -31,8 +32,9 @@ def _powers(x: T, n: int, product: Callable[[T, T], T]) -> List[T]:
   return xp[1:]
 
 
-def polynomial_no_constant(a: Sequence[Any], x: T, product: Callable[[T, T],
-                                                                     T]) -> T:
+def polynomial_no_constant(
+    a: Sequence[Any], x: T, product: Callable[[T, T], T]
+) -> T:
   """Paterson-Stockmeyer evaluation of a[0] x + a[1] x² + ... + a[n-1] xⁿ.
 
   A variant of the Paterson-Stockmeyer method for polynomial evaluation
@@ -76,7 +78,7 @@ def polynomial_no_constant(a: Sequence[Any], x: T, product: Callable[[T, T],
   s = int(np.ceil(np.sqrt(n)))
   xp = _powers(x, s, product)
   inner = lambda alpha: sum([cj * xj for (cj, xj) in zip(alpha, xp)])
-  inner_poly = lambda i: inner(a[s * i:min(n, s * (i + 1))])
+  inner_poly = lambda i: inner(a[s * i : min(n, s * (i + 1))])
   i = (n + s - 1) // s - 1
   y = inner_poly(i)
   for i in reversed(range(i)):

@@ -17,6 +17,7 @@
 
 TODO(dsuo): suport discrete hparams.
 """
+
 import copy
 import itertools
 import json
@@ -24,6 +25,7 @@ import json
 from absl import logging
 import numpy as np
 import pandas as pd
+
 
 
 def print_search_space(search_space):
@@ -34,22 +36,41 @@ def print_search_space(search_space):
     print(f'\t- scale_type: {hp["scale_type"]}')
 
 
-def get_top_k_random_sweep(trials, objective, min_objective, num_top_trials,
-                           num_random_seeds, top_mode='final', **kwargs):
+def get_top_k_random_sweep(
+    trials,
+    objective,
+    min_objective,
+    num_top_trials,
+    num_random_seeds,
+    top_mode='final',
+    **kwargs,
+):
   """Generate num_random trials for top k experiments."""
   del kwargs
 
   # Get the top k trials as ordered by objective
   if top_mode == 'final':
-    top_k_obj = trials[objective].apply(lambda x: x[-1]).sort_values(
-        ascending=min_objective).head(n=num_top_trials)
+    top_k_obj = (
+        trials[objective]
+        .apply(lambda x: x[-1])
+        .sort_values(ascending=min_objective)
+        .head(n=num_top_trials)
+    )
   elif top_mode == 'best':
     if min_objective:
-      top_k_obj = trials[objective].apply(lambda x: x.min()).sort_values(
-          ascending=min_objective).head(n=num_top_trials)
+      top_k_obj = (
+          trials[objective]
+          .apply(lambda x: x.min())
+          .sort_values(ascending=min_objective)
+          .head(n=num_top_trials)
+      )
     else:
-      top_k_obj = trials[objective].apply(lambda x: x.max()).sort_values(
-          ascending=min_objective).head(n=num_top_trials)
+      top_k_obj = (
+          trials[objective]
+          .apply(lambda x: x.max())
+          .sort_values(ascending=min_objective)
+          .head(n=num_top_trials)
+      )
   top_k = trials.loc[top_k_obj.index]
   print(f'Generating top k trials using objective `{objective}`.')
   print(top_k_obj)
@@ -61,20 +82,26 @@ def get_top_k_random_sweep(trials, objective, min_objective, num_top_trials,
   return [[hparam] * num_random_seeds for hparam in hparams], list(top_k_obj)
 
 
-def find_best_cube(trials,
-                   objective,
-                   search_space,
-                   k,
-                   cube_sizes=None,
-                   cube_strides=None,
-                   min_objective=True,
-                   **kwargs):
+def find_best_cube(
+    trials,
+    objective,
+    search_space,
+    k,
+    cube_sizes=None,
+    cube_strides=None,
+    min_objective=True,
+    **kwargs,
+):
   """Find best cube in original search space."""
   del kwargs
 
   # Get the top k trials as ordered by objective
-  top_k_obj = trials[objective].apply(lambda x: x[-1]).sort_values(
-      ascending=min_objective).head(n=k)
+  top_k_obj = (
+      trials[objective]
+      .apply(lambda x: x[-1])
+      .sort_values(ascending=min_objective)
+      .head(n=k)
+  )
   top_k_idx = top_k_obj.index
 
   for key in search_space.keys():
@@ -83,8 +110,9 @@ def find_best_cube(trials,
     else:
       trials[key] = trials[f'hps.{key}']
 
-  top_k_df = pd.concat((trials.loc[top_k_idx][search_space.keys()], top_k_obj),
-                       axis=1)
+  top_k_df = pd.concat(
+      (trials.loc[top_k_idx][search_space.keys()], top_k_obj), axis=1
+  )
 
   # Compute starting points of hyperparam cubes.
   cube_start_points = {}
@@ -97,7 +125,7 @@ def find_best_cube(trials,
     if hp['scale_type'] == 'UNIT_LOG_SCALE':
       hp['mapped_range'] = [
           np.floor(np.floor(np.log10(float(min_trial_value)))),
-          np.ceil(np.ceil(np.log10(float(max_trial_value))))
+          np.ceil(np.ceil(np.log10(float(max_trial_value)))),
       ]
     elif hp['scale_type'] == 'UNIT_LINEAR_SCALE':
       # This requires some work
@@ -107,7 +135,8 @@ def find_best_cube(trials,
     cube_start_points[key] = np.arange(
         hp['mapped_range'][0],
         hp['mapped_range'][1] - cube_sizes[key] + cube_strides[key],
-        cube_strides[key])
+        cube_strides[key],
+    )
     if len(cube_start_points[key]) == 0:  # pylint: disable=g-explicit-length-test
       cube_start_points[key] = np.array([hp['mapped_range'][0]])
     cube_end_points[key] = cube_start_points[key] + cube_sizes[key]
@@ -128,8 +157,9 @@ def find_best_cube(trials,
   best_cube_top_trial_included = False
 
   # Find trials from top k in each cube.
-  for cube_start_point, cube_end_point in zip(cube_start_points,
-                                              cube_end_points):
+  for cube_start_point, cube_end_point in zip(
+      cube_start_points, cube_end_points
+  ):
     points_df = top_k_df
     top_trial_included = True
     for i, (start, end) in enumerate(zip(cube_start_point, cube_end_point)):
@@ -140,9 +170,11 @@ def find_best_cube(trials,
       points_df = points_df[selectors]
     print(cube_start_point, cube_end_point, points_df[objective].mean())
     # Check if we have found a better cube.
-    change_flag = points_df[objective].mean(
-    ) < best_cube_mean if min_objective else points_df[objective].mean(
-    ) > best_cube_mean
+    change_flag = (
+        points_df[objective].mean() < best_cube_mean
+        if min_objective
+        else points_df[objective].mean() > best_cube_mean
+    )
 
     # Record best cube.
     if change_flag:
@@ -154,8 +186,8 @@ def find_best_cube(trials,
   new_search_space = copy.deepcopy(search_space)
   for val, (key, hp) in zip(best_cube, new_search_space.items()):
     if hp['scale_type'] == 'UNIT_LOG_SCALE':
-      hp['min_value'] = np.power(10., np.log10(val))
-      hp['max_value'] = np.power(10., np.log10(val) + cube_sizes[key])
+      hp['min_value'] = np.power(10.0, np.log10(val))
+      hp['max_value'] = np.power(10.0, np.log10(val) + cube_sizes[key])
     elif hp['scale_type'] == 'UNIT_LINEAR_SCALE':
       hp['min_value'] = val
       hp['max_value'] = val + cube_sizes[key]
@@ -163,8 +195,9 @@ def find_best_cube(trials,
     del hp['mapped_range']
 
   num_trials = len(best_cube_trials)
-  logging.info('Total number of trials included in the reported cube is %d',
-               num_trials)
+  logging.info(
+      'Total number of trials included in the reported cube is %d', num_trials
+  )
   if not best_cube_top_trial_included:
     logging.info('Warning the best trial was not included in the cube')
 

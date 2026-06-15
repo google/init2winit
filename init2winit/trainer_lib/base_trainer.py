@@ -34,7 +34,6 @@ import jax
 from ml_collections.config_dict import config_dict
 import orbax.checkpoint as ocp
 
-
 CHECKPOINT_TTL = 'ttl=180d'
 
 
@@ -243,15 +242,17 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     # 'params' and 'batch_stats' buffers as we don't re-assign those values in
     # eval, we do that only in train.
     self._evaluate_batch_jitted = jax.jit(
-        self._model.evaluate_batch, donate_argnums=(2,))
+        self._model.evaluate_batch, donate_argnums=(2,)
+    )
 
     # Creates a 1-d mesh with all devices available globally.
     self._mesh = model_utils.get_default_mesh()
 
     # Set training algorithm class.
     self._training_algorithm_class = training_algorithm_class
-    logging.info('Using training algorithm class: %s',
-                 self._training_algorithm_class)
+    logging.info(
+        'Using training algorithm class: %s', self._training_algorithm_class
+    )
 
     if log_frequency is not None:
       self._log_frequency = log_frequency
@@ -272,11 +273,13 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       utils.tabulate_model(self._model, self._hps)
       logging.info('train_size: %d,', self._hps.train_size)
 
-  def maybe_restore_from_checkpoint(self,
-                                    unreplicated_optimizer_state,
-                                    unreplicated_params,
-                                    unreplicated_batch_stats,
-                                    unreplicated_metrics_state):
+  def maybe_restore_from_checkpoint(
+      self,
+      unreplicated_optimizer_state,
+      unreplicated_params,
+      unreplicated_batch_stats,
+      unreplicated_metrics_state,
+  ):
     """Restores the training state from a checkpoint if one exists.
 
     Args:
@@ -414,13 +417,19 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     return eval_callbacks
 
   def _run_eval_callbacks(self, report):
+    """Runs all registered evaluation callbacks and updates the report."""
     for eval_callback in self._eval_callbacks:
-      callback_metrics = eval_callback.run_eval(self._params, self._batch_stats,
-                                                self._optimizer_state,
-                                                self._global_step)
+      callback_metrics = eval_callback.run_eval(
+          self._params,
+          self._batch_stats,
+          self._optimizer_state,
+          self._global_step,
+      )
       if set(callback_metrics.keys()).intersection(set(report.keys())):
-        raise ValueError('There was a collision between the callback'
-                         'metrics and the standard eval metrics keys')
+        raise ValueError(
+            'There was a collision between the callback'
+            'metrics and the standard eval metrics keys'
+        )
       report.update(callback_metrics)
 
   def _check_early_stopping(self, report):
@@ -443,7 +452,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           self._early_stopping_target_name,
           report[self._early_stopping_target_name],
           comparison_string,
-          self._early_stopping_target_value)
+          self._early_stopping_target_value,
+      )
     return early_stopping_condition
 
   def _build_training_report(self):
@@ -553,7 +563,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._sum_train_cost = 0.0
     epoch = self._global_step * self._hps.batch_size // self._hps.train_size
     overall_steps_per_sec = self._get_step_frequency(
-        self._global_step, start_step, start_time)
+        self._global_step, start_step, start_time
+    )
     report.update(
         epoch=epoch,
         preemption_count=self._preemption_count,
@@ -574,7 +585,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           start_time,
           self._eval_frequency,
           self._eval_steps,
-          eval_time)
+          eval_time,
+      )
       trainer_utils.log_epoch_report(report, self._metrics_logger)
 
     self._time_at_prev_eval_end = time.time()
@@ -628,15 +640,15 @@ class BaseTrainer(metaclass=abc.ABCMeta):
 
     start_time = time.time()
     if self._training_metrics_config is not None:
-      (metrics_init_fn, self._metrics_update_fn,
-       self._metrics_summary_fn) = make_training_metrics(
-           self._num_train_steps, self._hps, **self._training_metrics_config)
+      metrics_init_fn, self._metrics_update_fn, self._metrics_summary_fn = (
+          make_training_metrics(
+              self._num_train_steps, self._hps, **self._training_metrics_config
+          )
+      )
       unreplicated_metrics_state = metrics_init_fn(
           unreplicated_params, unreplicated_batch_stats
       )
-    logging.info(
-        'Metrics initialized in %f seconds', time.time() - start_time
-    )
+    logging.info('Metrics initialized in %f seconds', time.time() - start_time)
     start_time = time.time()
     (
         unreplicated_optimizer_state,
@@ -650,9 +662,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         unreplicated_metrics_state,
     )
 
-    logging.info(
-        'Checkpoint restored in %f seconds', time.time() - start_time
-    )
+    logging.info('Checkpoint restored in %f seconds', time.time() - start_time)
     # Allow training algorithms to post-process restored optimizer state
     # (e.g., re-wrap CpuOffloaded leaves stripped during serialization).
     unreplicated_optimizer_state = (
@@ -730,7 +740,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           batch_stats=self._batch_stats,
           hps=self._hps,
           global_step=self._global_step,
-          constant_base_rng=rng)
+          constant_base_rng=rng,
+      )
 
     start_time = time.time()
     start_step = self._global_step
@@ -842,8 +853,13 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     """
 
   @abc.abstractmethod
-  def shard(self, unreplicated_params, unreplicated_optimizer_state,
-            unreplicated_batch_stats, unreplicated_metrics_state):
+  def shard(
+      self,
+      unreplicated_params,
+      unreplicated_optimizer_state,
+      unreplicated_batch_stats,
+      unreplicated_metrics_state,
+  ):
     """Shard the training state.
 
     Args:

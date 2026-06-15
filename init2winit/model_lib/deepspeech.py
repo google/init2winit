@@ -37,7 +37,6 @@ import jax
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 
-
 Array = jnp.ndarray
 StateType = Union[Array, Tuple[Array, ...]]
 PRNGKey = Any
@@ -68,7 +67,9 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         bidirectional=True,
         enable_subsampling_batchnorm=False,
         enable_synced_batchnorm=False,
-        layernorm_everywhere=False))
+        layernorm_everywhere=False,
+    )
+)
 
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
@@ -94,12 +95,15 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         bidirectional=True,
         enable_subsampling_batchnorm=False,
         enable_synced_batchnorm=False,
-        layernorm_everywhere=False))
+        layernorm_everywhere=False,
+    )
+)
 
 
 @struct.dataclass
 class DeepspeechConfig:
   """Global hyperparameters used to minimize obnoxious kwarg plumbing."""
+
   vocab_size: int = 0
   dtype: Any = jnp.float32
   encoder_dim: int = 0
@@ -136,6 +140,7 @@ class Subsample(nn.Module):
     encoder_dim: model dimension of conformer.
     input_dropout_rate: dropout rate for inputs.
   """
+
   config: DeepspeechConfig
 
   @nn.compact
@@ -164,21 +169,24 @@ class Subsample(nn.Module):
         output_channels=config.encoder_dim,
         enable_batchnorm=config.enable_subsampling_batchnorm,
         enable_synced_batchnorm=config.enable_synced_batchnorm,
-        activation=config.activation
+        activation=config.activation,
     )(outputs, output_paddings, train)
 
     batch_size, subsampled_lengths, subsampled_dims, channels = outputs.shape
 
     outputs = jnp.reshape(
-        outputs, (batch_size, subsampled_lengths, subsampled_dims * channels))
+        outputs, (batch_size, subsampled_lengths, subsampled_dims * channels)
+    )
 
     outputs = nn.Dense(
         config.encoder_dim,
         use_bias=True,
-        kernel_init=nn.initializers.xavier_uniform())(outputs)
+        kernel_init=nn.initializers.xavier_uniform(),
+    )(outputs)
 
     outputs = nn.Dropout(
-        rate=config.input_dropout_rate, deterministic=not train)(outputs)
+        rate=config.input_dropout_rate, deterministic=not train
+    )(outputs)
 
     return outputs, output_paddings
 
@@ -190,6 +198,7 @@ class Conv2dSubsampling(nn.Module):
   2) Also performs strided convolution over input_paddings to return the correct
   paddings for downstream layers.
   """
+
   input_channels: int = 0
   output_channels: int = 0
   filter_stride: List[int] = (2, 2)
@@ -204,10 +213,12 @@ class Conv2dSubsampling(nn.Module):
 
   def setup(self):
     self.filter_shape = (3, 3, self.input_channels, self.output_channels)
-    self.kernel = self.param('kernel', nn.initializers.xavier_uniform(),
-                             self.filter_shape)
-    self.bias = self.param('bias', lambda rng, s: jnp.zeros(s, jnp.float32),
-                           self.output_channels)
+    self.kernel = self.param(
+        'kernel', nn.initializers.xavier_uniform(), self.filter_shape
+    )
+    self.bias = self.param(
+        'bias', lambda rng, s: jnp.zeros(s, jnp.float32), self.output_channels
+    )
 
   @nn.compact
   def __call__(self, inputs, paddings, train):
@@ -220,15 +231,19 @@ class Conv2dSubsampling(nn.Module):
         padding=self.padding,
         rhs_dilation=(1, 1),
         dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
-        feature_group_count=feature_group_count)
+        feature_group_count=feature_group_count,
+    )
 
     outputs += jnp.reshape(self.bias, (1,) * (outputs.ndim - 1) + (-1,))
 
     if self.enable_batchnorm:
-      outputs = BatchNorm(self.encoder_dim, self.dtype,
-                          self.batch_norm_momentum, self.batch_norm_epsilon,
-                          self.enable_synced_batchnorm)(
-                              outputs, input_paddings=None, train=train)
+      outputs = BatchNorm(
+          self.encoder_dim,
+          self.dtype,
+          self.batch_norm_momentum,
+          self.batch_norm_epsilon,
+          self.enable_synced_batchnorm,
+      )(outputs, input_paddings=None, train=train)
 
     if self.activation in model_utils.ACTIVATIONS:
       outputs = model_utils.ACTIVATIONS[self.activation](outputs)
@@ -245,19 +260,22 @@ class Conv2dSubsampling(nn.Module):
         rhs=jnp.ones([1, 1, 1]),
         window_strides=self.filter_stride[:1],
         padding=[(0, pad_len)],
-        dimension_numbers=('NHC', 'HIO', 'NHC'))
+        dimension_numbers=('NHC', 'HIO', 'NHC'),
+    )
     out_padding = jnp.squeeze(out_padding, axis=-1)
 
     # Mask outputs by correct paddings to ensure padded elements in inputs map
     # to padded value in outputs.
-    outputs = outputs * (1.0 -
-                         jnp.expand_dims(jnp.expand_dims(out_padding, -1), -1))
+    outputs = outputs * (
+        1.0 - jnp.expand_dims(jnp.expand_dims(out_padding, -1), -1)
+    )
 
     return outputs, out_padding
 
 
 class FeedForwardModule(nn.Module):
   """Feedforward block of conformer layer."""
+
   config: DeepspeechConfig
 
   @nn.compact
@@ -273,12 +291,14 @@ class FeedForwardModule(nn.Module):
           config.dtype,
           config.batch_norm_momentum,
           config.batch_norm_epsilon,
-          config.enable_synced_batchnorm)(inputs, input_paddings, train)
+          config.enable_synced_batchnorm,
+      )(inputs, input_paddings, train)
 
     inputs = nn.Dense(
         config.encoder_dim,
         use_bias=True,
-        kernel_init=nn.initializers.xavier_uniform())(inputs)
+        kernel_init=nn.initializers.xavier_uniform(),
+    )(inputs)
 
     if config.activation in model_utils.ACTIVATIONS:
       inputs = model_utils.ACTIVATIONS[config.activation](inputs)
@@ -287,7 +307,8 @@ class FeedForwardModule(nn.Module):
     inputs *= padding_mask
 
     inputs = nn.Dropout(rate=config.feed_forward_dropout_rate)(
-        inputs, deterministic=not train)
+        inputs, deterministic=not train
+    )
 
     return inputs
 
@@ -302,6 +323,7 @@ class LayerNorm(nn.Module):
   zeros, this differs from default flax implementation of multiplying by scale
   and initializing to ones.
   """
+
   dim: int = 0
   epsilon: float = 1e-6
 
@@ -333,6 +355,7 @@ class BatchNorm(nn.Module):
   and the corresponding defaults for momentum and epsilon have been copied over
   from lingvo.
   """
+
   encoder_dim: int = 0
   dtype: Any = jnp.float32
   batch_norm_momentum: float = 0.999
@@ -343,10 +366,12 @@ class BatchNorm(nn.Module):
     dim = self.encoder_dim
     dtype = self.dtype
 
-    self.ra_mean = self.variable('batch_stats', 'mean',
-                                 lambda s: jnp.zeros(s, dtype), dim)
-    self.ra_var = self.variable('batch_stats', 'var',
-                                lambda s: jnp.ones(s, dtype), dim)
+    self.ra_mean = self.variable(
+        'batch_stats', 'mean', lambda s: jnp.zeros(s, dtype), dim
+    )
+    self.ra_var = self.variable(
+        'batch_stats', 'var', lambda s: jnp.ones(s, dtype), dim
+    )
 
     self.gamma = self.param('scale', nn.initializers.zeros, dim, dtype)
     self.beta = self.param('bias', nn.initializers.zeros, dim, dtype)
@@ -375,7 +400,8 @@ class BatchNorm(nn.Module):
       mask = 1.0 - padding
       sum_v = jnp.sum(inputs * mask, axis=reduce_over_dims, keepdims=False)
       count_v = jnp.sum(
-          jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=False)
+          jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=False
+      )
 
       count_v = jnp.maximum(count_v, 1.0)
       mean = sum_v / count_v
@@ -383,7 +409,8 @@ class BatchNorm(nn.Module):
       sum_vv = jnp.sum(
           (inputs - mean) * (inputs - mean) * mask,
           axis=reduce_over_dims,
-          keepdims=False)
+          keepdims=False,
+      )
 
       var = sum_vv / count_v
 
@@ -399,6 +426,7 @@ class BatchNorm(nn.Module):
     bn_output *= 1.0 - padding
 
     return bn_output
+
 
 
 
@@ -451,6 +479,7 @@ class GenericRNNSequenceEncoder(nn.Module):
       greater than zero, you must use an RNN cell that implements
       `RecurrentDropoutCell` such as RecurrentDropoutOptimizedLSTMCell.
   """
+
   hidden_size: int
   cell_type: Type[nn.RNNCellBase]
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
@@ -464,9 +493,15 @@ class GenericRNNSequenceEncoder(nn.Module):
       variable_broadcast='params',
       in_axes=(1, flax.core.axes_scan.broadcast, flax.core.axes_scan.broadcast),
       out_axes=1,
-      split_rngs={'params': False})
-  def unroll_cell(self, cell_state: StateType, inputs: Array,
-                  recurrent_dropout_mask: Optional[Array], deterministic: bool):
+      split_rngs={'params': False},
+  )
+  def unroll_cell(
+      self,
+      cell_state: StateType,
+      inputs: Array,
+      recurrent_dropout_mask: Optional[Array],
+      deterministic: bool,
+  ):
     """Unrolls a recurrent cell over an input sequence.
 
     Args:
@@ -487,12 +522,14 @@ class GenericRNNSequenceEncoder(nn.Module):
     new_cell_state, output = self.cell(cell_state, inputs)
     return new_cell_state, (new_cell_state, output)
 
-  def __call__(self,
-               inputs: Array,
-               lengths: Array,
-               initial_state: StateType,
-               reverse: bool = False,
-               deterministic: bool = False):
+  def __call__(
+      self,
+      inputs: Array,
+      lengths: Array,
+      initial_state: StateType,
+      reverse: bool = False,
+      deterministic: bool = False,
+  ):
     """Unrolls the RNN cell over the inputs.
 
     Arguments:
@@ -516,11 +553,12 @@ class GenericRNNSequenceEncoder(nn.Module):
       inputs = flip_sequences(inputs, lengths)
 
     recurrent_dropout_mask = None
-    _, (cell_states, outputs) = self.unroll_cell(initial_state, inputs,
-                                                 recurrent_dropout_mask,
-                                                 deterministic)
+    _, (cell_states, outputs) = self.unroll_cell(
+        initial_state, inputs, recurrent_dropout_mask, deterministic
+    )
     final_state = jax.tree.map(
-        lambda x: x[jnp.arange(inputs.shape[0]), lengths - 1], cell_states)
+        lambda x: x[jnp.arange(inputs.shape[0]), lengths - 1], cell_states
+    )
 
     if reverse:
       outputs = flip_sequences(outputs, lengths)
@@ -550,11 +588,12 @@ class GenericRNN(nn.Module):
       concatenate the outputs from the two directions.
     cell_kwargs: Optional keyword arguments to instantiate the cell with.
   """
+
   cell_type: Type[nn.RNNCellBase]
   hidden_size: int
   num_layers: int = 1
-  dropout_rate: float = 0.
-  recurrent_dropout_rate: float = 0.
+  dropout_rate: float = 0.0
+  recurrent_dropout_rate: float = 0.0
   bidirectional: bool = False
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
 
@@ -564,7 +603,7 @@ class GenericRNN(nn.Module):
       inputs: Array,
       lengths: Array,
       initial_states: Optional[Sequence[StateType]] = None,
-      deterministic: bool = False
+      deterministic: bool = False,
   ) -> Tuple[Array, Sequence[StateType]]:
     """Processes the input sequence using the recurrent cell.
 
@@ -573,11 +612,11 @@ class GenericRNN(nn.Module):
       lengths: The lengths of each sequence in the batch. <int64>[batch_size]
       initial_states: The initial states for the cells. You must provide
         `num_layers` initial states (when using bidirectional, `num_layers *
-        2`).
-        These must be ordered in the following way: (layer_0_forward,
-          layer_0_backward, layer_1_forward, layer_1_backward, ...). If None,
-          all initial states will be initialized with zeros.
+        2`). These must be ordered in the following way: (layer_0_forward,
+        layer_0_backward, layer_1_forward, layer_1_backward, ...). If None, all
+        initial states will be initialized with zeros.
       deterministic: Disables dropout between layers when set to True.
+
     Returns:
       The sequence of all outputs for the final layer, and a list of final
       states for each cell and direction. Directions are alternated (first
@@ -616,11 +655,13 @@ class GenericRNN(nn.Module):
           cell_kwargs=self.cell_kwargs,
           hidden_size=self.hidden_size,
           recurrent_dropout_rate=self.recurrent_dropout_rate,
-          name=f'{self.name}SequenceEncoder_{cell_idx}')(
-              inputs,
-              lengths,
-              initial_state=initial_states[cell_idx],
-              deterministic=deterministic)
+          name=f'{self.name}SequenceEncoder_{cell_idx}',
+      )(
+          inputs,
+          lengths,
+          initial_state=initial_states[cell_idx],
+          deterministic=deterministic,
+      )
       final_states.append(final_state)
       cell_idx += 1
 
@@ -631,12 +672,14 @@ class GenericRNN(nn.Module):
             cell_kwargs=self.cell_kwargs,
             hidden_size=self.hidden_size,
             recurrent_dropout_rate=self.recurrent_dropout_rate,
-            name=f'{self.name}SequenceEncoder_{cell_idx}')(
-                inputs,
-                lengths,
-                initial_state=initial_states[cell_idx],
-                reverse=True,
-                deterministic=deterministic)
+            name=f'{self.name}SequenceEncoder_{cell_idx}',
+        )(
+            inputs,
+            lengths,
+            initial_state=initial_states[cell_idx],
+            reverse=True,
+            deterministic=deterministic,
+        )
         outputs = jnp.concatenate([outputs, backward_outputs], axis=-1)
         final_states.append(backward_final_state)
         cell_idx += 1
@@ -665,10 +708,11 @@ class LSTM(nn.Module):
       best for hidden sizes up to 2048.
     cell_kwargs: Optional keyword arguments to instantiate the cell with.
   """
+
   hidden_size: int
   num_layers: int = 1
-  dropout_rate: float = 0.
-  recurrent_dropout_rate: float = 0.
+  dropout_rate: float = 0.0
+  recurrent_dropout_rate: float = 0.0
   bidirectional: bool = False
   cell_type: Any = nn.OptimizedLSTMCell
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
@@ -679,7 +723,8 @@ class LSTM(nn.Module):
       inputs: Array,
       lengths: Array,
       initial_states: Optional[Sequence[StateType]] = None,
-      deterministic: bool = False) -> Tuple[Array, Sequence[StateType]]:
+      deterministic: bool = False,
+  ) -> Tuple[Array, Sequence[StateType]]:
     """Processes an input sequence with an LSTM cell.
 
     Example usage:
@@ -695,8 +740,8 @@ class LSTM(nn.Module):
       initial_states: The initial states for the cells. You must provide
         `num_layers` initial states (when using bidirectional, `num_layers *
         2`). These must be ordered in the following way: (layer_0_forward,
-          layer_0_backward, layer_1_forward, layer_1_backward, ...). If None,
-          all initial states will be initialized with zeros.
+        layer_0_backward, layer_1_forward, layer_1_backward, ...). If None, all
+        initial states will be initialized with zeros.
       deterministic: Disables dropout between layers when set to True.
 
     Returns:
@@ -712,11 +757,13 @@ class LSTM(nn.Module):
         recurrent_dropout_rate=self.recurrent_dropout_rate,
         bidirectional=self.bidirectional,
         cell_kwargs=self.cell_kwargs,
-        name='LSTM')(
-            inputs,
-            lengths,
-            initial_states=initial_states,
-            deterministic=deterministic)
+        name='LSTM',
+    )(
+        inputs,
+        lengths,
+        initial_states=initial_states,
+        deterministic=deterministic,
+    )
 
 
 class BatchRNN(nn.Module):
@@ -724,6 +771,7 @@ class BatchRNN(nn.Module):
 
   High level overview:
   """
+
   config: DeepspeechConfig
 
   @nn.compact
@@ -763,6 +811,7 @@ class DeepSpeechEncoderDecoder(nn.Module):
   for each time step. The output is then fed into a CTC loss which eliminates
   the need for alignment with targets.
   """
+
   config: DeepspeechConfig
 
   def setup(self):
@@ -774,7 +823,7 @@ class DeepSpeechEncoderDecoder(nn.Module):
         time_mask_max_frames=config.time_mask_max_frames,
         time_mask_max_ratio=config.time_mask_max_ratio,
         time_masks_per_frame=config.time_masks_per_frame,
-        use_dynamic_time_mask_max_frames=config.use_dynamic_time_mask_max_frames
+        use_dynamic_time_mask_max_frames=config.use_dynamic_time_mask_max_frames,
     )
 
   @nn.compact
@@ -789,8 +838,8 @@ class DeepSpeechEncoderDecoder(nn.Module):
     outputs, output_paddings = preprocessor.MelFilterbankFrontend(
         preprocessing_config,
         per_bin_mean=preprocessor.LIBRISPEECH_MEAN_VECTOR,
-        per_bin_stddev=preprocessor.LIBRISPEECH_STD_VECTOR)(outputs,
-                                                            output_paddings)
+        per_bin_stddev=preprocessor.LIBRISPEECH_STD_VECTOR,
+    )(outputs, output_paddings)
 
     # Ablate random parts of input along temporal and frequency dimension
     # following the specaug procedure in https://arxiv.org/abs/1904.08779.
@@ -805,13 +854,9 @@ class DeepSpeechEncoderDecoder(nn.Module):
     # Run the lstm layers.
     for _ in range(config.num_lstm_layers):
       if config.enable_residual_connections:
-        outputs = outputs + BatchRNN(config)(
-            outputs, output_paddings, train
-        )
+        outputs = outputs + BatchRNN(config)(outputs, output_paddings, train)
       else:
-        outputs = BatchRNN(config)(
-            outputs, output_paddings, train
-        )
+        outputs = BatchRNN(config)(outputs, output_paddings, train)
 
     for _ in range(config.num_ffn_layers):
       if config.enable_residual_connections:
@@ -830,7 +875,8 @@ class DeepSpeechEncoderDecoder(nn.Module):
     outputs = nn.Dense(
         config.vocab_size,
         use_bias=True,
-        kernel_init=nn.initializers.xavier_uniform())(outputs)
+        kernel_init=nn.initializers.xavier_uniform(),
+    )(outputs)
 
     return outputs, output_paddings
 
@@ -857,11 +903,13 @@ class DeepSpeechModel(base_model.BaseModel):
     labels = (labels * blank_mask).astype(labels.dtype)
 
     # Mask labels that don't equal previous label.
-    label_mask = jnp.concatenate([
-        jnp.ones_like(labels[:, :1], dtype=jnp.int32),
-        jnp.not_equal(labels[:, 1:], labels[:, :-1])
-    ],
-                                 axis=1)
+    label_mask = jnp.concatenate(
+        [
+            jnp.ones_like(labels[:, :1], dtype=jnp.int32),
+            jnp.not_equal(labels[:, 1:], labels[:, :-1]),
+        ],
+        axis=1,
+    )
 
     # Filter labels that aren't in the original sequence.
     maxlen = labels.shape[1]
@@ -897,8 +945,10 @@ class DeepSpeechModel(base_model.BaseModel):
     # Reshape back to square batch.
     batch_size = labels.shape[0]
     new_shape = [batch_size, new_maxlen]
-    return (jnp.reshape(flat, new_shape).astype(labels.dtype),
-            new_seq_len.astype(seq_length.dtype))
+    return (
+        jnp.reshape(flat, new_shape).astype(labels.dtype),
+        new_seq_len.astype(seq_length.dtype),
+    )
 
   def greedy_decode(self, logits, logit_paddings):
     per_frame_max = jnp.argmax(logits, axis=-1)
@@ -921,11 +971,12 @@ class DeepSpeechModel(base_model.BaseModel):
     labels = batch['targets']
     label_paddings = batch['target_paddings']
 
-    (objective_numerator, objective_denominator) = self.loss_fn(
-        logits, logit_paddings, labels, label_paddings)
+    objective_numerator, objective_denominator = self.loss_fn(
+        logits, logit_paddings, labels, label_paddings
+    )
 
     # epsilon added to handle empty batch case if we encounter one.
-    normalized_loss = (objective_numerator / (objective_denominator + 1e-9))
+    normalized_loss = objective_numerator / (objective_denominator + 1e-9)
     hyps, hyp_paddings = self.greedy_decode(logits, logit_paddings)
 
     return self.metrics_bundle.single_from_model_output(
@@ -933,18 +984,17 @@ class DeepSpeechModel(base_model.BaseModel):
         hyps=hyps,
         hyp_paddings=hyp_paddings,
         targets=labels,
-        target_paddings=label_paddings)
+        target_paddings=label_paddings,
+    )
 
   def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
     """Wrapper around flax_module.apply."""
     return self.flax_module.apply(
-        {
-            'params': params,
-            'batch_stats': batch_stats
-        },
+        {'params': params, 'batch_stats': batch_stats},
         batch['inputs'],
         batch['input_paddings'],
-        **apply_kwargs)
+        **apply_kwargs,
+    )
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return CTC loss."""
@@ -952,23 +1002,22 @@ class DeepSpeechModel(base_model.BaseModel):
     # For more information on flax.linen.Module.apply, see the docs at
     # https://flax.readthedocs.io/en/latest/flax.linen.html#flax.linen.Module.apply.
     (outputs, output_paddings), new_batch_stats = self.flax_module.apply(
-        {
-            'params': params,
-            'batch_stats': batch_stats
-        },
+        {'params': params, 'batch_stats': batch_stats},
         batch['inputs'],
         batch['input_paddings'],
         rngs={'dropout': dropout_rng},
         mutable=['batch_stats'],
-        train=True)
+        train=True,
+    )
 
     labels = batch['targets']
     label_paddings = batch['target_paddings']
 
-    (objective_numerator, objective_denominator) = self.loss_fn(
-        outputs, output_paddings, labels, label_paddings)
+    objective_numerator, objective_denominator = self.loss_fn(
+        outputs, output_paddings, labels, label_paddings
+    )
 
-    objective_value = (objective_numerator / (objective_denominator))
+    objective_value = objective_numerator / (objective_denominator)
     return objective_value, new_batch_stats
 
   def build_flax_module(self):
@@ -983,8 +1032,7 @@ class DeepSpeechModel(base_model.BaseModel):
         time_mask_max_frames=self.hps.time_mask_max_frames,
         time_mask_max_ratio=self.hps.time_mask_max_ratio,
         time_masks_per_frame=self.hps.time_masks_per_frame,
-        use_dynamic_time_mask_max_frames=self.hps
-        .use_dynamic_time_mask_max_frames,
+        use_dynamic_time_mask_max_frames=self.hps.use_dynamic_time_mask_max_frames,
         use_specaug=self.hps.use_specaug,
         input_dropout_rate=self.hps.input_dropout_rate,
         feed_forward_dropout_rate=self.hps.feed_forward_dropout_rate,
@@ -994,7 +1042,8 @@ class DeepSpeechModel(base_model.BaseModel):
         enable_subsampling_batchnorm=self.hps.enable_subsampling_batchnorm,
         enable_synced_batchnorm=self.hps.enable_synced_batchnorm,
         activation=self.hps.activation,
-        layernorm_everywhere=self.hps.layernorm_everywhere)
+        layernorm_everywhere=self.hps.layernorm_everywhere,
+    )
     module = DeepSpeechEncoderDecoder(config)
 
     return module
@@ -1034,8 +1083,7 @@ class MLCommonsDeepSpeechModel(DeepSpeechModel):
         time_mask_max_frames=self.hps.time_mask_max_frames,
         time_mask_max_ratio=self.hps.time_mask_max_ratio,
         time_masks_per_frame=self.hps.time_masks_per_frame,
-        use_dynamic_time_mask_max_frames=self.hps
-        .use_dynamic_time_mask_max_frames,
+        use_dynamic_time_mask_max_frames=self.hps.use_dynamic_time_mask_max_frames,
         use_specaug=self.hps.use_specaug,
         input_dropout_rate=aux_dropout_rate,
         feed_forward_dropout_rate=self.hps.dropout_rate,
@@ -1045,7 +1093,8 @@ class MLCommonsDeepSpeechModel(DeepSpeechModel):
         enable_subsampling_batchnorm=self.hps.enable_subsampling_batchnorm,
         enable_synced_batchnorm=self.hps.enable_synced_batchnorm,
         activation=self.hps.activation,
-        layernorm_everywhere=self.hps.layernorm_everywhere)
+        layernorm_everywhere=self.hps.layernorm_everywhere,
+    )
     module = DeepSpeechEncoderDecoder(config)
 
     return module

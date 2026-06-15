@@ -22,6 +22,7 @@ The support functions are refactored TensorFlow code previously
 developed by: aurkor@google.com and msaffar@google.com.
 
 """
+
 import itertools
 import math
 from typing import Any, Dict, List, Sequence, Tuple, Union
@@ -34,13 +35,11 @@ from ml_collections.config_dict import config_dict
 import numpy as np
 
 INITIALIZERS = {
-    'variance_scaling':
-        nn.initializers.variance_scaling(
-            0.2, mode='fan_avg', distribution='uniform'),
-    'glorot_uniform':
-        nn.initializers.glorot_uniform(),
-    'uniform':
-        nn.initializers.uniform()
+    'variance_scaling': nn.initializers.variance_scaling(
+        0.2, mode='fan_avg', distribution='uniform'
+    ),
+    'glorot_uniform': nn.initializers.glorot_uniform(),
+    'uniform': nn.initializers.uniform(),
 }
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
@@ -90,7 +89,8 @@ def shift_right(x, axis=1):
   pad_widths = [(0, 0)] * len(x.shape)
   pad_widths[axis] = (1, 0)
   padded = jnp.pad(
-      x, pad_widths, mode='constant', constant_values=x.dtype.type(0))
+      x, pad_widths, mode='constant', constant_values=x.dtype.type(0)
+  )
   return jax.lax.dynamic_slice_in_dim(padded, 0, padded.shape[axis] - 1, axis)
 
 
@@ -102,6 +102,7 @@ class FeedForward(nn.Module):
     feedforward_dropout: dropout rate in the Dropout layers.
     kernel_init: kernel initializer in the Dense layers.
   """
+
   feedforward_depths: Sequence[int] = None
   feedforward_dropout: float = 0.0
   kernel_init: Any = nn.initializers.glorot_uniform()
@@ -123,26 +124,29 @@ class FeedForward(nn.Module):
         features=self.feedforward_depths[0],
         kernel_init=self.kernel_init,
         use_bias=True,
-        name='conv1')(input_x)
+        name='conv1',
+    )(input_x)
 
     x = nn.relu(x)
 
-    x = nn.Dropout(
-        rate=self.feedforward_dropout, deterministic=not train)(x)
+    x = nn.Dropout(rate=self.feedforward_dropout, deterministic=not train)(x)
 
     output = nn.Dense(
         features=self.feedforward_depths[1],
         kernel_init=self.kernel_init,
         use_bias=True,
-        name='conv2')(x)
+        name='conv2',
+    )(x)
     return output
 
 
 # TODO(krasowiak): Potentially replace lines 128-1226
 # with modified Flax SelfAttention
-def decode_step_to_index(decode_step: int,
-                         array_shape: Tuple[int],
-                         query_shape: Tuple[int] = (256,)) -> Tuple[int]:
+def decode_step_to_index(
+    decode_step: int,
+    array_shape: Tuple[int, ...],
+    query_shape: Tuple[int, ...] = (256,),
+) -> Tuple[int, ...]:
   """Maps decode step to n-d index according to blocked raster scan order.
 
   Args:
@@ -155,8 +159,10 @@ def decode_step_to_index(decode_step: int,
     `decode_step` w.r.t. blocked raster scan order.
   """
   if len(query_shape) != len(array_shape):
-    raise ValueError(f'Query ({query_shape}) and array ({array_shape})'
-                     ' shapes not the same length.')
+    raise ValueError(
+        f'Query ({query_shape}) and array ({array_shape})'
+        ' shapes not the same length.'
+    )
 
   blocks_per_dimension = [t // q for t, q in zip(array_shape, query_shape)]
   items_in_block = np.prod(query_shape, dtype=jnp.int32)
@@ -182,7 +188,7 @@ def decode_step_to_index(decode_step: int,
 def get_item_at_decode_step(
     input_array: Tensor,
     decode_step: int = None,
-    query_shape: Tuple[int] = (256,)
+    query_shape: Tuple[int, ...] = (256,),
 ) -> Tensor:
   """Extracts a single item from an n-d array at `decode_step` position.
 
@@ -200,10 +206,12 @@ def get_item_at_decode_step(
   index = decode_step_to_index(
       decode_step=decode_step,
       array_shape=x_shape[1:-1],
-      query_shape=query_shape)
+      query_shape=query_shape,
+  )
   index = [i.tolist() for i in index]
-  output = input_array[:x_shape[0], index[0]:index[0] + len(index),
-                       0:x_shape[-1]]
+  output = input_array[
+      : x_shape[0], index[0] : index[0] + len(index), 0 : x_shape[-1]
+  ]
   return output
 
 
@@ -227,7 +235,8 @@ def ones_matrix_band_part(
     num_cols: int,
     max_backward: int,
     max_forward: int,
-    output_shape: Tuple[int] = None) -> Tensor:
+    output_shape: Tuple[int, ...] = None,
+) -> Tensor:
   """Prepares a matrix band part of 1s.
 
   Args:
@@ -259,10 +268,8 @@ def ones_matrix_band_part(
 
 
 def attention_bias_local(
-    length: int,
-    max_backward: int,
-    max_forward: int,
-    scale_factor: float = -1e9) -> Tensor:
+    length: int, max_backward: int, max_forward: int, scale_factor: float = -1e9
+) -> Tensor:
   """Creates a bias array to be added to attention logits.
 
   A position may attend to positions at most max_distance from it,
@@ -284,14 +291,15 @@ def attention_bias_local(
       num_cols=length,
       max_backward=max_backward,
       max_forward=max_forward,
-      output_shape=[1, 1, length, length])
+      output_shape=[1, 1, length, length],
+  )
   output = scale_factor * (1.0 - output)
   return output
 
 
-def attention_bias_lower_triangle(length: int,
-                                  bias_cache: Dict[str,
-                                                   Tensor] = None) -> Tensor:
+def attention_bias_lower_triangle(
+    length: int, bias_cache: Dict[str, Tensor] = None
+) -> Tensor:
   """Creates an bias tensor to be added to attention logits.
 
   Args:
@@ -313,10 +321,10 @@ def attention_bias_lower_triangle(length: int,
 
 
 def causal_attention_bias_nd(
-    query_shape: Tuple[int] = (256,),
-    memory_flange: Tuple[int] = (256,),
+    query_shape: Tuple[int, ...] = (256,),
+    memory_flange: Tuple[int, ...] = (256,),
     decode_step: int = None,
-    bias_cache: Dict[str, Tensor] = None
+    bias_cache: Dict[str, Tensor] = None,
 ) -> Tensor:
   """Creates a causal attention bias for local nd attention.
 
@@ -336,39 +344,47 @@ def causal_attention_bias_nd(
     return bias_cache[cache_key]
 
   if all([m % q != 0 for q, m in zip(query_shape, memory_flange)]):
-    raise ValueError(f'Query ({query_shape}) and memory ({memory_flange})'
-                     ' modulo not equal to 0.')
+    raise ValueError(
+        f'Query ({query_shape}) and memory ({memory_flange})'
+        ' modulo not equal to 0.'
+    )
   blocks_per_memory_flange = [
       m // q for q, m in zip(query_shape, memory_flange)
   ]
-  prev_blocks = np.prod(
-      [2 * b + 1 for b in blocks_per_memory_flange],
-      dtype=jnp.int32) // 2
+  prev_blocks = (
+      np.prod([2 * b + 1 for b in blocks_per_memory_flange], dtype=jnp.int32)
+      // 2
+  )
   all_blocks = np.prod(
-      [blocks_per_memory_flange[0] + 1] +
-      [2 * b + 1 for b in blocks_per_memory_flange[1:]],
-      dtype=jnp.int32)
+      [blocks_per_memory_flange[0] + 1]
+      + [2 * b + 1 for b in blocks_per_memory_flange[1:]],
+      dtype=jnp.int32,
+  )
   future_blocks = all_blocks - prev_blocks - 1
   items_in_block = np.prod(query_shape, dtype=jnp.int32)
   items_in_query = items_in_block if decode_step is None else 1
   prev_blocks_attn = jnp.zeros(
-      [1, 1, items_in_query, prev_blocks * items_in_block])
+      [1, 1, items_in_query, prev_blocks * items_in_block]
+  )
 
   if decode_step is None:
-    center_block_attn = attention_bias_lower_triangle(length=items_in_block,
-                                                      bias_cache=bias_cache)
+    center_block_attn = attention_bias_lower_triangle(
+        length=items_in_block, bias_cache=bias_cache
+    )
   else:
     step_in_block = decode_step % items_in_block
     cond = jnp.less_equal(
-        jnp.arange(stop=items_in_block, dtype=jnp.int32),
-        step_in_block).reshape(shape=[1, 1, items_in_query, items_in_block])
+        jnp.arange(stop=items_in_block, dtype=jnp.int32), step_in_block
+    ).reshape(shape=[1, 1, items_in_query, items_in_block])
     x = jnp.zeros([1, 1, items_in_query, items_in_block])
     y = -1e9 * jnp.ones([1, 1, items_in_query, items_in_block])
     center_block_attn = jnp.where(cond, x, y)
   future_blocks_attn = -1e9 * jnp.ones(
-      [1, 1, items_in_query, future_blocks * items_in_block])
+      [1, 1, items_in_query, future_blocks * items_in_block]
+  )
   output = jnp.concatenate(
-      [prev_blocks_attn, center_block_attn, future_blocks_attn], axis=3)
+      [prev_blocks_attn, center_block_attn, future_blocks_attn], axis=3
+  )
 
   if decode_step is None:
     if bias_cache is None:
@@ -390,19 +406,22 @@ def maybe_tile(input_x: Tensor, input_y: Tensor) -> Tensor:
   x_shape = input_x.shape
   y_shape = input_y.shape
   if len(x_shape) != len(y_shape):
-    raise ValueError(f'Query ({x_shape}) and array ({y_shape})'
-                     ' shapes not the same length.')
+    raise ValueError(
+        f'Query ({x_shape}) and array ({y_shape}) shapes not the same length.'
+    )
   x_tile = [1]
   y_tile = [1]
   for x_dim, y_dim in zip(x_shape[1:-1], y_shape[1:-1]):
     try:
       if x_dim % y_dim != 0:
-        raise ValueError(f'X_dim ({x_dim}) and y_dim ({y_dim})'
-                         ' modulos not equal to 0.')
+        raise ValueError(
+            f'X_dim ({x_dim}) and y_dim ({y_dim}) modulos not equal to 0.'
+        )
     except ValueError as maybe_tile_error:
       if y_dim % x_dim != 0:
-        raise ValueError(f'X_dim ({x_dim}) and y_dim ({y_dim})'
-                         ' modulos not equal to 0.') from maybe_tile_error
+        raise ValueError(
+            f'X_dim ({x_dim}) and y_dim ({y_dim}) modulos not equal to 0.'
+        ) from maybe_tile_error
     if x_dim == y_dim:
       x_tile.append(1)
       y_tile.append(1)
@@ -420,12 +439,12 @@ def maybe_tile(input_x: Tensor, input_y: Tensor) -> Tensor:
 
 def local_attention_bias_nd(
     v_array: Tensor,
-    query_shape: Tuple[int] = (256,),
-    memory_flange: Tuple[int] = (256,),
+    query_shape: Tuple[int, ...] = (256,),
+    memory_flange: Tuple[int, ...] = (256,),
     masked: bool = True,
     cache_padding_bias: bool = False,
     decode_step: int = None,
-    bias_cache: Dict[str, Tensor] = None
+    bias_cache: Dict[str, Tensor] = None,
 ) -> Tensor:
   """Creates an attention bias for local n-d attention.
 
@@ -444,14 +463,14 @@ def local_attention_bias_nd(
     items_in_memory] if cache_padding_bias is True.
   """
   cache_names = ['_'.join(map(str, i)) for i in [query_shape, memory_flange]]
-  cache_key = 'local_attention_bias_{}_{}_{}_{}'.format(cache_names[0],
-                                                        cache_names[1], masked,
-                                                        cache_padding_bias)
+  cache_key = 'local_attention_bias_{}_{}_{}_{}'.format(
+      cache_names[0], cache_names[1], masked, cache_padding_bias
+  )
   if bias_cache and cache_key in bias_cache and decode_step is None:
     return bias_cache[cache_key]
 
   if cache_padding_bias:
-    array = embedding_to_padding(embedding=v_array[:1, :, :, :]) * -1e9,
+    array = (embedding_to_padding(embedding=v_array[:1, :, :, :]) * -1e9,)
     padding_attn_bias = jnp.expand_dims(array, axis=-2)
   else:
     array = embedding_to_padding(embedding=v_array) * -1e9
@@ -462,9 +481,11 @@ def local_attention_bias_nd(
         query_shape=query_shape,
         memory_flange=memory_flange,
         decode_step=decode_step,
-        bias_cache=bias_cache)
-    causal_attn_bias, padding_attn_bias = maybe_tile(input_x=causal_attn_bias,
-                                                     input_y=padding_attn_bias)
+        bias_cache=bias_cache,
+    )
+    causal_attn_bias, padding_attn_bias = maybe_tile(
+        input_x=causal_attn_bias, input_y=padding_attn_bias
+    )
     output = jnp.minimum(causal_attn_bias, padding_attn_bias)
   else:
     output = padding_attn_bias
@@ -476,7 +497,7 @@ def local_attention_bias_nd(
   return output
 
 
-def pad_to_multiple_nd(input_x: Tensor, block_shape: Tuple[int]) -> Tensor:
+def pad_to_multiple_nd(input_x: Tensor, block_shape: Tuple[int, ...]) -> Tensor:
   """Ensures the input is a multiple of a provided shape.
 
   Args:
@@ -489,15 +510,14 @@ def pad_to_multiple_nd(input_x: Tensor, block_shape: Tuple[int]) -> Tensor:
   """
   shape = input_x.shape
   paddings = [-l % b for l, b in zip(shape[1:-1], block_shape)]
-  output = jnp.pad(
-      input_x, [(0, 0)] + [(0, p) for p in paddings] + [(0, 0)])
+  output = jnp.pad(input_x, [(0, 0)] + [(0, p) for p in paddings] + [(0, 0)])
   return output
 
 
 def select_block_for_decode_step(
     input_x: Tensor,
     decode_step: int = None,
-    query_shape: Tuple[int] = (256,)
+    query_shape: Tuple[int, ...] = (256,),
 ) -> Tensor:
   """Selects one block from the input array that contains position `decode_step`.
 
@@ -514,11 +534,15 @@ def select_block_for_decode_step(
   blocked_x_shape = input_x.shape
   x_shape = [b * q for b, q in zip(blocked_x_shape[1:-2], query_shape)]
   index = decode_step_to_index(
-      decode_step=decode_step, array_shape=query_shape, query_shape=x_shape)
+      decode_step=decode_step, array_shape=query_shape, query_shape=x_shape
+  )
   blocked_index = [i // q for i, q in zip(index, query_shape)]
-  output = input_x[:blocked_x_shape[0],
-                   blocked_index[0]:blocked_index[0] + len(blocked_index),
-                   0:blocked_x_shape[-2], 0:blocked_x_shape[-1]]
+  output = input_x[
+      : blocked_x_shape[0],
+      blocked_index[0] : blocked_index[0] + len(blocked_index),
+      0 : blocked_x_shape[-2],
+      0 : blocked_x_shape[-1],
+  ]
   return output
 
 
@@ -536,28 +560,39 @@ def break_into_blocks_nd(input_x: Tensor, block_shape: Tuple[int]) -> Tensor:
   """
   x_shape = list(input_x.shape)
   if all([l % b != 0 for l, b in zip(x_shape[1:], block_shape)]):
-    raise ValueError(f'X_shape[1:] ({x_shape[1:]}) and block ({block_shape})'
-                     ' modulo not equal to 0.')
+    raise ValueError(
+        f'X_shape[1:] ({x_shape[1:]}) and block ({block_shape})'
+        ' modulo not equal to 0.'
+    )
   blocks_per_dimension = [l // b for l, b in zip(x_shape[1:], block_shape)]
   reshape_to = list(
-      itertools.chain.from_iterable(zip(blocks_per_dimension, block_shape)))
+      itertools.chain.from_iterable(zip(blocks_per_dimension, block_shape))
+  )
   input_x = jnp.reshape(input_x, [-1] + reshape_to + x_shape[-1:])
   block_dimensions_index = [2 * (i + 1) for i in range(len(block_shape))]
-  axes = [0] + [i - 1 for i in block_dimensions_index
-               ] + block_dimensions_index + [2 * len(block_shape) + 1]
+  axes = (
+      [0]
+      + [i - 1 for i in block_dimensions_index]
+      + block_dimensions_index
+      + [2 * len(block_shape) + 1]
+  )
   input_x = jnp.transpose(input_x, axes)
-  axes = [-1] + blocks_per_dimension + [
-      np.prod(block_shape, dtype=jnp.int32)
-  ] + x_shape[-1:]
+  axes = (
+      [-1]
+      + blocks_per_dimension
+      + [np.prod(block_shape, dtype=jnp.int32)]
+      + x_shape[-1:]
+  )
   output = jnp.reshape(input_x, axes)
   return output
 
 
 def break_into_memory_blocks_nd(
     input_x: Tensor,
-    query_shape: Tuple[int] = (256,),
-    memory_flange: Tuple[int] = (256,),
-    masked: bool = True) -> Tensor:
+    query_shape: Tuple[int, ...] = (256,),
+    memory_flange: Tuple[int, ...] = (256,),
+    masked: bool = True,
+) -> Tensor:
   """Breaks an input array into memory blocks around query blocks.
 
   Args:
@@ -572,8 +607,10 @@ def break_into_memory_blocks_nd(
     which is equal to q[i] + 2m[i] or q[i] + m[i] if masked attention and i = 1
   """
   if all([m % q != 0 for q, m in zip(query_shape, memory_flange)]):
-    raise ValueError(f'Query ({query_shape}) and memory ({memory_flange})'
-                     ' modulo not equal to 0.')
+    raise ValueError(
+        f'Query ({query_shape}) and memory ({memory_flange})'
+        ' modulo not equal to 0.'
+    )
   original_x_shape = input_x.shape
   blocks_in_memory_flange = [m // b for b, m in zip(query_shape, memory_flange)]
   num_query_blocks = [
@@ -583,12 +620,14 @@ def break_into_memory_blocks_nd(
   if masked:
     input_x = jnp.pad(
         input_x,
-        [[0, 0], [memory_flange[0], 0]] +
-        [[p, p] for p in memory_flange[1:]] + [[0, 0]])
+        [[0, 0], [memory_flange[0], 0]]
+        + [[p, p] for p in memory_flange[1:]]
+        + [[0, 0]],
+    )
   else:
     input_x = jnp.pad(
-        input_x,
-        [[0, 0]] + [[p, p] for p in memory_flange] + [[0, 0]])
+        input_x, [[0, 0]] + [[p, p] for p in memory_flange] + [[0, 0]]
+    )
 
   query_blocks = break_into_blocks_nd(input_x=input_x, block_shape=query_shape)
   start_indices_per_dimension = []
@@ -602,9 +641,9 @@ def break_into_memory_blocks_nd(
 
   slices = []
   for start_indices in itertools.product(*start_indices_per_dimension):
-    s = query_blocks[0:,
-                     start_indices[0]:start_indices[0] + num_query_blocks[0],
-                     0:, 0:]
+    s = query_blocks[
+        0:, start_indices[0] : start_indices[0] + num_query_blocks[0], 0:, 0:
+    ]
     slices.append(s)
   output = jnp.concatenate(slices, axis=-2)
   return output
@@ -627,8 +666,9 @@ def flatten_blocks_nd(input_x: Tensor) -> Tensor:
   return output
 
 
-def unflatten_blocks_nd(input_x: Tensor,
-                        blocks_per_dimension: List[int]) -> Tensor:
+def unflatten_blocks_nd(
+    input_x: Tensor, blocks_per_dimension: List[int]
+) -> Tensor:
   """Converts a flattened array to a blocked array.
 
   Args:
@@ -639,25 +679,24 @@ def unflatten_blocks_nd(input_x: Tensor,
     output: an array of shape [batch, d1, d2, ..., dn, items_in_block, depth].
   """
   x_shape = list(input_x.shape)
-  assert x_shape[1] == np.prod(
-      blocks_per_dimension, dtype=jnp.int32)
-  output = jnp.reshape(
-      input_x, [-1] + blocks_per_dimension + x_shape[-2:])
+  assert x_shape[1] == np.prod(blocks_per_dimension, dtype=jnp.int32)
+  output = jnp.reshape(input_x, [-1] + blocks_per_dimension + x_shape[-2:])
   return output
 
 
 def break_bias_into_blocks(
     input_bias: Tensor,
     local_num_heads: int = 8,
-    memory_query_shape: Tuple[int] = (256,),
-    memory_flange: Tuple[int] = (256,),
+    memory_query_shape: Tuple[int, ...] = (256,),
+    memory_flange: Tuple[int, ...] = (256,),
     masked: bool = True,
-    decode_step: int = None) -> Tensor:
+    decode_step: int = None,
+) -> Tensor:
   """Breaks bias into a blocked array.
 
   Args:
     input_bias: a bias array of shape of shape [batch * heads, num_blocks,
-    items_in_query, items_in_memory].
+      items_in_query, items_in_memory].
     local_num_heads: a number of local attention heads.
     memory_query_shape: a tuple with a memory query shape.
     memory_flange: a tuple with a memory flange shape.
@@ -676,20 +715,20 @@ def break_bias_into_blocks(
       input_x=x,
       query_shape=memory_query_shape,
       memory_flange=memory_flange,
-      masked=masked)
+      masked=masked,
+  )
 
   if decode_step is not None:
     x = select_block_for_decode_step(
-        input_x=x, decode_step=decode_step, query_shape=memory_query_shape)
+        input_x=x, decode_step=decode_step, query_shape=memory_query_shape
+    )
 
   x = flatten_blocks_nd(input_x=x)
   output = jnp.squeeze(x, axis=-1)
   return output
 
 
-def cast_like(
-    input_x: Tensor,
-    input_y: Tensor) -> Tensor:
+def cast_like(input_x: Tensor, input_y: Tensor) -> Tensor:
   """Cast the same dtype on the first array as on the second if necessary.
 
   Args:
@@ -711,8 +750,9 @@ def generate_relative_positions_matrix(
     length_q: int,
     length_k: int,
     max_relative_position: int = 513,
-    query_shape: Tuple[int] = (256,),
-    decode_step: int = None) -> Tensor:
+    query_shape: Tuple[int, ...] = (256,),
+    decode_step: int = None,
+) -> Tensor:
   """Generates matrix of relative positions.
 
   Args:
@@ -737,11 +777,13 @@ def generate_relative_positions_matrix(
   else:
     block_len = np.prod(query_shape)
     positive_positions = block_len - decode_step % block_len
-    distance_mat = jnp.expand_dims(
-        jnp.arange(-length_k, 0, 1),
-        axis=0) + positive_positions
+    distance_mat = (
+        jnp.expand_dims(jnp.arange(-length_k, 0, 1), axis=0)
+        + positive_positions
+    )
   distance_mat_clipped = jnp.clip(
-      distance_mat, -max_relative_position, max_relative_position)
+      distance_mat, -max_relative_position, max_relative_position
+  )
   output = distance_mat_clipped + max_relative_position
   return output
 
@@ -755,17 +797,20 @@ class RelativePositionEmbeddings(nn.Module):
     query_shape: a tuple with a query shape.
     embedding_init: embeddings initializer.
   """
+
   embed_layer_name: str
   max_relative_position: int = 513
   depth: int = 129
-  query_shape: Tuple[int] = (256,)
+  query_shape: Tuple[int, ...] = (256,)
   decode_step: int = None
   embedding_init: Any = nn.initializers.glorot_uniform()
 
   def setup(self):
     self.embedding = self.param(
-        self.embed_layer_name, self.embedding_init,
-        (self.max_relative_position * 2 + 1, self.depth))
+        self.embed_layer_name,
+        self.embedding_init,
+        (self.max_relative_position * 2 + 1, self.depth),
+    )
 
   def __call__(self, length_q: int, length_k: int) -> Tensor:
     """Applies the RelativePositionEmbeddings module.
@@ -782,16 +827,15 @@ class RelativePositionEmbeddings(nn.Module):
         length_k=length_k,
         max_relative_position=self.max_relative_position,
         query_shape=self.query_shape,
-        decode_step=self.decode_step)
-    output = jnp.take(
-        self.embedding, indices=relative_positions_matrix, axis=0)
+        decode_step=self.decode_step,
+    )
+    output = jnp.take(self.embedding, indices=relative_positions_matrix, axis=0)
     return output
 
 
-def relative_attention_inner(input_x: Tensor,
-                             input_y: Tensor,
-                             input_z: Tensor,
-                             transpose: bool) -> Tensor:
+def relative_attention_inner(
+    input_x: Tensor, input_y: Tensor, input_z: Tensor, transpose: bool
+) -> Tensor:
   """Calculates position-aware inner dot-product attention.
 
   Args:
@@ -807,20 +851,18 @@ def relative_attention_inner(input_x: Tensor,
   """
   if transpose:
     xy_matmul = jnp.einsum(
-        'bhxd,bhyd->bhxy',
-        input_x,
-        input_y,
-        precision=jax.lax.Precision.HIGHEST)
+        'bhxd,bhyd->bhxy', input_x, input_y, precision=jax.lax.Precision.HIGHEST
+    )
     x_tz_matmul_r_t = jnp.einsum(
-        'bhxd,xyd->bhxy', input_x, input_z, precision=jax.lax.Precision.HIGHEST)
+        'bhxd,xyd->bhxy', input_x, input_z, precision=jax.lax.Precision.HIGHEST
+    )
   else:
     xy_matmul = jnp.einsum(
-        'bhxd,bhdy->bhxy',
-        input_x,
-        input_y,
-        precision=jax.lax.Precision.HIGHEST)
+        'bhxd,bhdy->bhxy', input_x, input_y, precision=jax.lax.Precision.HIGHEST
+    )
     x_tz_matmul_r_t = jnp.einsum(
-        'bhxd,xdy->bhxy', input_x, input_z, precision=jax.lax.Precision.HIGHEST)
+        'bhxd,xdy->bhxy', input_x, input_z, precision=jax.lax.Precision.HIGHEST
+    )
   output = xy_matmul + x_tz_matmul_r_t
   return output
 
@@ -838,19 +880,22 @@ class RelativeDotProductAttention(nn.Module):
     query_shape: a tuple with a query shape.
     embedding_init: embeddings initializer.
   """
+
   max_relative_position: int = 513
-  query_shape: Tuple[int] = (256,)
+  query_shape: Tuple[int, ...] = (256,)
   attention_dropout: float = 0.0
   decode_step: int = None
   embedding_init: Any = nn.initializers.glorot_uniform()
 
   @nn.compact
   def __call__(
-      self, q_array: Tensor,
+      self,
+      q_array: Tensor,
       k_array: Tensor,
       v_array: Tensor,
       bias_array: Tensor,
-      train: bool = False) -> Tensor:
+      train: bool = False,
+  ) -> Tensor:
     """Applies the RelativeDotProductAttention module.
 
     Args:
@@ -866,9 +911,10 @@ class RelativeDotProductAttention(nn.Module):
       weights
     """
     if not self.max_relative_position:
-      raise ValueError('Max relative position (%s) should be > 0 when using '
-                       'relative self attention.' %
-                       (self.max_relative_position))
+      raise ValueError(
+          'Max relative position (%s) should be > 0 when using '
+          'relative self attention.' % (self.max_relative_position)
+      )
     depth = k_array.shape[3]
     length_k = k_array.shape[2]
     length_q = q_array.shape[2]
@@ -879,32 +925,32 @@ class RelativeDotProductAttention(nn.Module):
         depth=depth,
         query_shape=self.query_shape,
         decode_step=self.decode_step,
-        embedding_init=self.embedding_init)(
-            length_q=length_q, length_k=length_k)
+        embedding_init=self.embedding_init,
+    )(length_q=length_q, length_k=length_k)
     relations_values = RelativePositionEmbeddings(
         embed_layer_name='relative_positions_values',
         max_relative_position=self.max_relative_position,
         depth=depth,
         query_shape=self.query_shape,
         decode_step=self.decode_step,
-        embedding_init=self.embedding_init)(
-            length_q=length_q, length_k=length_k)
+        embedding_init=self.embedding_init,
+    )(length_q=length_q, length_k=length_k)
     logits = relative_attention_inner(
-        input_x=q_array,
-        input_y=k_array,
-        input_z=relations_keys,
-        transpose=True)
+        input_x=q_array, input_y=k_array, input_z=relations_keys, transpose=True
+    )
     if bias_array is not None:
       logits += bias_array
     weights = nn.softmax(logits)
     if self.attention_dropout:
       weights = nn.Dropout(
-          rate=self.attention_dropout, deterministic=not train)(weights)
+          rate=self.attention_dropout, deterministic=not train
+      )(weights)
     output = relative_attention_inner(
         input_x=weights,
         input_y=v_array,
         input_z=relations_values,
-        transpose=False)
+        transpose=False,
+    )
     return output, weights
 
 
@@ -919,19 +965,23 @@ class DotProductAttention(nn.Module):
     query_shape: a tuple with a query shape.
     embedding_init: embeddings initializer.
   """
+
   local_relative: bool = True
   max_relative_position: int = 513
   attention_dropout: float = 0.0
   decode_step: int = None
-  query_shape: Tuple[int] = (256,)
+  query_shape: Tuple[int, ...] = (256,)
   embedding_init: Any = nn.initializers.glorot_uniform()
 
   @nn.compact
   def __call__(
-      self, q_array: Tensor,
+      self,
+      q_array: Tensor,
       k_array: Tensor,
       v_array: Tensor,
-      bias_array: Tensor, train: bool = False) -> Tensor:
+      bias_array: Tensor,
+      train: bool = False,
+  ) -> Tensor:
     """Applies the DotProductAttention module.
 
     Args:
@@ -953,11 +1003,13 @@ class DotProductAttention(nn.Module):
           decode_step=self.decode_step,
           query_shape=self.query_shape,
           embedding_init=self.embedding_init,
-      )(q_array=q_array,
-        k_array=k_array,
-        v_array=v_array,
-        bias_array=bias_array,
-        train=train)
+      )(
+          q_array=q_array,
+          k_array=k_array,
+          v_array=v_array,
+          bias_array=bias_array,
+          train=train,
+      )
     logits = jnp.matmul(q_array, jnp.transpose(k_array, axes=(0, 1, 3, 2)))
     if bias_array is not None:
       bias_array = cast_like(input_x=bias_array, input_y=logits)
@@ -965,7 +1017,8 @@ class DotProductAttention(nn.Module):
     weights = nn.softmax(logits)
     if self.attention_dropout:
       weights = nn.Dropout(
-          rate=self.attention_dropout, deterministic=not train)(weights)
+          rate=self.attention_dropout, deterministic=not train
+      )(weights)
     output = jnp.matmul(weights, v_array)
     return output, weights
 
@@ -989,7 +1042,7 @@ def combine_heads_nd(input_x: Tensor) -> Tensor:
   return output
 
 
-def put_back_blocks_nd(input_x: Tensor, block_shape: Tuple[int]) -> Tensor:
+def put_back_blocks_nd(input_x: Tensor, block_shape: Tuple[int, ...]) -> Tensor:
   """Restructures an input array from blocks to normal ordering.
 
   Args:
@@ -1004,21 +1057,30 @@ def put_back_blocks_nd(input_x: Tensor, block_shape: Tuple[int]) -> Tensor:
 
   if isinstance(x_shape[-2], int):
     if x_shape[-2] != np.prod(block_shape):
-      raise ValueError(f'X_shape[-2] ({x_shape[-2]}) and block ({block_shape})'
-                       ' are not equal.')
+      raise ValueError(
+          f'X_shape[-2] ({x_shape[-2]}) and block ({block_shape})'
+          ' are not equal.'
+      )
 
-  x = jnp.reshape(
-      input_x, x_shape[:-2] + list(block_shape) + x_shape[-1:])
+  x = jnp.reshape(input_x, x_shape[:-2] + list(block_shape) + x_shape[-1:])
   block_dimension_index = list(range(1, len(block_shape) + 1))
   block_shape_index = [b + len(block_shape) for b in block_dimension_index]
   interleaved_dimensions = list(
       itertools.chain.from_iterable(
-          zip(block_dimension_index, block_shape_index)))
-  x = jnp.transpose(x,
-                    [0] + interleaved_dimensions + [2 * len(block_shape) + 1])
-  axes = [-1] + [
-      x_shape[2 * i + 1] * x_shape[2 * i + 2] for i in range(len(block_shape))
-  ] + x_shape[-1:]
+          zip(block_dimension_index, block_shape_index)
+      )
+  )
+  x = jnp.transpose(
+      x, [0] + interleaved_dimensions + [2 * len(block_shape) + 1]
+  )
+  axes = (
+      [-1]
+      + [
+          x_shape[2 * i + 1] * x_shape[2 * i + 2]
+          for i in range(len(block_shape))
+      ]
+      + x_shape[-1:]
+  )
   output = jnp.reshape(x, axes)
   return output
 
@@ -1045,9 +1107,10 @@ class LocalAttention(nn.Module):
     kernel_init: kernel initializer in the Dense layers.
     embedding_init: embeddings initializer.
   """
-  query_shape: Tuple[int] = (256,)
-  memory_query_shape: Tuple[int] = (512,)
-  memory_flange: Tuple[int] = (256,)
+
+  query_shape: Tuple[int, ...] = (256,)
+  memory_query_shape: Tuple[int, ...] = (512,)
+  memory_flange: Tuple[int, ...] = (256,)
   local_num_heads: int = 8
   local_relative: bool = True
   memory_antecedent: bool = None
@@ -1064,11 +1127,13 @@ class LocalAttention(nn.Module):
   embedding_init: Any = nn.initializers.glorot_uniform()
 
   @nn.compact
-  def __call__(self,
-               q_array: Tensor,
-               k_array: Tensor,
-               v_array: Tensor,
-               train: bool = False) -> Tensor:
+  def __call__(
+      self,
+      q_array: Tensor,
+      k_array: Tensor,
+      v_array: Tensor,
+      train: bool = False,
+  ) -> Tensor:
     """Applies the LocalAttention module.
 
     Args:
@@ -1085,23 +1150,22 @@ class LocalAttention(nn.Module):
     if all([m % b != 0 for m, b in zip(self.memory_flange, self.query_shape)]):
       raise ValueError(
           f'Query ({self.query_shape}) and memory ({self.memory_flange})'
-          ' modulo not equal to 0.')
+          ' modulo not equal to 0.'
+      )
 
     if self.decode_step is not None:
-      q_array = jnp.reshape(
-          q_array, [-1] + list(q_array.shape[2:]))
+      q_array = jnp.reshape(q_array, [-1] + list(q_array.shape[2:]))
       latest_q = get_item_at_decode_step(
           input_array=q_array,
           decode_step=self.decode_step,
-          query_shape=self.query_shape)
+          query_shape=self.query_shape,
+      )
       q_array = jnp.reshape(
-          q_array,
-          [-1, self.local_num_heads] +
-          list(q_array.shape[1:]))
+          q_array, [-1, self.local_num_heads] + list(q_array.shape[1:])
+      )
       latest_q = jnp.reshape(
-          latest_q,
-          [-1, self.local_num_heads] +
-          list(latest_q.shape[1:]))
+          latest_q, [-1, self.local_num_heads] + list(latest_q.shape[1:])
+      )
       q_shape = list(latest_q.shape)
     else:
       q_shape = list(q_array.shape)
@@ -1123,38 +1187,45 @@ class LocalAttention(nn.Module):
 
     if self.decode_step is None:
       q_array = pad_to_multiple_nd(
-          input_x=q_array, block_shape=self.query_shape)
+          input_x=q_array, block_shape=self.query_shape
+      )
     k_array = pad_to_multiple_nd(input_x=k_array, block_shape=mem_query_shape)
     v_array = pad_to_multiple_nd(input_x=v_array, block_shape=mem_query_shape)
 
     if self.decode_step is None:
       q_array = break_into_blocks_nd(
-          input_x=q_array, block_shape=self.query_shape)
+          input_x=q_array, block_shape=self.query_shape
+      )
     else:
       q_array = jnp.reshape(
-          q_array, [-1] + [1] * (len(q_shape) - 3) + [q_shape[-1]])
+          q_array, [-1] + [1] * (len(q_shape) - 3) + [q_shape[-1]]
+      )
 
     k_array = break_into_memory_blocks_nd(
         input_x=k_array,
         query_shape=mem_query_shape,
         memory_flange=self.memory_flange,
-        masked=self.masked)
+        masked=self.masked,
+    )
     v_array = break_into_memory_blocks_nd(
         input_x=v_array,
         query_shape=mem_query_shape,
         memory_flange=self.memory_flange,
-        masked=self.masked)
+        masked=self.masked,
+    )
     blocks_per_dim = list(q_array.shape[1:-2])
 
     if self.decode_step is not None:
       k_array = select_block_for_decode_step(
           input_x=k_array,
           decode_step=self.decode_step,
-          query_shape=mem_query_shape)
+          query_shape=mem_query_shape,
+      )
       v_array = select_block_for_decode_step(
           input_x=v_array,
           decode_step=self.decode_step,
-          query_shape=mem_query_shape)
+          query_shape=mem_query_shape,
+      )
 
     q_array = flatten_blocks_nd(input_x=q_array)
     k_array = flatten_blocks_nd(input_x=k_array)
@@ -1172,7 +1243,8 @@ class LocalAttention(nn.Module):
         masked=self.masked,
         cache_padding_bias=self.cache_padding_bias,
         decode_step=self.decode_step,
-        bias_cache=bias_cache)
+        bias_cache=bias_cache,
+    )
 
     if self.padding_bias is not None:
       padding_bias = break_bias_into_blocks(input_bias=self.padding_bias)
@@ -1191,40 +1263,40 @@ class LocalAttention(nn.Module):
         attention_dropout=self.attention_dropout,
         decode_step=self.decode_step,
         query_shape=self.query_shape,
-        embedding_init=self.embedding_init)(
-            q_array=q_array,
-            k_array=k_array,
-            v_array=v_array,
-            bias_array=attn_bias,
-            train=train)
+        embedding_init=self.embedding_init,
+    )(
+        q_array=q_array,
+        k_array=k_array,
+        v_array=v_array,
+        bias_array=attn_bias,
+        train=train,
+    )
     output = unflatten_blocks_nd(
-        input_x=output, blocks_per_dimension=blocks_per_dim)
+        input_x=output, blocks_per_dimension=blocks_per_dim
+    )
     output = jnp.reshape(
-        output,
-        [q_shape[0], self.local_num_heads] +
-        list(output.shape[1:]))
+        output, [q_shape[0], self.local_num_heads] + list(output.shape[1:])
+    )
     outputs.append(output)
 
     output = jnp.concatenate(outputs, axis=1)
     output_shape = list(output.shape)
     output = jnp.reshape(
-        output, [output_shape[0], self.local_num_heads, -1, output_shape[-1]])
+        output, [output_shape[0], self.local_num_heads, -1, output_shape[-1]]
+    )
     output = nn.Dense(
         output_shape[-1],
         kernel_init=self.kernel_init,
         use_bias=False,
-        name='dense')(
-            output)
+        name='dense',
+    )(output)
     output = jnp.reshape(output, output_shape)
 
     if self.decode_step is None:
-      output = jnp.reshape(
-          output, [-1] + list(output.shape[2:]))
-      output = put_back_blocks_nd(
-          input_x=output, block_shape=self.query_shape)
-      output = jnp.reshape(
-          output, q_shape[:2] + list(output.shape[1:]))
-      output = output[0:, 0:, 0:q_shape[2:-1][0], 0:]
+      output = jnp.reshape(output, [-1] + list(output.shape[2:]))
+      output = put_back_blocks_nd(input_x=output, block_shape=self.query_shape)
+      output = jnp.reshape(output, q_shape[:2] + list(output.shape[1:]))
+      output = output[0:, 0:, 0 : q_shape[2:-1][0], 0:]
     return output
 
 
@@ -1246,11 +1318,15 @@ def split_heads_nd(input_x: Tensor, num_heads: int = 8) -> Tensor:
   m = x_shape[-1]
   if isinstance(m, int) and isinstance(num_heads, int):
     if m % num_heads != 0:
-      raise ValueError(f'X_shape[-1] ({m}) and memory ({num_heads})'
-                       ' modulo not equal to 0.')
+      raise ValueError(
+          f'X_shape[-1] ({m}) and memory ({num_heads}) modulo not equal to 0.'
+      )
   x = jnp.reshape(input_x, x_shape[:-1] + [num_heads, m // num_heads])
-  axes = [0, num_dimensions + 1] + list(range(
-      1, num_dimensions + 1)) + [num_dimensions + 2]
+  axes = (
+      [0, num_dimensions + 1]
+      + list(range(1, num_dimensions + 1))
+      + [num_dimensions + 2]
+  )
   output = jnp.transpose(x, axes=axes)
   return output
 
@@ -1258,8 +1334,9 @@ def split_heads_nd(input_x: Tensor, num_heads: int = 8) -> Tensor:
 def put_item_in_decode_step(
     input_x: Tensor,
     decode_step: int = None,
-    query_shape: Tuple[int] = (256,),
-    replacement: Any = 1.0) -> Tensor:
+    query_shape: Tuple[int, ...] = (256,),
+    replacement: Any = 1.0,
+) -> Tensor:
   """Puts a single item into an an array at the `decode_step` position.
 
   Args:
@@ -1278,13 +1355,11 @@ def put_item_in_decode_step(
   index = decode_step_to_index(
       decode_step=decode_step,
       array_shape=query_shape,
-      query_shape=x_shape[2:-1])
+      query_shape=x_shape[2:-1],
+  )
   flattened_x = jnp.reshape(
-      input_x,
-      [
-          -1, x_shape[1],
-          np.prod(x_shape[2:-1]), x_shape[-1]
-      ])
+      input_x, [-1, x_shape[1], np.prod(x_shape[2:-1]), x_shape[-1]]
+  )
   flattened_x = jnp.transpose(flattened_x, axes=[2, 0, 1, 3])
   flattened_index = 0
 
@@ -1325,15 +1400,16 @@ class MultiHeadAttention(nn.Module):
     kernel_init: kernel initializer in the Dense layers.
     embedding_init: embeddings initializer.
   """
+
   hidden_size: int = 1032
-  memory_query_shape: Tuple[int] = (512,)
+  memory_query_shape: Tuple[int, ...] = (512,)
   cache: Dict[str, Tensor] = None
   bias_cache: Dict[str, Tensor] = None
   memory_antecedent: Tensor = None
   total_key_depth: int = 1032
   total_value_depth: int = 1032
-  query_shape: Tuple[int] = (256,)
-  memory_flange: Tuple[int] = (256,)
+  query_shape: Tuple[int, ...] = (256,)
+  memory_flange: Tuple[int, ...] = (256,)
   local_num_heads: int = 8
   local_relative: bool = True
   masked: bool = True
@@ -1360,18 +1436,23 @@ class MultiHeadAttention(nn.Module):
       [batch, 1, ..., 1, output_depth] if decode_step is set.
     """
     if self.total_key_depth % self.local_num_heads != 0:
-      raise ValueError('Key depth (%d) must be divisible by the number of '
-                       'attention heads (%d).' %
-                       (self.total_key_depth, self.local_num_heads))
+      raise ValueError(
+          'Key depth (%d) must be divisible by the number of '
+          'attention heads (%d).' % (self.total_key_depth, self.local_num_heads)
+      )
     if self.total_value_depth % self.local_num_heads != 0:
-      raise ValueError('Value depth (%d) must be divisible by the number of '
-                       'attention heads (%d).' %
-                       (self.total_value_depth, self.local_num_heads))
+      raise ValueError(
+          'Value depth (%d) must be divisible by the number of '
+          'attention heads (%d).'
+          % (self.total_value_depth, self.local_num_heads)
+      )
 
     if self.share_qk:
       if self.memory_antecedent:
-        raise ValueError(f'Memory ({self.mmemory_antecedent}) must be None '
-                         'if share_qk is True.')
+        raise ValueError(
+            f'Memory ({self.mmemory_antecedent}) must be None '
+            'if share_qk is True.'
+        )
 
     if self.cache is None:
       cache = {}
@@ -1390,50 +1471,57 @@ class MultiHeadAttention(nn.Module):
       latest_antecedent = get_item_at_decode_step(
           input_array=query_antecedent,
           decode_step=self.decode_step,
-          query_shape=self.query_shape)
+          query_shape=self.query_shape,
+      )
       latest_q = nn.Dense(
           self.total_key_depth,
           kernel_init=self.kernel_init,
           use_bias=False,
-          name='latest_q')(
-              latest_antecedent)
+          name='latest_q',
+      )(latest_antecedent)
       latest_k = nn.Dense(
           self.total_key_depth,
           kernel_init=self.kernel_init,
           use_bias=False,
-          name='latest_k')(
-              latest_antecedent)
+          name='latest_k',
+      )(latest_antecedent)
       latest_v = nn.Dense(
           self.total_value_depth,
           kernel_init=self.kernel_init,
           use_bias=False,
-          name='latest_v')(
-              latest_antecedent)
+          name='latest_v',
+      )(latest_antecedent)
 
       latest_q = split_heads_nd(
-          input_x=latest_q, num_heads=self.local_num_heads)
+          input_x=latest_q, num_heads=self.local_num_heads
+      )
       key_depth_per_head = self.total_key_depth // self.local_num_heads
       latest_k = split_heads_nd(
-          input_x=latest_k, num_heads=self.local_num_heads)
+          input_x=latest_k, num_heads=self.local_num_heads
+      )
       latest_v = split_heads_nd(
-          input_x=latest_v, num_heads=self.local_num_heads)
+          input_x=latest_v, num_heads=self.local_num_heads
+      )
       q_array = cache['q']
       k_array = cache['k']
       v_array = cache['v']
-      q_array = put_item_in_decode_step(q_array, latest_q, self.decode_step,
-                                        self.query_shape)
+      q_array = put_item_in_decode_step(
+          q_array, latest_q, self.decode_step, self.query_shape
+      )
 
       if self.memory_antecedent is None:
         k_array = put_item_in_decode_step(
             input_x=k_array,
             replacement=latest_k,
             decode_step=self.decode_step,
-            query_shape=self.query_shape)
+            query_shape=self.query_shape,
+        )
         v_array = put_item_in_decode_step(
             input_x=v_array,
             replacement=latest_v,
             decode_step=self.decode_step,
-            query_shape=self.query_shape)
+            query_shape=self.query_shape,
+        )
 
       cache['q'] = q_array
       cache['k'] = k_array
@@ -1444,24 +1532,24 @@ class MultiHeadAttention(nn.Module):
           self.total_key_depth,
           kernel_init=self.kernel_init,
           use_bias=False,
-          name='q')(
-              query_antecedent)
+          name='q',
+      )(query_antecedent)
       k_array = nn.Dense(
           self.total_key_depth,
           kernel_init=self.kernel_init,
           use_bias=False,
-          name='k')(
-              query_antecedent)
+          name='k',
+      )(query_antecedent)
       v_array = nn.Dense(
           self.total_value_depth,
           kernel_init=self.kernel_init,
           use_bias=False,
-          name='v')(
-              query_antecedent)
+          name='v',
+      )(query_antecedent)
 
       q_array = split_heads_nd(input_x=q_array, num_heads=self.local_num_heads)
       key_depth_per_head = self.total_key_depth // self.local_num_heads
-      q_array *= key_depth_per_head ** -0.5
+      q_array *= key_depth_per_head**-0.5
       k_array = split_heads_nd(input_x=k_array, num_heads=self.local_num_heads)
       v_array = split_heads_nd(input_x=v_array, num_heads=self.local_num_heads)
 
@@ -1492,8 +1580,8 @@ class MultiHeadAttention(nn.Module):
         token_bias=self.token_bias,
         padding_bias=self.padding_bias,
         kernel_init=self.kernel_init,
-        embedding_init=self.embedding_init)(
-            q_array=q_array, k_array=k_array, v_array=v_array, train=train)
+        embedding_init=self.embedding_init,
+    )(q_array=q_array, k_array=k_array, v_array=v_array, train=train)
 
     output = combine_heads_nd(input_x=output)
 
@@ -1501,18 +1589,20 @@ class MultiHeadAttention(nn.Module):
         self.hidden_size,
         kernel_init=self.kernel_init,
         use_bias=False,
-        name='output_transform')(
-            output)
+        name='output_transform',
+    )(output)
     return output
 
 
 # TODO(krasowiak): Potentially replace lines 1506-1563
 # with modified AddPositionEmbs from init2winit.model_lib.transformer_lm
-def get_timing_signal_1d(length: int,
-                         channels: int,
-                         min_timescale: float = 1.0,
-                         max_timescale: float = 1.0e4,
-                         start_index: int = 0) -> Tensor:
+def get_timing_signal_1d(
+    length: int,
+    channels: int,
+    min_timescale: float = 1.0,
+    max_timescale: float = 1.0e4,
+    start_index: int = 0,
+) -> Tensor:
   """Positional encoding helper function.
 
   Args:
@@ -1527,20 +1617,17 @@ def get_timing_signal_1d(length: int,
   """
   position = jnp.arange(length + start_index, dtype=jnp.float32)
   num_timescales = channels // 2
-  log_timescale_increment = (
-      math.log(float(max_timescale) / float(min_timescale)) /
-      jnp.maximum(num_timescales - 1, 1))
+  log_timescale_increment = math.log(
+      float(max_timescale) / float(min_timescale)
+  ) / jnp.maximum(num_timescales - 1, 1)
   inv_timescales = min_timescale * jnp.exp(
-      jnp.arange(num_timescales, dtype=jnp.float32) *
-      -log_timescale_increment)
-  scaled_time = jnp.expand_dims(
-      position, axis=1) * jnp.expand_dims(
-          inv_timescales, axis=0)
-  signal = jnp.concatenate(
-      [jnp.sin(scaled_time),
-              jnp.cos(scaled_time)], axis=1)
-  signal = jnp.pad(
-      signal, [[0, 0], [0, jnp.mod(channels, 2)]])
+      jnp.arange(num_timescales, dtype=jnp.float32) * -log_timescale_increment
+  )
+  scaled_time = jnp.expand_dims(position, axis=1) * jnp.expand_dims(
+      inv_timescales, axis=0
+  )
+  signal = jnp.concatenate([jnp.sin(scaled_time), jnp.cos(scaled_time)], axis=1)
+  signal = jnp.pad(signal, [[0, 0], [0, jnp.mod(channels, 2)]])
   output = jnp.reshape(signal, [1, length, channels])
   return output
 
@@ -1562,7 +1649,8 @@ class ProcessInput(nn.Module):
     preprocessing_init: initializer for the first preprocessing step.
     embedding_init: embeddings initializer.
   """
-  query_shape: Tuple[int] = (256,)
+
+  query_shape: Tuple[int, ...] = (256,)
   preprocess_dropout_a: float = 0.0
   vocab_size: int = 98302
   embedding_dims: int = 1032
@@ -1576,9 +1664,11 @@ class ProcessInput(nn.Module):
   embed_layer_name: str = 'embeddings'
 
   def setup(self):
-    self.embedding = self.param(self.embed_layer_name,
-                                self.embedding_init,
-                                (self.vocab_size, self.embedding_dims))
+    self.embedding = self.param(
+        self.embed_layer_name,
+        self.embedding_init,
+        (self.vocab_size, self.embedding_dims),
+    )
 
   @nn.compact
   def __call__(self, input_x: Tensor, train: bool = False) -> Tensor:
@@ -1601,10 +1691,14 @@ class ProcessInput(nn.Module):
       raise ValueError(f'Query length ({self.query_shape}) is not equal 1.')
 
     if self.preprocess_dropout_a:
-      dropout_array = self.param('dropout_array', self.preprocessing_init,
-                                 shape)
-      input_x = jnp.where(dropout_array < self.preprocess_dropout_a,
-                          jnp.zeros_like(input_x), input_x)
+      dropout_array = self.param(
+          'dropout_array', self.preprocessing_init, shape
+      )
+      input_x = jnp.where(
+          dropout_array < self.preprocess_dropout_a,
+          jnp.zeros_like(input_x),
+          input_x,
+      )
 
     output = jnp.expand_dims(input_x, axis=-1)
     output = shift_right(output)
@@ -1613,24 +1707,26 @@ class ProcessInput(nn.Module):
 
     if self.preprocess_dropout_b:
       output = nn.Dropout(
-          rate=self.preprocess_dropout_b, deterministic=not train)(
-              output)
+          rate=self.preprocess_dropout_b, deterministic=not train
+      )(output)
 
     output = nn.Dense(
         self.hidden_size,
         kernel_init=self.kernel_init,
         use_bias=True,
-        name='emb_dense')(
-            output)
+        name='emb_dense',
+    )(output)
 
     if self.add_timing_signal:
       output += get_timing_signal_1d(
-          length=self.max_target_length, channels=self.hidden_size)
+          length=self.max_target_length, channels=self.hidden_size
+      )
     return output
 
 
 def process_partial_targets_decoding(
-    targets: Tensor, query_shape: Tuple[int] = (256,)) -> Tensor:
+    targets: Tensor, query_shape: Tuple[int, ...] = (256,)
+) -> Tensor:
   """Preprocesses tokenized input sequences in the decoding process.
 
   Args:
@@ -1644,13 +1740,11 @@ def process_partial_targets_decoding(
   seq_length = targets_shape[1]
   blocks_per_dim = [seq_length // q for q in query_shape]
   targets = jnp.reshape(
-      targets,
-      [
-          targets_shape[0], -1,
-          np.prod(query_shape), 1
-      ])
+      targets, [targets_shape[0], -1, np.prod(query_shape), 1]
+  )
   targets = unflatten_blocks_nd(
-      input_x=targets, blocks_per_dimension=blocks_per_dim)
+      input_x=targets, blocks_per_dimension=blocks_per_dim
+  )
   targets = put_back_blocks_nd(input_x=targets, block_shape=query_shape)
   outputs = jnp.reshape(targets, [-1, seq_length])
   return outputs
@@ -1663,14 +1757,14 @@ class LayerPostProcess(nn.Module):
     post_attention_epsilon: an epsilon value for LayerNorm.
     post_attention_dropout: a dropout rate in the postprocessing process.
   """
+
   post_attention_epsilon: float = 1e-6
   post_attention_dropout: float = 0.1
 
   @nn.compact
-  def __call__(self,
-               input_x: Tensor,
-               input_y: Tensor,
-               train: bool = False) -> Tensor:
+  def __call__(
+      self, input_x: Tensor, input_y: Tensor, train: bool = False
+  ) -> Tensor:
     """Applies the LayerPostProcess module.
 
     Args:
@@ -1684,13 +1778,15 @@ class LayerPostProcess(nn.Module):
       output: a postprocessed array of shape [batch, max_target_length,
       hidden_size].
     """
-    y = nn.Dropout(
-        rate=self.post_attention_dropout, deterministic=not train)(input_y)
+    y = nn.Dropout(rate=self.post_attention_dropout, deterministic=not train)(
+        input_y
+    )
 
     output = y + input_x
 
     output = nn.LayerNorm(
-        epsilon=self.post_attention_epsilon, name='layer_norm')(output)
+        epsilon=self.post_attention_epsilon, name='layer_norm'
+    )(output)
 
     return output
 
@@ -1728,6 +1824,7 @@ class DecoderBlock(nn.Module):
     kernel_init: kernel initializer in the Dense layers.
     embedding_init: embeddings initializer.
   """
+
   layer: int = None
   decoder_dropout_a: float = 0.1
   post_attention_epsilon: float = 1e-6
@@ -1738,9 +1835,9 @@ class DecoderBlock(nn.Module):
   memory_antecedent: Tensor = None
   total_key_depth: int = 1032
   total_value_depth: int = 1032
-  query_shape: Tuple[int] = (256,)
-  memory_query_shape: Tuple[int] = (512,)
-  memory_flange: int = (256,)
+  query_shape: Tuple[int, ...] = (256,)
+  memory_query_shape: Tuple[int, ...] = (512,)
+  memory_flange: Tuple[int, ...] = (256,)
   local_num_heads: int = 8
   local_relative: bool = True
   masked: bool = True
@@ -1768,8 +1865,9 @@ class DecoderBlock(nn.Module):
     Returns:
       output: an array of shape [batch, max_target_length, hidden_size].
     """
-    x = nn.Dropout(
-        rate=self.decoder_dropout_a, deterministic=not train)(input_x)
+    x = nn.Dropout(rate=self.decoder_dropout_a, deterministic=not train)(
+        input_x
+    )
 
     if self.cache is None:
       cache = {}
@@ -1809,29 +1907,31 @@ class DecoderBlock(nn.Module):
         token_bias=self.token_bias,
         padding_bias=self.padding_bias,
         kernel_init=self.kernel_init,
-        embedding_init=self.embedding_init)(query_antecedent=x, train=train)
+        embedding_init=self.embedding_init,
+    )(query_antecedent=x, train=train)
 
     x = LayerPostProcess(
         post_attention_epsilon=self.post_attention_epsilon,
-        post_attention_dropout=self.post_attention_dropout)(
-            input_x=x, input_y=y, train=train)
+        post_attention_dropout=self.post_attention_dropout,
+    )(input_x=x, input_y=y, train=train)
 
     y = FeedForward(
         feedforward_depths=self.feedforward_depths,
         feedforward_dropout=self.feedforward_dropout,
-        kernel_init=self.kernel_init)(
-            input_x=x, train=train)
+        kernel_init=self.kernel_init,
+    )(input_x=x, train=train)
 
     output = LayerPostProcess(
         post_attention_epsilon=self.post_attention_epsilon,
-        post_attention_dropout=self.post_attention_dropout)(
-            input_x=x, input_y=y, train=train)
+        post_attention_dropout=self.post_attention_dropout,
+    )(input_x=x, input_y=y, train=train)
 
     if self.decode_step is not None:
       output = get_item_at_decode_step(
           input_array=output,
           decode_step=self.decode_step,
-          query_shape=self.query_shape)
+          query_shape=self.query_shape,
+      )
     return output
 
 
@@ -1847,11 +1947,11 @@ class LocalAttentionTransformerArchitecture(nn.Module):
     query_shape: a tuple with a query shape.
     max_target_length: the maximum allowed length of the tokenized sequence.
     preprocess_dropout_a: a dropout rate in the first preprocessing Dropout
-          layer.
+      layer.
     embedding_dims: an embedding dimension.
     vocab_size: vocabulary size.
     preprocess_dropout_b: a dropout rate in the second preprocessing Dropout
-          layer.
+      layer.
     hidden_size: a hidden size depth.
     add_timing_signal: whether to add positional encoding.
     num_decoder_layers: number of decoder blocks/layers to use in the
@@ -1880,12 +1980,13 @@ class LocalAttentionTransformerArchitecture(nn.Module):
     feedforward_depths: number of neurons in the 1st and 2nd Dense layers.
     dtype: data types of the final logits.
   """
+
   kernel_init: Any = nn.initializers.glorot_uniform()
   preprocessing_init: Any = nn.initializers.uniform()
   embedding_init: Any = nn.initializers.glorot_uniform()
   decode: bool = False
   decode_step: int = None
-  query_shape: Tuple[int] = (256,)
+  query_shape: Tuple[int, ...] = (256,)
   max_target_length: int = 8192
   preprocess_dropout_a: float = 0.0
   embedding_dims: int = 1032
@@ -1901,8 +2002,8 @@ class LocalAttentionTransformerArchitecture(nn.Module):
   bias_cache: Dict[str, Tensor] = None
   local_num_heads: int = 8
   cache: Dict[str, Tensor] = None
-  memory_query_shape: Tuple[int] = (512,)
-  memory_flange: Tuple[int] = (256,)
+  memory_query_shape: Tuple[int, ...] = (512,)
+  memory_flange: Tuple[int, ...] = (256,)
   cache_padding_bias: bool = False
   max_relative_position: int = 513
   attention_dropout: float = 0.0
@@ -1918,9 +2019,7 @@ class LocalAttentionTransformerArchitecture(nn.Module):
   dtype: str = 'float32'
 
   @nn.compact
-  def __call__(self,
-               input_x: Tensor,
-               train: bool = False) -> Tensor:
+  def __call__(self, input_x: Tensor, train: bool = False) -> Tensor:
     """Applies the TransformerLocalAttentionArchitecture module.
 
     Args:
@@ -1941,7 +2040,8 @@ class LocalAttentionTransformerArchitecture(nn.Module):
 
     if self.decode:
       x = process_partial_targets_decoding(
-          targets=x, query_shape=self.query_shape)
+          targets=x, query_shape=self.query_shape
+      )
 
     x = ProcessInput(
         preprocess_dropout_a=self.preprocess_dropout_a,
@@ -1953,8 +2053,8 @@ class LocalAttentionTransformerArchitecture(nn.Module):
         max_target_length=self.max_target_length,
         kernel_init=self.kernel_init,
         preprocessing_init=self.preprocessing_init,
-        embedding_init=self.embedding_init)(
-            input_x=x, train=train)
+        embedding_init=self.embedding_init,
+    )(input_x=x, train=train)
 
     for layer in range(self.num_decoder_layers):
       y = DecoderBlock(
@@ -1984,14 +2084,15 @@ class LocalAttentionTransformerArchitecture(nn.Module):
           feedforward_depths=self.feedforward_depths,
           feedforward_dropout=self.feedforward_dropout,
           kernel_init=self.kernel_init,
-          embedding_init=self.embedding_init)(
-              input_x=x, train=train)
+          embedding_init=self.embedding_init,
+      )(input_x=x, train=train)
 
     output = nn.Dense(
         self.vocab_size,
         kernel_init=self.kernel_init,
         use_bias=True,
-        name='final_dense_2')(y)
+        name='final_dense_2',
+    )(y)
 
     output = output.astype(self.dtype)
     return output
@@ -2004,7 +2105,8 @@ class LocalAttentionTransformer(base_model.BaseModel):
     """Returns evaulation metrics on the given batch."""
     variables = {'params': params, 'batch_stats': batch_stats}
     logits = self.flax_module.apply(
-        variables, batch['inputs'], mutable=False, train=False)
+        variables, batch['inputs'], mutable=False, train=False
+    )
     targets = batch['targets']
     # Class 0 is reserved for padding
     weights = jnp.not_equal(targets, 0).astype(jnp.float32)
@@ -2031,7 +2133,8 @@ class LocalAttentionTransformer(base_model.BaseModel):
       apply_kwargs['rngs'] = {'dropout': dropout_rng}
 
     logits, new_batch_stats = self.flax_module.apply(
-        all_variables, batch['inputs'], **apply_kwargs)
+        all_variables, batch['inputs'], **apply_kwargs
+    )
     targets = batch['targets']
     # Class 0 is reserved for padding
     weights = jnp.not_equal(targets, 0).astype(jnp.float32)
@@ -2081,7 +2184,8 @@ class LocalAttentionTransformer(base_model.BaseModel):
         post_attention_dropout=self.hps.post_attention_dropout,
         feedforward_dropout=self.hps.feedforward_dropout,
         feedforward_depths=self.hps.feedforward_depths,
-        dtype=self.hps.model_dtype)
+        dtype=self.hps.model_dtype,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""

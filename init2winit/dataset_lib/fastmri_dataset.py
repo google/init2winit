@@ -31,25 +31,27 @@ import tensorflow_datasets as tfds
 gfile = tf.io.gfile
 listdir = tf.io.gfile.listdir
 
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    input_shape=(320, 320),
-    output_shape=(320, 320),
-    data_dir='',
-    train_dir='knee_singlecoil_train',
-    train_size=34742,
-    num_train_h5_files=973,
-    val_dir='knee_singlecoil_val',
-    valid_size=3554,
-    num_valid_h5_files=100,
-    # NOTE(dsuo): ground truth is not publicly available for the test set
-    # `knee_singlecoil_test_v2`, so we split the validation set into roughly
-    # two, 100 files for validation, 99 for test. This amounts to 3,554 slices
-    # for validation, 3,581 for test.
-    test_dir='knee_singlecoil_val',
-    test_size=3581,
-    num_test_h5_files=99,
-    eval_seed=0,
-))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        input_shape=(320, 320),
+        output_shape=(320, 320),
+        data_dir='',
+        train_dir='knee_singlecoil_train',
+        train_size=34742,
+        num_train_h5_files=973,
+        val_dir='knee_singlecoil_val',
+        valid_size=3554,
+        num_valid_h5_files=100,
+        # NOTE(dsuo): ground truth is not publicly available for the test
+        # set `knee_singlecoil_test_v2`, so we split the validation set into
+        # roughly two, 100 files for validation, 99 for test. This amounts
+        # to 3,554 slices for validation, 3,581 for test.
+        test_dir='knee_singlecoil_val',
+        test_size=3581,
+        num_test_h5_files=99,
+        eval_seed=0,
+    )
+)
 
 
 METADATA = {
@@ -57,8 +59,9 @@ METADATA = {
 }
 
 
-def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
-                     seed):
+def _process_example(
+    kspace, kspace_shape, target, target_shape, volume_max, seed
+):
   """Generate a single example (slice from mri image).
 
   Args:
@@ -83,14 +86,17 @@ def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
   acceleration = tf.convert_to_tensor(4.0, dtype=tf.float32)
 
   num_low_frequencies = tf.cast(
-      num_cols_float * center_fraction, dtype=tf.int32)
+      num_cols_float * center_fraction, dtype=tf.int32
+  )
 
   # calculate_center_mask
   mask = tf.zeros(num_cols, dtype=tf.float32)
   pad = (num_cols - num_low_frequencies + 1) // 2
   mask = tf.tensor_scatter_nd_update(
-      mask, tf.reshape(tf.range(pad, pad + num_low_frequencies), (-1, 1)),
-      tf.ones(num_low_frequencies))
+      mask,
+      tf.reshape(tf.range(pad, pad + num_low_frequencies), (-1, 1)),
+      tf.ones(num_low_frequencies),
+  )
 
   # reshape_mask
   center_mask = tf.reshape(mask, (1, num_cols))
@@ -102,8 +108,8 @@ def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
   )
 
   mask = tf.cast(
-      tf.random.stateless_uniform((num_cols,), seed) < prob,
-      dtype=tf.float32)
+      tf.random.stateless_uniform((num_cols,), seed) < prob, dtype=tf.float32
+  )
   acceleration_mask = tf.reshape(mask, (1, num_cols))
 
   mask = tf.math.maximum(center_mask, acceleration_mask)
@@ -118,8 +124,10 @@ def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
   image = tf.signal.fftshift(shifted_image, axes=(0, 1))
   scaling_norm = tf.cast(
       tf.math.sqrt(
-          tf.cast(tf.math.reduce_prod(tf.shape(kspace)[-2:]), 'float32')),
-      kspace.dtype)
+          tf.cast(tf.math.reduce_prod(tf.shape(kspace)[-2:]), 'float32')
+      ),
+      kspace.dtype,
+  )
   image = image * scaling_norm
   image = tf.stack((tf.math.real(image), tf.math.imag(image)), axis=-1)
 
@@ -132,7 +140,7 @@ def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
   image = image[..., w_from:w_to, h_from:h_to, :]
 
   # complex_abs
-  abs_image = tf.math.sqrt(tf.math.reduce_sum(image ** 2, axis=-1))
+  abs_image = tf.math.sqrt(tf.math.reduce_sum(image**2, axis=-1))
 
   # normalize_instance
   mean = tf.math.reduce_mean(abs_image)
@@ -151,14 +159,17 @@ def _process_example(kspace, kspace_shape, target, target_shape, volume_max,
       'targets': target,
       'mean': mean,
       'std': std,
-      'volume_max': volume_max
+      'volume_max': volume_max,
   }
 
 
 def _h5_to_examples(path):
   """Yield MRI slices from an hdf5 file containing a single MRI volume."""
-  tf.print('fastmri_dataset._h5_to_examples call:', path,
-           datetime.datetime.now().strftime('%H:%M:%S:%f'))
+  tf.print(
+      'fastmri_dataset._h5_to_examples call:',
+      path,
+      datetime.datetime.now().strftime('%H:%M:%S:%f'),
+  )
   with gfile.GFile(path, 'rb') as gf:
     with h5py.File(gf, 'r') as hf:
       # NOTE(dsuo): logic taken from reference code
@@ -166,7 +177,8 @@ def _h5_to_examples(path):
 
       for i in range(hf['kspace'].shape[0]):
         yield hf['kspace'][i], hf['kspace'][i].shape, hf['reconstruction_esc'][
-            i], hf['reconstruction_esc'][i].shape, volume_max
+            i
+        ], hf['reconstruction_esc'][i].shape, volume_max
 
 
 def _create_generator(filename):
@@ -178,7 +190,8 @@ def _create_generator(filename):
       tf.TensorSpec(shape=(), dtype=tf.float32),
   )
   return tf.data.Dataset.from_generator(
-      _h5_to_examples, args=(filename,), output_signature=signature)
+      _h5_to_examples, args=(filename,), output_signature=signature
+  )
 
 
 def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
@@ -192,6 +205,7 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
     hps: The hparams the experiment is run with. Required fields are
       num_train_h5_files, num_test_h5_files, and num_valid_h5_files.
     shuffle_rng: The RNG used to shuffle the split.
+
   Returns:
     A `tf.data.Dataset`.
   """
@@ -293,20 +307,23 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
       _create_generator,
       cycle_length=32,
       block_length=64,
-      num_parallel_calls=hps.num_tf_data_map_parallel_calls)
+      num_parallel_calls=hps.num_tf_data_map_parallel_calls,
+  )
   ds = ds.cache()
 
   def process_example(example_index, example):
     if split == 'train':
       process_rng = tf.random.experimental.stateless_fold_in(
-          shuffle_rng, example_index)
+          shuffle_rng, example_index
+      )
     else:
       # NOTE(dsuo): we use fixed randomness for eval.
       process_rng = tf.cast(jax.random.PRNGKey(hps.eval_seed), tf.int64)
     return _process_example(*example, process_rng)
 
   ds = ds.enumerate().map(
-      process_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls)
+      process_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls
+  )
 
   if split == 'train':
     ds = ds.shuffle(
@@ -344,8 +361,9 @@ def get_fastmri(shuffle_rng, batch_size, eval_batch_size, hps):
   train_ds = tfds.as_numpy(train_ds)
 
   # NOTE(dsuo): fastMRI has fixed randomness for eval.
-  eval_train_ds = load_split(per_host_eval_batch_size, 'eval_train', hps,
-                             shuffle_rng)
+  eval_train_ds = load_split(
+      per_host_eval_batch_size, 'eval_train', hps, shuffle_rng
+  )
   eval_train_ds = tfds.as_numpy(eval_train_ds)
 
   eval_ds = load_split(per_host_eval_batch_size, 'val', hps, shuffle_rng)
@@ -369,20 +387,20 @@ def get_fastmri(shuffle_rng, batch_size, eval_batch_size, hps):
     for batch in itertools.islice(test_ds, num_batches):
       yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
-  return data_utils.Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
-                            test_epoch)
+  return data_utils.Dataset(
+      train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch
+  )
 
 
 def get_fake_batch(hps):
   return {
-      'inputs':
-          np.ones((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype),
-      'targets':
-          np.ones((hps.batch_size, *hps.output_shape), dtype=hps.model_dtype),
-      'mean':
-          np.ones((hps.batch_size,), dtype=hps.model_dtype),
-      'std':
-          np.ones((hps.batch_size,), dtype=hps.model_dtype),
-      'volume_max':
-          np.ones((hps.batch_size,), dtype=hps.model_dtype),
+      'inputs': np.ones(
+          (hps.batch_size, *hps.input_shape), dtype=hps.model_dtype
+      ),
+      'targets': np.ones(
+          (hps.batch_size, *hps.output_shape), dtype=hps.model_dtype
+      ),
+      'mean': np.ones((hps.batch_size,), dtype=hps.model_dtype),
+      'std': np.ones((hps.batch_size,), dtype=hps.model_dtype),
+      'volume_max': np.ones((hps.batch_size,), dtype=hps.model_dtype),
   }

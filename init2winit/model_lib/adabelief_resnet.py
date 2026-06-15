@@ -30,7 +30,6 @@ pooling layer.
 https://arxiv.org/abs/2010.07468
 
 https://github.com/juntang-zhuang/Adabelief-Optimizer/blob/update_0.1.0/PyTorch_Experiments/classification_cifar10/models/resnet.py
-
 """
 
 import functools
@@ -44,7 +43,6 @@ from init2winit.model_lib import normalization
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 
-
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         num_filters=16,
@@ -55,11 +53,13 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         model_dtype='float32',
         virtual_batch_size=None,
         data_format='NHWC',
-    ))
+    )
+)
 
 
 class BasicResidualBlock(nn.Module):
   """Basic ResNet block."""
+
   filters: int
   strides: Tuple[int, int] = (1, 1)
   dtype: model_utils.Dtype = jnp.float32
@@ -81,16 +81,18 @@ class BasicResidualBlock(nn.Module):
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
         total_batch_size=self.total_batch_size,
-        data_format=self.data_format)
+        data_format=self.data_format,
+    )
     conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
 
     residual = x
     if needs_projection:
       residual = conv(
-          self.filters, (1, 1), self.strides, 'VALID',
-          name='proj_conv')(residual)
+          self.filters, (1, 1), self.strides, 'VALID', name='proj_conv'
+      )(residual)
       residual = batch_norm(name='proj_bn')(
-          residual, use_running_average=not train)
+          residual, use_running_average=not train
+      )
 
     y = conv(self.filters, (3, 3), self.strides, 'SAME', name='conv1')(x)
     y = batch_norm(name='bn1')(y, use_running_average=not train)
@@ -103,6 +105,7 @@ class BasicResidualBlock(nn.Module):
 
 class BottleneckResidualBlock(nn.Module):
   """Bottleneck ResNet block."""
+
   filters: int
   strides: Tuple[int, int] = (1, 1)
   dtype: model_utils.Dtype = jnp.float32
@@ -124,15 +127,18 @@ class BottleneckResidualBlock(nn.Module):
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
         total_batch_size=self.total_batch_size,
-        data_format=self.data_format)
+        data_format=self.data_format,
+    )
     conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
 
     residual = x
     if needs_projection:
-      residual = conv(
-          self.filters * 4, (1, 1), self.strides, name='proj_conv')(residual)
+      residual = conv(self.filters * 4, (1, 1), self.strides, name='proj_conv')(
+          residual
+      )
       residual = batch_norm(name='proj_bn')(
-          residual, use_running_average=not train)
+          residual, use_running_average=not train
+      )
 
     y = conv(self.filters, (1, 1), name='conv1')(x)
     y = batch_norm(name='bn1')(y, use_running_average=not train)
@@ -143,13 +149,15 @@ class BottleneckResidualBlock(nn.Module):
     y = conv(self.filters * 4, (1, 1), name='conv3')(y)
 
     y = batch_norm(name='bn3', scale_init=nn.initializers.zeros)(
-        y, use_running_average=not train)
+        y, use_running_average=not train
+    )
     y = nn.relu(residual + y)
     return y
 
 
 class ResNet(nn.Module):
   """Adabelief ResNetV1."""
+
   num_outputs: int
   num_filters: int = 64
   num_layers: int = 50
@@ -167,11 +175,14 @@ class ResNet(nn.Module):
       raise ValueError('Please provide a valid number of layers')
     block_sizes = _block_size_options[self.num_layers]
     x = nn.Conv(
-        self.num_filters, (3, 3), (1, 1),
+        self.num_filters,
+        (3, 3),
+        (1, 1),
         'SAME',
         use_bias=False,
         dtype=self.dtype,
-        name='init_conv')(x)
+        name='init_conv',
+    )(x)
     x = normalization.VirtualBatchNorm(
         momentum=self.batch_norm_momentum,
         epsilon=self.batch_norm_epsilon,
@@ -180,7 +191,8 @@ class ResNet(nn.Module):
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
         total_batch_size=self.total_batch_size,
-        data_format=self.data_format)(x, use_running_average=not train)
+        data_format=self.data_format,
+    )(x, use_running_average=not train)
     x = nn.relu(x)
     residual_block = block_type_options[self.num_layers]
     for i, block_size in enumerate(block_sizes):
@@ -195,7 +207,8 @@ class ResNet(nn.Module):
             batch_size=self.batch_size,
             virtual_batch_size=self.virtual_batch_size,
             total_batch_size=self.total_batch_size,
-            data_format=self.data_format)(x, train=train)
+            data_format=self.data_format,
+        )(x, train=train)
     x = jnp.mean(x, axis=(1, 2))
     x = nn.Dense(self.num_outputs, dtype=self.dtype)(x)
     return x
@@ -210,7 +223,7 @@ _block_size_options = {
     50: [3, 4, 6, 3],
     101: [3, 4, 23, 3],
     152: [3, 8, 36, 3],
-    200: [3, 24, 36, 3]
+    200: [3, 24, 36, 3],
 }
 
 block_type_options = {
@@ -220,7 +233,7 @@ block_type_options = {
     50: BottleneckResidualBlock,
     101: BottleneckResidualBlock,
     152: BottleneckResidualBlock,
-    200: BottleneckResidualBlock
+    200: BottleneckResidualBlock,
 }
 
 
@@ -239,7 +252,8 @@ class AdaBeliefResnetModel(base_model.BaseModel):
         batch_size=self.hps.batch_size,
         virtual_batch_size=self.hps.virtual_batch_size,
         total_batch_size=self.hps.total_accumulated_batch_size,
-        data_format=self.hps.data_format)
+        data_format=self.hps.data_format,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""

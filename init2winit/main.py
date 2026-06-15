@@ -72,9 +72,12 @@ config_flags.DEFINE_config_file(
 
 
 # Special, has no direct equivalent in config.
-flags.DEFINE_string('experiment_dir', None,
-                    'Path to save weights and other results. Each trial '
-                    'directory will have path experiment_dir/worker_id/.')
+flags.DEFINE_string(
+    'experiment_dir',
+    None,
+    'Path to save weights and other results. Each trial '
+    'directory will have path experiment_dir/worker_id/.',
+)
 
 
 FLAGS = flags.FLAGS
@@ -152,11 +155,13 @@ def _run(
   dataset_builder = datasets.get_dataset(dataset_name)
   data_selector = datasets.get_data_selector(data_selector_name)
   dataset_meta_data = datasets.get_dataset_meta_data(dataset_name)
-  input_pipeline_hps = config_dict.ConfigDict(dict(
-      num_tf_data_prefetches=num_tf_data_prefetches,
-      num_device_prefetches=num_device_prefetches,
-      num_tf_data_map_parallel_calls=num_tf_data_map_parallel_calls,
-  ))
+  input_pipeline_hps = config_dict.ConfigDict(
+      dict(
+          num_tf_data_prefetches=num_tf_data_prefetches,
+          num_device_prefetches=num_device_prefetches,
+          num_tf_data_map_parallel_calls=num_tf_data_map_parallel_calls,
+      )
+  )
   training_algorithm_class = (
       training_algorithms_registry.get_training_algorithm(
           training_algorithm_name

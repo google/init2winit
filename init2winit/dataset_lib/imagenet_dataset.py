@@ -386,7 +386,7 @@ def load_split(
       per_batch_mixup_rng = tf.random.experimental.stateless_fold_in(
           mixup_rng, batch_index
       )
-      (inputs, targets) = image_preprocessing.mixup_tf(
+      inputs, targets = image_preprocessing.mixup_tf(
           per_batch_mixup_rng,
           batch['inputs'],
           batch['targets'],

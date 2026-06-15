@@ -17,6 +17,7 @@
 
 Adapted from third_party/py/language/google/generation/tsukuyomi/models.py
 """
+
 import dataclasses
 from typing import Any, Optional
 
@@ -96,7 +97,8 @@ def shift_right(x, axis=1):
   pad_widths = [(0, 0)] * len(x.shape)
   pad_widths[axis] = (1, 0)
   padded = jnp.pad(
-      x, pad_widths, mode='constant', constant_values=x.dtype.type(0))
+      x, pad_widths, mode='constant', constant_values=x.dtype.type(0)
+  )
   return padded[:, :-1]
 
 
@@ -120,8 +122,8 @@ def sinusoidal_init(max_len=2048, min_scale=1.0, max_scale=10000.0):
     position = np.arange(0, max_len)[:, np.newaxis]
     scale_factor = -np.log(max_scale / min_scale) / (d_feature // 2 - 1)
     div_term = min_scale * np.exp(np.arange(0, d_feature // 2) * scale_factor)
-    pe[:, :d_feature // 2] = np.sin(position * div_term)
-    pe[:, d_feature // 2:2 * (d_feature // 2)] = np.cos(position * div_term)
+    pe[:, : d_feature // 2] = np.sin(position * div_term)
+    pe[:, d_feature // 2 : 2 * (d_feature // 2)] = np.cos(position * div_term)
     pe = pe[np.newaxis, :, :]  # [1, max_len, d_feature]
     return jnp.array(pe)
 
@@ -136,15 +138,13 @@ class AddPositionEmbs(nn.Module):
     (non-learned) sinusoidal embedding table.
   decode: whether to use an autoregressive cache.
   """
+
   max_len: int = 512
   posemb_init: Optional[model_utils.Initializer] = None
   decode: bool = False
 
   @nn.compact
-  def __call__(self,
-               inputs,
-               inputs_positions=None,
-               train=True):
+  def __call__(self, inputs, inputs_positions=None, train=True):
     """Applies AddPositionEmbs module.
 
     By default this layer uses a fixed sinusoidal embedding table. If a
@@ -161,22 +161,26 @@ class AddPositionEmbs(nn.Module):
     """
     del train
     # inputs.shape is (batch_size, seq_len, emb_dim)
-    assert inputs.ndim == 3, ('Number of dimensions should be 3,'
-                              ' but it is: %d' % inputs.ndim)
+    assert inputs.ndim == 3, (
+        'Number of dimensions should be 3, but it is: %d' % inputs.ndim
+    )
     length = inputs.shape[1]
     pos_emb_shape = (1, self.max_len, inputs.shape[-1])
     if self.posemb_init is None:
       # Use a fixed (non-learned) sinusoidal position embedding.
       pos_embedding = sinusoidal_init(max_len=self.max_len)(
-          None, pos_emb_shape, None)
+          None, pos_emb_shape, None
+      )
     else:
       pos_embedding = self.param(
-          'pos_embedding', pos_emb_shape, self.posemb_init)
+          'pos_embedding', pos_emb_shape, self.posemb_init
+      )
     pe = pos_embedding[:, :length, :]
     if self.decode:
       is_initialized = self.has_variable('cache', 'cache_index')
-      cache_index = self.variable('cache', 'cache_index',
-                                  lambda: jnp.array(0, dtype=jnp.uint32))
+      cache_index = self.variable(
+          'cache', 'cache_index', lambda: jnp.array(0, dtype=jnp.uint32)
+      )
       if is_initialized:
         i = cache_index.value
         cache_index.value = i + 1
@@ -192,6 +196,7 @@ class AddPositionEmbs(nn.Module):
 
 class MlpBlock(nn.Module):
   """Transformer MLP / feed-forward block."""
+
   mlp_dim: int
   dtype: model_utils.Dtype = jnp.float32
   out_dim: Optional[int] = None
@@ -219,11 +224,13 @@ class MlpBlock(nn.Module):
         kernel_init=self.kernel_init,
         bias_init=self.bias_init,
         weight_bin_hparams=whps,
-        inputs_bin_hparams=ahps)(inputs)
+        inputs_bin_hparams=ahps,
+    )(inputs)
     x = nn.relu(x)
     # add layer norm 1 for the sake of binarizing input activations of dense2
     dense1_normalize = model_utils.get_normalizer(
-        'layer_norm', train, dtype=self.dtype)
+        'layer_norm', train, dtype=self.dtype
+    )
     x = dense1_normalize()(x)
     x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
     output = binarize_layers.BiDense(
@@ -232,13 +239,14 @@ class MlpBlock(nn.Module):
         kernel_init=self.kernel_init,
         bias_init=self.bias_init,
         weight_bin_hparams=whps,
-        inputs_bin_hparams=ahps)(x)
+        inputs_bin_hparams=ahps,
+    )(x)
     # Add layer norm 2 to adjust the output magnitude after binarization
     dense2_normalize = model_utils.get_normalizer(
-        'layer_norm', train, dtype=self.dtype)
+        'layer_norm', train, dtype=self.dtype
+    )
     output = dense2_normalize()(output)
-    output = nn.Dropout(
-        rate=self.dropout_rate, deterministic=not train)(output)
+    output = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(output)
     return output
 
 
@@ -254,9 +262,10 @@ class Encoder1DBlock(nn.Module):
     attention_dropout_rate: <float> Dropout rate for attention weights.
     normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
       'pre_layer_norm', 'none'
-    enc_self_attn_kernel_init_fn: initializer for encoder's
-      self attention matrices.
+    enc_self_attn_kernel_init_fn: initializer for encoder's self attention
+      matrices.
   """
+
   qkv_dim: int
   mlp_dim: int
   num_heads: int
@@ -273,10 +282,7 @@ class Encoder1DBlock(nn.Module):
   )
 
   @nn.compact
-  def __call__(self,
-               inputs,
-               encoder_mask=None,
-               train=True):
+  def __call__(self, inputs, encoder_mask=None, train=True):
     """Applies Encoder1DBlock module.
 
     Args:
@@ -290,16 +296,24 @@ class Encoder1DBlock(nn.Module):
     # Attention block.
     assert inputs.ndim == 3
     if self.normalizer in [
-        'batch_norm', 'layer_norm', 'pre_layer_norm', 'none']:
+        'batch_norm',
+        'layer_norm',
+        'pre_layer_norm',
+        'none',
+    ]:
       maybe_pre_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=self.dtype)
+          self.normalizer, train, dtype=self.dtype
+      )
       maybe_post_normalize = model_utils.get_normalizer(
-          'none', train, dtype=self.dtype)
+          'none', train, dtype=self.dtype
+      )
     elif self.normalizer == 'post_layer_norm':
       maybe_pre_normalize = model_utils.get_normalizer(
-          'none', train, dtype=self.dtype)
+          'none', train, dtype=self.dtype
+      )
       maybe_post_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=self.dtype)
+          self.normalizer, train, dtype=self.dtype
+      )
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
@@ -315,8 +329,8 @@ class Encoder1DBlock(nn.Module):
         dropout_rate=self.attention_dropout_rate,
         binarize_hparams=self.binarize_hparams,
         dynamic_context=self.dynamic_context,
-        name='EncoderSelfAttention')(
-            x, mask=encoder_mask, deterministic=not train)
+        name='EncoderSelfAttention',
+    )(x, mask=encoder_mask, deterministic=not train)
 
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
     x = x + inputs
@@ -330,7 +344,8 @@ class Encoder1DBlock(nn.Module):
         dropout_rate=self.dropout_rate,
         binarize_hparams=self.binarize_hparams,
         dynamic_context=self.dynamic_context,
-        name='MLPBlock')(y, train=train)
+        name='MLPBlock',
+    )(y, train=train)
 
     res = x + y
     return maybe_post_normalize()(res)
@@ -348,12 +363,13 @@ class EncoderDecoder1DBlock(nn.Module):
     attention_dropout_rate: <float> Dropout rate for attention weights
     normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
       'pre_layer_norm', 'none'
-    dec_self_attn_kernel_init_fn: initializer for decoder's
-      self attention matrices.
-    dec_cross_attn_kernel_init_fn: initializer for decoder's
-      cross attention matrices.
+    dec_self_attn_kernel_init_fn: initializer for decoder's self attention
+      matrices.
+    dec_cross_attn_kernel_init_fn: initializer for decoder's cross attention
+      matrices.
     decode: whether to use an autoregressive cache.
   """
+
   qkv_dim: int
   mlp_dim: int
   num_heads: int
@@ -372,12 +388,14 @@ class EncoderDecoder1DBlock(nn.Module):
   )
 
   @nn.compact
-  def __call__(self,
-               targets,
-               encoded,
-               decoder_mask=None,
-               encoder_decoder_mask=None,
-               train=True):
+  def __call__(
+      self,
+      targets,
+      encoded,
+      decoder_mask=None,
+      encoder_decoder_mask=None,
+      train=True,
+  ):
     """Applies EncoderDecoder1DBlock module.
 
     Args:
@@ -393,16 +411,24 @@ class EncoderDecoder1DBlock(nn.Module):
     # Decoder block.
     assert targets.ndim == 3
     if self.normalizer in [
-        'batch_norm', 'layer_norm', 'pre_layer_norm', 'none']:
+        'batch_norm',
+        'layer_norm',
+        'pre_layer_norm',
+        'none',
+    ]:
       maybe_pre_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=self.dtype)
+          self.normalizer, train, dtype=self.dtype
+      )
       maybe_post_normalize = model_utils.get_normalizer(
-          'none', train, dtype=self.dtype)
+          'none', train, dtype=self.dtype
+      )
     elif self.normalizer == 'post_layer_norm':
       maybe_pre_normalize = model_utils.get_normalizer(
-          'none', train, dtype=self.dtype)
+          'none', train, dtype=self.dtype
+      )
       maybe_post_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=self.dtype)
+          self.normalizer, train, dtype=self.dtype
+      )
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
@@ -419,7 +445,8 @@ class EncoderDecoder1DBlock(nn.Module):
         decode=self.decode,
         binarize_hparams=self.binarize_hparams,
         dynamic_context=self.dynamic_context,
-        name='DecoderSelfAttention')(x, decoder_mask, deterministic=not train)
+        name='DecoderSelfAttention',
+    )(x, decoder_mask, deterministic=not train)
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
     x = x + targets
 
@@ -436,11 +463,10 @@ class EncoderDecoder1DBlock(nn.Module):
         broadcast_dropout=False,
         dropout_rate=self.attention_dropout_rate,
         binarize_hparams=self.binarize_hparams,
-        dynamic_context=self.dynamic_context)(
-            y, encoded, encoder_decoder_mask, deterministic=not train)
+        dynamic_context=self.dynamic_context,
+    )(y, encoded, encoder_decoder_mask, deterministic=not train)
 
-    y = nn.Dropout(rate=self.dropout_rate)(
-        y, deterministic=not train)
+    y = nn.Dropout(rate=self.dropout_rate)(y, deterministic=not train)
     y = y + x
 
     y = maybe_post_normalize()(y)
@@ -452,7 +478,8 @@ class EncoderDecoder1DBlock(nn.Module):
         dropout_rate=self.dropout_rate,
         binarize_hparams=self.binarize_hparams,
         dynamic_context=self.dynamic_context,
-        name='MLPBlock')(z, train=train)
+        name='MLPBlock',
+    )(z, train=train)
 
     res = y + z
     return maybe_post_normalize()(res)
@@ -461,21 +488,22 @@ class EncoderDecoder1DBlock(nn.Module):
 class Encoder(nn.Module):
   """Transformer Model Encoder for sequence to sequence translation.
 
-    vocab_size: size of the vocabulary
-    shared_embedding: a shared embedding layer to use.
-    use_bfloat16: bool: whether use bfloat16.
-    emb_dim: dimension of embedding
-    num_heads: number of heads
-    enc_num_layers: number of layers
-    qkv_dim: dimension of the query/key/value
-    mlp_dim: dimension of the mlp on top of attention block
-    max_len: maximum length.
-    dropout_rate: dropout rate
-    normalizer: One of 'batch_norm', 'layer_norm', 'none'
-    attention_dropout_rate: dropout rate for attention weights
-    enc_self_attn_kernel_init_fn: initializer for encoder's
-      self attention matrices.
+  vocab_size: size of the vocabulary
+  shared_embedding: a shared embedding layer to use.
+  use_bfloat16: bool: whether use bfloat16.
+  emb_dim: dimension of embedding
+  num_heads: number of heads
+  enc_num_layers: number of layers
+  qkv_dim: dimension of the query/key/value
+  mlp_dim: dimension of the mlp on top of attention block
+  max_len: maximum length.
+  dropout_rate: dropout rate
+  normalizer: One of 'batch_norm', 'layer_norm', 'none'
+  attention_dropout_rate: dropout rate for attention weights
+  enc_self_attn_kernel_init_fn: initializer for encoder's
+    self attention matrices.
   """
+
   vocab_size: int
   shared_embedding: Any = None
   use_bfloat16: bool = False
@@ -497,11 +525,9 @@ class Encoder(nn.Module):
   )
 
   @nn.compact
-  def __call__(self,
-               inputs,
-               inputs_positions=None,
-               encoder_mask=None,
-               train=True):
+  def __call__(
+      self, inputs, inputs_positions=None, encoder_mask=None, train=True
+  ):
     """Applies Transformer model on the inputs.
 
     Args:
@@ -521,16 +547,15 @@ class Encoder(nn.Module):
           num_embeddings=self.vocab_size,
           features=self.emb_dim,
           embedding_init=nn.initializers.normal(stddev=1.0),
-          name='input_vocab_embeddings')
+          name='input_vocab_embeddings',
+      )
     else:
       input_embed = self.shared_embedding
     x = inputs.astype('int32')
     x = input_embed(x)
     x = AddPositionEmbs(
-        max_len=self.max_len,
-        decode=False,
-        name='posembed_input')(
-            x, inputs_positions=inputs_positions, train=train)
+        max_len=self.max_len, decode=False, name='posembed_input'
+    )(x, inputs_positions=inputs_positions, train=train)
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
 
     if self.use_bfloat16:
@@ -552,13 +577,12 @@ class Encoder(nn.Module):
           enc_self_attn_kernel_init_fn=self.enc_self_attn_kernel_init_fn,
           binarize_hparams=self.binarize_hparams,
           dynamic_context=self.dynamic_context,
-          name=f'encoderblock_{lyr}')(
-              x,
-              encoder_mask=encoder_mask,
-              train=train)
+          name=f'encoderblock_{lyr}',
+      )(x, encoder_mask=encoder_mask, train=train)
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
       maybe_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=dtype)
+          self.normalizer, train, dtype=dtype
+      )
       x = maybe_normalize()(x)
     return x
 
@@ -566,27 +590,28 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
   """Transformer Model Decoder for sequence to sequence translation.
 
-    output_vocab_size: size of the vocabulary.
-    shared_embedding: a shared embedding layer to use.
-    logits_via_embedding: bool: whether final logit transform shares embedding
-      weights.
-    use_bfloat16: bool: whether use bfloat16.
-    emb_dim: dimension of embedding.
-    num_heads: number of heads.
-    dec_num_layers: number of layers.
-    qkv_dim: dimension of the query/key/value.
-    mlp_dim: dimension of the mlp on top of attention block.
-    max_len: maximum length.
-    decode: whether to use an autoregressive cache.
-    dropout_rate: dropout rate.
-    normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
-      'pre_layer_norm', 'none'
-    attention_dropout_rate: dropout rate for attention weights.
-    dec_self_attn_kernel_init_fn: initializer for decoder's
-      self attention matrices.
-    dec_cross_attn_kernel_init_fn: initializer for decoder's
-      cross attention matrices.
+  output_vocab_size: size of the vocabulary.
+  shared_embedding: a shared embedding layer to use.
+  logits_via_embedding: bool: whether final logit transform shares embedding
+    weights.
+  use_bfloat16: bool: whether use bfloat16.
+  emb_dim: dimension of embedding.
+  num_heads: number of heads.
+  dec_num_layers: number of layers.
+  qkv_dim: dimension of the query/key/value.
+  mlp_dim: dimension of the mlp on top of attention block.
+  max_len: maximum length.
+  decode: whether to use an autoregressive cache.
+  dropout_rate: dropout rate.
+  normalizer: One of 'batch_norm', 'layer_norm', 'post_layer_norm',
+    'pre_layer_norm', 'none'
+  attention_dropout_rate: dropout rate for attention weights.
+  dec_self_attn_kernel_init_fn: initializer for decoder's
+    self attention matrices.
+  dec_cross_attn_kernel_init_fn: initializer for decoder's
+    cross attention matrices.
   """
+
   output_vocab_size: int
   shared_embedding: Any = None
   logits_via_embedding: bool = False
@@ -611,13 +636,15 @@ class Decoder(nn.Module):
   )
 
   @nn.compact
-  def __call__(self,
-               encoded,
-               targets,
-               targets_positions=None,
-               decoder_mask=None,
-               encoder_decoder_mask=None,
-               train=True):
+  def __call__(
+      self,
+      encoded,
+      targets,
+      targets_positions=None,
+      decoder_mask=None,
+      encoder_decoder_mask=None,
+      train=True,
+  ):
     """Applies Transformer model on the inputs.
 
     Args:
@@ -626,7 +653,6 @@ class Decoder(nn.Module):
       targets_positions: input subsequence positions for packed examples.
       decoder_mask: decoder self-attention mask.
       encoder_decoder_mask: encoder-decoder attention mask.
-
       train: whether it is training.
 
     Returns:
@@ -642,7 +668,8 @@ class Decoder(nn.Module):
           num_embeddings=self.output_vocab_size,
           features=self.emb_dim,
           embedding_init=nn.initializers.normal(stddev=1.0),
-          name='output_vocab_embeddings')
+          name='output_vocab_embeddings',
+      )
     else:
       output_embed = self.shared_embedding
 
@@ -651,10 +678,8 @@ class Decoder(nn.Module):
       y = shift_right(y)
     y = output_embed(y)
     y = AddPositionEmbs(
-        max_len=self.max_len,
-        decode=self.decode,
-        name='posembed_output')(
-            y, inputs_positions=targets_positions, train=train)
+        max_len=self.max_len, decode=self.decode, name='posembed_output'
+    )(y, inputs_positions=targets_positions, train=train)
     y = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(y)
 
     if self.use_bfloat16:
@@ -675,15 +700,18 @@ class Decoder(nn.Module):
           decode=self.decode,
           binarize_hparams=self.binarize_hparams,
           dynamic_context=self.dynamic_context,
-          name=f'encoderdecoderblock_{lyr}')(
-              y,
-              encoded,
-              decoder_mask=decoder_mask,
-              encoder_decoder_mask=encoder_decoder_mask,
-              train=train)
+          name=f'encoderdecoderblock_{lyr}',
+      )(
+          y,
+          encoded,
+          decoder_mask=decoder_mask,
+          encoder_decoder_mask=encoder_decoder_mask,
+          train=train,
+      )
     if self.normalizer in ['batch_norm', 'layer_norm', 'pre_layer_norm']:
       maybe_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=dtype)
+          self.normalizer, train, dtype=dtype
+      )
       y = maybe_normalize()(y)
 
     # Decoded Logits
@@ -699,7 +727,8 @@ class Decoder(nn.Module):
           dtype=dtype,
           kernel_init=nn.initializers.xavier_uniform(),
           bias_init=nn.initializers.normal(stddev=1e-6),
-          name='logitdense')(y)
+          name='logitdense',
+      )(y)
     return logits
 
 
@@ -712,31 +741,32 @@ class Decoder(nn.Module):
 class Transformer(nn.Module):
   """Transformer Model for sequence to sequence translation.
 
-    vocab_size: size of the input vocabulary.
-    output_vocab_size: size of the output vocabulary. If None, the output
-      vocabulary size is assumed to be the same as vocab_size.
-    share_embeddings: bool: share embedding layer for inputs and targets.
-    logits_via_embedding: bool: whether final logit transform shares embedding
-      weights.
-    use_bfloat16: bool: whether use bfloat16.
-    emb_dim: dimension of embedding.
-    num_heads: number of heads.
-    enc_num_layers: number of encoder layers.
-    dec_num_layers: number of decoder layers.
-    qkv_dim: dimension of the query/key/value.
-    mlp_dim: dimension of the mlp on top of attention block.
-    max_len: maximum length.
-    dropout_rate: dropout rate.
-    attention_dropout_rate: dropout rate for attention weights.
-    normalizer: One of 'batch_norm', 'layer_norm', 'none'
-    enc_self_attn_kernel_init_fn: initializer for encoder's
-      self attention matrices.
-    dec_self_attn_kernel_init_fn: initializer for decoder's
-      self attention matrices.
-    dec_cross_attn_kernel_init_fn: initializer for decoder's
-      cross attention matrices.
-    decode: whether to use an autoregressive cache.
+  vocab_size: size of the input vocabulary.
+  output_vocab_size: size of the output vocabulary. If None, the output
+    vocabulary size is assumed to be the same as vocab_size.
+  share_embeddings: bool: share embedding layer for inputs and targets.
+  logits_via_embedding: bool: whether final logit transform shares embedding
+    weights.
+  use_bfloat16: bool: whether use bfloat16.
+  emb_dim: dimension of embedding.
+  num_heads: number of heads.
+  enc_num_layers: number of encoder layers.
+  dec_num_layers: number of decoder layers.
+  qkv_dim: dimension of the query/key/value.
+  mlp_dim: dimension of the mlp on top of attention block.
+  max_len: maximum length.
+  dropout_rate: dropout rate.
+  attention_dropout_rate: dropout rate for attention weights.
+  normalizer: One of 'batch_norm', 'layer_norm', 'none'
+  enc_self_attn_kernel_init_fn: initializer for encoder's
+    self attention matrices.
+  dec_self_attn_kernel_init_fn: initializer for decoder's
+    self attention matrices.
+  dec_cross_attn_kernel_init_fn: initializer for decoder's
+    cross attention matrices.
+  decode: whether to use an autoregressive cache.
   """
+
   vocab_size: Optional[int] = None
   output_vocab_size: Optional[int] = None
   share_embeddings: bool = False
@@ -766,13 +796,15 @@ class Transformer(nn.Module):
   def setup(self):
     if self.share_embeddings:
       if self.output_vocab_size is not None:
-        assert self.output_vocab_size == self.vocab_size, (
-            "can't share embedding with different vocab sizes.")
+        assert (
+            self.output_vocab_size == self.vocab_size
+        ), "can't share embedding with different vocab sizes."
       self.shared_embedding = nn.Embed(
           num_embeddings=self.vocab_size,
           features=self.emb_dim,
           embedding_init=nn.initializers.normal(stddev=1.0),
-          name='VocabEmbeddings')
+          name='VocabEmbeddings',
+      )
     else:
       self.shared_embedding = None
 
@@ -792,7 +824,8 @@ class Transformer(nn.Module):
         enc_self_attn_kernel_init_fn=self.enc_self_attn_kernel_init_fn,
         binarize_hparams=self.binarize_hparams,
         dynamic_context=self.dynamic_context,
-        name='encoder')
+        name='encoder',
+    )
     self.decoder = Decoder(
         output_vocab_size=self.output_vocab_size,
         shared_embedding=self.shared_embedding,
@@ -812,17 +845,20 @@ class Transformer(nn.Module):
         decode=self.should_decode,
         binarize_hparams=self.binarize_hparams,
         dynamic_context=self.dynamic_context,
-        name='decoder')
+        name='decoder',
+    )
 
   @nn.compact
-  def __call__(self,
-               inputs,
-               targets,
-               inputs_positions=None,
-               targets_positions=None,
-               inputs_segmentation=None,
-               targets_segmentation=None,
-               train=False):
+  def __call__(
+      self,
+      inputs,
+      targets,
+      inputs_positions=None,
+      targets_positions=None,
+      inputs_segmentation=None,
+      targets_segmentation=None,
+      train=False,
+  ):
     """Applies Transformer model on the inputs.
 
     Args:
@@ -837,18 +873,22 @@ class Transformer(nn.Module):
     Returns:
       Output: <float>[batch_size, target_sequence_length, qkv_dim]
     """
-    encoded = self.encode(inputs,
-                          inputs_positions=inputs_positions,
-                          inputs_segmentation=inputs_segmentation,
-                          train=train)
+    encoded = self.encode(
+        inputs,
+        inputs_positions=inputs_positions,
+        inputs_segmentation=inputs_segmentation,
+        train=train,
+    )
 
-    logits = self.decode(encoded,
-                         inputs,  # only used for masks
-                         targets,
-                         targets_positions=targets_positions,
-                         inputs_segmentation=inputs_segmentation,
-                         targets_segmentation=targets_segmentation,
-                         train=train)
+    logits = self.decode(
+        encoded,
+        inputs,  # only used for masks
+        targets,
+        targets_positions=targets_positions,
+        inputs_segmentation=inputs_segmentation,
+        targets_segmentation=targets_segmentation,
+        train=train,
+    )
     return logits.astype(jnp.float32) if self.use_bfloat16 else logits
 
   # The following two methods allow us to run the trained Transformer in
@@ -857,39 +897,39 @@ class Transformer(nn.Module):
   # cache object for iteratively storing keys and values during the decoding
   # process.
 
-  def encode(self,
-             inputs,
-             inputs_positions=None,
-             inputs_segmentation=None,
-             train=False):
+  def encode(
+      self, inputs, inputs_positions=None, inputs_segmentation=None, train=False
+  ):
     # Make padding attention mask.
     dtype = jnp.bfloat16 if self.use_bfloat16 else jnp.float32
-    encoder_mask = nn.make_attention_mask(
-        inputs > 0, inputs > 0, dtype=dtype)
+    encoder_mask = nn.make_attention_mask(inputs > 0, inputs > 0, dtype=dtype)
     # Add segmentation block-diagonal attention mask if using segmented data.
     if inputs_segmentation is not None:
       encoder_mask = nn.combine_masks(
           encoder_mask,
-          nn.make_attention_mask(inputs_segmentation,
-                                 inputs_segmentation,
-                                 jnp.equal,
-                                 dtype=dtype))
+          nn.make_attention_mask(
+              inputs_segmentation, inputs_segmentation, jnp.equal, dtype=dtype
+          ),
+      )
     encoded = self.encoder(
         inputs,
         inputs_positions=inputs_positions,
         encoder_mask=encoder_mask,
-        train=train)
+        train=train,
+    )
 
     return encoded
 
-  def decode(self,
-             encoded,
-             inputs,
-             targets,
-             targets_positions=None,
-             inputs_segmentation=None,
-             targets_segmentation=None,
-             train=False):
+  def decode(
+      self,
+      encoded,
+      inputs,
+      targets,
+      targets_positions=None,
+      inputs_segmentation=None,
+      targets_segmentation=None,
+      train=False,
+  ):
     # Make padding attention masks.
     dtype = jnp.bfloat16 if self.use_bfloat16 else jnp.float32
     if self.should_decode:
@@ -897,28 +937,31 @@ class Transformer(nn.Module):
       # used.
       decoder_mask = None
       encoder_decoder_mask = nn.make_attention_mask(
-          jnp.ones_like(targets) > 0, inputs > 0, dtype=dtype)
+          jnp.ones_like(targets) > 0, inputs > 0, dtype=dtype
+      )
     else:
       decoder_mask = nn.combine_masks(
           nn.make_attention_mask(targets > 0, targets > 0, dtype=dtype),
-          nn.make_causal_mask(targets, dtype=dtype))
+          nn.make_causal_mask(targets, dtype=dtype),
+      )
       encoder_decoder_mask = nn.make_attention_mask(
-          targets > 0, inputs > 0, dtype=dtype)
+          targets > 0, inputs > 0, dtype=dtype
+      )
 
     # Add segmentation block-diagonal attention masks if using segmented data.
     if inputs_segmentation is not None:
       decoder_mask = nn.combine_masks(
           decoder_mask,
-          nn.make_attention_mask(targets_segmentation,
-                                 targets_segmentation,
-                                 jnp.equal,
-                                 dtype=dtype))
+          nn.make_attention_mask(
+              targets_segmentation, targets_segmentation, jnp.equal, dtype=dtype
+          ),
+      )
       encoder_decoder_mask = nn.combine_masks(
           encoder_decoder_mask,
-          nn.make_attention_mask(targets_segmentation,
-                                 inputs_segmentation,
-                                 jnp.equal,
-                                 dtype=dtype))
+          nn.make_attention_mask(
+              targets_segmentation, inputs_segmentation, jnp.equal, dtype=dtype
+          ),
+      )
 
     logits = self.decoder(
         encoded,
@@ -926,7 +969,8 @@ class Transformer(nn.Module):
         targets_positions=targets_positions,
         decoder_mask=decoder_mask,
         encoder_decoder_mask=encoder_decoder_mask,
-        train=train)
+        train=train,
+    )
     return logits
 
 
@@ -939,6 +983,7 @@ class TransformerTranslate(base_model.BaseModel):
     # TODO(ankugarg): Initialize cache for fast auto-regressive decoding here.
     # Also, initilaize tokenizer here to de-tokenize predicted logits
     # from beach search to target language sequence.
+
   # pylint: disable=useless-super-delegation
 
   def evaluate_batch(self, params, batch_stats, batch, dynamic_context):
@@ -946,7 +991,8 @@ class TransformerTranslate(base_model.BaseModel):
 
     # replace the dynamic_context attribute across all layers in the model
     self.flax_module = dataclasses.replace(
-        self.flax_module, dynamic_context=dynamic_context)
+        self.flax_module, dynamic_context=dynamic_context
+    )
     # TODO(ankugarg): Augment with other metrics like log-perplexity.
     logits = self.flax_module.apply(
         {'params': params, 'batch_stats': batch_stats},
@@ -956,7 +1002,8 @@ class TransformerTranslate(base_model.BaseModel):
         targets_positions=batch.get('targets_positions'),
         inputs_segmentation=batch.get('inputs_segmentation'),
         targets_segmentation=batch.get('targets_segmentation'),
-        train=False)
+        train=False,
+    )
 
     weights = batch.get('weights')
     targets = batch['targets']
@@ -983,22 +1030,26 @@ class TransformerTranslate(base_model.BaseModel):
         batch.get('targets_positions'),
         batch.get('inputs_segmentation'),
         batch.get('targets_segmentation'),
-        **apply_kwargs)
+        **apply_kwargs,
+    )
 
-  def training_cost(self,
-                    params,
-                    batch,
-                    batch_stats=None,
-                    dropout_rng=None,
-                    dynamic_context=DynamicContext(),
-                    teacher_params=None,
-                    teacher_batch_stats=None,
-                    teacher_model=None):
+  def training_cost(
+      self,
+      params,
+      batch,
+      batch_stats=None,
+      dropout_rng=None,
+      dynamic_context=DynamicContext(),
+      teacher_params=None,
+      teacher_batch_stats=None,
+      teacher_model=None,
+  ):
     """Return cross entropy loss with (optional) L2 penalty on the weights."""
 
     # replace the dynamic_context attribute across all layers in the model
     self.flax_module = dataclasses.replace(
-        self.flax_module, dynamic_context=dynamic_context)
+        self.flax_module, dynamic_context=dynamic_context
+    )
     # inputs/targets positions and segmentations are required when we have
     # packed examples.
     logits, new_batch_stats = self.apply_on_batch(
@@ -1007,7 +1058,8 @@ class TransformerTranslate(base_model.BaseModel):
         batch,
         mutable=['batch_stats'],
         rngs={'dropout': dropout_rng},
-        train=True)
+        train=True,
+    )
 
     weights = batch.get('weights')
     targets = batch['targets']
@@ -1017,7 +1069,8 @@ class TransformerTranslate(base_model.BaseModel):
     # Optionally apply label smoothing.
     if self.hps.get('label_smoothing') is not None:
       targets = model_utils.apply_label_smoothing(
-          targets, self.hps.get('label_smoothing'))
+          targets, self.hps.get('label_smoothing')
+      )
     if teacher_model is not None:
       # label smoothing is overwritten (always disabled) during distillation
       targets = teacher_model.flax_module.apply(
@@ -1028,31 +1081,39 @@ class TransformerTranslate(base_model.BaseModel):
           batch.get('targets_positions'),
           batch.get('inputs_segmentation'),
           batch.get('targets_segmentation'),
-          train=False)
+          train=False,
+      )
       targets = lax.stop_gradient(softmax(targets))
-    (total_loss, total_weight) = self.loss_fn(
-        logits, targets, weights)
+    total_loss, total_weight = self.loss_fn(logits, targets, weights)
 
-    (total_loss, total_weight) = lax.psum(
-        (total_loss, total_weight), axis_name='batch')
+    total_loss, total_weight = lax.psum(
+        (total_loss, total_weight), axis_name='batch'
+    )
 
-    total_loss = (total_loss / total_weight)
+    total_loss = total_loss / total_weight
 
     if self.hps.get('l2_decay_factor'):
       l2_loss = model_utils.l2_regularization(
-          params, self.hps.l2_decay_rank_threshold)
+          params, self.hps.l2_decay_rank_threshold
+      )
       total_loss += 0.5 * self.hps.l2_decay_factor * l2_loss
     return total_loss, (new_batch_stats)
 
   def build_flax_module(self):
-    max_len = max(self.hps.max_target_length, self.hps.max_eval_target_length,
-                  self.hps.max_predict_length)
+    max_len = max(
+        self.hps.max_target_length,
+        self.hps.max_eval_target_length,
+        self.hps.max_predict_length,
+    )
     enc_self_attn_kernel_init_fn = model_utils.INITIALIZERS[
-        self.hps.enc_self_attn_kernel_init]()
+        self.hps.enc_self_attn_kernel_init
+    ]()
     dec_self_attn_kernel_init_fn = model_utils.INITIALIZERS[
-        self.hps.dec_self_attn_kernel_init]()
+        self.hps.dec_self_attn_kernel_init
+    ]()
     dec_cross_attn_kernel_init_fn = model_utils.INITIALIZERS[
-        self.hps.dec_cross_attn_kernel_init]()
+        self.hps.dec_cross_attn_kernel_init
+    ]()
     use_bfloat16 = self.hps.model_dtype == 'bfloat16'
 
     return Transformer(

@@ -18,9 +18,9 @@
 This file is useful when writing configs that perform tuning studies. In
 general, users should call is_minimized on eval metric column names.
 """
+
 import collections
 import itertools
-
 
 MIN_EVAL_METRICS = [
     'ce_loss',
@@ -40,7 +40,8 @@ def generate_eval_cols(metrics: collections.abc.Iterable[str]) -> list[str]:
 
 MINIMIZE_REGISTRY = {k: True for k in generate_eval_cols(MIN_EVAL_METRICS)}
 MINIMIZE_REGISTRY.update(
-    {k: False for k in generate_eval_cols(MAX_EVAL_METRICS)})
+    {k: False for k in generate_eval_cols(MAX_EVAL_METRICS)}
+)
 MINIMIZE_REGISTRY['train_cost'] = True
 MINIMIZE_REGISTRY['callback/wmt14_translate/de-en/valid/bleu_score'] = False
 MINIMIZE_REGISTRY['callback/wmt14_translate/de-en/test/bleu_score'] = False
@@ -55,5 +56,7 @@ def is_minimized(col_name: str) -> bool:
     if col in col_name:
       return MINIMIZE_REGISTRY[col]
 
-  raise ValueError(f'Column {col_name} not found in `MINIMIZE_REGISTRY` as '
-                   'either a column name or a substring of a column name.')
+  raise ValueError(
+      f'Column {col_name} not found in `MINIMIZE_REGISTRY` as '
+      'either a column name or a substring of a column name.'
+  )

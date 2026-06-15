@@ -75,7 +75,7 @@ def _scalar_inverse_root(x: chex.Array, n: int) -> chex.Array:
   elif n == 8:
     return lax.rsqrt(lax.sqrt(lax.sqrt(x)))
   else:
-    r = x**(1 / n)
+    r = x ** (1 / n)
     # One step of Newton's method to polish the root
     r = ((n - 1) / n) * r + (x / n) / _scalar_power(r, n - 1)
     return 1 / r
@@ -125,8 +125,8 @@ def pth_inv_root_rmn(
     x: Input matrix must be SPD with eigenvalues >= float32 epsilon.
     p: Exponent.
     fast_root: If True, use a lower mixed degree approximation of x^{1/p} (in
-      the slower version, we use a mixed degree approximation of 2 and 3.
-      In the fast version, degree 2 and 3 is used).
+      the slower version, we use a mixed degree approximation of 2 and 3. In the
+      fast version, degree 2 and 3 is used).
     precision: Matrix multiplication precision to use (on TPU). See
       `jax.default_matmul_precision`.
     stable_iter: Whether to use the stable iteration for the inner loop.
@@ -153,7 +153,7 @@ def pth_inv_root_rmn(
   ais, bis, cis = lax.cond(
       fast_root,
       lambda: pth_inv_root_rmn_coefficients.r12_schedule(p),
-      lambda: pth_inv_root_rmn_coefficients.r23_schedule(p)
+      lambda: pth_inv_root_rmn_coefficients.r23_schedule(p),
   )
   max_k = len(cis)
 
@@ -161,10 +161,11 @@ def pth_inv_root_rmn(
   def chol_inv(m):
     l_m = jnp.linalg.cholesky(m)
     e = jnp.finfo(jnp.float32).eps
+
     def _avoid_nan_body(val):
-      (_, e, m) = val
+      _, e, m = val
       l = jnp.linalg.cholesky(m + jnp.diag(e * jnp.diag(m)))
-      e = 2*e
+      e = 2 * e
       return (l, e, m)
 
     l_m, _, _ = lax.while_loop(
@@ -194,6 +195,7 @@ def pth_inv_root_rmn(
     if stable_iter:
       w_n = jnp.zeros((n, n), jnp.float32)
       y_inv = lax.cond(k == 0, lambda m: m, symm_inv, y)
+
       def inside_iter(s, w_sum):
         a2 = lax.dynamic_index_in_dim(a, s, keepdims=False)
         b2 = lax.dynamic_index_in_dim(b, s, keepdims=False)
@@ -205,6 +207,7 @@ def pth_inv_root_rmn(
       y = c * (y + w_n)
     else:
       w = jnp.zeros((n, n), jnp.float32)
+
       def inside_iter2(s, w_sum):
         a2 = lax.dynamic_index_in_dim(a, s, keepdims=False)
         b2 = lax.dynamic_index_in_dim(b, s, keepdims=False)
@@ -247,4 +250,4 @@ def pth_inv_root_rmn(
     # inverse is computed as square of the inverse square root
     with jax.default_matmul_precision(_get_precision_string(precision)):
       return alpha * x, beta * val[1] @ val[1]
-  return 1/beta * val[0], beta * val[1]
+  return 1 / beta * val[0], beta * val[1]

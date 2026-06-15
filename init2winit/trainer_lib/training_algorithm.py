@@ -28,7 +28,6 @@ import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import optax
 
-
 _GRAD_CLIP_EPS = 1e-6
 
 

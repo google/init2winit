@@ -123,7 +123,8 @@ class ModelDebuggerTest(absltest.TestCase):
     debugger = model_debugger.ModelDebugger(use_pmap=False)
     rep_rng = flax.jax_utils.replicate(rng)
     metrics = debugger.full_eval(
-        10, params=variables['params'], grad=variables['params'], rng=rep_rng)
+        10, params=variables['params'], grad=variables['params'], rng=rep_rng
+    )
     expected_keys = [
         'step',
         'global_param_norm_sql2',
@@ -150,23 +151,33 @@ class ModelDebuggerTest(absltest.TestCase):
     get_act_stats_fn = model_debugger.create_forward_pass_stats_fn(
         apply_on_batch,
         capture_activation_norms=True,
-        sown_collection_names=['qvalues'])
+        sown_collection_names=['qvalues'],
+    )
 
     debugger = model_debugger.ModelDebugger(
-        forward_pass=get_act_stats_fn, use_pmap=True)
+        forward_pass=get_act_stats_fn, use_pmap=True
+    )
 
     metrics = debugger.full_eval(
-        step=0, params=rep_params, batch=xs, rng=rep_rng)
+        step=0, params=rep_params, batch=xs, rng=rep_rng
+    )
 
     expected_output = np.dot(xs[0], params['Dense_0']['kernel'])
-    expected_q_value = np.linalg.norm(expected_output)**2 / expected_output.size
+    expected_q_value = (
+        np.linalg.norm(expected_output) ** 2 / expected_output.size
+    )
     expected_c_value = model_debugger.cvalue(expected_output)
-    expected_output_norm = np.linalg.norm(
-        expected_output)**2 / expected_output.size
-    expected_input_norm = float(np.linalg.norm(xs))**2 / xs.size
+    expected_output_norm = (
+        np.linalg.norm(expected_output) ** 2 / expected_output.size
+    )
+    expected_input_norm = float(np.linalg.norm(xs)) ** 2 / xs.size
     expected_keys = [
-        'qvalues', 'intermediate_qvalue', 'intermediate_cvalue', 'step',
-        'param_norms_sql2', 'global_param_norm_sql2'
+        'qvalues',
+        'intermediate_qvalue',
+        'intermediate_cvalue',
+        'step',
+        'param_norms_sql2',
+        'global_param_norm_sql2',
     ]
 
     self.assertEqual(set(expected_keys), set(metrics.keys()))
@@ -174,19 +185,21 @@ class ModelDebuggerTest(absltest.TestCase):
     self.assertAlmostEqual(
         float(expected_q_value),
         float(metrics['intermediate_qvalue']['__call__'][0]),
-        places=5)
+        places=5,
+    )
     self.assertAlmostEqual(
         float(expected_c_value),
         float(metrics['intermediate_cvalue']['__call__'][0]),
-        places=5)
+        places=5,
+    )
     self.assertAlmostEqual(
-        expected_input_norm,
-        float(metrics['qvalues']['residualq'][0]),
-        places=5)
+        expected_input_norm, float(metrics['qvalues']['residualq'][0]), places=5
+    )
     self.assertAlmostEqual(
         expected_output_norm,
         float(metrics['qvalues']['residualq'][1]),
-        places=5)
+        places=5,
+    )
 
   def test_skip_analysis(self):
     """Test that we can selectively turn off layers in the backward pass."""
@@ -208,8 +221,8 @@ class ModelDebuggerTest(absltest.TestCase):
       @nn.compact
       def __call__(self, x):
         x = nn.Dense(
-            1, kernel_init=nn.initializers.constant(3), use_bias=False)(
-                x)
+            1, kernel_init=nn.initializers.constant(3), use_bias=False
+        )(x)
         y = C()(x)
         return y
 
@@ -219,8 +232,8 @@ class ModelDebuggerTest(absltest.TestCase):
       @nn.compact
       def __call__(self, x):
         x = nn.Dense(
-            1, kernel_init=nn.initializers.constant(2), use_bias=False)(
-                x)
+            1, kernel_init=nn.initializers.constant(2), use_bias=False
+        )(x)
         return x
 
     init_rng = jax.random.PRNGKey(0)
@@ -244,15 +257,21 @@ class ModelDebuggerTest(absltest.TestCase):
         use_pmap=True,
         grad_fn=grad_fn,
         skip_flags=['B_0/C_0'],
-        skip_groups=['test_group'])
+        skip_groups=['test_group'],
+    )
     rep_params = flax.jax_utils.replicate(ps)
     rep_rng = flax.jax_utils.replicate(rng)
     rep_x = flax.jax_utils.replicate(x)
     metrics = debugger.full_eval(
-        step=10, params=rep_params, rng=rep_rng, batch=rep_x)
+        step=10, params=rep_params, rng=rep_rng, batch=rep_x
+    )
     expected_keys = [
-        'step', 'global_param_norm_sql2', 'param_norms_sql2', 'grad_norms_sql2',
-        'global_grad_norm_sql2', 'skip_analysis'
+        'step',
+        'global_param_norm_sql2',
+        'param_norms_sql2',
+        'grad_norms_sql2',
+        'global_grad_norm_sql2',
+        'skip_analysis',
     ]
     self.assertEqual(set(expected_keys), set(metrics.keys()))
     skip_dict = metrics['skip_analysis']
@@ -286,8 +305,7 @@ class ModelDebuggerTest(absltest.TestCase):
 
     rep_variables = set_up_cnn()
     pytree_path = os.path.join(self.test_dir, 'metrics')
-    pytree_metrics_logger = utils.PytreeMetricLogger(
-        pytree_path=pytree_path)
+    pytree_metrics_logger = utils.PytreeMetricLogger(pytree_path=pytree_path)
     metrics_logger = utils.MetricLogger(self.test_dir)
 
     # Fake grad_fn for testing.
@@ -299,7 +317,8 @@ class ModelDebuggerTest(absltest.TestCase):
         use_pmap=False,
         grad_fn=grad_fn,
         metrics_logger=metrics_logger,
-        pytree_metrics_logger=pytree_metrics_logger)
+        pytree_metrics_logger=pytree_metrics_logger,
+    )
 
     # eval twice to test the concat
     extra_metrics = {'train_loss': 1.0}
@@ -308,12 +327,14 @@ class ModelDebuggerTest(absltest.TestCase):
         10,
         params=rep_variables['params'],
         grad=rep_variables['params'],
-        extra_scalar_metrics=extra_metrics)
+        extra_scalar_metrics=extra_metrics,
+    )
     metrics = debugger.full_eval(
         20,
         params=rep_variables['params'],
         grad=None,  # use internal gradient comp
-        extra_scalar_metrics=extra_metrics2)
+        extra_scalar_metrics=extra_metrics2,
+    )
     expected_keys = [
         'step',
         'global_param_norm_sql2',
@@ -331,28 +352,35 @@ class ModelDebuggerTest(absltest.TestCase):
     self.assertEqual(metrics['global_grad_norm_sql2'].shape, expected_shape)
     # Test stored metrics is concatenated.
     expected_shape = (2,)
-    self.assertEqual(loaded_metrics['global_grad_norm_sql2'].shape,
-                     expected_shape)
+    self.assertEqual(
+        loaded_metrics['global_grad_norm_sql2'].shape, expected_shape
+    )
 
     # check param norms were saved correctly
     self.assertEqual(
-        loaded_metrics['param_norms_sql2']['Conv_0']['kernel'].shape, (2,))
+        loaded_metrics['param_norms_sql2']['Conv_0']['kernel'].shape, (2,)
+    )
     self.assertEqual(loaded_metrics['train_loss'][0], 1.0)
 
     # Test restore of prior metrics.
     new_debugger = model_debugger.ModelDebugger(
         use_pmap=True,
         metrics_logger=metrics_logger,
-        pytree_metrics_logger=pytree_metrics_logger)
+        pytree_metrics_logger=pytree_metrics_logger,
+    )
     _ = new_debugger.full_eval(
         30,
         params=rep_variables['params'],
         grad=rep_variables['params'],
-        extra_scalar_metrics=extra_metrics2)
+        extra_scalar_metrics=extra_metrics2,
+    )
     pytree_metrics_logger.wait_until_pytree_checkpoint_finished()
     self.assertEqual(
-        new_debugger.stored_metrics['param_norms_sql2']['Conv_0']
-        ['kernel'].shape, (3,))
+        new_debugger.stored_metrics['param_norms_sql2']['Conv_0'][
+            'kernel'
+        ].shape,
+        (3,),
+    )
 
 
 if __name__ == '__main__':

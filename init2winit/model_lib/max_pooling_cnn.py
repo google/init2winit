@@ -18,6 +18,7 @@
 This model can be used to implement the 3c3d architecture from:
 https://github.com/fsschneider/DeepOBS/blob/master/deepobs/tensorflow/testproblems/_3c3d.py
 """
+
 from typing import Any, Sequence
 
 from flax import linen as nn
@@ -25,23 +26,23 @@ from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
 import jax.numpy as jnp
-
 from ml_collections.config_dict import config_dict
 
-
 # small hparams used for unit tests
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    num_filters=[64, 96, 128],
-    kernel_sizes=[5, 3, 3],
-    kernel_paddings=['VALID', 'VALID', 'SAME'],
-    window_sizes=[3, 3, 3],
-    window_paddings=['SAME', 'SAME', 'SAME'],
-    strides=[2, 2, 2],
-    num_dense_units=[512, 256],
-    activation_fn='relu',
-    normalizer='none',
-    model_dtype='float32',
-))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        num_filters=[64, 96, 128],
+        kernel_sizes=[5, 3, 3],
+        kernel_paddings=['VALID', 'VALID', 'SAME'],
+        window_sizes=[3, 3, 3],
+        window_paddings=['SAME', 'SAME', 'SAME'],
+        strides=[2, 2, 2],
+        num_dense_units=[512, 256],
+        activation_fn='relu',
+        normalizer='none',
+        model_dtype='float32',
+    )
+)
 
 
 class MaxPoolingCNN(nn.Module):
@@ -49,6 +50,7 @@ class MaxPoolingCNN(nn.Module):
 
   The model assumes the input shape is [batch, H, W, C].
   """
+
   num_outputs: int
   num_filters: Sequence[int]
   kernel_sizes: Sequence[int]
@@ -66,31 +68,47 @@ class MaxPoolingCNN(nn.Module):
   def __call__(self, x, train):
     maybe_normalize = model_utils.get_normalizer(self.normalizer, train)
     iterator = zip(
-        self.num_filters, self.kernel_sizes, self.kernel_paddings,
-        self.window_sizes, self.window_paddings, self.strides)
-    for num_filters, kernel_size, kernel_padding, window_size, window_padding, stride in iterator:
+        self.num_filters,
+        self.kernel_sizes,
+        self.kernel_paddings,
+        self.window_sizes,
+        self.window_paddings,
+        self.strides,
+    )
+    for (
+        num_filters,
+        kernel_size,
+        kernel_padding,
+        window_size,
+        window_padding,
+        stride,
+    ) in iterator:
       x = nn.Conv(
-          num_filters, (kernel_size, kernel_size), (1, 1),
+          num_filters,
+          (kernel_size, kernel_size),
+          (1, 1),
           padding=kernel_padding,
           kernel_init=self.kernel_init,
-          bias_init=self.bias_init)(x)
+          bias_init=self.bias_init,
+      )(x)
       x = model_utils.ACTIVATIONS[self.activation_fn](x)
       x = maybe_normalize()(x)
       x = nn.max_pool(
           x,
           window_shape=(window_size, window_size),
           strides=(stride, stride),
-          padding=window_padding)
+          padding=window_padding,
+      )
     x = jnp.reshape(x, (x.shape[0], -1))
     for num_units in self.num_dense_units:
       x = nn.Dense(
-          num_units, kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
+          num_units, kernel_init=self.kernel_init, bias_init=self.bias_init
+      )(x)
       x = model_utils.ACTIVATIONS[self.activation_fn](x)
       x = maybe_normalize()(x)
     x = nn.Dense(
-        self.num_outputs,
-        kernel_init=self.kernel_init,
-        bias_init=self.bias_init)(x)
+        self.num_outputs, kernel_init=self.kernel_init, bias_init=self.bias_init
+    )(x)
     return x
 
 
@@ -109,7 +127,8 @@ class MaxPoolingCNNModel(base_model.BaseModel):
         strides=self.hps.strides,
         num_dense_units=self.hps.num_dense_units,
         activation_fn=self.hps.activation_fn,
-        normalizer=self.hps.normalizer)
+        normalizer=self.hps.normalizer,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""

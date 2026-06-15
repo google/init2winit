@@ -36,8 +36,9 @@ os.environ['FLAX_PROFILE'] = 'true'
 
 flags.DEFINE_string('dataset', None, 'Which dataset to inspect')
 flags.DEFINE_string('model', None, 'Which model to use')
-flags.DEFINE_integer('batch_size', None,
-                     'Number of examples to retrieve in 1 batch')
+flags.DEFINE_integer(
+    'batch_size', None, 'Number of examples to retrieve in 1 batch'
+)
 flags.DEFINE_integer('num_batches', None, 'Number of batches to retrieve')
 
 FLAGS = flags.FLAGS
@@ -80,8 +81,9 @@ def main(unused_argv):
     rng = jax.random.PRNGKey(0)
     rng, data_rng = jax.random.split(rng)
 
-    dataset = datasets.get_dataset(FLAGS.dataset)(data_rng, batch_size,
-                                                  batch_size, hps)
+    dataset = datasets.get_dataset(FLAGS.dataset)(
+        data_rng, batch_size, batch_size, hps
+    )
     train_iter = dataset.train_iterator_fn()
 
     for i in range(num_batches):

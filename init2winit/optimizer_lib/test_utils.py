@@ -24,7 +24,6 @@ import jax.numpy as jnp
 from ml_collections.config_dict import ConfigDict
 import optax
 
-
 # pylint:disable=duplicate-key
 
 
@@ -139,7 +138,7 @@ class AppendHparamName(chex.TestCase):
 
     # Test that we can access and set the new hparam
     state = new_opt.init(init_params)
-    state = optax.tree_utils.tree_set(state, foo=2.)
+    state = optax.tree_utils.tree_set(state, foo=2.0)
     foo = optax.tree_utils.tree_get(state, 'foo')
     self.assertEqual(foo, 2.0)
 

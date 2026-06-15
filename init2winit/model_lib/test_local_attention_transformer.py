@@ -13,8 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for local atention transformer.
-"""
+"""Tests for local atention transformer."""
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -29,7 +28,6 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
 
   Reference shapes and data types come from Colab notebooks,
   where TF and JAX/FLAX support functions where compared.
-
   """
 
   def test_decode_step_to_index(self):
@@ -37,7 +35,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     decode_step = 10
     array_shape = (8192,)
     output = local_attention_transformer.decode_step_to_index(
-        decode_step, array_shape)
+        decode_step, array_shape
+    )
 
     self.assertEqual(output, (10,))
 
@@ -66,7 +65,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     max_forward = 10
     output_shape = [1, 1, 2, 2]
     output = local_attention_transformer.ones_matrix_band_part(
-        num_rows, num_cols, max_backward, max_forward, output_shape)
+        num_rows, num_cols, max_backward, max_forward, output_shape
+    )
 
     self.assertEqual(output.shape, (1, 1, 2, 2))
     self.assertEqual(output.dtype, np.float32)
@@ -77,7 +77,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     max_backward = 10
     max_forward = 10
     output = local_attention_transformer.attention_bias_local(
-        length, max_backward, max_forward)
+        length, max_backward, max_forward
+    )
 
     self.assertEqual(output.shape, (1, 1, 2, 2))
     self.assertEqual(output.dtype, np.float32)
@@ -130,7 +131,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     x = np.array(np.random.rand(1, 10, 256, 16), dtype=np.float32)
     decode_step = 10
     output = local_attention_transformer.select_block_for_decode_step(
-        x, decode_step)
+        x, decode_step
+    )
 
     self.assertEqual(output.shape, (1, 1, 256, 16))
     self.assertEqual(output.dtype, np.float32)
@@ -165,7 +167,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     x = np.array(np.random.rand(1, 2, 3, 4), dtype=np.float32)
     blocks_per_dimension = [2]
     output = local_attention_transformer.unflatten_blocks_nd(
-        x, blocks_per_dimension)
+        x, blocks_per_dimension
+    )
 
     self.assertEqual(output.shape, (1, 2, 3, 4))
     self.assertEqual(output.dtype, np.float32)
@@ -192,7 +195,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     length_q = 10
     length_k = 10
     output = local_attention_transformer.generate_relative_positions_matrix(
-        length_q, length_k)
+        length_q, length_k
+    )
 
     self.assertEqual(output.shape, (10, 10))
     self.assertEqual(output.dtype, np.int32)
@@ -203,7 +207,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     length_k = 10
     rng_key = jax.random.PRNGKey(0)
     model = local_attention_transformer.RelativePositionEmbeddings(
-        embed_layer_name='unit_test')
+        embed_layer_name='unit_test'
+    )
     params = model.init(rng_key, length_q, length_k)
     output = model.apply(params, length_q, length_k)
 
@@ -217,7 +222,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     z = np.array(np.random.rand(1, 4, 3), dtype=np.float32)
     transpose = False
     output = local_attention_transformer.relative_attention_inner(
-        x, y, z, transpose)
+        x, y, z, transpose
+    )
 
     self.assertEqual(output.shape, (1, 1, 1, 3))
     self.assertEqual(output.dtype, np.float32)
@@ -297,7 +303,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     """Tests support function put_item_in_decode_step."""
     x = jnp.array(np.random.rand(3, 8, 1, 4), dtype=np.float32)
     output = local_attention_transformer.put_item_in_decode_step(
-        input_x=x, decode_step=1)
+        input_x=x, decode_step=1
+    )
 
     self.assertEqual(output.shape, (3, 8, 1, 4))
     self.assertEqual(output.dtype, np.float32)
@@ -337,7 +344,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     """Tests support function process_partial_targets_decoding."""
     x = np.array(np.random.rand(1, 256), dtype=np.float32)
     output = local_attention_transformer.process_partial_targets_decoding(
-        targets=x)
+        targets=x
+    )
 
     self.assertEqual(output.shape, (1, 256))
     self.assertEqual(output.dtype, np.float32)
@@ -349,7 +357,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
 
     key1 = jax.random.PRNGKey(0)
     model = local_attention_transformer.FeedForward(
-        feedforward_depths=feedforward_depths)
+        feedforward_depths=feedforward_depths
+    )
     params = model.init(key1, x)
     output = model.apply(params, x)
 
@@ -374,7 +383,8 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
     x = jnp.array(np.random.rand(1, 2, 1032), dtype=jnp.float32)
     rng_key = jax.random.PRNGKey(0)
     model = local_attention_transformer.DecoderBlock(
-        feedforward_depths=feedforward_depths)
+        feedforward_depths=feedforward_depths
+    )
     params = model.init(rng_key, x)
     imp_output = model.apply(params, x)
 
@@ -384,4 +394,3 @@ class LocalAttentionTransformerTests(parameterized.TestCase):
 
 if __name__ == '__main__':
   absltest.main()
-

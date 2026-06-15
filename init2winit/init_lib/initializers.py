@@ -42,6 +42,8 @@ def noop(
 ):
   """No-op init."""
   return params
+
+
 # pylint: enable=unused-argument
 
 DEFAULT_HPARAMS = config_dict.ConfigDict()

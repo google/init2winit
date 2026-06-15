@@ -16,6 +16,7 @@
 """Tests for losses.py.
 
 """
+
 import functools
 import types
 
@@ -51,107 +52,139 @@ HPS_2 = config_dict.ConfigDict({
     'rescaled_loss_m': 10.0,
 })
 
-CLASSIFICATION_TEST_DATA = [{
-    'logits':
-        np.array([[5, 3, 4, -3, 7], [2, 5, -5, 5, 6], [-6, -5, 8, -6, 4],
-                  [15, 8, -6, 4, 2], [-7, 5, -6, 9, 0]]),
-    'one_hot_targets':
-        np.array([[1, 0, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 0],
-                  [0, 0, 0, 0, 1], [0, 1, 0, 0, 0]]),
-    'weights':
-        None,
-    'hps': HPS_1,
-    'cross_entropy':
-        8.956906,
-    'bi_tempered_cross_entropy':
-        1.9120569,
-    'rescaled_mean_squared_error':
-        37.56,
-}, {
-    'logits':
-        np.array([[4, 2, 0, -4, 5], [14, 2, -5, 10, 12], [20, -3, 7, -9, 6],
-                  [5, 7, -1, 2, -8], [4, -7, 9, 0, 2]]),
-    'one_hot_targets':
-        np.array([[0, 1, 0, 0, 0], [0, 0, 0, 1, 0], [1, 0, 0, 0, 0],
-                  [0, 0, 0, 0, 1], [0, 0, 1, 0, 0]]),
-    'weights':
-        np.array([2, 7, 0, 3, 0]),
-    'hps': HPS_2,
-    'cross_entropy':
-        6.7589717,
-    'bi_tempered_cross_entropy':
-        1.7393580,
-    'rescaled_mean_squared_error':
-        140.56666,
-}]
+CLASSIFICATION_TEST_DATA = [
+    {
+        'logits': np.array([
+            [5, 3, 4, -3, 7],
+            [2, 5, -5, 5, 6],
+            [-6, -5, 8, -6, 4],
+            [15, 8, -6, 4, 2],
+            [-7, 5, -6, 9, 0],
+        ]),
+        'one_hot_targets': np.array([
+            [1, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0],
+            [0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 1],
+            [0, 1, 0, 0, 0],
+        ]),
+        'weights': None,
+        'hps': HPS_1,
+        'cross_entropy': 8.956906,
+        'bi_tempered_cross_entropy': 1.9120569,
+        'rescaled_mean_squared_error': 37.56,
+    },
+    {
+        'logits': np.array([
+            [4, 2, 0, -4, 5],
+            [14, 2, -5, 10, 12],
+            [20, -3, 7, -9, 6],
+            [5, 7, -1, 2, -8],
+            [4, -7, 9, 0, 2],
+        ]),
+        'one_hot_targets': np.array([
+            [0, 1, 0, 0, 0],
+            [0, 0, 0, 1, 0],
+            [1, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1],
+            [0, 0, 1, 0, 0],
+        ]),
+        'weights': np.array([2, 7, 0, 3, 0]),
+        'hps': HPS_2,
+        'cross_entropy': 6.7589717,
+        'bi_tempered_cross_entropy': 1.7393580,
+        'rescaled_mean_squared_error': 140.56666,
+    },
+]
 
-RECONSTRUCTION_TEST_DATA = [{
-    'logits':
-        np.array([[4, -5, 8, -10], [-5, 7, 4, 11], [12, 5, 5, -9],
-                  [7, -11, -4, 8]]).astype(float),
-    'targets':
-        np.array([[0.05, 0.02, 0.96, 0.02], [0.05, 0.001, 0.5, 0.4],
-                  [0.68, 0.92, 0.12, 0.22], [0.34, 0.44, 0.29, 0.2]]),
-    'weights':
-        None,
-    'hps': HPS_1,
-    'sigmoid_binary_cross_entropy':
-        11.996754,
-    'bi_tempered_sigmoid_binary_cross_entropy':
-        1.9910424,
-    'sigmoid_mean_squared_error':
-        1.180348,
-}, {
-    'logits':
-        np.array([[[4, -5], [8, -10]], [[-5, 7], [4, 11]], [[12, 5], [5, -9]],
-                  [[7, -11], [-4, 8]]]).astype(float),
-    'targets':
-        np.array([[[0.05, 0.02], [0.96, 0.02]], [[0.05, 0.001], [0.5, 0.4]],
-                  [[0.68, 0.92], [0.12, 0.22]], [[0.34, 0.44], [0.29, 0.2]]]),
-    'weights':
-        None,
-    'hps': HPS_1,
-    'sigmoid_binary_cross_entropy':
-        11.996754,
-    'bi_tempered_sigmoid_binary_cross_entropy':
-        1.9910425,
-    'sigmoid_mean_squared_error':
-        1.180348,
-}, {
-    'logits':
-        np.array([[4, -5, 8, -10], [-5, 7, 4, 11], [12, 5, 5, -9],
-                  [7, -11, -4, 8]]).astype(float),
-    'targets':
-        np.array([[0.05, 0.02, 0.96, 0.02], [0.05, 0.001, 0.5, 0.4],
-                  [0.68, 0.92, 0.12, 0.22], [0.34, 0.44, 0.29, 0.2]]),
-    'weights':
-        np.array([0, 4, 0, 2]),
-    'hps': HPS_1,
-    'sigmoid_binary_cross_entropy':
-        16.259,
-    'bi_tempered_sigmoid_binary_cross_entropy':
-        2.6654808,
-    'sigmoid_mean_squared_error':
-        1.5073959,
-}]
+RECONSTRUCTION_TEST_DATA = [
+    {
+        'logits': (
+            np.array([
+                [4, -5, 8, -10],
+                [-5, 7, 4, 11],
+                [12, 5, 5, -9],
+                [7, -11, -4, 8],
+            ]).astype(float)
+        ),
+        'targets': np.array([
+            [0.05, 0.02, 0.96, 0.02],
+            [0.05, 0.001, 0.5, 0.4],
+            [0.68, 0.92, 0.12, 0.22],
+            [0.34, 0.44, 0.29, 0.2],
+        ]),
+        'weights': None,
+        'hps': HPS_1,
+        'sigmoid_binary_cross_entropy': 11.996754,
+        'bi_tempered_sigmoid_binary_cross_entropy': 1.9910424,
+        'sigmoid_mean_squared_error': 1.180348,
+    },
+    {
+        'logits': (
+            np.array([
+                [[4, -5], [8, -10]],
+                [[-5, 7], [4, 11]],
+                [[12, 5], [5, -9]],
+                [[7, -11], [-4, 8]],
+            ]).astype(float)
+        ),
+        'targets': np.array([
+            [[0.05, 0.02], [0.96, 0.02]],
+            [[0.05, 0.001], [0.5, 0.4]],
+            [[0.68, 0.92], [0.12, 0.22]],
+            [[0.34, 0.44], [0.29, 0.2]],
+        ]),
+        'weights': None,
+        'hps': HPS_1,
+        'sigmoid_binary_cross_entropy': 11.996754,
+        'bi_tempered_sigmoid_binary_cross_entropy': 1.9910425,
+        'sigmoid_mean_squared_error': 1.180348,
+    },
+    {
+        'logits': (
+            np.array([
+                [4, -5, 8, -10],
+                [-5, 7, 4, 11],
+                [12, 5, 5, -9],
+                [7, -11, -4, 8],
+            ]).astype(float)
+        ),
+        'targets': np.array([
+            [0.05, 0.02, 0.96, 0.02],
+            [0.05, 0.001, 0.5, 0.4],
+            [0.68, 0.92, 0.12, 0.22],
+            [0.34, 0.44, 0.29, 0.2],
+        ]),
+        'weights': np.array([0, 4, 0, 2]),
+        'hps': HPS_1,
+        'sigmoid_binary_cross_entropy': 16.259,
+        'bi_tempered_sigmoid_binary_cross_entropy': 2.6654808,
+        'sigmoid_mean_squared_error': 1.5073959,
+    },
+]
 
-CROSS_ENTROPY_TEST_DATA = [{
-    'logits':
-        np.array([[4, 7], [-2, 5], [8, 6], [-10, -4], [3, -5]]).astype(float),
-    'targets':
-        np.array([[1, 0], [0, 1], [1, 0], [1, 0], [0, 1]]),
-    'weights':
-        None,
-    'hps': HPS_1,
-}, {
-    'logits':
-        np.array([[4, 7], [-2, 5], [8, 6], [-10, -4], [3, -5]]).astype(float),
-    'targets':
-        np.array([[1, 0], [0, 1], [1, 0], [1, 0], [0, 1]]),
-    'weights':
-        np.array([2, 0, 0, 6, 1]),
-    'hps': HPS_1,
-}]
+CROSS_ENTROPY_TEST_DATA = [
+    {
+        'logits': (
+            np.array([[4, 7], [-2, 5], [8, 6], [-10, -4], [3, -5]]).astype(
+                float
+            )
+        ),
+        'targets': np.array([[1, 0], [0, 1], [1, 0], [1, 0], [0, 1]]),
+        'weights': None,
+        'hps': HPS_1,
+    },
+    {
+        'logits': (
+            np.array([[4, 7], [-2, 5], [8, 6], [-10, -4], [3, -5]]).astype(
+                float
+            )
+        ),
+        'targets': np.array([[1, 0], [0, 1], [1, 0], [1, 0], [0, 1]]),
+        'weights': np.array([2, 0, 0, 6, 1]),
+        'hps': HPS_1,
+    },
+]
 
 CLASSIFICATION_KEYS = [
     (loss_name, loss_name) for loss_name in CLASSIFICATION_LOSSES
@@ -205,7 +238,8 @@ class LossesTest(parameterized.TestCase):
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['one_hot_targets'], data['weights']),
           data[loss_name],
-          places=5)
+          places=5,
+      )
 
   @parameterized.named_parameters(*RECONSTRUCTION_KEYS)
   def test_regression_losses(self, loss_name):
@@ -215,14 +249,18 @@ class LossesTest(parameterized.TestCase):
       self.assertAlmostEqual(
           loss_fn(data['logits'], data['targets'], data['weights']),
           data[loss_name],
-          places=6)
+          places=6,
+      )
 
   def test_cross_entropy_loss_fn(self):
+    """Tests equivalence of binary and multi-class cross entropy."""
     for data in CROSS_ENTROPY_TEST_DATA:
       for binary_loss_name, loss_name in [
           ('sigmoid_binary_cross_entropy', 'cross_entropy'),
-          ('bi_tempered_sigmoid_binary_cross_entropy',
-           'bi_tempered_cross_entropy')
+          (
+              'bi_tempered_sigmoid_binary_cross_entropy',
+              'bi_tempered_cross_entropy',
+          ),
       ]:
         sigmoid_binary_ce_fn = losses.get_loss_fn(binary_loss_name, data['hps'])
         sigmoid_binary_ce_fn = wrap_loss(self, sigmoid_binary_ce_fn)
@@ -230,20 +268,23 @@ class LossesTest(parameterized.TestCase):
         ce_fn = wrap_loss(self, ce_fn)
         self.assertAlmostEqual(
             sigmoid_binary_ce_fn(
-                np.array([[logits[0] - logits[1]] for logits in data['logits']
-                         ]),
+                np.array(
+                    [[logits[0] - logits[1]] for logits in data['logits']]
+                ),
                 np.array([[targets[0]] for targets in data['targets']]),
-                data['weights']),
+                data['weights'],
+            ),
             ce_fn(data['logits'], data['targets'], data['weights']),
-            places=5)
+            places=5,
+        )
 
   def test_sigmoid_cross_entropy_per_label_weights(self):
     """Tests whether per label weights mask the correct entries."""
     for binary_loss_name in [
         'sigmoid_binary_cross_entropy',
-        'bi_tempered_sigmoid_binary_cross_entropy']:
-      sigmoid_binary_ce_fn = losses.get_loss_fn(
-          binary_loss_name, HPS_1)
+        'bi_tempered_sigmoid_binary_cross_entropy',
+    ]:
+      sigmoid_binary_ce_fn = losses.get_loss_fn(binary_loss_name, HPS_1)
       sigmoid_binary_ce_fn = wrap_loss(self, sigmoid_binary_ce_fn)
       logits = np.arange(15).reshape(3, 5)
       targets = np.arange(15, 30).reshape(3, 5)
@@ -260,8 +301,11 @@ class LossesTest(parameterized.TestCase):
       # per-label case.
       self.assertAlmostEqual(
           sigmoid_binary_ce_fn(logits, targets, per_label_weights),
-          sigmoid_binary_ce_fn(logits[:, :4], targets[:, :4],
-                               per_example_weights) / 4)
+          sigmoid_binary_ce_fn(
+              logits[:, :4], targets[:, :4], per_example_weights
+          )
+          / 4,
+      )
 
   # optax ctc loss blank token has id = 0 by default
   @parameterized.named_parameters(
@@ -301,6 +345,7 @@ class LossesTest(parameterized.TestCase):
     loss_value = mae(logits, targets)
 
     self.assertAlmostEqual(loss_value, jax.numpy.array([result]))
+
 
 if __name__ == '__main__':
   absltest.main()

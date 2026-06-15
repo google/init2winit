@@ -25,17 +25,19 @@ import numpy as np
 import scipy.stats
 
 
-def _small_perturbation(n: int, gamma: float,
-                        rng: np.random.RandomState) -> np.ndarray:
+def _small_perturbation(
+    n: int, gamma: float, rng: np.random.RandomState
+) -> np.ndarray:
   """Returns a vector of absolute values ofnormally distributed values with standard deviation gamma."""
-  s = gamma*np.abs(rng.normal(size=n))
+  s = gamma * np.abs(rng.normal(size=n))
   return s
 
 
-def _random_singular_values(n: int, gamma: float,
-                            rng: np.random.RandomState) -> np.ndarray:
+def _random_singular_values(
+    n: int, gamma: float, rng: np.random.RandomState
+) -> np.ndarray:
   """Returns n random singular values in [γ, 1]."""
-  s = gamma**rng.random((n,))  # log of singular values uniformly distributed
+  s = gamma ** rng.random((n,))  # log of singular values uniformly distributed
   if n > 0:
     s[0] = gamma
   if n > 1:
@@ -44,8 +46,8 @@ def _random_singular_values(n: int, gamma: float,
 
 
 def _random_svd(
-    n: int, gamma: float,
-    rng: np.random.RandomState) -> Tuple[np.ndarray, np.ndarray]:
+    n: int, gamma: float, rng: np.random.RandomState
+) -> Tuple[np.ndarray, np.ndarray]:
   """Returns a random SVD decomposition with singular values in [γ, 1]."""
   # sample a uniformly random orthogonal matrix.
   v = scipy.stats.ortho_group.rvs(n, random_state=rng)
@@ -84,9 +86,9 @@ class InvSquareRootTest(parameterized.TestCase):
     v = v.astype(np.float64)
     q = _small_perturbation(n, 1e-4, rng)
     q = np.diag(q.astype(np.float64))
-    a_sqrt = (v * s**(1 / p)) @ v.T
-    a_isqrt = (v * s**(-1 / p)) @ v.T
-    exact = (v * (s + q**2)**(-1 / p)) @ v.T
+    a_sqrt = (v * s ** (1 / p)) @ v.T
+    a_isqrt = (v * s ** (-1 / p)) @ v.T
+    exact = (v * (s + q**2) ** (-1 / p)) @ v.T
     ans = _update_sqrt(a_sqrt, a_isqrt, q)[1]
     ans = np.array(ans).astype(np.float64)
     error = np.linalg.norm(ans - exact, 2) / np.linalg.norm(exact, 2)

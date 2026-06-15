@@ -286,6 +286,7 @@ def eval_metrics(
     )
     # Metrics are None if the dataset doesn't have that split
     if split_metrics is not None:
-      metrics = _merge_and_apply_prefix(metrics, split_metrics,
-                                        (split_name + '/'))
+      metrics = _merge_and_apply_prefix(
+          metrics, split_metrics, (split_name + '/')
+      )
   return metrics

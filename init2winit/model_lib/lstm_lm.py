@@ -18,6 +18,7 @@
 Inspired by
 https://github.com/pytorch/examples/blob/main/word_language_model/model.py
 """
+
 from typing import Any, Mapping, Tuple, Union
 
 import flax
@@ -55,7 +56,8 @@ def shift_right(x, axis=1):
   pad_widths = [(0, 0)] * len(x.shape)
   pad_widths[axis] = (1, 0)
   padded = jnp.pad(
-      x, pad_widths, mode='constant', constant_values=x.dtype.type(MASK_TOKEN))
+      x, pad_widths, mode='constant', constant_values=x.dtype.type(MASK_TOKEN)
+  )
   return lax.dynamic_slice_in_dim(padded, 0, padded.shape[axis] - 1, axis)
 
 
@@ -73,8 +75,8 @@ class LSTMLM(nn.Module):
     bidirectional: Process the sequence left-to-right and right-to-left and
       contatenate the outputs of the two directions.
     residual_connections: Add residual connection between layers.
-    tie_embeddings: If true share weights of the input embedding layer
-      with the output embeddings.
+    tie_embeddings: If true share weights of the input embedding layer with the
+      output embeddings.
     projection_layer: If true add projection layer after LSTM from LSTM output
       size (hidden_sizes[-1]) to emb_dim. Useful if tie_embeddings is True and
       hidden_sizes[-1] is not equal to emb_dim.
@@ -83,11 +85,12 @@ class LSTMLM(nn.Module):
       using `flax.linen.LSTMCell` instead.
     cell_kwargs: Optional keyword arguments to instatiate the cell with.
   """
+
   emb_dim: int
   vocab_size: int
   hidden_sizes: list[int]
-  dropout_rate: float = 0.
-  recurrent_dropout_rate: float = 0.
+  dropout_rate: float = 0.0
+  recurrent_dropout_rate: float = 0.0
   bidirectional: bool = False
   residual_connections: bool = False
   tie_embeddings: bool = False
@@ -148,8 +151,9 @@ class LSTMLM(nn.Module):
         deterministic=(not train),
     )
     # Apply dropout on outputs
-    output = nn.Dropout(
-        rate=self.dropout_rate, deterministic=(not train))(output)
+    output = nn.Dropout(rate=self.dropout_rate, deterministic=(not train))(
+        output
+    )
 
     # Optionally apply projection layer
     if self.projection_layer:
@@ -174,8 +178,8 @@ class LSTMModel(base_model.BaseModel):
       metric_fn(logits, targets, weights), including the argument names.
 
     Args:
-      params: A dict of trainable model parameters. Passed as
-      {'params': params} into flax_module.apply().
+      params: A dict of trainable model parameters. Passed as {'params': params}
+        into flax_module.apply().
       batch_stats: A dict of non-trainable model state. Passed as
         {'batch_stats': batch_stats} into flax_module.apply().
       batch: A dictionary with keys 'inputs', 'targets', 'weights'.
@@ -218,6 +222,7 @@ class LSTMModel(base_model.BaseModel):
     )
 
   def get_fake_inputs(self, hps):
-    dummy_inputs = jnp.ones((hps.batch_size, hps.sequence_length),
-                            dtype='int32')
+    dummy_inputs = jnp.ones(
+        (hps.batch_size, hps.sequence_length), dtype='int32'
+    )
     return [dummy_inputs]

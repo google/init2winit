@@ -75,11 +75,12 @@ class AccumulatorTest(parameterized.TestCase):
       grads, _ = nth_grads.update(grads, None)
       updates, state = accumulator.update(grads, state)
 
-      actual = jax.tree.map(lambda g, t: (1 - decay) * g + decay * t,
-                            grads['variables'], moments)
+      actual = jax.tree.map(
+          lambda g, t: (1 - decay) * g + decay * t, grads['variables'], moments
+      )
       if debias:
         count += jnp.array(1, dtype=jnp.int32)
-        beta = jnp.array(1, dtype=jnp.int32) - decay ** count
+        beta = jnp.array(1, dtype=jnp.int32) - decay**count
         actual = jax.tree.map(lambda t: t / beta.astype(t.dtype), actual)  # pylint: disable=cell-var-from-loop
 
       chex.assert_trees_all_close(updates['moments'], actual)
@@ -99,18 +100,20 @@ class PreconditionerTest(parameterized.TestCase):
     """Test precondition_by_rms."""
 
     actual_rms = transform.precondition_by_rms(
-        decay=decay, eps=eps, eps_root=eps_root, debias=debias)
+        decay=decay, eps=eps, eps_root=eps_root, debias=debias
+    )
 
-    decon_rms = preconditioner.preconditioner(preconditioner.nth_power,
-                                              preconditioner.ema_accumulator,
-                                              preconditioner.rexp_updater,
-                                              {'power': 2}, {
-                                                  'decay': decay,
-                                                  'debias': debias
-                                              }, {
-                                                  'eps': eps,
-                                                  'eps_root': eps_root,
-                                              })
+    decon_rms = preconditioner.preconditioner(
+        preconditioner.nth_power,
+        preconditioner.ema_accumulator,
+        preconditioner.rexp_updater,
+        {'power': 2},
+        {'decay': decay, 'debias': debias},
+        {
+            'eps': eps,
+            'eps_root': eps_root,
+        },
+    )
 
     params = jax.random.uniform(jax.random.PRNGKey(0), (10, 10))
 
@@ -139,8 +142,9 @@ class PreconditionerTest(parameterized.TestCase):
       initial_accumulator_value=[1e-8, 1e-6, 1e-1],
       debias=[True, False],
   )
-  def test_precondition_by_yogi(self, b2, eps, eps_root,
-                                initial_accumulator_value, debias):
+  def test_precondition_by_yogi(
+      self, b2, eps, eps_root, initial_accumulator_value, debias
+  ):
     """Test precondition_by_yogi."""
 
     actual_yogi = transform.precondition_by_yogi(
@@ -148,18 +152,24 @@ class PreconditionerTest(parameterized.TestCase):
         eps=eps,
         eps_root=eps_root,
         initial_accumulator_value=initial_accumulator_value,
-        debias=debias)
+        debias=debias,
+    )
 
     decon_yogi = preconditioner.preconditioner(
-        preconditioner.nth_power, preconditioner.yogi_accumulator,
-        preconditioner.rexp_updater, {'power': 2}, {
+        preconditioner.nth_power,
+        preconditioner.yogi_accumulator,
+        preconditioner.rexp_updater,
+        {'power': 2},
+        {
             'b2': b2,
             'initial_accumulator_value': initial_accumulator_value,
-            'debias': debias
-        }, {
+            'debias': debias,
+        },
+        {
             'eps': eps,
             'eps_root': eps_root,
-        })
+        },
+    )
 
     params = jax.random.uniform(jax.random.PRNGKey(0), (10, 10))
 
@@ -179,6 +189,7 @@ class PreconditionerTest(parameterized.TestCase):
       decon_params = optax.apply_updates(params, decon_updates)
 
       chex.assert_trees_all_close(actual_params, decon_params, atol=1e-4)
+
 
 if __name__ == '__main__':
   absltest.main()

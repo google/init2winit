@@ -16,6 +16,7 @@
 r"""NQM Model.
 
 """
+
 from flax import linen as nn
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
@@ -26,13 +27,15 @@ import numpy as np
 from scipy.stats import ortho_group
 
 # small hparams used for unit tests
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    # Note the dimension is set by input_shape.
-    hessian_decay_power=1,
-    noise_decay_power=1,
-    nqm_mode='diagH_diagC',
-    model_dtype='float32',
-))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        # Note the dimension is set by input_shape.
+        hessian_decay_power=1,
+        noise_decay_power=1,
+        nqm_mode='diagH_diagC',
+        model_dtype='float32',
+    )
+)
 
 
 class NQMLoss(nn.Module):
@@ -46,12 +49,13 @@ class NQMLoss(nn.Module):
 
   Attrs:
     hessian: dxd psd matrix representing the loss hessian.
-    noise_scaling: dxd matrix used to scale noise_input. This is a matrix N
-      s.t. N^T N = C, where C will be the covariance of the scaled noise.
+    noise_scaling: dxd matrix used to scale noise_input. This is a matrix N s.t.
+      N^T N = C, where C will be the covariance of the scaled noise.
     train: Ignored, we add this to conform to the i2w model API. noise_input =
       jnp.asarray(noise_input) x = self.param('x', (noise_input.shape[-1],),
       initializers.ones)
   """
+
   hessian: model_utils.Array
   noise_scaling: model_utils.Array
   train: bool = True
@@ -74,17 +78,17 @@ class NQMLoss(nn.Module):
     # NQM loss = 1/2 x^T hessian x + x.T noise_scaling noise_input
     # this gives grad loss = hessian x + eps, where eps ~ N(0, C)
     return jnp.dot(jnp.dot(x.T, self.hessian), x) / 2 + jnp.mean(
-        jnp.dot(jnp.dot(noise_input, self.noise_scaling), x))
+        jnp.dot(jnp.dot(noise_input, self.noise_scaling), x)
+    )
 
 
 def quadratic_form(u, sigma):
   return np.dot(np.dot(u.T, sigma), u)
 
 
-def _get_nqm_matrices(dim,
-                      hessian_decay_power=1.0,
-                      noise_decay_power=1.0,
-                      mode='diagH_noC'):
+def _get_nqm_matrices(
+    dim, hessian_decay_power=1.0, noise_decay_power=1.0, mode='diagH_noC'
+):
   """Returns a hessian and a noise scaling matrix used in the NQM.
 
   The corresponding loss will be equal to  1/2 x^T H x + eps sqrtC x.
@@ -114,7 +118,7 @@ def _get_nqm_matrices(dim,
   Args:
     dim: dimension of the matrices to generate.
     hessian_decay_power: Hessian eigenvalues will be of the form 1 / i^power.
-    noise_decay_power : Noise eigenvalues will be of the form 1 / i^power.
+      noise_decay_power : Noise eigenvalues will be of the form 1 / i^power.
     mode: One of the modes listed above.
 
   Returns:
@@ -122,10 +126,12 @@ def _get_nqm_matrices(dim,
       sqrtC^T sqrtC = C.
   """
   hessian_eigs = np.array(
-      [1.0 / np.power(i, hessian_decay_power) for i in range(1, dim + 1)])
+      [1.0 / np.power(i, hessian_decay_power) for i in range(1, dim + 1)]
+  )
   hessian_eigs = np.diag(hessian_eigs)
   noise_scaling_eigs = np.array(
-      [1.0 / np.power(i, noise_decay_power / 2.0) for i in range(1, dim + 1)])
+      [1.0 / np.power(i, noise_decay_power / 2.0) for i in range(1, dim + 1)]
+  )
 
   noise_scaling_eigs = np.diag(noise_scaling_eigs)
 
@@ -137,19 +143,25 @@ def _get_nqm_matrices(dim,
 
   ortho_matrix = ortho_group.rvs(dim=dim)  # H = U^T Sigma U
   if mode == 'H_noC':
-    return (quadratic_form(ortho_matrix, hessian_eigs),
-            np.zeros_like(noise_scaling_eigs))
+    return (
+        quadratic_form(ortho_matrix, hessian_eigs),
+        np.zeros_like(noise_scaling_eigs),
+    )
 
   elif mode == 'H_codiagC':
     # noise matrix = noise_scaling_eigs U
-    return (quadratic_form(ortho_matrix, hessian_eigs),
-            np.dot(noise_scaling_eigs, ortho_matrix))
+    return (
+        quadratic_form(ortho_matrix, hessian_eigs),
+        np.dot(noise_scaling_eigs, ortho_matrix),
+    )
 
   elif mode == 'H_offdiagC':
     # Sample a new rotation matrix for the noise
     c_ortho_matrix = ortho_group.rvs(dim=dim)
-    return (quadratic_form(ortho_matrix, hessian_eigs),
-            np.dot(noise_scaling_eigs, c_ortho_matrix))
+    return (
+        quadratic_form(ortho_matrix, hessian_eigs),
+        np.dot(noise_scaling_eigs, c_ortho_matrix),
+    )
 
   elif mode == 'diagH_offdiagC':
     # Sample a new rotation matrix for the noise
@@ -186,13 +198,11 @@ class NQM(base_model.BaseModel):
   def evaluate_batch(self, params, batch_stats, batch):
     """Evals the NQM loss."""
     logits = self.flax_module.apply(
-        {'params': params}, batch['inputs'], train=False)
+        {'params': params}, batch['inputs'], train=False
+    )
     # Trainer eval assumes eval function sums, not averages.
     loss = logits * batch['inputs'].shape[0]
-    metrics = {
-        'loss': loss,
-        'num_examples': batch['inputs'].shape[0]
-    }
+    metrics = {'loss': loss, 'num_examples': batch['inputs'].shape[0]}
     return metrics
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
@@ -213,14 +223,17 @@ class NQM(base_model.BaseModel):
     """
     del dropout_rng
     average_loss = self.flax_module.apply(
-        {'params': params}, batch['inputs'], train=True)
+        {'params': params}, batch['inputs'], train=True
+    )
     return average_loss, batch_stats
 
   def build_flax_module(self):
-    hessian, noise_scaling = _get_nqm_matrices(self.hps.input_shape[0],
-                                               self.hps.hessian_decay_power,
-                                               self.hps.noise_decay_power,
-                                               self.hps.nqm_mode)
+    hessian, noise_scaling = _get_nqm_matrices(
+        self.hps.input_shape[0],
+        self.hps.hessian_decay_power,
+        self.hps.noise_decay_power,
+        self.hps.nqm_mode,
+    )
     return NQMLoss(hessian=hessian, noise_scaling=noise_scaling)
 
   def get_fake_inputs(self, hps):

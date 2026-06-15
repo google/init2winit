@@ -68,8 +68,10 @@ def unfreeze_wrapper(init_fn, update_fn):
 
   def wrapped_update_fn(updates, state, params=None):
     new_updates, state = update_fn(
-        flax.core.unfreeze(updates), state,
-        None if params is None else flax.core.unfreeze(params))
+        flax.core.unfreeze(updates),
+        state,
+        None if params is None else flax.core.unfreeze(params),
+    )
 
     if isinstance(updates, flax.core.FrozenDict):
       new_updates = flax.core.freeze(new_updates)
@@ -95,8 +97,11 @@ def apply_and_maybe_scale_by_learning_rate(config, learning_rate):
     return not isinstance(x, str) and x['element'] == 'scale_by_learning_rate'
 
   def contains_lr_as_param(x):
-    return not isinstance(x, str) and x.get(
-        'hps', None) and 'learning_rate' in x['hps']
+    return (
+        not isinstance(x, str)
+        and x.get('hps', None)
+        and 'learning_rate' in x['hps']
+    )
 
   def update_leaf(x):
     if contains_lr_as_param(x):
@@ -113,14 +118,14 @@ def apply_and_maybe_scale_by_learning_rate(config, learning_rate):
             '0': config,
             '1': {
                 'element': 'scale_by_learning_rate',
-                'hps': {
-                    'learning_rate': learning_rate
-                }
-            }
+                'hps': {'learning_rate': learning_rate},
+            },
         }
     }
   elif num_scaled == 1:
     return map_element(update_leaf, config)
   else:
-    logging.warning('Kitchen Sink configuration has more than one '
-                    'scale_by_learning_rate. Please double check config')
+    logging.warning(
+        'Kitchen Sink configuration has more than one '
+        'scale_by_learning_rate. Please double check config'
+    )

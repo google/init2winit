@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Wide Resnet Model."""
+
 from typing import List, Optional, Tuple
 
 from flax import linen as nn
@@ -21,9 +22,7 @@ from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 from jax.nn import initializers
 import jax.numpy as jnp
-
 from ml_collections.config_dict import config_dict
-
 
 # small hparams used for unit tests
 DEFAULT_HPARAMS = config_dict.ConfigDict(
@@ -39,12 +38,14 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         virtual_batch_size=None,
         model_dtype='float32',
         activation_function='relu',
-        group_strides=[(1, 1), (2, 2), (2, 2)])
+        group_strides=[(1, 1), (2, 2), (2, 2)],
+    )
 )
 
 
 class WideResnetBlock(nn.Module):
   """Defines a single WideResnetBlock."""
+
   channels: int
   strides: List[Tuple[int]]
   conv_kernel_init: model_utils.Initializer = initializers.lecun_normal()
@@ -62,7 +63,8 @@ class WideResnetBlock(nn.Module):
         train,
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
-        total_batch_size=self.total_batch_size)
+        total_batch_size=self.total_batch_size,
+    )
     y = maybe_normalize(name='bn1')(x)
     y = model_utils.ACTIVATIONS[self.activation_function](y)
 
@@ -74,7 +76,8 @@ class WideResnetBlock(nn.Module):
           self.strides,
           padding='SAME',
           kernel_init=self.conv_kernel_init,
-          use_bias=False)(y)
+          use_bias=False,
+      )(y)
 
     y = nn.Conv(
         self.channels,
@@ -83,7 +86,8 @@ class WideResnetBlock(nn.Module):
         padding='SAME',
         name='conv1',
         kernel_init=self.conv_kernel_init,
-        use_bias=False)(y)
+        use_bias=False,
+    )(y)
     y = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(y)
     y = maybe_normalize(name='bn2')(y)
     y = model_utils.ACTIVATIONS[self.activation_function](y)
@@ -93,7 +97,8 @@ class WideResnetBlock(nn.Module):
         padding='SAME',
         name='conv2',
         kernel_init=self.conv_kernel_init,
-        use_bias=False)(y)
+        use_bias=False,
+    )(y)
 
     if self.normalizer == 'none':
       y = model_utils.ScalarMultiply()(y)
@@ -103,6 +108,7 @@ class WideResnetBlock(nn.Module):
 
 class WideResnetGroup(nn.Module):
   """Defines a WideResnetGroup."""
+
   blocks_per_group: int
   channels: int
   strides: Tuple[int, int] = (1, 1)
@@ -126,12 +132,14 @@ class WideResnetGroup(nn.Module):
           activation_function=self.activation_function,
           batch_size=self.batch_size,
           virtual_batch_size=self.virtual_batch_size,
-          total_batch_size=self.total_batch_size)(x, train=train)
+          total_batch_size=self.total_batch_size,
+      )(x, train=train)
     return x
 
 
 class WideResnet(nn.Module):
   """Defines the WideResnet Model."""
+
   blocks_per_group: int
   channel_multiplier: int
   group_strides: List[Tuple[int]]
@@ -153,7 +161,8 @@ class WideResnet(nn.Module):
         padding='SAME',
         name='init_conv',
         kernel_init=self.conv_kernel_init,
-        use_bias=False)(x)
+        use_bias=False,
+    )(x)
     x = WideResnetGroup(
         self.blocks_per_group,
         16 * self.channel_multiplier,
@@ -164,7 +173,8 @@ class WideResnet(nn.Module):
         activation_function=self.activation_function,
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
-        total_batch_size=self.total_batch_size)(x, train=train)
+        total_batch_size=self.total_batch_size,
+    )(x, train=train)
     x = WideResnetGroup(
         self.blocks_per_group,
         32 * self.channel_multiplier,
@@ -175,7 +185,8 @@ class WideResnet(nn.Module):
         activation_function=self.activation_function,
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
-        total_batch_size=self.total_batch_size)(x, train=train)
+        total_batch_size=self.total_batch_size,
+    )(x, train=train)
     x = WideResnetGroup(
         self.blocks_per_group,
         64 * self.channel_multiplier,
@@ -186,13 +197,15 @@ class WideResnet(nn.Module):
         activation_function=self.activation_function,
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
-        total_batch_size=self.total_batch_size)(x, train=train)
+        total_batch_size=self.total_batch_size,
+    )(x, train=train)
     maybe_normalize = model_utils.get_normalizer(
         self.normalizer,
         train,
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
-        total_batch_size=self.total_batch_size)
+        total_batch_size=self.total_batch_size,
+    )
     x = maybe_normalize()(x)
     x = model_utils.ACTIVATIONS[self.activation_function](x)
     x = nn.avg_pool(x, (8, 8))
@@ -212,15 +225,18 @@ class WideResnetModel(base_model.BaseModel):
         group_strides=self.hps.group_strides,
         num_outputs=self.hps['output_shape'][-1],
         conv_kernel_init=model_utils.INITIALIZERS[self.hps.conv_kernel_init](
-            self.hps.conv_kernel_scale),
+            self.hps.conv_kernel_scale
+        ),
         dense_kernel_init=model_utils.INITIALIZERS[self.hps.dense_kernel_init](
-            self.hps.dense_kernel_scale),
+            self.hps.dense_kernel_scale
+        ),
         dropout_rate=self.hps.dropout_rate,
         normalizer=self.hps.normalizer,
         activation_function=self.hps.activation_function,
         batch_size=self.hps.batch_size,
         virtual_batch_size=self.hps.virtual_batch_size,
-        total_batch_size=self.hps.total_accumulated_batch_size)
+        total_batch_size=self.hps.total_accumulated_batch_size,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""

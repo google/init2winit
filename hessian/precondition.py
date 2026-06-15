@@ -55,11 +55,13 @@ def _make_inv_power_preconditioner(diag, eps, eps_root=0.0, power=0.5):
 
 
 # KS transforms for which preconditioning is implemented.
-SUPPORTED_KS_TRANSFORMS = ['scale_by_adam',
-                           'scale_by_nadam',
-                           'scale_by_amsgrad',
-                           'precondition_by_rms',
-                           'precondition_by_rss']
+SUPPORTED_KS_TRANSFORMS = [
+    'scale_by_adam',
+    'scale_by_nadam',
+    'scale_by_amsgrad',
+    'precondition_by_rms',
+    'precondition_by_rss',
+]
 
 
 def _make_ks_preconditioner(element, state, hps):
@@ -75,31 +77,37 @@ def _make_ks_preconditioner(element, state, hps):
   """
   err_msg = 'all KS hps must be set in order to compute preconditioned Hessian'
   if element == 'scale_by_adam' or element == 'scale_by_nadam':
-    if not ('b2' in hps and 'debias' in hps
-            and 'eps' in hps and 'eps_root' in hps):
+    if not (
+        'b2' in hps and 'debias' in hps and 'eps' in hps and 'eps_root' in hps
+    ):
       raise ValueError(err_msg)
     nu = _maybe_bias_correct(state.nu, hps['b2'], state.count, hps['debias'])
-    return _make_inv_power_preconditioner(nu, hps['eps'], hps['eps_root'],
-                                          hps.get('power', 0.5))
+    return _make_inv_power_preconditioner(
+        nu, hps['eps'], hps['eps_root'], hps.get('power', 0.5)
+    )
   elif element == 'scale_by_amsgrad':
     if not ('eps' in hps and 'eps_root' in hps):
       raise ValueError(err_msg)
     return _make_inv_power_preconditioner(state.nu, hps['eps'], hps['eps_root'])
   elif element == 'precondition_by_rms':
-    if not ('decay' in hps and 'debias' in hps
-            and 'eps' in hps and 'eps_root' in hps):
+    if not (
+        'decay' in hps
+        and 'debias' in hps
+        and 'eps' in hps
+        and 'eps_root' in hps
+    ):
       raise ValueError(err_msg)
     nu = _maybe_bias_correct(state.nu, hps['decay'], state.count, hps['debias'])
     return _make_inv_power_preconditioner(nu, hps['eps'], hps['eps_root'])
   elif element == 'precondition_by_rss':
     if 'eps' not in hps:
       raise ValueError(err_msg)
-    return _make_inv_power_preconditioner(state.sum_of_squares,
-                                          hps['eps'], 0.0)
+    return _make_inv_power_preconditioner(state.sum_of_squares, hps['eps'], 0.0)
 
 
-def make_diag_preconditioner(optimizer, opt_hparams,
-                             optimizer_state, precondition_config):
+def make_diag_preconditioner(
+    optimizer, opt_hparams, optimizer_state, precondition_config
+):
   """Construct a diagonal preconditioner.
 
   Given an optimizer and its state, return that optimizer's preconditioner.
@@ -119,6 +127,7 @@ def make_diag_preconditioner(optimizer, opt_hparams,
     opt_hparams: (dict) The opt_hparams dict from the init2winit config.
     optimizer_state: (pytree) The unreplicated optimizer state.
     precondition_config: (ConfigDict) Configs for the preconditioner.
+
   Returns:
     (pytree) diagonal preconditioner
   """
@@ -138,7 +147,8 @@ def make_diag_preconditioner(optimizer, opt_hparams,
   # a single KS transform chain, and a single preconditioner in that chain.
   if optimizer == 'kitchen_sink' and '0' in opt_hparams:
     precondition_steps = [
-        step for step in opt_hparams.keys()
+        step
+        for step in opt_hparams.keys()
         if opt_hparams[step]['element'] in SUPPORTED_KS_TRANSFORMS
     ]
     if len(precondition_steps) != 1:

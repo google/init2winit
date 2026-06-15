@@ -19,6 +19,7 @@ import copy
 
 from absl import logging
 import flax
+
 from init2winit.model_lib.model_utils import ParameterType  # pylint: disable=g-importing-member
 from init2winit.optimizer_lib import gradient_accumulator
 from init2winit.optimizer_lib import kitchen_sink
@@ -30,8 +31,8 @@ from init2winit.optimizer_lib import sla
 from init2winit.optimizer_lib import utils
 import jax
 import jax.numpy as jnp
-import optax
 
+import optax
 
 
 
@@ -116,7 +117,9 @@ def sgd(learning_rate, weight_decay, momentum=None, nesterov=False):
   return optax.chain(
       optax.add_decayed_weights(weight_decay),
       optax.sgd(
-          learning_rate=learning_rate, momentum=momentum, nesterov=nesterov))
+          learning_rate=learning_rate, momentum=momentum, nesterov=nesterov
+      ),
+  )
 
 
 def get_optimizer(hps, model=None, batch_axis_name=None):
@@ -226,8 +229,8 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
 
     if ParameterType.DEFAULT.value not in param_type_to_optimizer_and_hparams:
       raise ValueError(
-          f'Fallback default optimizer not found in param_type_to_grad_tx.'
-          f' Please add a fallback optimizer to param_type_to_grad_tx ='
+          'Fallback default optimizer not found in param_type_to_grad_tx.'
+          ' Please add a fallback optimizer to param_type_to_grad_tx ='
           f' {param_type_to_optimizer_and_hparams}'
       )
     param_type_to_grad_tx = {}
@@ -239,8 +242,8 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         opt_hparams.opt_hparams.update(hparams_to_merge)
       hps_copy.update(opt_hparams)
       logging.info('HPS_COPY %s', hps_copy)
-      param_type_to_grad_tx[param_type] = (
-          optax.GradientTransformation(*get_optimizer(hps_copy, model))
+      param_type_to_grad_tx[param_type] = optax.GradientTransformation(
+          *get_optimizer(hps_copy, model)
       )
 
     param_to_type = model.params_types
@@ -269,35 +272,43 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
     hps_last_layer['l2_decay_factor'] = None
 
     network_optimizer = optax.GradientTransformation(
-        *get_optimizer(hps_network))
+        *get_optimizer(hps_network)
+    )
     last_layer_optimizer = optax.GradientTransformation(
-        *get_optimizer(hps_last_layer))
+        *get_optimizer(hps_last_layer)
+    )
 
     opt_init, opt_update = online_newton_step.multiple_optimizer(
         last_layer_name=hps.opt_hparams['last_layer_name'],
         network_optimizer=network_optimizer,
         last_layer_optimizer=last_layer_optimizer,
         last_layer_base_lr=hps.opt_hparams['last_layer_base_lr'],
-        base_lr=hps.lr_hparams['base_lr'])
+        base_lr=hps.lr_hparams['base_lr'],
+    )
   elif hps.optimizer == 'online_newton_step':
     opt_init, opt_update = utils.static_inject_hyperparams(
-        online_newton_step.online_newton_step)(
-            learning_rate=0.0,  # Manually injected on each train step.
-            alpha=hps.opt_hparams['alpha'],
-            weight_decay=weight_decay)
+        online_newton_step.online_newton_step
+    )(
+        learning_rate=0.0,  # Manually injected on each train step.
+        alpha=hps.opt_hparams['alpha'],
+        weight_decay=weight_decay,
+    )
   elif hps.optimizer == 'diag_ons':
     opt_init, opt_update = utils.static_inject_hyperparams(
-        online_newton_step.diag_ons)(
-            learning_rate=1.0,  # Set to 1.0 to use as a last layer optimizer.
-            weight_decay=weight_decay,
-            b1=hps.opt_hparams['beta1'],
-            b2=hps.opt_hparams['beta2'])
+        online_newton_step.diag_ons
+    )(
+        learning_rate=1.0,  # Set to 1.0 to use as a last layer optimizer.
+        weight_decay=weight_decay,
+        b1=hps.opt_hparams['beta1'],
+        b2=hps.opt_hparams['beta2'],
+    )
   elif hps.optimizer == 'momentum' or hps.optimizer == 'nesterov':
     opt_init, opt_update = utils.static_inject_hyperparams(sgd)(
         learning_rate=0.0,  # Manually injected on each train step.
         weight_decay=weight_decay,
         momentum=hps.opt_hparams['momentum'],
-        nesterov=(hps.optimizer == 'nesterov'))
+        nesterov=(hps.optimizer == 'nesterov'),
+    )
   elif hps.optimizer == 'tearfree':
     sketch_size = hps.opt_hparams.get('sketchy_rank')
     if sketch_size is not None and sketch_size > 0:
@@ -383,15 +394,17 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         b1=hps.opt_hparams['beta1'],
         b2=hps.opt_hparams['beta2'],
         eps=hps.opt_hparams['epsilon'],
-        weight_decay=weight_decay)
+        weight_decay=weight_decay,
+    )
   elif hps.optimizer == 'adafactor':
     opt_init, opt_update = utils.static_inject_hyperparams(optax.adafactor)(
         learning_rate=0.0,
         min_dim_size_to_factor=hps.opt_hparams['min_dim_size_to_factor'],
         decay_rate=hps.opt_hparams['adafactor_decay_rate'],
         decay_offset=hps.opt_hparams['decay_offset'],
-        multiply_by_parameter_scale=hps
-        .opt_hparams['multiply_by_parameter_scale'],
+        multiply_by_parameter_scale=hps.opt_hparams[
+            'multiply_by_parameter_scale'
+        ],
         clipping_threshold=hps.opt_hparams['clipping_threshold'],
         momentum=hps.opt_hparams['momentum'],
         weight_decay_rate=weight_decay,
@@ -440,18 +453,14 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         safeguard_warmup=hps.opt_hparams['safeguard_warmup'],
     )
   elif hps.optimizer == 'cocob':
-    opt_init, opt_update = utils.static_inject_hyperparams(
-        optax.contrib.cocob
-    )(
+    opt_init, opt_update = utils.static_inject_hyperparams(optax.contrib.cocob)(
         learning_rate=0.0,
         weight_decay=weight_decay,
         alpha=hps.opt_hparams['alpha'],
         eps=hps.opt_hparams['eps'],
     )
   elif hps.optimizer == 'momo':
-    opt_init, opt_update = utils.static_inject_hyperparams(
-        optax.contrib.momo
-    )(
+    opt_init, opt_update = utils.static_inject_hyperparams(optax.contrib.momo)(
         learning_rate=0.0,
         beta=hps.opt_hparams['beta'],
         lower_bound=hps.opt_hparams['lower_bound'],
@@ -473,18 +482,14 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
     )
     optimizer_requires_value = True
   elif hps.optimizer == 'dog':
-    opt_init, opt_update = utils.static_inject_hyperparams(
-        optax.contrib.dog
-    )(
+    opt_init, opt_update = utils.static_inject_hyperparams(optax.contrib.dog)(
         learning_rate=0.0,
         reps_rel=hps.opt_hparams['reps_rel'],
         eps=hps.opt_hparams['eps'],
         weight_decay=hps.opt_hparams['weight_decay'],
     )
   elif hps.optimizer == 'dowg':
-    opt_init, opt_update = utils.static_inject_hyperparams(
-        optax.contrib.dowg
-    )(
+    opt_init, opt_update = utils.static_inject_hyperparams(optax.contrib.dowg)(
         learning_rate=0.0,
         eps=hps.opt_hparams['eps'],
         weight_decay=hps.opt_hparams['weight_decay'],
@@ -492,8 +497,8 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
 
   elif hps.optimizer == 'kitchen_sink':
     opt_init, opt_update = utils.static_inject_hyperparams(
-        kitchen_sink.kitchen_sink)(
-            learning_rate=0.0, config=hps.opt_hparams)
+        kitchen_sink.kitchen_sink
+    )(learning_rate=0.0, config=hps.opt_hparams)
   elif hps.optimizer == 'samuel':
     opt_init, opt_update = samuel.from_hparams(hps.opt_hparams)
 
@@ -511,7 +516,8 @@ def get_optimizer(hps, model=None, batch_axis_name=None):
         total_batch_size=hps.total_accumulated_batch_size,
         virtual_batch_size=virtual_batch_size,
         base_opt_init_fn=opt_init,
-        base_opt_update_fn=opt_update)
+        base_opt_update_fn=opt_update,
+    )
 
   if hps.opt_hparams.get('use_sam', False):
     opt_init, opt_update = (
@@ -586,14 +592,16 @@ def _wrap_update_fn(
   """
   del opt_name
 
-  def update_fn(grads,
-                optimizer_state,
-                params,
-                batch=None,
-                batch_stats=None,
-                cost_fn=None,
-                grad_fn=None,
-                value=None):
+  def update_fn(
+      grads,
+      optimizer_state,
+      params,
+      batch=None,
+      batch_stats=None,
+      cost_fn=None,
+      grad_fn=None,
+      value=None,
+  ):
     del batch, batch_stats
     if send_grad_fn and send_cost_fn:
       # Note that `value_and_grad` already returns the cost, so there is no need
@@ -601,10 +609,12 @@ def _wrap_update_fn(
       raise ValueError('send_grad_fn and send_cost_fn must not both be True.')
     if send_grad_fn:
       return opt_update(
-          grads, optimizer_state, grad_fn_params_tuple=(grad_fn, params))
+          grads, optimizer_state, grad_fn_params_tuple=(grad_fn, params)
+      )
     elif send_cost_fn:
       return opt_update(
-          grads, optimizer_state, cost_fn_params_tuple=(cost_fn, params))
+          grads, optimizer_state, cost_fn_params_tuple=(cost_fn, params)
+      )
     elif send_value:
       return opt_update(
           grads,

@@ -14,9 +14,9 @@
 # limitations under the License.
 
 """Common code used by different models."""
+
 import enum
 import functools
-
 from typing import Any, Callable, Dict, Iterable
 
 from absl import logging
@@ -50,15 +50,17 @@ ACTIVATIONS = {
 lecun_normal = functools.partial(
     initializers.variance_scaling,
     mode='fan_in',
-    distribution='truncated_normal')
+    distribution='truncated_normal',
+)
 
 # This trick is used in fairseq's multihead attention.
 # https://github.com/facebookresearch/fairseq/blob/0.12.2-release/fairseq/modules/multihead_attention.py#L171  # pylint: disable=line-too-long
 xavier_uniform_over_sqrt2 = functools.partial(
     initializers.variance_scaling,
-    scale=1./2,
+    scale=1.0 / 2,
     mode='fan_avg',
-    distribution='uniform')
+    distribution='uniform',
+)
 
 INITIALIZERS = {
     'delta_orthogonal': initializers.delta_orthogonal,
@@ -71,6 +73,7 @@ INITIALIZERS = {
 
 class ScalarMultiply(nn.Module):
   """Layer which multiplies by a single scalar."""
+
   scale_init: Any = initializers.ones
 
   @nn.compact
@@ -78,13 +81,15 @@ class ScalarMultiply(nn.Module):
     return x * self.param('scale', self.scale_init, ())
 
 
-def get_normalizer(normalizer,
-                   train,
-                   batch_size=None,
-                   virtual_batch_size=None,
-                   total_batch_size=None,
-                   dtype=jnp.float32,
-                   data_format='NHWC'):
+def get_normalizer(
+    normalizer,
+    train,
+    batch_size=None,
+    virtual_batch_size=None,
+    total_batch_size=None,
+    dtype=jnp.float32,
+    data_format='NHWC',
+):
   """Maps a string to the given normalizer function.
 
   We return a function that returns the normalization module, deferring the
@@ -105,8 +110,8 @@ def get_normalizer(normalizer,
   Args:
     normalizer: One of ['batch_norm', 'virtual_batch_norm', 'layer_norm',
       'none'].
-    train: Boolean indiciating if we are running in train or inference mode
-      for batch norm.
+    train: Boolean indiciating if we are running in train or inference mode for
+      batch norm.
     batch_size: only used for virtual batch norm, the batch size.
     virtual_batch_size: only used for virtual batch norm, the virtual batch
       size.
@@ -128,7 +133,8 @@ def get_normalizer(normalizer,
         use_running_average=not train,
         momentum=0.9,
         epsilon=1e-5,
-        dtype=dtype)
+        dtype=dtype,
+    )
   elif normalizer == 'virtual_batch_norm':
     return functools.partial(
         normalization.VirtualBatchNorm,
@@ -139,18 +145,23 @@ def get_normalizer(normalizer,
         virtual_batch_size=virtual_batch_size,
         data_format=data_format,
         total_batch_size=total_batch_size,
-        dtype=dtype)
+        dtype=dtype,
+    )
   elif normalizer in ['layer_norm', 'pre_layer_norm', 'post_layer_norm']:
     return functools.partial(nn.LayerNorm, dtype=dtype)
   elif normalizer == 'none':
+
     def identity_wrapper(*args, **kwargs):
       del args
       del kwargs
+
       def identity(x, *args, **kwargs):
         del args
         del kwargs
         return x
+
       return identity
+
     return identity_wrapper
   else:
     raise ValueError('Unknown normalizer: {}'.format(normalizer))
@@ -224,8 +235,8 @@ def l2_regularization(params, l2_decay_rank_threshold):
   Args:
     params: Pytree containing parameters.
     l2_decay_rank_threshold: The calculation will only include parameters with
-       param.ndim >= l2_decay_rank_threshold. Set to 2 to ignore all bias and
-       batch_norm params in the model.
+      param.ndim >= l2_decay_rank_threshold. Set to 2 to ignore all bias and
+      batch_norm params in the model.
 
   Returns:
     weight_l2: the squared l2 norm of all params matching the threshold.
@@ -257,13 +268,15 @@ def flatten_dict(nested_dict, sep='/'):
 
   For example, if the dictionary is {'outer1': {'inner1': 1, 'inner2': 2}}.
   This will return {'/outer1/inner1': 1, '/outer1/inner2': 2}. With sep='/' this
-  will match how flax.traverse_util.ParamTreeTraversal flattens the keys, to allow for
+  will match how flax.traverse_util.ParamTreeTraversal flattens the keys, to
+  allow for
   easy filtering when using traversals. Requires the nested dictionaries
   contain no cycles.
 
   Args:
     nested_dict: A nested dictionary.
     sep: The separator to use when concatenating the dictionary strings.
+
   Returns:
     The flattened dictionary.
   """
@@ -310,6 +323,7 @@ def rescale_layers(params, layer_rescale_factors):
 # Define this so that if using pytree iteration utilities, can iterate over the
 # model shapes pytree without iterating over the shape tuples.
 class ShapeTuple:
+
   def __init__(self, shape_tuple):
     self.shape_tuple = shape_tuple
 
@@ -326,6 +340,7 @@ def param_shapes(params):
 
 class ParameterType(enum.Enum):
   """Different types of neural network parameters."""
+
   WEIGHT = 0
   BIAS = 1
   CONV_WEIGHT = 2
@@ -361,7 +376,8 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
     name = name.lower()
     if isinstance(value, dict) or isinstance(value, FrozenDict):
       param_types_dict[original_name] = param_types(
-          value, parent_name=parent_name + '/' + name)
+          value, parent_name=parent_name + '/' + name
+      )
     else:
       if 'batchnorm' in parent_name or 'bn' in parent_name:
         if name == 'scale':
@@ -370,7 +386,8 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
           param_types_dict[original_name] = ParameterType.BATCH_NORM_BIAS
         else:
           raise ValueError(
-              f'Unrecognized batch norm parameter: {parent_name}/{name}.')
+              f'Unrecognized batch norm parameter: {parent_name}/{name}.'
+          )
       elif (
           'layernorm' in parent_name
           or 'layer_norm_' in parent_name
@@ -383,7 +400,8 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
           param_types_dict[original_name] = ParameterType.LAYER_NORM_BIAS
         else:
           raise ValueError(
-              f'Unrecognized layer norm parameter: {parent_name}/{name}.')
+              f'Unrecognized layer norm parameter: {parent_name}/{name}.'
+          )
       elif 'rmsnorm' in parent_name:
         if name == 'scale':
           param_types_dict[original_name] = ParameterType.RMSNORM_SCALE
@@ -391,13 +409,15 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
           param_types_dict[original_name] = ParameterType.RMSNORM_BIAS
         else:
           raise ValueError(
-              f'Unrecognized rms norm parameter: {parent_name}/{name}.')
+              f'Unrecognized rms norm parameter: {parent_name}/{name}.'
+          )
       elif 'queryscaler' in parent_name:
         if name == 'scale':
           param_types_dict[original_name] = ParameterType.ATTENTION_SCALE
         else:
           raise ValueError(
-              f'Unrecognized query scaler parameter: {parent_name}/{name}.')
+              f'Unrecognized query scaler parameter: {parent_name}/{name}.'
+          )
       elif 'conv' in parent_name:
         if 'bias' in name:
           param_types_dict[original_name] = ParameterType.BIAS
@@ -406,8 +426,9 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
       # Note that this is exact equality, not contained in, because
       # flax.linen.Embed names the embedding parameter "embedding"
       # https://github.com/google/flax/blob/main/flax/linen/linear.py#L604.
-      elif ('embedding' in name or
-            ('embedding' in parent_name and name == 'kernel')):
+      elif 'embedding' in name or (
+          'embedding' in parent_name and name == 'kernel'
+      ):
         param_types_dict[original_name] = ParameterType.EMBEDDING
       elif (
           'attention' in parent_name
@@ -430,7 +451,8 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
           param_types_dict[original_name] = ParameterType.ATTENTION_QKV
         else:
           raise ValueError(
-              f'Unrecognized attention parameter: {parent_name}/{name}.')
+              f'Unrecognized attention parameter: {parent_name}/{name}.'
+          )
       elif 'lstm' in parent_name:
         if name == 'kernel':
           param_types_dict[original_name] = ParameterType.LSTM_WEIGHT
@@ -438,7 +460,8 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
           param_types_dict[original_name] = ParameterType.LSTM_BIAS
         else:
           raise ValueError(
-              f'Unrecognized attention parameter: {parent_name}/{name}.')
+              f'Unrecognized attention parameter: {parent_name}/{name}.'
+          )
       elif 'subsample' in parent_name and 'dense' in parent_name:
         if name == 'kernel':
           param_types_dict[original_name] = ParameterType.SUBSAMPLE_WEIGHT
@@ -451,8 +474,7 @@ def param_types(shapes, parent_name: str = '') -> Dict[str, ParameterType]:
       elif 'x' in name:
         param_types_dict[original_name] = ParameterType.NQM_PARAM
       else:
-        raise ValueError(
-            f'Unrecognized parameter: {parent_name}/{name}.')
+        raise ValueError(f'Unrecognized parameter: {parent_name}/{name}.')
   return param_types_dict
 
 

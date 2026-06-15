@@ -16,6 +16,7 @@
 r"""Tests for gradient_accumulator.py.
 
 """
+
 import copy
 import functools
 import itertools
@@ -52,22 +53,26 @@ def _init_model(model_cls, hps):
   model = model_cls(hps, dataset_metadata, loss_name, metrics_name)
   params_rng, dropout_rng = jax.random.split(key, num=2)
   model_init_fn = jax.jit(
-      functools.partial(model.flax_module.init, train=False))
+      functools.partial(model.flax_module.init, train=False)
+  )
   init_dict = model_init_fn(
       rngs={'params': params_rng, 'dropout': dropout_rng},
-      x=np.zeros((2, *hps.input_shape)))
+      x=np.zeros((2, *hps.input_shape)),
+  )
   params = init_dict['params']
   batch_stats = init_dict.get('batch_stats', {})
   return params, batch_stats, model.training_cost
 
 
-def _optimize(num_steps,
-              params,
-              batch_stats,
-              training_cost,
-              train_iter,
-              opt_init,
-              opt_update):
+def _optimize(
+    num_steps,
+    params,
+    batch_stats,
+    training_cost,
+    train_iter,
+    opt_init,
+    opt_update,
+):
   """Update the Flax model for num_steps steps."""
   opt_state = opt_init(params)
 
@@ -76,7 +81,9 @@ def _optimize(num_steps,
         params,
         batch=batch,
         batch_stats=batch_stats,
-        dropout_rng=jax.random.PRNGKey(2))
+        dropout_rng=jax.random.PRNGKey(2),
+    )
+
   grad_fn = jax.value_and_grad(opt_cost, has_aux=True)
   for _ in range(num_steps):
     data_batch = next(train_iter)
@@ -89,8 +96,7 @@ def _optimize(num_steps,
 
 def _get_fake_text_dataset(batch_size, eval_num_batches):
   """Yields a single text batch repeatedly for train and test."""
-  inputs = jnp.array(
-      np.random.randint(low=0, high=4, size=(batch_size, 32)))
+  inputs = jnp.array(np.random.randint(low=0, high=4, size=(batch_size, 32)))
   batch = {
       'inputs': inputs,
       'targets': inputs,
@@ -122,10 +128,12 @@ def _get_fake_text_dataset(batch_size, eval_num_batches):
   meta_data = {
       'apply_one_hot_in_loss': True,
       'shift_inputs': True,
-      'causal': True
+      'causal': True,
   }
-  return (Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
-                  test_epoch), meta_data)
+  return (
+      Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch),
+      meta_data,
+  )
 
 
 class GradientAccumulatorTest(absltest.TestCase):
@@ -143,13 +151,15 @@ class GradientAccumulatorTest(absltest.TestCase):
 
   def test_virtual_batch_size_error(self):
     with self.assertRaisesRegex(
-        ValueError, 'Gradient accumulation does not currently support using '):
+        ValueError, 'Gradient accumulation does not currently support using '
+    ):
       gradient_accumulator.accumulate_gradients(
           per_step_batch_size=32,
           total_batch_size=96,
           virtual_batch_size=48,
           base_opt_init_fn=None,
-          base_opt_update_fn=None)
+          base_opt_update_fn=None,
+      )
 
   def test_accumulation(self):
     """Test simple gradient accumulation."""
@@ -173,16 +183,19 @@ class GradientAccumulatorTest(absltest.TestCase):
         'total_accumulated_batch_size': total_batch_size,
     })
     grad_acc_params, grad_acc_batch_stats, grad_acc_training_cost = _init_model(
-        model_cls, hps)
+        model_cls, hps
+    )
     total_dataset = dataset_builder(
         shuffle_rng=jax.random.PRNGKey(1),
         batch_size=total_batch_size,
         eval_batch_size=10,
-        hps=hps)
+        hps=hps,
+    )
     # Ensure we see the same exact batches.
     train_iter = total_dataset.train_iterator_fn()
     train_iter = itertools.islice(train_iter, 0, num_steps)
     train_iter = itertools.cycle(train_iter)
+
     def grad_acc_train_iter():
       for _ in range(num_steps):
         total_batch = next(train_iter)
@@ -197,13 +210,15 @@ class GradientAccumulatorTest(absltest.TestCase):
 
     lrs = jnp.array([1.0, 0.1, 1e-2])
     sgd_opt_init, sgd_opt_update = optax.sgd(
-        learning_rate=lambda t: lrs.at[t].get())
+        learning_rate=lambda t: lrs.at[t].get()
+    )
     opt_init, opt_update = gradient_accumulator.accumulate_gradients(
         per_step_batch_size=per_step_batch_size,
         total_batch_size=total_batch_size,
         virtual_batch_size=virtual_batch_size,
         base_opt_init_fn=sgd_opt_init,
-        base_opt_update_fn=sgd_opt_update)
+        base_opt_update_fn=sgd_opt_update,
+    )
     grad_acc_params, grad_acc_batch_stats = _optimize(
         # Run for 3x the number of steps to see the same number of examples.
         num_steps=3 * num_steps,
@@ -212,7 +227,8 @@ class GradientAccumulatorTest(absltest.TestCase):
         training_cost=grad_acc_training_cost,
         train_iter=grad_acc_train_iter(),
         opt_init=opt_init,
-        opt_update=opt_update)
+        opt_update=opt_update,
+    )
 
     # Compute the same updates, but without gradient accumulation.
     hps.update({
@@ -227,20 +243,22 @@ class GradientAccumulatorTest(absltest.TestCase):
         training_cost=training_cost,
         train_iter=train_iter,
         opt_init=sgd_opt_init,
-        opt_update=sgd_opt_update)
+        opt_update=sgd_opt_update,
+    )
 
-    diffs_params = jax.tree.map(lambda a, b: jnp.mean(jnp.abs(a - b)),
-                                grad_acc_params, params)
+    diffs_params = jax.tree.map(
+        lambda a, b: jnp.mean(jnp.abs(a - b)), grad_acc_params, params
+    )
 
     def batch_stats_reduce(a, b):
       if len(a.shape) > 0:  # pylint: disable=g-explicit-length-test
-        return jnp.mean(
-            jnp.abs(jnp.mean(a, axis=0) - jnp.mean(b, axis=0)))
+        return jnp.mean(jnp.abs(jnp.mean(a, axis=0) - jnp.mean(b, axis=0)))
       # The gradient accumulator counters are scalars.
       return a - b
 
-    diffs_batch_stats = jax.tree.map(batch_stats_reduce, grad_acc_batch_stats,
-                                     batch_stats)
+    diffs_batch_stats = jax.tree.map(
+        batch_stats_reduce, grad_acc_batch_stats, batch_stats
+    )
     # We sometimes get small floating point errors in the gradients, so we
     # cannot test for the values being exactly the same.
     acceptable_params_diff = 1e-4
@@ -257,11 +275,11 @@ class GradientAccumulatorTest(absltest.TestCase):
             not_close_dict[new_name] = dd
       return not_close_dict
 
-    not_close_params = check_closeness(
-        '', diffs_params, acceptable_params_diff)
+    not_close_params = check_closeness('', diffs_params, acceptable_params_diff)
     self.assertEmpty(not_close_params)
     not_close_batch_stats = check_closeness(
-        '', diffs_batch_stats, acceptable_batch_stats_diff)
+        '', diffs_batch_stats, acceptable_batch_stats_diff
+    )
     # Note that for the variance variables in the batch stats collection, they
     # sometimes can start to diverge slightly over time (with a higher number of
     # training steps), likely due to numerical issues.
@@ -300,10 +318,7 @@ class GradientAccumulatorTest(absltest.TestCase):
         'opt_hparams': {
             'momentum': 0.9,
         },
-        'lr_hparams': {
-            'base_lr': 0.005,
-            'schedule': 'constant'
-        },
+        'lr_hparams': {'base_lr': 0.005, 'schedule': 'constant'},
         # Training HParams.
         'l2_decay_factor': 1e-4,
         'l2_decay_rank_threshold': 2,
@@ -315,7 +330,8 @@ class GradientAccumulatorTest(absltest.TestCase):
     initializer = initializers.get_initializer('noop')
     eval_num_batches = 5
     dataset, dataset_meta_data = _get_fake_text_dataset(
-        batch_size=hps.batch_size, eval_num_batches=eval_num_batches)
+        batch_size=hps.batch_size, eval_num_batches=eval_num_batches
+    )
     eval_batch_size = hps.batch_size
 
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
@@ -340,10 +356,13 @@ class GradientAccumulatorTest(absltest.TestCase):
             eval_frequency=eval_every,
             checkpoint_steps=checkpoint_steps,
             metrics_logger=metrics_logger,
-            init_logger=init_logger).train())
+            init_logger=init_logger,
+        ).train()
+    )
 
     with tf.io.gfile.GFile(
-        os.path.join(self.test_dir, 'measurements.csv')) as f:
+        os.path.join(self.test_dir, 'measurements.csv')
+    ) as f:
       df = pandas.read_csv(f)
       train_err = df['train/error_rate'].values[-1]
       # Note that upgrading to Linen made this fail at 0.6.

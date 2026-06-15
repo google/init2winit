@@ -48,7 +48,6 @@ from init2winit.optimizer_lib.kitchen_sink._src.transform import ScaleByAdamStat
 from init2winit.optimizer_lib.kitchen_sink._src.transform import ScaleByAMSGradState
 from init2winit.optimizer_lib.kitchen_sink._src.utils import unfreeze_wrapper
 
-
 __version__ = '0.0.1'
 
 __all__ = (

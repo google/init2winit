@@ -38,7 +38,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         activation_function=['relu', 'relu', 'relu', 'relu', 'relu'],
         kernel_scales=[1.0] * 6,
         model_dtype='float32',
-    ))
+    )
+)
 
 
 class AutoEncoderModel(base_model.BaseModel):
@@ -46,19 +47,19 @@ class AutoEncoderModel(base_model.BaseModel):
 
   def build_flax_module(self):
     kernel_inits = [
-        initializers.normal(scale)
-        for scale in self.hps.kernel_scales
+        initializers.normal(scale) for scale in self.hps.kernel_scales
     ]
 
     return FullyConnected(
         num_outputs=self.hps['output_shape'][-1],
         hid_sizes=self.hps.hid_sizes,
         activation_function=self.hps.activation_function,
-        kernel_inits=kernel_inits)
+        kernel_inits=kernel_inits,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""
     dummy_inputs = [
         jnp.zeros((hps.batch_size, *hps.input_shape), dtype=hps.model_dtype)
-        ]
+    ]
     return dummy_inputs

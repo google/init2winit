@@ -30,12 +30,9 @@ DEFAULT_CONFIG = {
 }
 
 
-def get_grad(params,
-             batch,
-             rng,
-             batch_stats=None,
-             module_flags=None,
-             training_cost=None):
+def get_grad(
+    params, batch, rng, batch_stats=None, module_flags=None, training_cost=None
+):
   """Single step of the training loop.
 
   Args:
@@ -57,13 +54,11 @@ def get_grad(params,
     kwargs = {'module_flags': module_flags}
   else:
     kwargs = {}
+
   def opt_cost(params):
     return training_cost(
-        params,
-        batch,
-        batch_stats=batch_stats,
-        dropout_rng=rng,
-        **kwargs)
+        params, batch, batch_stats=batch_stats, dropout_rng=rng, **kwargs
+    )
 
   grad_fn = jax.value_and_grad(opt_cost, has_aux=True)
   _, grad = grad_fn(params)
@@ -104,7 +99,8 @@ class ModelDebugCallback:
     get_act_stats_fn = model_debugger.create_forward_pass_stats_fn(
         model.apply_on_batch,
         capture_activation_norms=True,
-        sown_collection_names=callback_config.get('sown_collection_names'))
+        sown_collection_names=callback_config.get('sown_collection_names'),
+    )
     batch_stats = jax.tree.map(lambda x: x[:][0], batch_stats)
     grad_fn = functools.partial(
         get_grad,
@@ -117,7 +113,8 @@ class ModelDebugCallback:
         metrics_logger=logger,
         grad_fn=grad_fn,
         skip_flags=callback_config.get('skip_flags'),
-        skip_groups=callback_config.get('skip_groups'))
+        skip_groups=callback_config.get('skip_groups'),
+    )
     # pmap functions for the training loop
     # in_axes = (params = 0, batch_stats = 0, batch = 0, step = None,
     # lr = None, rng = None, local_device_index = 0, training_metrics_grabber=0,
@@ -150,14 +147,16 @@ class ModelDebugCallback:
     """
     del optimizer_state
     del batch_stats
-    p_norms = jax.tree.map(lambda x: jnp.linalg.norm(x[0].reshape(-1))**2,
-                           params)
+    p_norms = jax.tree.map(
+        lambda x: jnp.linalg.norm(x[0].reshape(-1)) ** 2, params
+    )
 
     self.debugger.full_eval(
         step=global_step,
         params=params,
         param_norms_sql2=p_norms,
         batch=self.batch,
-        rng=self.batch_rng)
+        rng=self.batch_rng,
+    )
 
     return {}

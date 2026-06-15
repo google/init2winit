@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Classes specifying different protein domains."""
+
 import collections
 from collections import abc
 import copy
@@ -40,18 +41,20 @@ _DEFAULT_VOCAB_NAME = 'vocab'
 class Vocabulary(object):
   """Basic vocabulary used to represent output tokens for domains."""
 
-  def __init__(self,
-               tokens,
-               name=None,
-               include_bos=False,
-               include_eos=False,
-               include_pad=False,
-               include_mask=False,
-               bos_token=BOS_TOKEN,
-               eos_token=EOS_TOKEN,
-               pad_token=PAD_TOKEN,
-               mask_token=MASK_TOKEN,
-               disallow_sep_token=True):
+  def __init__(
+      self,
+      tokens,
+      name=None,
+      include_bos=False,
+      include_eos=False,
+      include_pad=False,
+      include_mask=False,
+      bos_token=BOS_TOKEN,
+      eos_token=EOS_TOKEN,
+      pad_token=PAD_TOKEN,
+      mask_token=MASK_TOKEN,
+      disallow_sep_token=True,
+  ):
     """A token vocabulary.
 
     Args:
@@ -61,22 +64,22 @@ class Vocabulary(object):
       name: An optional name for the vocab.
       include_bos: Whether to append `bos_token` to `tokens` that marks the
         beginning of a sequence.
-      include_eos: Whether to append `eos_token` to `tokens` that marks the
-        end of a sequence.
+      include_eos: Whether to append `eos_token` to `tokens` that marks the end
+        of a sequence.
       include_pad: Whether to append `pad_token` to `tokens` to marks past end
         of sequence.
       include_mask: Whether to append `mask_token` to `tokens` to mark masked
         positions.
-      bos_token: A special token than marks the beginning of sequence.
-        Ignored if `include_bos == False`.
-      eos_token: A special token than marks the end of sequence.
-        Ignored if `include_eos == False`.
-      pad_token: A special token than marks past the end of sequence.
-        Ignored if `include_pad == False`.
+      bos_token: A special token than marks the beginning of sequence. Ignored
+        if `include_bos == False`.
+      eos_token: A special token than marks the end of sequence. Ignored if
+        `include_eos == False`.
+      pad_token: A special token than marks past the end of sequence. Ignored if
+        `include_pad == False`.
       mask_token: A special token than marks MASKED positions for e.g. BERT.
         Ignored if `include_mask == False`.
       disallow_sep_token: If True, disallow `|` appearing in the vocabulary,
-      which is used as separator token when serializing to csv.
+        which is used as separator token when serializing to csv.
     """
     if not isinstance(tokens, abc.Iterable):
       tokens = range(tokens)
@@ -95,7 +98,8 @@ class Vocabulary(object):
       special_tokens = sorted(set(tokens) & set([SEP_TOKEN]))
       if special_tokens:
         raise ValueError(
-            f'tokens contains reserved special tokens: {special_tokens}!')
+            f'tokens contains reserved special tokens: {special_tokens}!'
+        )
 
     self._name = name
     self._set_tokens(tokens)
@@ -114,9 +118,11 @@ class Vocabulary(object):
     self._tokens = tokens
     self._token_ids = list(range(len(tokens)))
     self._id_to_token = collections.OrderedDict(
-        zip(self._token_ids, self._tokens))
+        zip(self._token_ids, self._tokens)
+    )
     self._token_to_id = collections.OrderedDict(
-        zip(self._tokens, self._token_ids))
+        zip(self._tokens, self._token_ids)
+    )
 
   def __setstate__(self, state):
     """Create vocab from dict version."""
@@ -139,7 +145,8 @@ class Vocabulary(object):
             eos_token=self._eos_token,
             pad_token=self._pad_token,
             mask_token=self._mask_token,
-        ))
+        )
+    )
 
   def as_dict(self):
     """Serialize vocabulary to dict."""
@@ -178,26 +185,32 @@ class Vocabulary(object):
   @property
   def bos(self):
     """Returns the index of the BOS token or None if unspecified."""
-    return (None if self._bos_token is None else
-            self._token_to_id[self._bos_token])
+    return (
+        None if self._bos_token is None else self._token_to_id[self._bos_token]
+    )
 
   @property
   def eos(self):
     """Returns the index of the EOS token or None if unspecified."""
-    return (None if self._eos_token is None else
-            self._token_to_id[self._eos_token])
+    return (
+        None if self._eos_token is None else self._token_to_id[self._eos_token]
+    )
 
   @property
   def mask(self):
     """Returns the index of the MASK token or None if unspecified."""
-    return (None if self._mask_token is None else
-            self._token_to_id[self._mask_token])
+    return (
+        None
+        if self._mask_token is None
+        else self._token_to_id[self._mask_token]
+    )
 
   @property
   def pad(self):
     """Returns the index of the PAD token or None if unspecified."""
-    return (None
-            if self._pad_token is None else self._token_to_id[self._pad_token])
+    return (
+        None if self._pad_token is None else self._token_to_id[self._pad_token]
+    )
 
   def is_valid(self, value):
     """Tests if a value is a valid token id and returns a bool."""
@@ -243,12 +256,14 @@ class Vocabulary(object):
     return ''.join(tokens) if as_str else tokens
 
 
-def make_protein_vocab(include_anomalous_amino_acids=True,
-                       include_bos=True,
-                       include_eos=True,
-                       include_pad=True,
-                       include_mask=True,
-                       include_align_tokens=False):
+def make_protein_vocab(
+    include_anomalous_amino_acids=True,
+    include_bos=True,
+    include_eos=True,
+    include_pad=True,
+    include_mask=True,
+    include_align_tokens=False,
+):
   """Returns a vocabulary for proteins."""
   tokens = list(_AA_TOKENS)
   if include_anomalous_amino_acids:
@@ -261,5 +276,5 @@ def make_protein_vocab(include_anomalous_amino_acids=True,
       include_bos=include_bos,
       include_eos=include_eos,
       include_pad=include_pad,
-      include_mask=include_mask)
-
+      include_mask=include_mask,
+  )

@@ -37,7 +37,8 @@ def normalize_vector(y: jnp.ndarray) -> jnp.ndarray:
     y: A pytree of numpy ndarray, vector y in the equation above.
   """
   gradient_norm = jnp.sqrt(
-      sum([jnp.sum(jnp.square(e)) for e in jax.tree_util.tree_leaves(y)]))
+      sum([jnp.sum(jnp.square(e)) for e in jax.tree_util.tree_leaves(y)])
+  )
   normalized_gradient = jax.tree.map(lambda x: x / gradient_norm, y)
   return normalized_gradient
 
@@ -55,7 +56,7 @@ def sam_update(
     alpha=1.0,
 ):
   """SAM update function."""
-  (grad_fn, params) = grad_fn_params_tuple
+  grad_fn, params = grad_fn_params_tuple
   updates = normalize_vector(updates)
   noised_params = jax.tree_util.tree_map(
       lambda p, u: p + rho * u, params, updates
@@ -108,7 +109,7 @@ def sharpness_aware_minimization(
   def update_fn(updates, state, grad_fn_params_tuple):
     # Updates here have been averaged across devices in Trainer before being
     # sent to the optimizer.
-    (_, params) = grad_fn_params_tuple
+    _, params = grad_fn_params_tuple
 
     # Update function in between SAM steps.
     intermediate_update_fn = clean_update
@@ -128,9 +129,14 @@ def sharpness_aware_minimization(
     if grad_clip:
       updates_norm = jnp.sqrt(model_utils.l2_regularization(updates, 0))
       scaled_updates = jax.tree.map(
-          lambda x: x / (updates_norm + _GRAD_CLIP_EPS) * grad_clip, updates)
-      updates = jax.lax.cond(updates_norm > grad_clip, lambda _: scaled_updates,
-                             lambda _: updates, None)
+          lambda x: x / (updates_norm + _GRAD_CLIP_EPS) * grad_clip, updates
+      )
+      updates = jax.lax.cond(
+          updates_norm > grad_clip,
+          lambda _: scaled_updates,
+          lambda _: updates,
+          None,
+      )
     # TODO(thetish): Explore different order for base optimizer and SAM. For
     # example, in Adam preconditioning the SAM perturbation is helpful.
     return base_opt_update_fn(updates, state, params)  # Apply base optimizer

@@ -42,21 +42,18 @@ EDGES_SIZE_MULTIPLIER = 40
 
 def _make_graph(num_nodes, num_edges, labels):
   return {
-      'num_edges':
-          np.array([num_edges]),
-      'num_nodes':
-          np.array([num_nodes]),
-      'edge_index':
-          np.array(
-              list(
-                  itertools.islice(
-                      itertools.combinations(range(num_nodes), 2), num_edges))),
-      'edge_feat':
-          np.ones((num_edges, 3)).astype('float32'),
-      'node_feat':
-          np.ones((num_nodes, 9)).astype('float32'),
-      'labels':
-          labels
+      'num_edges': np.array([num_edges]),
+      'num_nodes': np.array([num_nodes]),
+      'edge_index': np.array(
+          list(
+              itertools.islice(
+                  itertools.combinations(range(num_nodes), 2), num_edges
+              )
+          )
+      ),
+      'edge_feat': np.ones((num_edges, 3)).astype('float32'),
+      'node_feat': np.ones((num_nodes, 9)).astype('float32'),
+      'labels': labels,
   }
 
 
@@ -67,7 +64,8 @@ def _as_dataset(*args, **kwargs):
   def get_iter():
     return (
         _make_graph(num_nodes, num_edges, labels)
-        for num_nodes, num_edges, labels in zip(NUMS_NODES, NUMS_EDGES, LABELS))
+        for num_nodes, num_edges, labels in zip(NUMS_NODES, NUMS_EDGES, LABELS)
+    )
 
   return tf.data.Dataset.from_generator(
       get_iter,
@@ -78,7 +76,8 @@ def _as_dataset(*args, **kwargs):
           'node_feat': tf.TensorSpec(shape=(None, 9), dtype=np.float32),
           'num_edges': tf.TensorSpec(shape=(1,), dtype=np.int64),
           'num_nodes': tf.TensorSpec(shape=(1,), dtype=np.int64),
-      })
+      },
+  )
 
 
 def _get_dataset(shuffle_seed, additional_hps=None):
@@ -104,7 +103,8 @@ def _get_dataset(shuffle_seed, additional_hps=None):
         shuffle_rng=shuffle_seed,
         batch_size=batch_size,
         eval_batch_size=eval_batch_size,
-        hps=hps)
+        hps=hps,
+    )
     return dataset
 
 
@@ -126,12 +126,14 @@ class OgbgMolpcbaTest(tf.test.TestCase):
     # The graphs are padded to the right size
     self.assertEqual(inputs.n_node.shape[0], BATCH_SIZE + 1)
     self.assertEqual(
-        np.sum(inputs.n_node), BATCH_SIZE * NODES_SIZE_MULTIPLIER + 1)
+        np.sum(inputs.n_node), BATCH_SIZE * NODES_SIZE_MULTIPLIER + 1
+    )
     self.assertEqual(np.sum(inputs.n_edge), BATCH_SIZE * EDGES_SIZE_MULTIPLIER)
 
     # Weights are zero at NaN labels and in padded examples
-    self.assertNDArrayNear(batch['weights'],
-                           np.array([[1, 1], [0, 1], [0, 0]]), 1e-3)
+    self.assertNDArrayNear(
+        batch['weights'], np.array([[1, 1], [0, 1], [0, 0]]), 1e-3
+    )
     self.assertFalse(np.any(np.isnan(batch['targets'])))
 
   def test_train_shuffle_is_deterministic(self):
@@ -156,30 +158,32 @@ class OgbgMolpcbaTest(tf.test.TestCase):
     num_nodes = np.array(NUMS_NODES[0])
     num_edges = np.array(NUMS_EDGES[0])
 
+    self.assertNDArrayNear(inputs.n_node[0], np.array(num_nodes + 1), 1e-3)
     self.assertNDArrayNear(
-        inputs.n_node[0], np.array(num_nodes + 1), 1e-3)
+        inputs.n_edge[0], np.array(num_edges + num_nodes), 1e-3
+    )
     self.assertNDArrayNear(
-        inputs.n_edge[0], np.array(num_edges + num_nodes), 1e-3)
+        inputs.edges[num_edges : num_edges + num_nodes],
+        np.zeros_like(inputs.edges[num_edges : num_edges + num_nodes]),
+        1e-3,
+    )
     self.assertNDArrayNear(
-        inputs.edges[num_edges:num_edges + num_nodes],
-        np.zeros_like(inputs.edges[num_edges:num_edges + num_nodes]), 1e-3)
-    self.assertNDArrayNear(inputs.nodes[num_nodes],
-                           np.zeros_like(inputs.nodes[num_nodes]), 1e-3)
+        inputs.nodes[num_nodes], np.zeros_like(inputs.nodes[num_nodes]), 1e-3
+    )
 
   def test_add_bidirectional_edges(self):
     """Tests that adding bidirectional edges works correctly."""
     dataset = _get_dataset(
-        jax.random.PRNGKey(0), {'add_bidirectional_edges': True})
+        jax.random.PRNGKey(0), {'add_bidirectional_edges': True}
+    )
 
     batch = next(dataset.valid_epoch())
     inputs = batch['inputs']
     num_nodes = np.array(NUMS_NODES[0])
     num_edges = np.array(NUMS_EDGES[0])
 
-    self.assertNDArrayNear(
-        inputs.n_node[0], np.array(num_nodes), 1e-3)
-    self.assertNDArrayNear(
-        inputs.n_edge[0], np.array(num_edges * 2), 1e-3)
+    self.assertNDArrayNear(inputs.n_node[0], np.array(num_nodes), 1e-3)
+    self.assertNDArrayNear(inputs.n_edge[0], np.array(num_edges * 2), 1e-3)
 
   def test_add_self_loops(self):
     """Tests that adding self loops works correctly."""
@@ -190,13 +194,15 @@ class OgbgMolpcbaTest(tf.test.TestCase):
     num_nodes = np.array(NUMS_NODES[0])
     num_edges = np.array(NUMS_EDGES[0])
 
+    self.assertNDArrayNear(inputs.n_node[0], np.array(num_nodes), 1e-3)
     self.assertNDArrayNear(
-        inputs.n_node[0], np.array(num_nodes), 1e-3)
+        inputs.n_edge[0], np.array(num_edges + num_nodes), 1e-3
+    )
     self.assertNDArrayNear(
-        inputs.n_edge[0], np.array(num_edges + num_nodes), 1e-3)
-    self.assertNDArrayNear(
-        inputs.edges[num_edges:num_edges + num_nodes],
-        np.zeros_like(inputs.edges[num_edges:num_edges + num_nodes]), 1e-3)
+        inputs.edges[num_edges : num_edges + num_nodes],
+        np.zeros_like(inputs.edges[num_edges : num_edges + num_nodes]),
+        1e-3,
+    )
 
 
 if __name__ == '__main__':

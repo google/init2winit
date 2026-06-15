@@ -37,7 +37,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         vocab_path=None,
         train_size=30301028,
         pack_examples=False,
-        max_corpus_chars=10**7))
+        max_corpus_chars=10**7,
+    )
+)
 
 METADATA = {
     'apply_one_hot_in_loss': True,
@@ -56,25 +58,30 @@ def get_lm1b(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
   """Wrapper to conform to the general dataset API."""
   process_count = jax.process_count()
   if batch_size % process_count != 0:
-    raise ValueError('process_count={} must divide batch_size={}.'.format(
-        process_count, batch_size))
+    raise ValueError(
+        'process_count={} must divide batch_size={}.'.format(
+            process_count, batch_size
+        )
+    )
 
   per_host_batch_size = batch_size // process_count
   if eval_batch_size is None:
     eval_batch_size = batch_size
 
   if eval_batch_size % process_count != 0:
-    raise ValueError('process_count={} must divide eval_batch_size={}.'.format(
-        process_count, eval_batch_size))
+    raise ValueError(
+        'process_count={} must divide eval_batch_size={}.'.format(
+            process_count, eval_batch_size
+        )
+    )
   per_host_eval_batch_size = eval_batch_size // process_count
 
-  return _get_lm1b(hps, per_host_batch_size, per_host_eval_batch_size,
-                   shuffle_rng)
+  return _get_lm1b(
+      hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng
+  )
 
 
-def maybe_pad_batch(batch,
-                    desired_batch_size,
-                    mask_key='targets'):
+def maybe_pad_batch(batch, desired_batch_size, mask_key='targets'):
   """Zero pad the batch on the right to desired_batch_size.
 
   All keys in the batch dictionary will have their corresponding arrays padded.
@@ -88,9 +95,9 @@ def maybe_pad_batch(batch,
     desired_batch_size: All arrays in the dict will be padded to have first
       dimension equal to desired_batch_size.
     mask_key: Typically used for text datasets, it's either 'inputs' (for
-      encoder only models like language models) or 'targets'
-      (for encoder-decoder models like seq2seq tasks) to decide weights for
-      padded sequence. For Image datasets, this will be (most likely) unused.
+      encoder only models like language models) or 'targets' (for
+      encoder-decoder models like seq2seq tasks) to decide weights for padded
+      sequence. For Image datasets, this will be (most likely) unused.
 
   Returns:
     A dictionary mapping the same keys to the padded batches. Additionally we
@@ -103,8 +110,9 @@ def maybe_pad_batch(batch,
     raise ValueError(f'Incorrect mask key {mask_key}.')
 
   if 'weights' in batch:
-    batch['weights'] = np.multiply(batch['weights'],
-                                   np.where(batch[mask_key] > 0, 1, 0))
+    batch['weights'] = np.multiply(
+        batch['weights'], np.where(batch[mask_key] > 0, 1, 0)
+    )
   else:
     batch['weights'] = np.where(batch[mask_key] > 0, 1, 0)
 
@@ -130,16 +138,22 @@ def _get_lm1b(hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng):
   """Data generators for lm1b."""
   n_devices = jax.local_device_count()
   if per_host_batch_size % n_devices != 0:
-    raise ValueError('n_devices={} must divide per_host_batch_size={}.'.format(
-        n_devices, per_host_batch_size))
+    raise ValueError(
+        'n_devices={} must divide per_host_batch_size={}.'.format(
+            n_devices, per_host_batch_size
+        )
+    )
 
   if per_host_eval_batch_size % n_devices != 0:
     raise ValueError(
         'n_devices={} must divide per_host_eval_batch_size={}.'.format(
-            n_devices, per_host_eval_batch_size))
+            n_devices, per_host_eval_batch_size
+        )
+    )
 
   train_ds, eval_train_ds, eval_ds = lm1b_input_pipeline_v2.get_lm1b_datasets(
-      hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng)
+      hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng
+  )
 
   def train_iterator_fn():
     for batch in iter(train_ds):

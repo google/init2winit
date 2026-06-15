@@ -68,7 +68,8 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         enable_conformer_post_layer_norm=True,
         use_lingvo_attention=False,
         attn_temperature=1.0,
-        ))
+    )
+)
 
 
 DEFAULT_HPARAMS = config_dict.ConfigDict(
@@ -93,12 +94,15 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         enable_decoder_pre_layer_norm=True,
         enable_conformer_post_layer_norm=True,
         use_lingvo_attention=False,
-        attn_temperature=1.0))
+        attn_temperature=1.0,
+    )
+)
 
 
 @struct.dataclass
 class ConformerConfig:
   """Global hyperparameters used to minimize obnoxious kwarg plumbing."""
+
   vocab_size: int = 0
   dtype: Any = jnp.float32
   encoder_dim: int = 0
@@ -143,6 +147,7 @@ class LayerNorm(nn.Module):
   zeros, this differs from default flax implementation of multiplying by scale
   and initializing to ones.
   """
+
   dim: int = 0
   epsilon: float = 1e-6
 
@@ -156,7 +161,7 @@ class LayerNorm(nn.Module):
     var = jnp.mean(jnp.square(inputs - mean), axis=[-1], keepdims=True)
 
     normed_inputs = (inputs - mean) * jax.lax.rsqrt(var + self.epsilon)
-    normed_inputs *= (1 + self.scale)
+    normed_inputs *= 1 + self.scale
     normed_inputs += self.bias
 
     return normed_inputs
@@ -169,6 +174,7 @@ class Subsample(nn.Module):
     encoder_dim: model dimension of conformer.
     input_dropout_rate: dropout rate for inputs.
   """
+
   encoder_dim: int = 0
   input_dropout_rate: float = 0.0
 
@@ -178,29 +184,32 @@ class Subsample(nn.Module):
     outputs = jnp.expand_dims(inputs, axis=-1)
 
     outputs, output_paddings = Conv2dSubsampling(
-        input_channels=1, output_channels=self.encoder_dim)(outputs,
-                                                            output_paddings)
+        input_channels=1, output_channels=self.encoder_dim
+    )(outputs, output_paddings)
 
     outputs, output_paddings = Conv2dSubsampling(
-        input_channels=self.encoder_dim,
-        output_channels=self.encoder_dim)(outputs, output_paddings)
+        input_channels=self.encoder_dim, output_channels=self.encoder_dim
+    )(outputs, output_paddings)
 
     batch_size, subsampled_lengths, subsampled_dims, channels = outputs.shape
 
     outputs = jnp.reshape(
-        outputs, (batch_size, subsampled_lengths, subsampled_dims * channels))
+        outputs, (batch_size, subsampled_lengths, subsampled_dims * channels)
+    )
 
     outputs = nn.Dense(
         self.encoder_dim,
         use_bias=True,
-        kernel_init=nn.initializers.xavier_uniform())(outputs)
+        kernel_init=nn.initializers.xavier_uniform(),
+    )(outputs)
 
     outputs = outputs + AddPositionalEmbedding(embedding_dim=self.encoder_dim)(
-        seq_length=outputs.shape[1])
+        seq_length=outputs.shape[1]
+    )
 
-    outputs = nn.Dropout(
-        rate=self.input_dropout_rate, deterministic=not train)(
-            outputs)
+    outputs = nn.Dropout(rate=self.input_dropout_rate, deterministic=not train)(
+        outputs
+    )
 
     return outputs, output_paddings
 
@@ -212,6 +221,7 @@ class Conv2dSubsampling(nn.Module):
   2) Also performs strided convolution over input_paddings to return the correct
   paddings for downstream layers.
   """
+
   input_channels: int = 0
   output_channels: int = 0
   filter_stride: List[int] = (2, 2)
@@ -219,10 +229,12 @@ class Conv2dSubsampling(nn.Module):
 
   def setup(self):
     self.filter_shape = (3, 3, self.input_channels, self.output_channels)
-    self.kernel = self.param('kernel', nn.initializers.xavier_uniform(),
-                             self.filter_shape)
-    self.bias = self.param('bias', lambda rng, s: jnp.zeros(s, jnp.float32),
-                           self.output_channels)
+    self.kernel = self.param(
+        'kernel', nn.initializers.xavier_uniform(), self.filter_shape
+    )
+    self.bias = self.param(
+        'bias', lambda rng, s: jnp.zeros(s, jnp.float32), self.output_channels
+    )
 
   @nn.compact
   def __call__(self, inputs, paddings):
@@ -235,7 +247,8 @@ class Conv2dSubsampling(nn.Module):
         padding=self.padding,
         rhs_dilation=(1, 1),
         dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
-        feature_group_count=feature_group_count)
+        feature_group_count=feature_group_count,
+    )
 
     outputs += jnp.reshape(self.bias, (1,) * (outputs.ndim - 1) + (-1,))
     outputs = nn.relu(outputs)
@@ -250,19 +263,21 @@ class Conv2dSubsampling(nn.Module):
         rhs=jnp.ones([1, 1, 1]),
         window_strides=self.filter_stride[:1],
         padding=[(0, pad_len)],
-        dimension_numbers=('NHC', 'HIO', 'NHC'))
+        dimension_numbers=('NHC', 'HIO', 'NHC'),
+    )
     out_padding = jnp.squeeze(out_padding, axis=-1)
 
     # Mask outputs by correct paddings to ensure padded elements in inputs map
     # to padded value in outputs.
-    outputs = outputs * (1.0 -
-                         jnp.expand_dims(jnp.expand_dims(out_padding, -1), -1))
+    outputs = outputs * (
+        1.0 - jnp.expand_dims(jnp.expand_dims(out_padding, -1), -1)
+    )
     return outputs, out_padding
 
 
 class FeedForwardModule(nn.Module):
-  """Feedforward block of conformer layer.
-  """
+  """Feedforward block of conformer layer."""
+
   config: ConformerConfig
 
   @nn.compact
@@ -274,23 +289,25 @@ class FeedForwardModule(nn.Module):
     inputs = nn.Dense(
         config.encoder_dim * config.feed_forward_expansion_factor,
         use_bias=True,
-        kernel_init=nn.initializers.xavier_uniform())(
-            inputs)
+        kernel_init=nn.initializers.xavier_uniform(),
+    )(inputs)
     inputs = model_utils.ACTIVATIONS[self.config.activation_function](inputs)
     inputs = nn.Dropout(rate=config.feed_forward_dropout_rate)(
-        inputs, deterministic=not train)
+        inputs, deterministic=not train
+    )
 
     inputs = inputs * padding_mask
 
     inputs = nn.Dense(
         config.encoder_dim,
         use_bias=True,
-        kernel_init=nn.initializers.xavier_uniform())(
-            inputs)
+        kernel_init=nn.initializers.xavier_uniform(),
+    )(inputs)
     inputs = inputs * padding_mask
 
     inputs = nn.Dropout(rate=config.feed_forward_residual_dropout_rate)(
-        inputs, deterministic=not train)
+        inputs, deterministic=not train
+    )
 
     return inputs
 
@@ -302,6 +319,7 @@ class AddPositionalEmbedding(nn.Module):
     max_len: maximum possible length for the input
     posemb_init: positional embedding initializer
   """
+
   min_timescale: int = 1
   max_timescale: int = 10_000
   embedding_dim: int = 512
@@ -310,22 +328,24 @@ class AddPositionalEmbedding(nn.Module):
   def __call__(self, seq_length):
     position = jnp.arange(seq_length, dtype=jnp.float32)[jnp.newaxis, :]
     num_timescales = self.embedding_dim // 2
-    log_timescale_increment = (
-        math.log(float(self.max_timescale) / float(self.min_timescale)) /
-        jnp.maximum(jnp.asarray(num_timescales, dtype=jnp.float32) - 1, 1))
+    log_timescale_increment = math.log(
+        float(self.max_timescale) / float(self.min_timescale)
+    ) / jnp.maximum(jnp.asarray(num_timescales, dtype=jnp.float32) - 1, 1)
     inv_timescales = self.min_timescale * jnp.exp(
-        jnp.arange(num_timescales, dtype=jnp.float32) *
-        -log_timescale_increment)
+        jnp.arange(num_timescales, dtype=jnp.float32) * -log_timescale_increment
+    )
     scaled_time = (
-        position[:, :, jnp.newaxis] *
-        inv_timescales[jnp.newaxis, jnp.newaxis, :])
+        position[:, :, jnp.newaxis]
+        * inv_timescales[jnp.newaxis, jnp.newaxis, :]
+    )
     signal = jnp.concatenate(
-        [jnp.sin(scaled_time), jnp.cos(scaled_time)],
-        axis=2).astype(jnp.float32)
+        [jnp.sin(scaled_time), jnp.cos(scaled_time)], axis=2
+    ).astype(jnp.float32)
     # Force usage of `np` rather than `jnp` to compute static values at trace
     # time.
-    signal = jnp.pad(signal,
-                     [[0, 0], [0, 0], [0, np.mod(self.embedding_dim, 2)]])
+    signal = jnp.pad(
+        signal, [[0, 0], [0, 0], [0, np.mod(self.embedding_dim, 2)]]
+    )
     return signal
 
 
@@ -333,6 +353,7 @@ class AddPositionalEmbedding(nn.Module):
 # https://github.com/tensorflow/lingvo/blob/7de4ca8fff3cb28c2ecb21bbd7b02a964ce727f7/lingvo/jax/layers/attentions.py#L201
 class QueryScaler(nn.Module):
   """A layer to scale individual dims of the query attention matrix."""
+
   dim: int = 0
 
   def setup(self):
@@ -342,8 +363,10 @@ class QueryScaler(nn.Module):
   def __call__(self, inputs):
     inputs_shape = inputs.shape
     if inputs_shape[-1] != self.dim:
-      raise ValueError('QueryScaler expects inputs to have'
-                       ' same last dimension as scaling param.')
+      raise ValueError(
+          'QueryScaler expects inputs to have'
+          ' same last dimension as scaling param.'
+      )
 
     # 1.0/jax.nn.softplus(0.0) = 1.442695041. Hard code this number so that we
     # can avoid unnecessary XLA op fusion mess on TPU.
@@ -358,18 +381,20 @@ class QueryScaler(nn.Module):
 # Modifying flax linen default dot product attention function to add
 # query scaling, reference to original function here :
 # https://github.com/google/flax/blob/a9af38085a7a49b571cf37d375060fd683e74972/flax/linen/attention.py#L121
-def dot_product_attention(query,
-                          key,
-                          value,
-                          bias=None,
-                          mask=None,
-                          broadcast_dropout=True,
-                          dropout_rng=None,
-                          dropout_rate=0.,
-                          deterministic=False,
-                          dtype=jnp.float32,
-                          precision=None,
-                          temperature=1.0):
+def dot_product_attention(
+    query,
+    key,
+    value,
+    bias=None,
+    mask=None,
+    broadcast_dropout=True,
+    dropout_rng=None,
+    dropout_rate=0.0,
+    deterministic=False,
+    dtype=jnp.float32,
+    precision=None,
+    temperature=1.0,
+):
   """Computes dot-product attention given query, key, and value.
 
   This is the core function for applying attention based on
@@ -380,21 +405,19 @@ def dot_product_attention(query,
   Note: query, key, value needn't have any batch dimensions.
 
   Args:
-    query: queries for calculating attention with shape of
-      `[batch..., q_length, num_heads, qk_depth_per_head]`.
-    key: keys for calculating attention with shape of
-      `[batch..., kv_length, num_heads, qk_depth_per_head]`.
-    value: values to be used in attention with shape of
-      `[batch..., kv_length, num_heads, v_depth_per_head]`.
+    query: queries for calculating attention with shape of `[batch..., q_length,
+      num_heads, qk_depth_per_head]`.
+    key: keys for calculating attention with shape of `[batch..., kv_length,
+      num_heads, qk_depth_per_head]`.
+    value: values to be used in attention with shape of `[batch..., kv_length,
+      num_heads, v_depth_per_head]`.
     bias: bias for the attention weights. This should be broadcastable to the
-      shape `[batch..., num_heads, q_length, kv_length]`.
-      This can be used for incorporating causal masks, padding masks,
-      proximity bias, etc.
+      shape `[batch..., num_heads, q_length, kv_length]`. This can be used for
+      incorporating causal masks, padding masks, proximity bias, etc.
     mask: mask for the attention weights. This should be broadcastable to the
-      shape `[batch..., num_heads, q_length, kv_length]`.
-      This can be used for incorporating causal masks.
-      Attention weights are masked out if their corresponding mask value
-      is `False`.
+      shape `[batch..., num_heads, q_length, kv_length]`. This can be used for
+      incorporating causal masks. Attention weights are masked out if their
+      corresponding mask value is `False`.
     broadcast_dropout: bool: use a broadcasted dropout along batch dims.
     dropout_rng: JAX PRNGKey: to be used for dropout
     dropout_rate: dropout rate
@@ -408,23 +431,36 @@ def dot_product_attention(query,
     Output of shape `[batch..., q_length, num_heads, v_depth_per_head]`.
   """
   assert key.ndim == query.ndim == value.ndim, 'q, k, v must have same rank.'
-  assert query.shape[:-3] == key.shape[:-3] == value.shape[:-3], (
-      'q, k, v batch dims must match.')
-  assert query.shape[-2] == key.shape[-2] == value.shape[-2], (
-      'q, k, v num_heads must match.')
+  assert (
+      query.shape[:-3] == key.shape[:-3] == value.shape[:-3]
+  ), 'q, k, v batch dims must match.'
+  assert (
+      query.shape[-2] == key.shape[-2] == value.shape[-2]
+  ), 'q, k, v num_heads must match.'
   assert key.shape[-3] == value.shape[-3], 'k, v lengths must match.'
 
   # compute attention weights
   query = QueryScaler(dim=query.shape[-1])(query)
-  attn_weights = nn.dot_product_attention_weights(query, key, bias, mask,
-                                                  broadcast_dropout,
-                                                  dropout_rng, dropout_rate,
-                                                  deterministic, dtype,
-                                                  precision)
+  attn_weights = nn.dot_product_attention_weights(
+      query,
+      key,
+      bias,
+      mask,
+      broadcast_dropout,
+      dropout_rng,
+      dropout_rate,
+      deterministic,
+      dtype,
+      precision,
+  )
 
   # return weighted sum over values for each query position
-  return jnp.einsum('...hqk,...khd->...qhd', attn_weights, value,
-                    precision=precision) * temperature
+  return (
+      jnp.einsum(
+          '...hqk,...khd->...qhd', attn_weights, value, precision=precision
+      )
+      * temperature
+  )
 
 
 class MultiHeadedSelfAttention(nn.Module):
@@ -436,6 +472,7 @@ class MultiHeadedSelfAttention(nn.Module):
   Note: this attention implementation uses a learned scale parameter to scale
   query matrix before passing it to flax attention module.
   """
+
   config: ConformerConfig = None
 
   def setup(self):
@@ -444,7 +481,8 @@ class MultiHeadedSelfAttention(nn.Module):
         num_heads=self.config.num_attention_heads,
         hidden_dim=self.config.encoder_dim,
         input_dim=self.config.encoder_dim,
-        dim_per_head=dim_per_head)
+        dim_per_head=dim_per_head,
+    )
 
   def _get_large_negative_number(self, dtype):
     if jnp.issubdtype(dtype, jnp.inexact):
@@ -467,7 +505,8 @@ class MultiHeadedSelfAttention(nn.Module):
     config = self.config
     mask_paddings = 1 - paddings
     attention_mask = nn.make_attention_mask(
-        mask_paddings > 0, mask_paddings > 0, dtype=jnp.float32)
+        mask_paddings > 0, mask_paddings > 0, dtype=jnp.float32
+    )
 
     inputs = LayerNorm(dim=config.encoder_dim)(inputs)
 
@@ -478,10 +517,12 @@ class MultiHeadedSelfAttention(nn.Module):
           query_vec=inputs,
           key_vec=inputs,
           value_vec=inputs,
-          atten_mask=atten_mask)[0]
+          atten_mask=atten_mask,
+      )[0]
     else:
       attn_fn = functools.partial(
-          dot_product_attention, temperature=config.attn_temperature)
+          dot_product_attention, temperature=config.attn_temperature
+      )
       result = nn.SelfAttention(
           num_heads=config.num_attention_heads,
           qkv_features=config.encoder_dim,
@@ -493,11 +534,12 @@ class MultiHeadedSelfAttention(nn.Module):
           broadcast_dropout=False,
           attention_fn=attn_fn,
           dropout_rate=config.attention_dropout_rate,
-          deterministic=not train)(inputs, mask=attention_mask)
+          deterministic=not train,
+      )(inputs, mask=attention_mask)
 
     result = nn.Dropout(
-        rate=config.attention_residual_dropout_rate, deterministic=not train)(
-            result)
+        rate=config.attention_residual_dropout_rate, deterministic=not train
+    )(result)
 
     return result
 
@@ -514,16 +556,19 @@ class BatchNorm(nn.Module):
   and the corresponding defaults for momentum and epsilon have been copied over
   from lingvo.
   """
+
   config: ConformerConfig
 
   def setup(self):
     dim = self.config.encoder_dim
     dtype = self.config.dtype
 
-    self.ra_mean = self.variable('batch_stats', 'mean',
-                                 lambda s: jnp.zeros(s, dtype), dim)
-    self.ra_var = self.variable('batch_stats', 'var',
-                                lambda s: jnp.ones(s, dtype), dim)
+    self.ra_mean = self.variable(
+        'batch_stats', 'mean', lambda s: jnp.zeros(s, dtype), dim
+    )
+    self.ra_var = self.variable(
+        'batch_stats', 'var', lambda s: jnp.ones(s, dtype), dim
+    )
 
     self.gamma = self.param('scale', nn.initializers.zeros, dim, dtype)
     self.beta = self.param('bias', nn.initializers.zeros, dim, dtype)
@@ -541,7 +586,8 @@ class BatchNorm(nn.Module):
       mask = 1.0 - padding
       sum_v = jnp.sum(inputs * mask, axis=reduce_over_dims, keepdims=False)
       count_v = jnp.sum(
-          jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=False)
+          jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=False
+      )
 
       count_v = jnp.maximum(count_v, 1.0)
       mean = sum_v / count_v
@@ -549,14 +595,13 @@ class BatchNorm(nn.Module):
       sum_vv = jnp.sum(
           (inputs - mean) * (inputs - mean) * mask,
           axis=reduce_over_dims,
-          keepdims=False)
+          keepdims=False,
+      )
 
       var = sum_vv / count_v
 
-      self.ra_mean.value = momentum * self.ra_mean.value + (
-          1 - momentum) * mean
-      self.ra_var.value = momentum * self.ra_var.value + (
-          1 - momentum) * var
+      self.ra_mean.value = momentum * self.ra_mean.value + (1 - momentum) * mean
+      self.ra_var.value = momentum * self.ra_var.value + (1 - momentum) * var
     else:
       mean = self.ra_mean.value
       var = self.ra_var.value
@@ -589,6 +634,7 @@ class ConvolutionBlock(nn.Module):
      |
     output
   """
+
   config: ConformerConfig
 
   @nn.compact
@@ -599,12 +645,14 @@ class ConvolutionBlock(nn.Module):
     input_gated1 = nn.Dense(
         config.encoder_dim,
         kernel_init=nn.initializers.xavier_uniform(),
-        use_bias=True)(inputs)
+        use_bias=True,
+    )(inputs)
 
     input_gated2 = nn.Dense(
         config.encoder_dim,
         kernel_init=nn.initializers.xavier_uniform(),
-        use_bias=True)(inputs)
+        use_bias=True,
+    )(inputs)
 
     inputs = input_gated1 * jax.nn.sigmoid(input_gated2)
     inputs = inputs * (1 - jnp.expand_dims(input_paddings, -1))
@@ -616,17 +664,19 @@ class ConvolutionBlock(nn.Module):
         padding='SAME',
         feature_group_count=config.encoder_dim,
         use_bias=False,
-        kernel_init=nn.initializers.xavier_uniform())(inputs)
+        kernel_init=nn.initializers.xavier_uniform(),
+    )(inputs)
 
     inputs = BatchNorm(config)(inputs, input_paddings, train)
 
     inputs = model_utils.ACTIVATIONS[self.config.activation_function](inputs)
     inputs = nn.Dense(
-        config.encoder_dim,
-        kernel_init=nn.initializers.xavier_uniform())(inputs)
+        config.encoder_dim, kernel_init=nn.initializers.xavier_uniform()
+    )(inputs)
 
     inputs = nn.Dropout(
-        rate=config.conv_residual_dropout_rate, deterministic=not train)(inputs)
+        rate=config.conv_residual_dropout_rate, deterministic=not train
+    )(inputs)
     return inputs
 
 
@@ -641,8 +691,8 @@ class ConformerBlock(nn.Module):
     x = x + 0.5 * FeedForward(x)
 
     y = layer_norm(x)
-
   """
+
   config: ConformerConfig
 
   @nn.compact
@@ -651,15 +701,18 @@ class ConformerBlock(nn.Module):
     padding_mask = jnp.expand_dims(1 - input_paddings, -1)
 
     inputs = inputs + 0.5 * FeedForwardModule(config=self.config)(
-        inputs, padding_mask, train)
+        inputs, padding_mask, train
+    )
 
     inputs = inputs + MultiHeadedSelfAttention(config=self.config)(
-        inputs, input_paddings, train)
+        inputs, input_paddings, train
+    )
 
     inputs = inputs + ConvolutionBlock(config)(inputs, input_paddings, train)
 
     inputs = inputs + 0.5 * FeedForwardModule(config=self.config)(
-        inputs, padding_mask, train)
+        inputs, padding_mask, train
+    )
 
     if config.enable_conformer_post_layer_norm:
       inputs = LayerNorm(dim=config.encoder_dim)(inputs)
@@ -674,6 +727,7 @@ class ConformerEncoderDecoder(nn.Module):
   for each time step. The output is then fed into a CTC loss which eliminates
   the need for alignment with targets.
   """
+
   config: ConformerConfig
 
   def setup(self):
@@ -685,8 +739,8 @@ class ConformerEncoderDecoder(nn.Module):
         time_mask_max_frames=config.time_mask_max_frames,
         time_mask_max_ratio=config.time_mask_max_ratio,
         time_masks_per_frame=config.time_masks_per_frame,
-        use_dynamic_time_mask_max_frames=config
-        .use_dynamic_time_mask_max_frames)
+        use_dynamic_time_mask_max_frames=config.use_dynamic_time_mask_max_frames,
+    )
 
   @nn.compact
   def __call__(self, inputs, input_paddings, train):
@@ -700,8 +754,8 @@ class ConformerEncoderDecoder(nn.Module):
     outputs, output_paddings = preprocessor.MelFilterbankFrontend(
         preprocessing_config,
         per_bin_mean=preprocessor.LIBRISPEECH_MEAN_VECTOR,
-        per_bin_stddev=preprocessor.LIBRISPEECH_STD_VECTOR)(
-            outputs, output_paddings)
+        per_bin_stddev=preprocessor.LIBRISPEECH_STD_VECTOR,
+    )(outputs, output_paddings)
 
     # Ablate random parts of input along temporal and frequency dimension
     # following the specaug procedure in https://arxiv.org/abs/1904.08779.
@@ -711,8 +765,8 @@ class ConformerEncoderDecoder(nn.Module):
     # Subsample input by a factor of 4 by performing strided convolutions.
     outputs, output_paddings = Subsample(
         encoder_dim=config.encoder_dim,
-        input_dropout_rate=config.input_dropout_rate)(outputs, output_paddings,
-                                                      train)
+        input_dropout_rate=config.input_dropout_rate,
+    )(outputs, output_paddings, train)
 
     # Run the conformer encoder layers.
     for _ in range(config.num_encoder_layers):
@@ -724,7 +778,8 @@ class ConformerEncoderDecoder(nn.Module):
     outputs = nn.Dense(
         config.vocab_size,
         use_bias=True,
-        kernel_init=nn.initializers.xavier_uniform())(outputs)
+        kernel_init=nn.initializers.xavier_uniform(),
+    )(outputs)
 
     return outputs, output_paddings
 
@@ -751,10 +806,13 @@ class ConformerModel(base_model.BaseModel):
     labels = (labels * blank_mask).astype(labels.dtype)
 
     # Mask labels that don't equal previous label.
-    label_mask = jnp.concatenate([
-        jnp.ones_like(labels[:, :1], dtype=jnp.int32),
-        jnp.not_equal(labels[:, 1:], labels[:, :-1])
-    ], axis=1)
+    label_mask = jnp.concatenate(
+        [
+            jnp.ones_like(labels[:, :1], dtype=jnp.int32),
+            jnp.not_equal(labels[:, 1:], labels[:, :-1]),
+        ],
+        axis=1,
+    )
 
     # Filter labels that aren't in the original sequence.
     maxlen = labels.shape[1]
@@ -790,8 +848,10 @@ class ConformerModel(base_model.BaseModel):
     # Reshape back to square batch.
     batch_size = labels.shape[0]
     new_shape = [batch_size, new_maxlen]
-    return (jnp.reshape(flat, new_shape).astype(labels.dtype),
-            new_seq_len.astype(seq_length.dtype))
+    return (
+        jnp.reshape(flat, new_shape).astype(labels.dtype),
+        new_seq_len.astype(seq_length.dtype),
+    )
 
   def greedy_decode(self, logits, logit_paddings):
     per_frame_max = jnp.argmax(logits, axis=-1)
@@ -804,22 +864,21 @@ class ConformerModel(base_model.BaseModel):
     """Evaluates cross_entopy on the given batch."""
 
     logits, logit_paddings = self.flax_module.apply(
-        {
-            'params': params,
-            'batch_stats': batch_stats
-        },
+        {'params': params, 'batch_stats': batch_stats},
         batch['inputs'],
         batch['input_paddings'],
         train=False,
-        mutable=False)
+        mutable=False,
+    )
 
     labels = batch['targets']
     label_paddings = batch['target_paddings']
 
-    (objective_numerator, objective_denominator) = self.loss_fn(
-        logits, logit_paddings, labels, label_paddings)
+    objective_numerator, objective_denominator = self.loss_fn(
+        logits, logit_paddings, labels, label_paddings
+    )
 
-    normalized_loss = (objective_numerator / (objective_denominator))
+    normalized_loss = objective_numerator / (objective_denominator)
     hyps, hyp_paddings = self.greedy_decode(logits, logit_paddings)
 
     return self.metrics_bundle.single_from_model_output(
@@ -827,7 +886,8 @@ class ConformerModel(base_model.BaseModel):
         hyps=hyps,
         hyp_paddings=hyp_paddings,
         targets=labels,
-        target_paddings=label_paddings)
+        target_paddings=label_paddings,
+    )
 
   def training_cost(self, params, batch, batch_stats=None, dropout_rng=None):
     """Return CTC loss."""
@@ -835,24 +895,23 @@ class ConformerModel(base_model.BaseModel):
     # For more information on flax.linen.Module.apply, see the docs at
     # https://flax.readthedocs.io/en/latest/flax.linen.html#flax.linen.Module.apply.
     (outputs, output_paddings), new_batch_stats = self.flax_module.apply(
-        {
-            'params': params,
-            'batch_stats': batch_stats
-        },
+        {'params': params, 'batch_stats': batch_stats},
         batch['inputs'],
         batch['input_paddings'],
         rngs={'dropout': dropout_rng},
         mutable=['batch_stats'],
-        train=True)
+        train=True,
+    )
 
     labels = batch['targets']
     label_paddings = batch['target_paddings']
 
-    (objective_numerator, objective_denominator) = self.loss_fn(
-        outputs, output_paddings, labels, label_paddings)
+    objective_numerator, objective_denominator = self.loss_fn(
+        outputs, output_paddings, labels, label_paddings
+    )
 
     # epsilon added to handle empty batch case if we encounter one.
-    objective_value = (objective_numerator / (objective_denominator + 1e-9))
+    objective_value = objective_numerator / (objective_denominator + 1e-9)
     return objective_value, new_batch_stats
 
   def apply_on_batch(self, params, batch_stats, batch, **apply_kwargs):
@@ -863,10 +922,8 @@ class ConformerModel(base_model.BaseModel):
       variables = {'params': params}
 
     return self.flax_module.apply(
-        variables,
-        batch['inputs'],
-        batch['input_paddings'],
-        **apply_kwargs)
+        variables, batch['inputs'], batch['input_paddings'], **apply_kwargs
+    )
 
   def build_flax_module(self):
     config = ConformerConfig(
@@ -881,18 +938,16 @@ class ConformerModel(base_model.BaseModel):
         time_mask_max_frames=self.hps.time_mask_max_frames,
         time_mask_max_ratio=self.hps.time_mask_max_ratio,
         time_masks_per_frame=self.hps.time_masks_per_frame,
-        use_dynamic_time_mask_max_frames=self.hps
-        .use_dynamic_time_mask_max_frames,
+        use_dynamic_time_mask_max_frames=self.hps.use_dynamic_time_mask_max_frames,
         use_specaug=self.hps.use_specaug,
         attention_residual_dropout_rate=self.hps.residual_dropout_rate,
         feed_forward_residual_dropout_rate=self.hps.residual_dropout_rate,
         input_dropout_rate=self.hps.input_dropout_rate,
-        enable_conformer_post_layer_norm=self.hps
-        .enable_conformer_post_layer_norm,
+        enable_conformer_post_layer_norm=self.hps.enable_conformer_post_layer_norm,
         enable_decoder_pre_layer_norm=self.hps.enable_decoder_pre_layer_norm,
         use_lingvo_attention=self.hps.use_lingvo_attention,
         activation_function=self.hps.activation_function,
-        )
+    )
     module = ConformerEncoderDecoder(config)
 
     return module
@@ -933,19 +988,17 @@ class MLCommonsConformerModel(ConformerModel):
         time_mask_max_frames=self.hps.time_mask_max_frames,
         time_mask_max_ratio=self.hps.time_mask_max_ratio,
         time_masks_per_frame=self.hps.time_masks_per_frame,
-        use_dynamic_time_mask_max_frames=self.hps
-        .use_dynamic_time_mask_max_frames,
+        use_dynamic_time_mask_max_frames=self.hps.use_dynamic_time_mask_max_frames,
         use_specaug=self.hps.use_specaug,
         attention_residual_dropout_rate=self.hps.dropout_rate,
         feed_forward_residual_dropout_rate=self.hps.dropout_rate,
         input_dropout_rate=aux_dropout_rate,
-        enable_conformer_post_layer_norm=self.hps
-        .enable_conformer_post_layer_norm,
+        enable_conformer_post_layer_norm=self.hps.enable_conformer_post_layer_norm,
         enable_decoder_pre_layer_norm=self.hps.enable_decoder_pre_layer_norm,
         use_lingvo_attention=self.hps.use_lingvo_attention,
         attn_temperature=self.hps.attn_temperature,
         activation_function=self.hps.activation_function,
-        )
+    )
     module = ConformerEncoderDecoder(config)
 
     return module

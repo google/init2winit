@@ -28,7 +28,6 @@ from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow_datasets as tfds
 
-
 VOCAB_SIZE = 100864
 EVAL_SPLIT = 'cc_main_2024_10'
 
@@ -173,22 +172,14 @@ def get_dataset(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
   def train_iterator_fn():
     for example in iter(train_ds):
       inputs, targets, weights = data_loader.get_in_out(example)
-      batch = {
-          'inputs': inputs,
-          'targets': targets,
-          'weights': weights
-      }
+      batch = {'inputs': inputs, 'targets': targets, 'weights': weights}
       yield batch
 
   def eval_train_epoch(num_batches=None):
     eval_train_iter = iter(eval_ds)
     for example in itertools.islice(eval_train_iter, num_batches):
       inputs, targets, weights = data_loader.get_in_out(example)
-      batch = {
-          'inputs': inputs,
-          'targets': targets,
-          'weights': weights
-      }
+      batch = {'inputs': inputs, 'targets': targets, 'weights': weights}
 
       yield batch
 
@@ -196,11 +187,7 @@ def get_dataset(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
     valid_iter = iter(eval_ds)
     for example in itertools.islice(valid_iter, num_batches):
       inputs, targets, weights = data_loader.get_in_out(example)
-      batch = {
-          'inputs': inputs,
-          'targets': targets,
-          'weights': weights
-      }
+      batch = {'inputs': inputs, 'targets': targets, 'weights': weights}
       yield batch
 
   # pylint: disable=unreachable

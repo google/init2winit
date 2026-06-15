@@ -37,8 +37,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         vocab_size=VOCAB_SIZE,
         # TODO(kasimbeg) : add vocab path after seperating out tokenizer
         # vocab_path=None,
-        train_size=59676  # Number of sequences.
-    ))
+        train_size=59676,  # Number of sequences.
+    )
+)
 
 METADATA = {
     'apply_one_hot_in_loss': True,
@@ -65,7 +66,8 @@ def get_wikitext2(
     data_rng,
     batch_size: int,
     eval_batch_size: int = None,
-    hps: config_dict.ConfigDict = None,) -> Dataset:
+    hps: config_dict.ConfigDict = None,
+) -> Dataset:
   """Returns Wikitext-2 Dataset.
 
   Args:
@@ -86,22 +88,28 @@ def get_wikitext2(
   if batch_size % process_count != 0:
     raise ValueError(
         'process_count={} must divide batch_size={}.'.format(
-            process_count, batch_size))
+            process_count, batch_size
+        )
+    )
 
   if eval_batch_size % process_count != 0:
     raise ValueError(
         'process_count={} must divide batch_size={}.'.format(
-            process_count, batch_size))
+            process_count, batch_size
+        )
+    )
 
   if eval_batch_size is None:
     eval_batch_size = batch_size
 
-  train_dataset, eval_train_dataset, valid_dataset, test_dataset = input_pipeline.get_wikitext2_dataset(
-      hps,
-      train_batch_size=batch_size,
-      valid_batch_size=eval_batch_size,
-      test_batch_size=eval_batch_size,
-      shuffle_seed=data_utils.convert_jax_to_tf_random_seed(data_rng),
+  train_dataset, eval_train_dataset, valid_dataset, test_dataset = (
+      input_pipeline.get_wikitext2_dataset(
+          hps,
+          train_batch_size=batch_size,
+          valid_batch_size=eval_batch_size,
+          test_batch_size=eval_batch_size,
+          shuffle_seed=data_utils.convert_jax_to_tf_random_seed(data_rng),
+      )
   )
 
   def train_iterator_fn():
@@ -120,5 +128,4 @@ def get_wikitext2(
     for batch in itertools.islice(iter(test_dataset), num_batches):
       yield add_weights_to_batch(data_utils.tf_to_numpy(batch))
 
-  return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
-                 test_epoch)
+  return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)

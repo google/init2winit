@@ -45,7 +45,6 @@ from init2winit.model_lib import xformer_translate
 from init2winit.model_lib import xformer_translate_binary
 from init2winit.model_lib import xformer_translate_mlc_variant
 
-
 _ALL_MODELS = {
     'fully_connected': (
         fully_connected.FullyConnectedModel,

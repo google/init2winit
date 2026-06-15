@@ -20,7 +20,6 @@ import jax.random
 from ml_collections.config_dict import config_dict
 import numpy as np
 
-
 NQM_HPARAMS = config_dict.ConfigDict(
     dict(
         train_size=1e10,
@@ -28,7 +27,8 @@ NQM_HPARAMS = config_dict.ConfigDict(
         test_size=0,
         input_shape=(100,),  # This determines the dimension.
         output_shape=(1,),
-    ))
+    )
+)
 NQM_METADATA = {
     'apply_one_hot_in_loss': False,
 }
@@ -49,6 +49,7 @@ def get_nqm_noise(shuffle_rng, batch_size, eval_batch_size, hps=None):
     eval_batch_size: Not used.
     hps: Hparams object. We only refer to hps.input_shape to determine the
       dimension of the noise.
+
   Returns:
     train_epoch, eval_train_epoch, valid_epoch, test_epoch: three generators.
       Only train_epoch is used.
@@ -83,6 +84,7 @@ def get_nqm_noise(shuffle_rng, batch_size, eval_batch_size, hps=None):
     del kwargs
     return
     yield  # This yield is needed to make this a valid (null) iterator.
+
   # pylint: enable=unreachable
 
   # pylint: disable=unreachable

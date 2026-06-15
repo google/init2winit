@@ -27,11 +27,9 @@ from typing import Iterable, Iterator, Union
 import grain.python as grain
 import jax
 import jax.numpy as jnp
-
 import numpy as np
 
 import sentencepiece as spm
-
 
 PAD_ID = 0
 
@@ -81,6 +79,7 @@ class SentencePieceByteTokenizer(spm.SentencePieceProcessor):
 
   def DecodeIds(self, ids: Iterable[int]) -> str:
     return bytes(ids).decode('utf-8')
+
   # pylint: enable=invalid-name
 
 

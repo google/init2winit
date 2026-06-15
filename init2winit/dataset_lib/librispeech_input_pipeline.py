@@ -24,7 +24,6 @@ import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
-
 # pylint: disable=g-import-not-at-top
 try:
   from init2winit.dataset_lib import spm_tokenizer
@@ -39,7 +38,7 @@ Features = Dict[str, tf.Tensor]
 ALLOWED_TOKENIZERS = ['SPM', 'RAW']
 
 
-class CharacterTokenizer():
+class CharacterTokenizer:
   """Tokenizer that uses raw character level vocab."""
 
   def __init__(self):
@@ -49,7 +48,7 @@ class CharacterTokenizer():
         '</s>': 2,
         '_': 3,
         ' ': 4,
-        '\'': 5,
+        "'": 5,
         'A': 6,
         'B': 7,
         'C': 8,
@@ -132,12 +131,12 @@ def _preprocess_output(features, tokenizer, hps):
 
   Args:
     features: input tf data features
-    tokenizer: tokenizer to be used to tokenize the input
-      feature's output transcription.
+    tokenizer: tokenizer to be used to tokenize the input feature's output
+      transcription.
     hps: hyperparameters for the dataset pipeline set upstream, this is used to
-      extract flags controlling which tokenizer is used.
-      Uses sentence piece tokenizer if hps.use_spm_tokenizer = True.
-      Uses simple character level tokenizer if hps.use_character_tokenizer=True.
+      extract flags controlling which tokenizer is used. Uses sentence piece
+      tokenizer if hps.use_spm_tokenizer = True. Uses simple character level
+      tokenizer if hps.use_character_tokenizer=True.
 
   Returns:
     outputs tf data features with tokenized transcripts.
@@ -145,19 +144,23 @@ def _preprocess_output(features, tokenizer, hps):
   if hps.tokenizer_type == 'SPM':
     features['targets'] = tokenizer.tokenize(features['targets'])
     features['target_paddings'] = tf.zeros_like(
-        features['targets'], dtype=tf.float32)
+        features['targets'], dtype=tf.float32
+    )
   elif hps.tokenizer_type == 'RAW':
     features['targets'] = tf.py_function(
-        func=tokenizer.tokenize, inp=[features['targets']], Tout=tf.int32)
+        func=tokenizer.tokenize, inp=[features['targets']], Tout=tf.int32
+    )
     features['target_paddings'] = tf.zeros_like(
-        features['targets'], dtype=tf.float32)
+        features['targets'], dtype=tf.float32
+    )
 
   return features
 
 
 def _make_input_paddings(features):
   features['input_paddings'] = tf.zeros_like(
-      features['inputs'], dtype=tf.float32)
+      features['inputs'], dtype=tf.float32
+  )
   return features
 
 
@@ -173,8 +176,9 @@ def _normalize_feature_names(features):
   return features
 
 
-def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
-                    split: str, shuffle_seed=None) -> tf.data.Dataset:
+def get_raw_dataset(
+    dataset_builder: tfds.core.DatasetBuilder, split: str, shuffle_seed=None
+) -> tf.data.Dataset:
   """Loads the raw dataset and normalizes feature keys.
 
   Args:
@@ -192,7 +196,8 @@ def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
   ds = dataset_builder.as_dataset(
       split=per_host_split,
       shuffle_files=(shuffle_seed is not None),
-      read_config=tfds.ReadConfig(shuffle_seed=shuffle_seed))
+      read_config=tfds.ReadConfig(shuffle_seed=shuffle_seed),
+  )
   ds = ds.map(_normalize_feature_names, num_parallel_calls=AUTOTUNE)
 
   return ds
@@ -217,7 +222,8 @@ def preprocess_data(
     raise ValueError(
         'Passed in tokenizer_type value does not correspond to currently '
         'supported tokenizers, make sure one of SPM or RAW is set'
-        ' as tokenizer_type flag.')
+        ' as tokenizer_type flag.'
+    )
 
   if hps.tokenizer_type == 'SPM':
     tokenizer = spm_tokenizer.load_tokenizer(hps.tokenizer_vocab_path)
@@ -226,7 +232,8 @@ def preprocess_data(
 
   dataset = dataset.map(
       functools.partial(_preprocess_output, tokenizer=tokenizer, hps=hps),
-      num_parallel_calls=10)
+      num_parallel_calls=10,
+  )
 
   dataset = dataset.map(_make_input_paddings, num_parallel_calls=10)
 
@@ -234,7 +241,8 @@ def preprocess_data(
   # note that audio filtering is post frequency domain conversion.
   if max_input_length > 0 and max_target_length > 0:
     inputs_length_filter, targets_length_filter = length_filter(
-        max_input_length, max_target_length)
+        max_input_length, max_target_length
+    )
     dataset = dataset.filter(inputs_length_filter)
     dataset = dataset.filter(targets_length_filter)
 
@@ -255,8 +263,9 @@ def preprocess_data(
           'inputs': 0,
           'targets': 0,
           'input_paddings': 1.0,
-          'target_paddings': 1.0
-      })
+          'target_paddings': 1.0,
+      },
+  )
 
   if prefetch_size:
     dataset = dataset.prefetch(prefetch_size)
@@ -285,7 +294,8 @@ def get_librispeech_datasets(
       train=True,
       batch_size=per_host_batch_size,
       hps=hps,
-      shuffle_seed=utils.convert_jax_to_tf_random_seed(data_shuffle_seed))
+      shuffle_seed=utils.convert_jax_to_tf_random_seed(data_shuffle_seed),
+  )
 
   eval_ds = preprocess_data(
       eval_data,
@@ -300,6 +310,7 @@ def get_librispeech_datasets(
       train=False,
       batch_size=per_host_eval_batch_size,
       hps=hps,
-      drop_remainder=False)
+      drop_remainder=False,
+  )
 
   return train_ds, eval_ds, test_ds

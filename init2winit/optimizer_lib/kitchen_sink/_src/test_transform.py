@@ -34,8 +34,9 @@ def _optimizer_loop(optimizer, iterations=5):
   results = []
   for _ in range(iterations):
     compute_loss = lambda params, x, y: optax.l2_loss(params['w'].dot(x), y)
-    grads = jax.grad(compute_loss)(params, jnp.array([5.0, 6.0]),
-                                   jnp.array(4.0))
+    grads = jax.grad(compute_loss)(
+        params, jnp.array([5.0, 6.0]), jnp.array(4.0)
+    )
     updates, opt_state = optimizer.update(grads, opt_state, params)
     params = optax.apply_updates(params, updates)
     results.append(params)
@@ -46,7 +47,8 @@ def _optimizers_all_close(tx1, tx2, iterations=5, rtol=1e-5):
   chex.assert_trees_all_close(
       _optimizer_loop(tx1, iterations),
       _optimizer_loop(tx2, iterations),
-      rtol=rtol)
+      rtol=rtol,
+  )
 
 
 class AdamTest(parameterized.TestCase):
@@ -62,7 +64,8 @@ class AdamTest(parameterized.TestCase):
     """Test adam. Thoroughly."""
     tx1 = optax.scale_by_adam(b1=b1, b2=b2, eps=eps, eps_root=eps_root)
     tx2 = transform.scale_by_adam(
-        b1=b1, b2=b2, eps=eps, eps_root=eps_root, debias=True)
+        b1=b1, b2=b2, eps=eps, eps_root=eps_root, debias=True
+    )
 
     _optimizers_all_close(tx1, tx2)
 
@@ -74,30 +77,16 @@ class NesterovTest(chex.TestCase):
     """Testing correctness via an independent flax.optim run."""
 
     target_solution = [
-        {
-            'w': jnp.array([0.40500003, 0.286])
-        },
-        {
-            'w': jnp.array([0.255515, 0.106618])
-        },
-        {
-            'w': jnp.array([0.31884143, 0.18260972])
-        },
-        {
-            'w': jnp.array([0.40163627, 0.28196353])
-        },
-        {
-            'w': jnp.array([0.43924114, 0.32708937])
-        },
+        {'w': jnp.array([0.40500003, 0.286])},
+        {'w': jnp.array([0.255515, 0.106618])},
+        {'w': jnp.array([0.31884143, 0.18260972])},
+        {'w': jnp.array([0.40163627, 0.28196353])},
+        {'w': jnp.array([0.43924114, 0.32708937])},
     ]
     optimizer = kitchen_sink(
-        {'0': {
-            'element': 'nesterov',
-            'hps': {
-                'decay': 0.7
-            }
-        }},
-        learning_rate=0.01)
+        {'0': {'element': 'nesterov', 'hps': {'decay': 0.7}}},
+        learning_rate=0.01,
+    )
     results = _optimizer_loop(optimizer)
     for target, result in zip(target_solution, results):
       chex.assert_trees_all_close(target, result)
@@ -110,30 +99,16 @@ class PolyakHBTest(chex.TestCase):
     """Testing correctness via an independent flax.optim run."""
 
     target_solution = [
-        {
-            'w': jnp.array([0.65, 0.58000004])
-        },
-        {
-            'w': jnp.array([0.26849997, 0.12220004])
-        },
-        {
-            'w': jnp.array([0.09766498, -0.08280197])
-        },
-        {
-            'w': jnp.array([0.17850482, 0.01420582])
-        },
-        {
-            'w': jnp.array([0.38620475, 0.2634457])
-        },
+        {'w': jnp.array([0.65, 0.58000004])},
+        {'w': jnp.array([0.26849997, 0.12220004])},
+        {'w': jnp.array([0.09766498, -0.08280197])},
+        {'w': jnp.array([0.17850482, 0.01420582])},
+        {'w': jnp.array([0.38620475, 0.2634457])},
     ]
     optimizer = kitchen_sink(
-        {'0': {
-            'element': 'polyak_hb',
-            'hps': {
-                'decay': 0.7
-            }
-        }},
-        learning_rate=0.01)
+        {'0': {'element': 'polyak_hb', 'hps': {'decay': 0.7}}},
+        learning_rate=0.01,
+    )
     results = _optimizer_loop(optimizer)
     for target, result in zip(target_solution, results):
       chex.assert_trees_all_close(target, result)
@@ -154,9 +129,9 @@ class FirstMomentEMATest(chex.TestCase):
       def update_fn(updates, state, params=None):
         del params
         state['count'] += 1
-        state['w'] = ((1 - decay) * updates['w'] + decay * state['w'])
+        state['w'] = (1 - decay) * updates['w'] + decay * state['w']
         if debias:
-          update = {'w': state['w'] / (1 - decay**state['count'])}
+          update = {'w': state['w'] / (1 - decay ** state['count'])}
         else:
           update = {'w': state['w']}
         return update, state
@@ -165,18 +140,16 @@ class FirstMomentEMATest(chex.TestCase):
 
     decay = 0.7
     learning_rate = 0.01
-    true_ema = optax.chain(ema(decay), optax.scale(-1. * learning_rate))
+    true_ema = optax.chain(ema(decay), optax.scale(-1.0 * learning_rate))
     ks_ema = kitchen_sink(
         {
             '0': {
                 'element': 'first_moment_ema',
-                'hps': {
-                    'decay': decay,
-                    'debias': True
-                }
+                'hps': {'decay': decay, 'debias': True},
             }
         },
-        learning_rate=learning_rate)
+        learning_rate=learning_rate,
+    )
     targets = _optimizer_loop(true_ema)
     results = _optimizer_loop(ks_ema)
 
@@ -192,12 +165,7 @@ class PreconditionByRMSTest(chex.TestCase):
     precondition_by_rms = kitchen_sink({
         '0': {
             'element': 'precondition_by_rms',
-            'hps': {
-                'decay': 0.9,
-                'debias': False,
-                'eps': 0,
-                'eps_root': 1e-8
-            }
+            'hps': {'decay': 0.9, 'debias': False, 'eps': 0, 'eps_root': 1e-8},
         }
     })
     targets = _optimizer_loop(rms_prop)
@@ -208,20 +176,17 @@ class PreconditionByRMSTest(chex.TestCase):
 
   def test_debias_true(self):
     adam = kitchen_sink(
-        {'0': {
-            'element': 'scale_by_adam',
-            'hps': {
-                'b1': 0.0
-            },
-        }})
+        {
+            '0': {
+                'element': 'scale_by_adam',
+                'hps': {'b1': 0.0},
+            }
+        }
+    )
 
     precondition_by_rms = kitchen_sink(
-        {'0': {
-            'element': 'precondition_by_rms',
-            'hps': {
-                'debias': True
-            }
-        }})
+        {'0': {'element': 'precondition_by_rms', 'hps': {'debias': True}}}
+    )
     targets = _optimizer_loop(adam)
     results = _optimizer_loop(precondition_by_rms)
 
@@ -242,11 +207,12 @@ class PreconditionByYogiTest(chex.TestCase):
                     'b2': 0.9,
                     'debias': True,
                     'eps': 1e-8,
-                    'eps_root': 1e-6
-                }
+                    'eps_root': 1e-6,
+                },
             }
         },
-        learning_rate=1.0)
+        learning_rate=1.0,
+    )
     targets = _optimizer_loop(optax_yogi)
     results = _optimizer_loop(precondition_by_yogi)
 
@@ -276,21 +242,27 @@ class TwistedAdamTest(chex.TestCase):
         return State(
             nu=jax.tree.map(jnp.zeros_like, params),
             trace=jax.tree.map(jnp.zeros_like, params),
-            count=jnp.zeros([], jnp.int32))
+            count=jnp.zeros([], jnp.int32),
+        )
 
       def update_fn(updates, state, params=None):
         del params
         count = state.count + jnp.array(1, jnp.int32)
         nu = {
-            'w': (1 - rms_decay) * (updates['w']**2) + rms_decay * state.nu['w']
+            'w': (
+                (1 - rms_decay) * (updates['w'] ** 2)
+                + rms_decay * state.nu['w']
+            )
         }
         updates = {'w': updates['w'] / (jax.lax.sqrt(nu['w'] + eps_root) + eps)}
 
         updates = {'w': updates['w'] * jnp.sqrt((1 - rms_decay**count))}
 
         trace = {
-            'w': (1 - moment_decay) * updates['w'] +
-                 moment_decay * state.trace['w']
+            'w': (
+                (1 - moment_decay) * updates['w']
+                + moment_decay * state.trace['w']
+            )
         }
         updates = {'w': trace['w']}
 
@@ -308,16 +280,13 @@ class TwistedAdamTest(chex.TestCase):
                 'decay': rms_decay,
                 'eps': eps,
                 'eps_root': eps_root,
-                'debias': True
-            }
+                'debias': True,
+            },
         },
         '1': {
             'element': 'first_moment_ema',
-            'hps': {
-                'decay': moment_decay,
-                'debias': True
-            }
-        }
+            'hps': {'decay': moment_decay, 'debias': True},
+        },
     })
 
     targets = _optimizer_loop(true_twisted_adam)
@@ -344,19 +313,18 @@ class AMSGradTest(chex.TestCase):
         _, state = adam.update(updates, state, params)
         curr_nu = state.nu
         nu_hat = jax.tree.map(jnp.maximum, curr_nu, prev_nu)
-        updates = jax.tree.map(lambda m, v: m / (jnp.sqrt(v + 0.0) + 1e-8),
-                               state.mu, nu_hat)
+        updates = jax.tree.map(
+            lambda m, v: m / (jnp.sqrt(v + 0.0) + 1e-8), state.mu, nu_hat
+        )
 
         return updates, optax.ScaleByAdamState(
-            count=state.count, mu=state.mu, nu=nu_hat)
+            count=state.count, mu=state.mu, nu=nu_hat
+        )
 
       return optax.GradientTransformation(init_fn, update_fn)
 
     true_amsgrad = amsgrad()
-    ks_amsgrad = kitchen_sink(
-        {'0': {
-            'element': 'scale_by_amsgrad'
-        }})
+    ks_amsgrad = kitchen_sink({'0': {'element': 'scale_by_amsgrad'}})
 
     targets = _optimizer_loop(true_amsgrad)
     results = _optimizer_loop(ks_amsgrad)
@@ -376,16 +344,17 @@ class EquivalenceTest(chex.TestCase):
                 'element': 'precondition_by_rss',
                 'hps': {
                     'initial_accumulator_value': 0.3,
-                }
+                },
             },
             '1': {
                 'element': 'first_moment_ema',
                 'hps': {
                     'decay': 0.0,
-                }
-            }
+                },
+            },
         },
-        learning_rate=0.7)
+        learning_rate=0.7,
+    )
 
     targets = _optimizer_loop(true_adagrad)
     results = _optimizer_loop(ks_adagrad)
@@ -400,48 +369,26 @@ class EqEMAHBTest(chex.TestCase):
   def test_equivalence(self):
     hb = kitchen_sink(
         {
-            '0': {
-                'element': 'precondition_by_rms',
-                'hps': {
-                    'decay': 0.3
-                }
-            },
-            '1': {
-                'element': 'polyak_hb',
-                'hps': {
-                    'decay': 0.5
-                }
-            },
+            '0': {'element': 'precondition_by_rms', 'hps': {'decay': 0.3}},
+            '1': {'element': 'polyak_hb', 'hps': {'decay': 0.5}},
             '2': {
                 'element': 'add_decayed_weights',
-                'hps': {
-                    'weight_decay': 0.1
-                }
-            }
+                'hps': {'weight_decay': 0.1},
+            },
         },
-        learning_rate=1.0)
+        learning_rate=1.0,
+    )
     ema = kitchen_sink(
         {
-            '0': {
-                'element': 'precondition_by_rms',
-                'hps': {
-                    'decay': 0.3
-                }
-            },
-            '1': {
-                'element': 'first_moment_ema',
-                'hps': {
-                    'decay': 0.5
-                }
-            },
+            '0': {'element': 'precondition_by_rms', 'hps': {'decay': 0.3}},
+            '1': {'element': 'first_moment_ema', 'hps': {'decay': 0.5}},
             '2': {
                 'element': 'add_decayed_weights',
-                'hps': {
-                    'weight_decay': 0.05
-                }
-            }
+                'hps': {'weight_decay': 0.05},
+            },
         },
-        learning_rate=2.0)
+        learning_rate=2.0,
+    )
 
     targets = _optimizer_loop(hb)
     results = _optimizer_loop(ema)
@@ -465,11 +412,12 @@ class LayeredBetaTest(chex.TestCase):
                     'decays': decays,
                     'scales': scales,
                     'decay_distribution': decay_distribution,
-                    'eps_root': 0.0
-                }
+                    'eps_root': 0.0,
+                },
             },
         },
-        learning_rate=1.0)
+        learning_rate=1.0,
+    )
     scales = jnp.array([0.9, 0.5, 1.0, 1.0])
     betas = jnp.array([0.19, 0.75, 1.0, 1.0])
     one_minus_betas = jnp.array([0.81, 0.25, 1.0, 1.0])
@@ -477,7 +425,7 @@ class LayeredBetaTest(chex.TestCase):
     opt_state = ks_opt.init(params)
     # step 1
     grads = {'w': 2 * jnp.ones((4,))}
-    true_nu = one_minus_betas * (grads['w']**2)
+    true_nu = one_minus_betas * (grads['w'] ** 2)
     true_updates = {
         'w': -1.0 * jnp.array(scales) * grads['w'] / jnp.sqrt(true_nu)
     }
@@ -486,7 +434,7 @@ class LayeredBetaTest(chex.TestCase):
     params = optax.apply_updates(params, opt_updates)
     # step2
     grads = {'w': jnp.ones((4,))}
-    true_nu = one_minus_betas * (grads['w']**2) + betas * true_nu
+    true_nu = one_minus_betas * (grads['w'] ** 2) + betas * true_nu
     true_updates = {
         'w': -1.0 * jnp.array(scales) * grads['w'] / jnp.sqrt(true_nu)
     }

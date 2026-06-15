@@ -35,7 +35,6 @@ from init2winit.model_lib import model_utils
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 
-
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         num_layers=11,  # Must be one of [11, 13, 16, 19]
@@ -76,6 +75,7 @@ def features(x, num_layers, normalizer, dtype, train):
 
 class VGG(nn.Module):
   """Adabelief VGG."""
+
   num_layers: int
   num_outputs: int
   normalizer: str = 'none'
@@ -86,7 +86,8 @@ class VGG(nn.Module):
     x = features(x, self.num_layers, self.normalizer, self.dtype, train)
     x = jnp.reshape(x, (x.shape[0], -1))
     x = classifier(
-        x, self.num_outputs, dropout_rate=0.5, deterministic=not train)
+        x, self.num_outputs, dropout_rate=0.5, deterministic=not train
+    )
     return x
 
 
@@ -96,32 +97,95 @@ class VGG(nn.Module):
 # letter M indicates a max pooling layer.
 _layer_size_options = {
     1: [
-        8, 'M', 16, 'M', 32, 32, 'M', 64, 64, 'M', 64, 64, 'M'
-        ],  # used for testing only.
+        8,
+        'M',
+        16,
+        'M',
+        32,
+        32,
+        'M',
+        64,
+        64,
+        'M',
+        64,
+        64,
+        'M',
+    ],  # used for testing only.
     11: [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
     13: [
-        64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'
+        64,
+        64,
+        'M',
+        128,
+        128,
+        'M',
+        256,
+        256,
+        'M',
+        512,
+        512,
+        'M',
+        512,
+        512,
+        'M',
     ],
     16: [
-        64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512,
-        512, 512, 'M'
+        64,
+        64,
+        'M',
+        128,
+        128,
+        'M',
+        256,
+        256,
+        256,
+        'M',
+        512,
+        512,
+        512,
+        'M',
+        512,
+        512,
+        512,
+        'M',
     ],
     19: [
-        64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512,
-        'M', 512, 512, 512, 512, 'M'
+        64,
+        64,
+        'M',
+        128,
+        128,
+        'M',
+        256,
+        256,
+        256,
+        256,
+        'M',
+        512,
+        512,
+        512,
+        512,
+        'M',
+        512,
+        512,
+        512,
+        512,
+        'M',
     ],
 }
 
 
 # pylint: disable=[missing-class-docstring]
 class AdaBeliefVGGModel(base_model.BaseModel):
+
   def build_flax_module(self):
     """Adabelief VGG."""
     return VGG(
         num_layers=self.hps.num_layers,
         num_outputs=self.hps['output_shape'][-1],
         dtype=self.hps.model_dtype,
-        normalizer=self.hps.normalizer)
+        normalizer=self.hps.normalizer,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""

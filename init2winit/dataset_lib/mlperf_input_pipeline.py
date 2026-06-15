@@ -19,7 +19,6 @@ import os
 
 from init2winit.dataset_lib import data_utils
 from init2winit.dataset_lib import imagenet_preprocessing
-
 import jax
 import tensorflow as tf
 
@@ -29,13 +28,15 @@ MEAN_RGB = [0.485 * 255, 0.456 * 255, 0.406 * 255]
 STDDEV_RGB = [0.229 * 255, 0.224 * 255, 0.225 * 255]
 
 
-def load_split(batch_size,
-               split,
-               dtype,
-               rng,
-               data_dir=None,
-               image_size=224,
-               shuffle_size=16384):
+def load_split(
+    batch_size,
+    split,
+    dtype,
+    rng,
+    data_dir=None,
+    image_size=224,
+    shuffle_size=16384,
+):
   """Returns the input_fn.
 
   Args:
@@ -49,6 +50,7 @@ def load_split(batch_size,
     image_size: the size to resize the images to using `tf.image.resize(...,
       method='bicubic')`.
     shuffle_size: the size of the shuffle buffer used in `dataset.shuffler()`.
+
   Returns: a tf.data.Dataset that is batched and preprocessed, and optionally
     shuffled and repeated, for ImageNet based off the MLPerf codebase. Note that
     for evaluation, the final partial batches are not yet padded to be the same
@@ -76,19 +78,23 @@ def load_split(batch_size,
     if len(value) > 1:
       [example_index, value] = value
       per_example_rng = tf.random.experimental.stateless_fold_in(
-          tf.cast(preprocess_rng, tf.int64), example_index)
+          tf.cast(preprocess_rng, tf.int64), example_index
+      )
     elif split == 'train':
       raise ValueError(
           'Must enumerate() over tf.data.Dataset when training in order to get '
-          'a per-example index to fold into a per-example seed.')
+          'a per-example index to fold into a per-example seed.'
+      )
     else:
       value = value[0]
       per_example_rng = None
     parsed = tf.io.parse_single_example(
-        value, {
+        value,
+        {
             'image/encoded': tf.io.FixedLenFeature((), tf.string, ''),
-            'image/class/label': tf.io.FixedLenFeature([], tf.int64, 0)
-        })
+            'image/class/label': tf.io.FixedLenFeature([], tf.int64, 0),
+        },
+    )
     image_bytes = tf.reshape(parsed['image/encoded'], [])
     label = tf.cast(tf.reshape(parsed['image/class/label'], []), tf.int32) - 1
 
@@ -101,10 +107,12 @@ def load_split(batch_size,
           crop='random',
           random_crop_area_range=(0.05, 1.0),
           use_center_crop_if_random_failed=False,
-          random_flip=True)
+          random_flip=True,
+      )
     else:
       image = imagenet_preprocessing.preprocess_for_eval(
-          image_bytes, dtype, image_size)
+          image_bytes, dtype, image_size
+      )
 
     return {
         'inputs': image,
@@ -115,18 +123,22 @@ def load_split(batch_size,
   num_hosts = jax.process_count()
   use_training_files = split in ['train', 'eval_train']
   file_pattern = os.path.join(
-      data_dir, 'train-*' if use_training_files else 'validation-*')
+      data_dir, 'train-*' if use_training_files else 'validation-*'
+  )
   dataset = tf.data.Dataset.list_files(file_pattern, shuffle=False)
   dataset = dataset.shard(num_hosts, index)
   concurrent_files = min(10, 1024 // num_hosts)
-  dataset = dataset.interleave(tf.data.TFRecordDataset, concurrent_files, 1,
-                               concurrent_files)
+  dataset = dataset.interleave(
+      tf.data.TFRecordDataset, concurrent_files, 1, concurrent_files
+  )
 
   if split == 'train':
     dataset = dataset.cache()  # cache compressed JPEGs instead
     dataset = dataset.shuffle(
-        shuffle_size, reshuffle_each_iteration=True,
-        seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng)).repeat()
+        shuffle_size,
+        reshuffle_each_iteration=True,
+        seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng),
+    ).repeat()
     dataset = dataset.enumerate().map(dataset_parser, 64)
   else:
     dataset = dataset.map(dataset_parser, 64)

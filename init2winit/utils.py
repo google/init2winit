@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Utility functions for logging and recording training metrics."""
+
 import concurrent.futures
 import copy
 import functools
@@ -34,7 +35,6 @@ import numpy as np
 import orbax.checkpoint as ocp
 import pandas as pd
 from tensorflow.io import gfile
-
 
 exists = gfile.exists
 
@@ -107,16 +107,16 @@ def set_up_loggers(train_dir, xm_work_unit=None):
   """Creates a logger for eval metrics as well as initialization metrics."""
   csv_path = os.path.join(train_dir, 'measurements.csv')
   metrics_logger = MetricLogger(
-      csv_path=csv_path,
-      xm_work_unit=xm_work_unit,
-      events_dir=train_dir)
+      csv_path=csv_path, xm_work_unit=xm_work_unit, events_dir=train_dir
+  )
 
   init_csv_path = os.path.join(train_dir, 'init_measurements.csv')
   init_json_path = os.path.join(train_dir, 'init_scalars.json')
   init_logger = MetricLogger(
       csv_path=init_csv_path,
       json_path=init_json_path,
-      xm_work_unit=xm_work_unit)
+      xm_work_unit=xm_work_unit,
+  )
   return metrics_logger, init_logger
 
 
@@ -135,13 +135,16 @@ def run_in_parallel(function, list_of_kwargs_to_function, num_workers):
   """
   if num_workers < 1:
     raise ValueError(
-        'Number of workers must be greater than 0. Was {}'.format(num_workers))
+        'Number of workers must be greater than 0. Was {}'.format(num_workers)
+    )
 
   with concurrent.futures.ThreadPoolExecutor(num_workers) as executor:
     futures = []
     logging.info(
-        'Adding %d jobs to process pool to run in %d parallel '
-        'threads.', len(list_of_kwargs_to_function), num_workers)
+        'Adding %d jobs to process pool to run in %d parallel threads.',
+        len(list_of_kwargs_to_function),
+        num_workers,
+    )
 
     for kwargs in list_of_kwargs_to_function:
       f = executor.submit(function, **kwargs)
@@ -171,7 +174,7 @@ def add_log_file(logfile):
 
 class PytreeMetricLogger(object):
   """Used to log pytree metrics during training.
-  
+
   This class is used to log pytree metrics during training. It is similar to
   MetricLogger, but it is designed to log pytree metrics.
   """
@@ -192,7 +195,8 @@ class PytreeMetricLogger(object):
         self._pytree_path,
         options=ocp.CheckpointManagerOptions(
             file_options=orbax_file_options,
-            max_to_keep=1, create=True,
+            max_to_keep=1,
+            create=True,
         ),
     )
 
@@ -240,11 +244,9 @@ class MetricLogger(object):
   the wrong time.
   """
 
-  def __init__(self,
-               csv_path='',
-               json_path='',
-               events_dir=None,
-               **logger_kwargs):
+  def __init__(
+      self, csv_path='', json_path='', events_dir=None, **logger_kwargs
+  ):
     """Create a recorder for metrics, as CSV or JSON.
 
 
@@ -264,7 +266,8 @@ class MetricLogger(object):
       if len(logger_kwargs.keys()) > 1 or 'xm_work_unit' not in logger_kwargs:
         raise ValueError(
             'The only logger_kwarg that should be passed to MetricLogger is '
-            'xm_work_unit.')
+            'xm_work_unit.'
+        )
       self._xm_work_unit = logger_kwargs['xm_work_unit']
     else:
       self._xm_work_unit = None
@@ -304,7 +307,8 @@ class MetricLogger(object):
       for name, value in metrics.items():
         if name not in self._measurements:
           self._measurements[name] = self._xm_work_unit.get_measurement_series(
-              label=name)
+              label=name
+          )
         try:
           self._measurements[name].create_measurement(
               objective_value=reduce_to_scalar(value),
@@ -316,7 +320,8 @@ class MetricLogger(object):
 
     if self._tb_metric_writer:
       self._tb_metric_writer.write_scalars(
-          step=metrics['global_step'], scalars=metrics)
+          step=metrics['global_step'], scalars=metrics
+      )
       # This gives a 1-2% slowdown in steps_per_sec on cifar-10 with batch
       # size 512. We could only flush at the end of training to optimize this.
       self._tb_metric_writer.flush()
@@ -361,7 +366,8 @@ def log_pytree_shape_and_statistics(pytree, json_path=None):
   shape_dict = jax.tree.map(_summary_str, pytree)
   absl_logging.info(flax.core.pretty_repr(shape_dict))
   total_params = jax.tree_util.tree_reduce(
-      operator.add, jax.tree.map(lambda x: x.size, pytree))
+      operator.add, jax.tree.map(lambda x: x.size, pytree)
+  )
   absl_logging.info('Total params: %d', total_params)
 
 
@@ -372,18 +378,27 @@ def tabulate_model(model, hps):
     model: init2winit BaseModel
     hps: ml_collections.config_dict.config_dict.ConfigDict
   """
-  tabulate_fn = nn.tabulate(model.flax_module, jax.random.PRNGKey(0),
-                            console_kwargs={'force_terminal': False,
-                                            'force_jupyter': False,
-                                            'width': 240},
-                            )
+  tabulate_fn = nn.tabulate(
+      model.flax_module,
+      jax.random.PRNGKey(0),
+      console_kwargs={
+          'force_terminal': False,
+          'force_jupyter': False,
+          'width': 240,
+      },
+  )
   fake_inputs_hps = copy.copy(hps)
   fake_inputs_hps.batch_size = 2
   fake_inputs = model.get_fake_inputs(fake_inputs_hps)
   # Currently only two models implement the get_fake_batch.
   # Only attempt to log if we get a valid fake_input_batch.
   if fake_inputs:
-    absl_logging.info(tabulate_fn(*fake_inputs, train=False,))
+    absl_logging.info(
+        tabulate_fn(
+            *fake_inputs,
+            train=False,
+        )
+    )
 
 
 def edit_distance(source, target):
@@ -429,7 +444,8 @@ def edit_distance(source, target):
         distance[i][j] = 1 + min(
             distance[i][j - 1],  # Insert
             distance[i - 1][j],  # Remove
-            distance[i - 1][j - 1])  # Replace
+            distance[i - 1][j - 1],
+        )  # Replace
 
   return distance[num_source_words][num_target_words]
 

@@ -23,7 +23,6 @@ https://github.com/google/praxis/blob/516a96bce6f03090c5903531038f8f8af6212250/p
 """
 
 import dataclasses
-
 import functools
 import re
 from typing import Any, NamedTuple, Optional, Tuple, Union
@@ -32,14 +31,14 @@ import jax
 from jax import numpy as jnp
 import optax
 
-
 JTensor = Any
 NestedJTensor = Any
 NestedHParams = Any
 
 
-def to_quantized(fvalue: JTensor,
-                 quantized_dtype: jnp.dtype) -> Tuple[JTensor, JTensor]:
+def to_quantized(
+    fvalue: JTensor, quantized_dtype: jnp.dtype
+) -> Tuple[JTensor, JTensor]:
   """Converts floating point values `fvalues` to quantized values.
 
   We use a very simple quantization scheme where the range is symmetric around
@@ -83,14 +82,16 @@ def to_quantized(fvalue: JTensor,
   if fvalue.ndim < 1:
     raise ValueError(
         f'Input array {fvalue} must have a strictly positive number of '
-        'dimensions.')
+        'dimensions.'
+    )
 
   max_abs = jnp.max(jnp.abs(fvalue), axis=0)
   bucket_size = max_abs / num_buckets
   bs_expanded = bucket_size[jnp.newaxis, ...]
   # To avoid divide by 0.0
-  bs_nonzero = jnp.where(bs_expanded > 0.0, bs_expanded,
-                         jnp.ones_like(bs_expanded))
+  bs_nonzero = jnp.where(
+      bs_expanded > 0.0, bs_expanded, jnp.ones_like(bs_expanded)
+  )
   ratio = fvalue / bs_nonzero
   # We use rounding to remove bias.
   quantized = jnp.round(ratio)
@@ -127,8 +128,8 @@ def adafactor_decay_rate_adam(beta2: float, step_counter: JTensor) -> JTensor:
   """
   step = step_counter
   beta2 = jnp.array(beta2, dtype=jnp.float32)
-  t = step + 1.
-  return beta2 * (1. - jnp.power(beta2, t - 1.)) / (1. - jnp.power(beta2, t))
+  t = step + 1.0
+  return beta2 * (1.0 - jnp.power(beta2, t - 1.0)) / (1.0 - jnp.power(beta2, t))
 
 
 def adafactor_decay_rate_pow(exponent: float, step_counter: JTensor) -> JTensor:
@@ -144,7 +145,7 @@ def adafactor_decay_rate_pow(exponent: float, step_counter: JTensor) -> JTensor:
   """
   step = step_counter
   exponent = jnp.array(exponent, dtype=jnp.float32)
-  return 1. - jnp.power((step + 1.), -exponent)
+  return 1.0 - jnp.power((step + 1.0), -exponent)
 
 
 def reduce_mean(array: JTensor) -> JTensor:
@@ -186,6 +187,7 @@ def reduce_rms(array: JTensor) -> JTensor:
 @dataclasses.dataclass(frozen=True)
 class _ShardedAdafactorUpdateResult:
   """Structure containing per-variable info for Adafactor."""
+
   update: Optional[Any]
   m: Optional[Any]
   m_scale: Optional[Any]
@@ -196,6 +198,7 @@ class _ShardedAdafactorUpdateResult:
 
 class ShardedAdafactorState(NamedTuple):
   """Overall state of the ShardedAdafactor optimizer."""
+
   count: JTensor
   m: Optional[NestedJTensor]
   m_scale: Optional[NestedJTensor]
@@ -228,7 +231,8 @@ class _ShardedAdafactorHelper:
       multiply_by_parameter_scale: bool,
       epsilon2_param_scale_reg: float,
       maybe_inf_to_nan: bool,
-      nesterov: bool) -> None:
+      nesterov: bool,
+  ) -> None:
     """Constructor. See ShardedAdafactor() below."""
 
     self._learning_rate = learning_rate
@@ -320,7 +324,8 @@ class _ShardedAdafactorHelper:
         m_scale=jax.tree.map(lambda o: o.m_scale, result_tree),
         vr=jax.tree.map(lambda o: o.vr, result_tree),
         vc=jax.tree.map(lambda o: o.vc, result_tree),
-        v=jax.tree.map(lambda o: o.v, result_tree))
+        v=jax.tree.map(lambda o: o.v, result_tree),
+    )
 
   def init(self, param):
     """Initializes the optimizer state for a given param."""
@@ -358,7 +363,8 @@ class _ShardedAdafactorHelper:
         m_scale=output_m_scale,
         vr=output_vr,
         vc=output_vc,
-        v=output_v)
+        v=output_v,
+    )
 
   def inf_to_nan(self, array):
     """Converting Infinity values to the more sticky NaN."""
@@ -386,8 +392,9 @@ class _ShardedAdafactorHelper:
     """
     return jnp.maximum(reduce_rms(var), jnp.asarray(self._epsilon2, var.dtype))
 
-  def compute_var_and_slot_update(self, count, grad, m, m_scale, vr, vc, v,
-                                  param, var_name=None):
+  def compute_var_and_slot_update(
+      self, count, grad, m, m_scale, vr, vc, v, param, var_name=None
+  ):
     """Computes the var and optimizer slots updates for a single variable."""
     # We can probably skip this step
     grad = grad.astype(jnp.float32)
@@ -424,7 +431,7 @@ class _ShardedAdafactorHelper:
     update_scale += grad_squared_mean * 1e-30
     # END HACK
 
-    mixing_rate = 1. - decay_rate
+    mixing_rate = 1.0 - decay_rate
     shape = param.shape
 
     output_m = jnp.zeros((1,))
@@ -439,18 +446,23 @@ class _ShardedAdafactorHelper:
       # reduce_mean().
       vr_axis, vc_axis = factored_second_moment_dims
       grad_squared_row_mean = self.inf_to_nan(
-          jnp.mean(grad_squared, axis=vr_axis))
+          jnp.mean(grad_squared, axis=vr_axis)
+      )
       grad_squared_col_mean = self.inf_to_nan(
-          jnp.mean(grad_squared, axis=vc_axis))
+          jnp.mean(grad_squared, axis=vc_axis)
+      )
       new_vr = decay_rate * vr + mixing_rate * grad_squared_row_mean
       new_vc = decay_rate * vc + mixing_rate * grad_squared_col_mean
       output_vr = new_vr
       output_vc = new_vc
       long_term_mean = jnp.mean(new_vr, axis=-1, keepdims=True)
-      r_factor = 1. / jnp.sqrt(new_vr / long_term_mean)
-      c_factor = 1. / jnp.sqrt(new_vc)
-      x = grad * jnp.expand_dims(r_factor, vr_axis) * jnp.expand_dims(
-          c_factor, vc_axis)
+      r_factor = 1.0 / jnp.sqrt(new_vr / long_term_mean)
+      c_factor = 1.0 / jnp.sqrt(new_vc)
+      x = (
+          grad
+          * jnp.expand_dims(r_factor, vr_axis)
+          * jnp.expand_dims(c_factor, vc_axis)
+      )
     else:
       # v with sharding annotation.
       new_v = decay_rate * v + mixing_rate * grad_squared
@@ -458,7 +470,7 @@ class _ShardedAdafactorHelper:
       x = grad / jnp.sqrt(new_v)
 
     if self._clip_threshold is not None:
-      clipping_denom = jnp.maximum(1., reduce_rms(x) / self._clip_threshold)
+      clipping_denom = jnp.maximum(1.0, reduce_rms(x) / self._clip_threshold)
       clipping_denom = self.inf_to_nan(clipping_denom)
       x /= clipping_denom
 
@@ -471,7 +483,7 @@ class _ShardedAdafactorHelper:
         m = to_float(m, m_scale)
       if self._nesterov:
         subtrahend_original = subtrahend
-      subtrahend = self._beta1 * m + (1. - self._beta1) * subtrahend
+      subtrahend = self._beta1 * m + (1.0 - self._beta1) * subtrahend
       subtrahend = self.inf_to_nan(subtrahend)
       if self._quantized_dtype == jnp.bfloat16:
         new_m = subtrahend.astype(jnp.bfloat16)
@@ -518,7 +530,9 @@ class _ShardedAdafactorHelper:
         ratio = w_norm / g_norm
         ratio = jnp.where(
             jnp.greater(w_norm, 0),
-            jnp.where(jnp.greater(g_norm, 0), (w_norm / g_norm), 1.0), 1.0)
+            jnp.where(jnp.greater(g_norm, 0), (w_norm / g_norm), 1.0),
+            1.0,
+        )
         subtrahend *= ratio
 
     return _ShardedAdafactorUpdateResult(
@@ -527,7 +541,8 @@ class _ShardedAdafactorHelper:
         m_scale=output_m_scale,
         vr=output_vr,
         vc=output_vc,
-        v=output_v)
+        v=output_v,
+    )
 
 
 def sharded_adafactor(
@@ -535,10 +550,10 @@ def sharded_adafactor(
     weight_decay: Optional[Union[float, dict[str, float]]] = None,
     layerwise_adaptation: bool = False,
     decay_method: str = '',
-    decay_adam: float = 0.,
-    decay_pow: float = 0.,
-    beta1: float = 0.,
-    clip_threshold: Optional[float] = 1.,
+    decay_adam: float = 0.0,
+    decay_pow: float = 0.0,
+    beta1: float = 0.0,
+    clip_threshold: Optional[float] = 1.0,
     factored: bool = True,
     epsilon1_grad_sq_reg: float = 1e-30,
     quantized_dtype: jnp.dtype = jnp.int8,
@@ -628,7 +643,8 @@ def sharded_adafactor(
   assert learning_rate is not None
   assert decay_method == 'adam' or decay_method == 'pow', (
       f'decay_method: {decay_method} not supported. Supported methods are '
-      '"pow", or "adam".')
+      '"pow", or "adam".'
+  )
 
   sharded_adafactor_helper = _ShardedAdafactorHelper(
       learning_rate=learning_rate,
@@ -650,24 +666,36 @@ def sharded_adafactor(
       multiply_by_parameter_scale=multiply_by_parameter_scale,
       epsilon2_param_scale_reg=epsilon2_param_scale_reg,
       maybe_inf_to_nan=maybe_inf_to_nan,
-      nesterov=nesterov)
+      nesterov=nesterov,
+  )
 
   def init_fn(params):
     """Initializes the optimizer's state."""
     return sharded_adafactor_helper.to_state(
         jnp.zeros([], jnp.int32),
-        jax.tree.map(sharded_adafactor_helper.init, params))
+        jax.tree.map(sharded_adafactor_helper.init, params),
+    )
 
   def update_fn(updates, state, params=None):
     if params is None:
       raise ValueError(
           'You are using a transformation that requires the current value of '
-          'parameters, but you are not passing `params` when calling `update`.')
+          'parameters, but you are not passing `params` when calling `update`.'
+      )
 
     compute_var_and_slot_update_fn = functools.partial(
-        sharded_adafactor_helper.compute_var_and_slot_update, state.count)
-    output = jax.tree.map(compute_var_and_slot_update_fn, updates, state.m,
-                          state.m_scale, state.vr, state.vc, state.v, params)
+        sharded_adafactor_helper.compute_var_and_slot_update, state.count
+    )
+    output = jax.tree.map(
+        compute_var_and_slot_update_fn,
+        updates,
+        state.m,
+        state.m_scale,
+        state.vr,
+        state.vc,
+        state.v,
+        params,
+    )
     updates = jax.tree.map(lambda o: o.update, output)
     count_plus_one = state.count + jnp.array(1, jnp.int32)
     updated_states = sharded_adafactor_helper.to_state(count_plus_one, output)

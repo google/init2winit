@@ -32,17 +32,20 @@ PAD_ID = 0
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
-def get_trained_tokenizer(train_dataset: tf.data.Dataset,) -> tf.data.Dataset:
+def get_trained_tokenizer(
+    train_dataset: tf.data.Dataset,
+) -> tf.data.Dataset:
   tokenizer = wikitext_tokenizer.Tokenizer()
   tokenizer.train(train_dataset)
   return tokenizer
 
 
-def batch_with_padding(dataset: tf.data.Dataset,
-                       batch_size,
-                       padded_shapes=None,
-                       padding_id=PAD_ID,
-                       ):
+def batch_with_padding(
+    dataset: tf.data.Dataset,
+    batch_size,
+    padded_shapes=None,
+    padding_id=PAD_ID,
+):
   """Batches a tf.data.Dataset and adds padding if len(dataset) not divisible by the batch size.
 
   Args:
@@ -52,14 +55,14 @@ def batch_with_padding(dataset: tf.data.Dataset,
     padding_id: value for padding, for elements in new batch
 
   Returns:
-
   """
   batched_dataset = dataset.batch(batch_size, drop_remainder=False)
 
   # tf.data.Dataset.padded.batch pads elements in the batch so we call it
   # again with batch_size=1 to pad each element in original batch.
   padded_batched_dataset = batched_dataset.padded_batch(
-      1, padded_shapes=padded_shapes, padding_values=padding_id)
+      1, padded_shapes=padded_shapes, padding_values=padding_id
+  )
 
   # Remove extra dimension resulting from the batch_size=1.
   padded_batched_dataset = padded_batched_dataset.unbatch()
@@ -68,8 +71,11 @@ def batch_with_padding(dataset: tf.data.Dataset,
 
 
 def get_wikitext2_dataset(
-    hps: config_dict.ConfigDict, train_batch_size: int, valid_batch_size: int,
-    test_batch_size: int, shuffle_seed: int
+    hps: config_dict.ConfigDict,
+    train_batch_size: int,
+    valid_batch_size: int,
+    test_batch_size: int,
+    shuffle_seed: int,
 ) -> tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset, tf.data.Dataset]:
   """Returns wikitext-2 dataset.
 
@@ -123,13 +129,17 @@ def get_wikitext2_dataset(
 
   # Split the sequences into inputs and targets.
   train_dataset_sequences = train_dataset_sequences.map(
-      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE
+  )
   eval_train_dataset_sequences = eval_train_dataset_sequences.map(
-      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE
+  )
   valid_dataset_sequences = valid_dataset_sequences.map(
-      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE
+  )
   test_dataset_sequences = test_dataset_sequences.map(
-      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE
+  )
 
   # Shuffle the train sequences.
   train_dataset_sequences = train_dataset_sequences.shuffle(
@@ -149,23 +159,26 @@ def get_wikitext2_dataset(
       train_batch_size,
       padded_shapes={
           'inputs': (train_batch_size, None),
-          'targets': (train_batch_size, None)
-      }).prefetch(tf.data.experimental.AUTOTUNE)
+          'targets': (train_batch_size, None),
+      },
+  ).prefetch(tf.data.experimental.AUTOTUNE)
 
   valid_dataset = batch_with_padding(
       valid_dataset_sequences,
       valid_batch_size,
       padded_shapes={
           'inputs': (valid_batch_size, None),
-          'targets': (valid_batch_size, None)
-      }).prefetch(tf.data.experimental.AUTOTUNE)
+          'targets': (valid_batch_size, None),
+      },
+  ).prefetch(tf.data.experimental.AUTOTUNE)
 
   test_dataset = batch_with_padding(
       test_dataset_sequences,
       test_batch_size,
       padded_shapes={
           'inputs': (test_batch_size, None),
-          'targets': (test_batch_size, None)
-      }).prefetch(tf.data.experimental.AUTOTUNE)
+          'targets': (test_batch_size, None),
+      },
+  ).prefetch(tf.data.experimental.AUTOTUNE)
 
   return train_dataset, eval_train_dataset, valid_dataset, test_dataset

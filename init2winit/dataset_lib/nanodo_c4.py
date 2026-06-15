@@ -109,14 +109,12 @@ def py_batched_tfds(
       operations=pygrain_ops,
       sampler=index_sampler,
       worker_count=worker_count,
-      worker_buffer_size=worker_buffer_size
+      worker_buffer_size=worker_buffer_size,
   )
   return batched_dataloader
 
 
-def get_dataset(
-    shuffle_rng, batch_size, eval_batch_size=None, hps=None
-):
+def get_dataset(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
   """Data generators for Nanodo."""
 
   shuffle_seed = data_utils.convert_jax_to_tf_random_seed(shuffle_rng)
@@ -153,22 +151,14 @@ def get_dataset(
   def train_iterator_fn():
     for example in iter(train_ds):
       inputs, targets, weights = data_loader.get_in_out(example)
-      batch = {
-          'inputs': inputs,
-          'targets': targets,
-          'weights': weights
-      }
+      batch = {'inputs': inputs, 'targets': targets, 'weights': weights}
       yield batch
 
   def eval_train_epoch(num_batches=None):
     eval_train_iter = iter(eval_ds)
     for example in itertools.islice(eval_train_iter, num_batches):
       inputs, targets, weights = data_loader.get_in_out(example)
-      batch = {
-          'inputs': inputs,
-          'targets': targets,
-          'weights': weights
-      }
+      batch = {'inputs': inputs, 'targets': targets, 'weights': weights}
 
       yield batch
 
@@ -176,11 +166,7 @@ def get_dataset(
     valid_iter = iter(eval_ds)
     for example in itertools.islice(valid_iter, num_batches):
       inputs, targets, weights = data_loader.get_in_out(example)
-      batch = {
-          'inputs': inputs,
-          'targets': targets,
-          'weights': weights
-      }
+      batch = {'inputs': inputs, 'targets': targets, 'weights': weights}
       yield batch
 
   # pylint: disable=unreachable

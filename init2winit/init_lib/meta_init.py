@@ -37,20 +37,22 @@ from ml_collections.config_dict import config_dict
 import numpy as np
 import optax
 
-
 # Small hparams for quicker tests.
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    meta_learning_rate=.1,
-    meta_steps=50,
-    meta_batch_size=8,
-    epsilon=1e-5,
-    meta_momentum=0.5,
-))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        meta_learning_rate=0.1,
+        meta_steps=50,
+        meta_batch_size=8,
+        epsilon=1e-5,
+        meta_momentum=0.5,
+    )
+)
 
 
 def _count_params(tree):
-  return jax.tree_util.tree_reduce(operator.add,
-                                   jax.tree.map(lambda x: x.size, tree))
+  return jax.tree_util.tree_reduce(
+      operator.add, jax.tree.map(lambda x: x.size, tree)
+  )
 
 
 def scale_params(params, scalars):
@@ -93,11 +95,13 @@ def meta_loss(params_to_loss, scalars, normalized_params, epsilon):
   nparams = _count_params(g)
 
   def meta_term(g, hgp):
-    ratio = (g-hgp) / (g + epsilon * jax.lax.stop_gradient(2*(g >= 0) - 1))
+    ratio = (g - hgp) / (g + epsilon * jax.lax.stop_gradient(2 * (g >= 0) - 1))
     return jnp.sum(jnp.abs(ratio - 1))
 
-  return jax.tree_util.tree_reduce(operator.add, jax.tree.map(
-      meta_term, g, hgp)) / nparams
+  return (
+      jax.tree_util.tree_reduce(operator.add, jax.tree.map(meta_term, g, hgp))
+      / nparams
+  )
 
 
 def normalize(node):
@@ -115,16 +119,18 @@ def _get_non_bias_params(params):
   return bias_and_scalar_keys
 
 
-def meta_optimize_scales(loss_fn,
-                         fprop,
-                         normalized_params,
-                         norms,
-                         hps,
-                         input_shape,
-                         output_shape,
-                         rng_key,
-                         metrics_logger=None,
-                         log_every=10):
+def meta_optimize_scales(
+    loss_fn,
+    fprop,
+    normalized_params,
+    norms,
+    hps,
+    input_shape,
+    output_shape,
+    rng_key,
+    metrics_logger=None,
+    log_every=10,
+):
   """Implements MetaInit initializer.
 
   Args:
@@ -148,8 +154,11 @@ def meta_optimize_scales(loss_fn,
   """
   num_outputs = output_shape[-1]
   if hps.meta_batch_size % jax.device_count() != 0:
-    raise ValueError('meta_bs: {}, n_devices: {}'.format(
-        hps.meta_batch_size, jax.device_count()))
+    raise ValueError(
+        'meta_bs: {}, n_devices: {}'.format(
+            hps.meta_batch_size, jax.device_count()
+        )
+    )
 
   def get_batch(rng_key):
     """Return a fake batch of data."""
@@ -160,10 +169,15 @@ def meta_optimize_scales(loss_fn,
     input_key, target_key = jax.random.split(rng_key)
 
     inputs = jax.random.normal(input_key, meta_input_shape)
-    targets = jax.random.randint(target_key, (
-        jax.local_device_count(),
-        hps.meta_batch_size // jax.device_count(),
-    ), 0, num_outputs)
+    targets = jax.random.randint(
+        target_key,
+        (
+            jax.local_device_count(),
+            hps.meta_batch_size // jax.device_count(),
+        ),
+        0,
+        num_outputs,
+    )
     targets = jnp.eye(num_outputs)[targets]
     return (inputs, targets)
 
@@ -174,13 +188,14 @@ def meta_optimize_scales(loss_fn,
     for key in non_bias_and_scalar_keys:
       logging.info(key)
   traversal = flax.traverse_util.ModelParamTraversal(
-      lambda path, _: path in non_bias_and_scalar_keys)
+      lambda path, _: path in non_bias_and_scalar_keys
+  )
 
   # Non-bias, non-scalar norms.
   meta_params = traversal.update(lambda x: x, norms)
   meta_opt_init_fn, meta_opt_update_fn = optax.sgd(
-      learning_rate=hps.meta_learning_rate,
-      momentum=hps.meta_momentum)
+      learning_rate=hps.meta_learning_rate, momentum=hps.meta_momentum
+  )
   meta_optimizer_state = meta_opt_init_fn(meta_params)
   meta_optimizer_state = jax_utils.replicate(meta_optimizer_state)
   meta_params = jax_utils.replicate(meta_params)
@@ -189,9 +204,11 @@ def meta_optimize_scales(loss_fn,
   @functools.partial(jax.pmap, axis_name='batch')
   def update(meta_params, optimizer_state, inputs, targets):
     """Update step."""
+
     def params_to_loss(params):
       loss_value, loss_weight = loss_fn(
-          fprop({'params': params}, inputs, train=True), targets)
+          fprop({'params': params}, inputs, train=True), targets
+      )
       return loss_value / loss_weight
 
     def _meta_loss(params):
@@ -202,7 +219,8 @@ def meta_optimize_scales(loss_fn,
     grads = model_utils.cross_device_avg(grads)
     grads = jax.tree.map(jnp.sign, grads)
     meta_updates, new_meta_optimizer_state = meta_opt_update_fn(
-        grads, optimizer_state, params=meta_params)
+        grads, optimizer_state, params=meta_params
+    )
     new_meta_params = optax.apply_updates(meta_params, meta_updates)
     return new_meta_params, new_meta_optimizer_state, loss
 
@@ -213,18 +231,19 @@ def meta_optimize_scales(loss_fn,
     inputs, targets = get_batch(batch_rng)
 
     meta_params, meta_optimizer_state, loss_value = update(
-        meta_params, meta_optimizer_state, inputs, targets)
+        meta_params, meta_optimizer_state, inputs, targets
+    )
     training_curve.append(loss_value)
-    if (jax.process_index() == 0 and
-        (i % log_every == 0 or (i + 1) == hps.meta_steps)):
+    if jax.process_index() == 0 and (
+        i % log_every == 0 or (i + 1) == hps.meta_steps
+    ):
       end = time.perf_counter()
-      logging.info('Cumulative time (seconds): %d', end-start)
+      logging.info('Cumulative time (seconds): %d', end - start)
       logging.info('meta_init step %d, loss: %f', i, float(loss_value[0]))
       if metrics_logger is not None:
-        metrics_logger.append_scalar_metrics({
-            'global_step': i,
-            'meta_loss': float(loss_value[0])
-        })
+        metrics_logger.append_scalar_metrics(
+            {'global_step': i, 'meta_loss': float(loss_value[0])}
+        )
 
   # Create a new model with the learned init.
   learned_norms = jax_utils.unreplicate(meta_params)
@@ -234,21 +253,24 @@ def meta_optimize_scales(loss_fn,
 def _log_shape_and_norms(pytree, metrics_logger, key):
   shape_and_norms = jax.tree.map(
       lambda x: (str(x.shape), str(np.linalg.norm(x.reshape(-1)))),
-      unfreeze(pytree))
+      unfreeze(pytree),
+  )
   logging.info(json.dumps(shape_and_norms, sort_keys=True, indent=4))
   if metrics_logger is not None:
     metrics_logger.append_json_object({'key': key, 'value': shape_and_norms})
 
 
-def meta_init(loss_fn,
-              flax_module,
-              params,
-              hps,
-              input_shape,
-              output_shape,
-              rng_key,
-              metrics_logger=None,
-              log_every=10):
+def meta_init(
+    loss_fn,
+    flax_module,
+    params,
+    hps,
+    input_shape,
+    output_shape,
+    rng_key,
+    metrics_logger=None,
+    log_every=10,
+):
   """Implements MetaInit initializer.
 
   Args:
@@ -272,8 +294,7 @@ def meta_init(loss_fn,
     _log_shape_and_norms(params, metrics_logger, key='init_norms')
     # First grab the norms of all weights and rescale params to have norm 1.
     logging.info('Running meta init')
-  norms = jax.tree.map(lambda node: jnp.linalg.norm(node.reshape(-1)),
-                       params)
+  norms = jax.tree.map(lambda node: jnp.linalg.norm(node.reshape(-1)), params)
 
   normalized_params = jax.tree.map(normalize, params)
 
@@ -287,7 +308,8 @@ def meta_init(loss_fn,
       output_shape,
       rng_key,
       metrics_logger=metrics_logger,
-      log_every=log_every)
+      log_every=log_every,
+  )
   new_params = scale_params(normalized_params, learned_norms)
 
   if jax.process_index() == 0:

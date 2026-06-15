@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Flax implementation of ResNet V1."""
+
 import functools
 from typing import Optional, Tuple
 
@@ -25,23 +26,24 @@ from init2winit.model_lib import normalization
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 
-
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    num_filters=16,
-    num_layers=18,  # Must be one of [18, 34, 50, 101, 152, 200]
-    batch_norm_momentum=0.9,
-    batch_norm_epsilon=1e-5,
-    # Make this a string to avoid having to import jnp into the configs.
-    model_dtype='float32',
-    virtual_batch_size=64,
-    data_format='NHWC',
-    block_type='post_activation',  # either pre_activation or post_activation
-    bn_relu_conv=True,  # only used for block_type='pre_activation'
-    use_bn=True,
-    dropout_rate=0.0,
-    activation_function='relu',
-    extra_norm_on_residual=False,
-))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        num_filters=16,
+        num_layers=18,  # Must be one of [18, 34, 50, 101, 152, 200]
+        batch_norm_momentum=0.9,
+        batch_norm_epsilon=1e-5,
+        # Make this a string to avoid having to import jnp into the configs.
+        model_dtype='float32',
+        virtual_batch_size=64,
+        data_format='NHWC',
+        block_type='post_activation',  # pre_activation or post_activation
+        bn_relu_conv=True,  # only used for block_type='pre_activation'
+        use_bn=True,
+        dropout_rate=0.0,
+        activation_function='relu',
+        extra_norm_on_residual=False,
+    )
+)
 
 
 class PreActResidualBlock(nn.Module):
@@ -52,6 +54,7 @@ class PreActResidualBlock(nn.Module):
   non-linearity after the residual connection, the preactivation block applies
   it before the residual connection.
   """
+
   filters: int
   strides: Tuple[int] = (1, 1)
   dtype: model_utils.Dtype = jnp.float32
@@ -69,6 +72,7 @@ class PreActResidualBlock(nn.Module):
   @nn.compact
   def __call__(self, x, train):
     needs_projection = x.shape[-1] != self.filters * 4 or self.strides != (1, 1)
+
     def maybe_normalize(name):
       if self.use_bn:
         return normalization.VirtualBatchNorm(
@@ -79,7 +83,8 @@ class PreActResidualBlock(nn.Module):
             virtual_batch_size=self.virtual_batch_size,
             total_batch_size=self.total_batch_size,
             data_format=self.data_format,
-            name=name)
+            name=name,
+        )
       else:
         return lambda x, **kwargs: x
 
@@ -87,10 +92,12 @@ class PreActResidualBlock(nn.Module):
 
     residual = x
     if needs_projection:
-      residual = conv(
-          self.filters * 4, (1, 1), self.strides, name='proj_conv')(residual)
+      residual = conv(self.filters * 4, (1, 1), self.strides, name='proj_conv')(
+          residual
+      )
       residual = maybe_normalize(name='proj_bn')(
-          residual, use_running_average=not train)
+          residual, use_running_average=not train
+      )
 
     def _bn_nonlin(y, name):
       if self.bn_relu_conv:
@@ -110,12 +117,14 @@ class PreActResidualBlock(nn.Module):
 
     if self.extra_norm_on_residual:
       return maybe_normalize(name='extra')(
-          y + residual, use_running_average=not train)
+          y + residual, use_running_average=not train
+      )
     return y + residual
 
 
 class ResidualBlock(nn.Module):
   """Bottleneck ResNet block."""
+
   filters: int
   strides: Tuple[int] = (1, 1)
   dtype: model_utils.Dtype = jnp.float32
@@ -133,6 +142,7 @@ class ResidualBlock(nn.Module):
   @nn.compact
   def __call__(self, x, train):
     needs_projection = x.shape[-1] != self.filters * 4 or self.strides != (1, 1)
+
     def maybe_normalize(name, scale_init=nn.initializers.ones):
       if self.use_bn:
         return normalization.VirtualBatchNorm(
@@ -144,7 +154,8 @@ class ResidualBlock(nn.Module):
             total_batch_size=self.total_batch_size,
             data_format=self.data_format,
             scale_init=scale_init,
-            name=name)
+            name=name,
+        )
       else:
         return lambda x, **kwargs: x
 
@@ -152,10 +163,12 @@ class ResidualBlock(nn.Module):
 
     residual = x
     if needs_projection:
-      residual = conv(
-          self.filters * 4, (1, 1), self.strides, name='proj_conv')(residual)
+      residual = conv(self.filters * 4, (1, 1), self.strides, name='proj_conv')(
+          residual
+      )
       residual = maybe_normalize(name='proj_bn')(
-          residual, use_running_average=not train)
+          residual, use_running_average=not train
+      )
 
     y = conv(self.filters, (1, 1), name='conv1')(x)
     y = maybe_normalize(name='bn1')(y, use_running_average=not train)
@@ -166,7 +179,8 @@ class ResidualBlock(nn.Module):
     y = conv(self.filters * 4, (1, 1), name='conv3')(y)
 
     y = maybe_normalize(name='bn3', scale_init=nn.initializers.zeros)(
-        y, use_running_average=not train)
+        y, use_running_average=not train
+    )
 
     y = model_utils.ACTIVATIONS[self.activation_function](residual + y)
     if self.extra_norm_on_residual:
@@ -176,6 +190,7 @@ class ResidualBlock(nn.Module):
 
 class ResNet(nn.Module):
   """ResNetV1."""
+
   num_outputs: int
   num_filters: int = 64
   num_layers: int = 50
@@ -199,10 +214,14 @@ class ResNet(nn.Module):
       raise ValueError('Please provide a valid number of layers')
     block_sizes = _block_size_options[self.num_layers]
 
-    x = nn.Conv(self.num_filters, (7, 7), (2, 2),
-                use_bias=False,
-                dtype=self.dtype,
-                name='init_conv')(x)
+    x = nn.Conv(
+        self.num_filters,
+        (7, 7),
+        (2, 2),
+        use_bias=False,
+        dtype=self.dtype,
+        name='init_conv',
+    )(x)
     if self.use_bn:
       x = normalization.VirtualBatchNorm(
           momentum=self.batch_norm_momentum,
@@ -212,7 +231,8 @@ class ResNet(nn.Module):
           batch_size=self.batch_size,
           virtual_batch_size=self.virtual_batch_size,
           total_batch_size=self.total_batch_size,
-          data_format=self.data_format)(x, use_running_average=not train)
+          data_format=self.data_format,
+      )(x, use_running_average=not train)
     x = nn.max_pool(x, (3, 3), strides=(2, 2), padding='SAME')
     if self.block_type == 'post_activation':
       residual_block = ResidualBlock
@@ -226,7 +246,7 @@ class ResNet(nn.Module):
         strides = (2, 2) if i > 0 and j == 0 else (1, 1)
         index += 1
         x = residual_block(
-            self.num_filters * 2 ** i,
+            self.num_filters * 2**i,
             strides=strides,
             dtype=self.dtype,
             batch_norm_momentum=self.batch_norm_momentum,
@@ -239,7 +259,7 @@ class ResNet(nn.Module):
             use_bn=self.use_bn,
             activation_function=self.activation_function,
             extra_norm_on_residual=self.extra_norm_on_residual,
-            )(x, train=train)
+        )(x, train=train)
     x = jnp.mean(x, axis=(1, 2))
     if self.dropout_rate > 0.0:
       x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
@@ -257,7 +277,7 @@ _block_size_options = {
     101: [3, 4, 23, 3],
     152: [3, 8, 36, 3],
     200: [3, 24, 36, 3],
-    1000: [3, 24 * 5, 36 * 5, 3]
+    1000: [3, 24 * 5, 36 * 5, 3],
 }
 
 
@@ -282,7 +302,8 @@ class ResnetModel(base_model.BaseModel):
         use_bn=self.hps.use_bn,
         dropout_rate=self.hps.dropout_rate,
         activation_function=self.hps.activation_function,
-        extra_norm_on_residual=self.hps.extra_norm_on_residual)
+        extra_norm_on_residual=self.hps.extra_norm_on_residual,
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for purpose of initializing the model."""

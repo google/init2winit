@@ -41,7 +41,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         tokenizer='word',
         tokenizer_vocab_path=None,
         vocab_size=input_pipeline.WORD_VOCAB_SIZE,
-    ))
+    )
+)
 
 
 METADATA = {
@@ -71,7 +72,8 @@ def get_wikitext103(
     batch_size: int,
     eval_batch_size: int = None,
     hps: config_dict.ConfigDict = None,
-    pad_id: int = PAD_ID) -> Dataset:
+    pad_id: int = PAD_ID,
+) -> Dataset:
   """Returns Wikitext-103 Dataset.
 
   Args:
@@ -93,7 +95,9 @@ def get_wikitext103(
   if batch_size % process_count != 0:
     raise ValueError(
         'process_count={} must divide batch_size={}.'.format(
-            process_count, batch_size))
+            process_count, batch_size
+        )
+    )
 
   if eval_batch_size is None:
     eval_batch_size = batch_size
@@ -101,7 +105,9 @@ def get_wikitext103(
   if eval_batch_size % process_count != 0:
     raise ValueError(
         'process_count={} must divide batch_size={}.'.format(
-            process_count, batch_size))
+            process_count, batch_size
+        )
+    )
 
   train_dataset, eval_train_dataset, valid_dataset, test_dataset = (
       input_pipeline.get_wikitext103_dataset(
@@ -129,5 +135,4 @@ def get_wikitext103(
     for batch in itertools.islice(iter(test_dataset), num_batches):
       yield add_weights_to_batch(data_utils.tf_to_numpy(batch), pad_id)
 
-  return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
-                 test_epoch)
+  return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)

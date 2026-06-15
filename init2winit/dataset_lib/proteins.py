@@ -40,7 +40,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         output_shape=(31,),
         train_size=27000000,
         data_name='uniref50/unaligned_encoded',
-    ))
+    )
+)
 
 METADATA = {
     'apply_one_hot_in_loss': True,
@@ -65,18 +66,26 @@ def _crop(x, max_length, sample):
     start = tf.random.uniform(
         (),
         dtype=tf.int32,
-        maxval=tf.maximum(1,
-                          tf.shape(x)[0] - max_length + 1))
+        maxval=tf.maximum(1, tf.shape(x)[0] - max_length + 1),
+    )
   else:
     start = 0
 
-  x = x[start:(start + max_length)]
+  x = x[start : (start + max_length)]
   return x
 
 
-def preprocess_masked(inputs, random_tokens, mask_token, pad_token, mask_rate,
-                      mask_token_proportion, random_token_proportion, mode,
-                      rng):
+def preprocess_masked(
+    inputs,
+    random_tokens,
+    mask_token,
+    pad_token,
+    mask_rate,
+    mask_token_proportion,
+    random_token_proportion,
+    mode,
+    rng,
+):
   """Preprocess inputs for masked language modeling.
 
   Args:
@@ -99,8 +108,9 @@ def preprocess_masked(inputs, random_tokens, mask_token, pad_token, mask_rate,
   """
   total = random_token_proportion + mask_token_proportion
   if total < 0 or total > 1:
-    raise ValueError('Sum of random proportion and mask proportion must be'
-                     ' in [0, 1] range.')
+    raise ValueError(
+        'Sum of random proportion and mask proportion must be in [0, 1] range.'
+    )
   targets = inputs
 
   if mode == Mode.PREDICT:
@@ -126,7 +136,8 @@ def preprocess_masked(inputs, random_tokens, mask_token, pad_token, mask_rate,
     # Generate full array of random tokens.
     rng, subrng = jax.random.split(rng)
     random_ids = jax.random.randint(
-        subrng, inputs.shape, minval=0, maxval=len(random_tokens))
+        subrng, inputs.shape, minval=0, maxval=len(random_tokens)
+    )
 
     fullrandom = random_tokens[random_ids]
     # Full array of MASK tokens
@@ -137,13 +148,16 @@ def preprocess_masked(inputs, random_tokens, mask_token, pad_token, mask_rate,
 
     # Remaining probability mass stays original values after MASK and RANDOM.
     # MASK tokens.
-    masked_inputs = jnp.where(rand < mask_token_proportion, fullmask,
-                              inputs)
+    masked_inputs = jnp.where(rand < mask_token_proportion, fullmask, inputs)
     # Random tokens.
     masked_inputs = jnp.where(
-        jnp.logical_and(rand >= mask_token_proportion,
-                        rand < mask_token_proportion + random_token_proportion),
-        fullrandom, masked_inputs)
+        jnp.logical_and(
+            rand >= mask_token_proportion,
+            rand < mask_token_proportion + random_token_proportion,
+        ),
+        fullrandom,
+        masked_inputs,
+    )
 
     # Only replace positions where `should_mask`
     masked_inputs = jnp.where(should_mask, masked_inputs, inputs)
@@ -152,14 +166,16 @@ def preprocess_masked(inputs, random_tokens, mask_token, pad_token, mask_rate,
   return masked_inputs, targets, weights
 
 
-class BertMasker():
+class BertMasker:
   """Construct BERT masker given a vocab."""
 
-  def __init__(self,
-               vocab,
-               mask_rate=0.15,
-               mask_token_proportion=0.1,
-               random_token_proportion=0.8):
+  def __init__(
+      self,
+      vocab,
+      mask_rate=0.15,
+      mask_token_proportion=0.1,
+      random_token_proportion=0.8,
+  ):
     self._vocab = vocab
     if vocab.mask is None:
       raise ValueError('Vocabulary must specify a MASK token.')
@@ -182,7 +198,8 @@ class BertMasker():
         pad_token=self._vocab.pad,
         mask_rate=self._mask_rate,
         mask_token_proportion=self._mask_token_proportion,
-        random_token_proportion=self._random_token_proportion)
+        random_token_proportion=self._random_token_proportion,
+    )
     return inputs, targets, weights
 
 
@@ -194,20 +211,23 @@ def shift_right(x, bos_token):
       x,
       pad_widths,
       mode='constant',
-      constant_values=tf.constant(bos_token, dtype=x.dtype))
+      constant_values=tf.constant(bos_token, dtype=x.dtype),
+  )
   return padded[:, :-1]
 
 
-def load_protein_tfds(name,
-                      split,
-                      field='sequence',
-                      num_epochs=1,
-                      shuffle_buffer=2**15,
-                      batch_size=32,
-                      max_length=None,
-                      sample_length=True,
-                      data_dir=None,
-                      drop_remainder=True):
+def load_protein_tfds(
+    name,
+    split,
+    field='sequence',
+    num_epochs=1,
+    shuffle_buffer=2**15,
+    batch_size=32,
+    max_length=None,
+    sample_length=True,
+    data_dir=None,
+    drop_remainder=True,
+):
   """Load protein tfds by name.
 
   If split is `train`, shuffle data.
@@ -235,7 +255,8 @@ def load_protein_tfds(name,
       split=split,
       with_info=False,
       data_dir=data_dir,
-      shuffle_files=shuffle)
+      shuffle_files=shuffle,
+  )
 
   # Construct vocab from stored metadata.
   # TODO(ddohan): Regenerate dataset with new vocab.
@@ -248,9 +269,9 @@ def load_protein_tfds(name,
   # pylint: disable=protected-access
   if max_length:
     ds = ds.map(
-        functools.partial(
-            _crop, max_length=max_length, sample=sample_length),
-        num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        functools.partial(_crop, max_length=max_length, sample=sample_length),
+        num_parallel_calls=tf.data.experimental.AUTOTUNE,
+    )
   # pylint: disable=protected-access
 
   if shuffle:
@@ -263,16 +284,14 @@ def load_protein_tfds(name,
       batch_size,
       padded_shapes=max_length,
       padding_values=np.array(vocab.pad, dtype=np.int64),
-      drop_remainder=drop_remainder)
+      drop_remainder=drop_remainder,
+  )
 
   ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
   return ds, vocab
 
 
-def load_dataset(data_name,
-                 batch_size,
-                 eval_batch_size,
-                 length=512):
+def load_dataset(data_name, batch_size, eval_batch_size, length=512):
   """Load protein dataset.
 
   Args:
@@ -286,9 +305,11 @@ def load_dataset(data_name,
   """
   logging.info('Loading data_name: %s', data_name)
   train_ds, vocab = load_protein_tfds(
-      data_name, 'train', max_length=length, batch_size=batch_size)
+      data_name, 'train', max_length=length, batch_size=batch_size
+  )
   valid_ds, vocab = load_protein_tfds(
-      data_name, 'validation', max_length=length, batch_size=eval_batch_size)
+      data_name, 'validation', max_length=length, batch_size=eval_batch_size
+  )
 
   return train_ds, valid_ds, vocab
 
@@ -296,11 +317,7 @@ def load_dataset(data_name,
 def _batch_to_dict(batch, masker, mode, rng):
   batch = data_utils.tf_to_numpy(batch)
   inputs, targets, weights = masker(batch, mode, rng)
-  return {
-      'inputs': inputs,
-      'targets': targets,
-      'weights': weights
-  }
+  return {'inputs': inputs, 'targets': targets, 'weights': weights}
 
 
 def get_uniref(shuffle_rng, batch_size, eval_batch_size, hps=None):
@@ -308,38 +325,39 @@ def get_uniref(shuffle_rng, batch_size, eval_batch_size, hps=None):
   per_host_batch_size = batch_size // jax.process_count()
   per_host_eval_batch_size = eval_batch_size // jax.process_count()
   return _get_uniref(
-      per_host_batch_size,
-      per_host_eval_batch_size,
-      hps,
-      shuffle_rng)
+      per_host_batch_size, per_host_eval_batch_size, hps, shuffle_rng
+  )
 
 
-def _get_uniref(
-    per_host_batch_size,
-    per_host_eval_batch_size,
-    hps,
-    data_rng):
+def _get_uniref(per_host_batch_size, per_host_eval_batch_size, hps, data_rng):
   """Data generators for Uniref50 clustered protein dataset."""
   # TODO(gilmer) Currently uniref drops the last partial batch on eval.
   logging.warning(
-      'Currently the Protein dataset drops the last partial batch on eval')
+      'Currently the Protein dataset drops the last partial batch on eval'
+  )
   if jax.process_count() > 1:
     raise NotImplementedError('Proteins does not support multihost training')
 
   n_devices = jax.local_device_count()
   if per_host_batch_size % n_devices != 0:
-    raise ValueError('n_devices={} must divide per_host_batch_size={}.'.format(
-        n_devices, per_host_batch_size))
+    raise ValueError(
+        'n_devices={} must divide per_host_batch_size={}.'.format(
+            n_devices, per_host_batch_size
+        )
+    )
   if per_host_eval_batch_size % n_devices != 0:
     raise ValueError(
         'n_devices={} must divide per_host_eval_batch_size={}.'.format(
-            n_devices, per_host_eval_batch_size))
+            n_devices, per_host_eval_batch_size
+        )
+    )
 
   train_ds, eval_ds, vocab = load_dataset(
       hps.data_name,
       batch_size=per_host_batch_size,
       eval_batch_size=per_host_eval_batch_size,
-      length=hps.max_target_length)
+      length=hps.max_target_length,
+  )
 
   masker = BertMasker(vocab=vocab)
 
@@ -351,14 +369,16 @@ def _get_uniref(
   def eval_train_epoch(num_batches=None):
     eval_train_iter = iter(train_ds)
     for batch_index, batch in enumerate(
-        itertools.islice(eval_train_iter, num_batches)):
+        itertools.islice(eval_train_iter, num_batches)
+    ):
       batch_rng = jax.random.fold_in(data_rng, batch_index)
       yield _batch_to_dict(batch, masker, 'eval', batch_rng)
 
   def valid_epoch(num_batches=None):
     valid_iter = iter(eval_ds)
     for batch_index, batch in enumerate(
-        itertools.islice(valid_iter, num_batches)):
+        itertools.islice(valid_iter, num_batches)
+    ):
       batch_rng = jax.random.fold_in(data_rng, batch_index)
       yield _batch_to_dict(batch, masker, 'eval', batch_rng)
 

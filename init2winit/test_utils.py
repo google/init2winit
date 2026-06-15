@@ -86,10 +86,12 @@ class UtilsTest(parameterized.TestCase):
   def test_array_append(self):
     """Test appending to an array."""
     np.testing.assert_allclose(
-        utils.array_append(jnp.array([1, 2, 3]), 4), jnp.array([1, 2, 3, 4]))
+        utils.array_append(jnp.array([1, 2, 3]), 4), jnp.array([1, 2, 3, 4])
+    )
     np.testing.assert_allclose(
         utils.array_append(jnp.array([[1, 2], [3, 4]]), jnp.array([5, 6])),
-        jnp.array([[1, 2], [3, 4], [5, 6]]))
+        jnp.array([[1, 2], [3, 4], [5, 6]]),
+    )
 
   def test_tree_norm_sq_l2(self):
     """Test computing the squared L2 norm of a pytree."""
@@ -99,9 +101,9 @@ class UtilsTest(parameterized.TestCase):
 
   def test_tree_sum(self):
     """Test computing the sum of a pytree."""
-    pytree = {'foo': 2*jnp.ones(10), 'baz': jnp.ones(20)}
+    pytree = {'foo': 2 * jnp.ones(10), 'baz': jnp.ones(20)}
     self.assertEqual(utils.total_tree_sum(pytree), 40)
+
 
 if __name__ == '__main__':
   absltest.main()
-

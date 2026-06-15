@@ -42,6 +42,7 @@ def create_partition_flat_params_fn(key_map):
     partition_flat_params, a function which returns a partitioned param
       dictionary.
   """
+
   def partition_flat_params(flat_params):
     subparam_groups = {}
     for tup in flat_params:
@@ -51,6 +52,7 @@ def create_partition_flat_params_fn(key_map):
       subparam_groups[mapped_key][tup] = flat_params[tup]
 
     return subparam_groups
+
   return partition_flat_params
 
 
@@ -76,4 +78,3 @@ skip_analysis_registry = {
 
 def get_skip_analysis_fn(name):
   return skip_analysis_registry[name]
-

@@ -17,10 +17,8 @@
 
 import functools
 from absl.testing import absltest
-
 from flax import linen as nn
 from init2winit.model_lib import normalization
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -31,7 +29,8 @@ jax.config.parse_flags_with_absl()
 
 def _init(flax_module, rng, input_shape):
   model_init_fn = jax.jit(
-      functools.partial(flax_module.init, use_running_average=False))
+      functools.partial(flax_module.init, use_running_average=False)
+  )
   xs = np.zeros(input_shape)
   init_dict = model_init_fn({'params': rng}, xs)
   params = init_dict['params']
@@ -61,33 +60,38 @@ class NormalizationTest(absltest.TestCase):
     bn_params, bn_state = _init(bn_flax_module, rng, input_shape)
 
     vbn_flax_module = normalization.VirtualBatchNorm(
-        momentum=0.9, virtual_batch_size=batch_size, data_format='NHWC')
+        momentum=0.9, virtual_batch_size=batch_size, data_format='NHWC'
+    )
     vbn_params, vbn_state = _init(vbn_flax_module, rng, input_shape)
 
     _, bn_state = bn_flax_module.apply(
         {'params': bn_params, 'batch_stats': bn_state},
         x,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
     bn_state = bn_state['batch_stats']
     bn_y, bn_state = bn_flax_module.apply(
         {'params': bn_params, 'batch_stats': bn_state},
         x,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
     bn_state = bn_state['batch_stats']
 
     _, vbn_state = vbn_flax_module.apply(
         {'params': vbn_params, 'batch_stats': vbn_state},
         x,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
     vbn_state = vbn_state['batch_stats']
     vbn_y, vbn_state = vbn_flax_module.apply(
         {'params': vbn_params, 'batch_stats': vbn_state},
         x,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
     vbn_state = vbn_state['batch_stats']
 
     # Test that the layer forward passes are the same.
@@ -97,11 +101,13 @@ class NormalizationTest(absltest.TestCase):
     np.testing.assert_allclose(
         bn_state['mean'],
         np.squeeze(vbn_state['batch_norm_running_mean']),
-        atol=1e-4)
+        atol=1e-4,
+    )
     np.testing.assert_allclose(
         bn_state['var'],
         np.squeeze(vbn_state['batch_norm_running_var']),
-        atol=1e-4)
+        atol=1e-4,
+    )
 
   def test_forward_pass(self):
     """Test that two calls are the same as one with twice the batch size."""
@@ -123,57 +129,66 @@ class NormalizationTest(absltest.TestCase):
     x_both = jnp.concatenate((x1, x2))
 
     expected_bn_y = jnp.concatenate(
-        (jnp.ones(half_input_shape) * -1.0, jnp.ones(half_input_shape)))
+        (jnp.ones(half_input_shape) * -1.0, jnp.ones(half_input_shape))
+    )
 
     bn_flax_module = nn.BatchNorm(momentum=0.9)
     bn_params, bn_state = _init(bn_flax_module, rng, input_shape)
 
     vbn_flax_module = normalization.VirtualBatchNorm(
-        momentum=0.9, virtual_batch_size=batch_size, data_format='NHWC')
+        momentum=0.9, virtual_batch_size=batch_size, data_format='NHWC'
+    )
     vbn_params, vbn_state = _init(vbn_flax_module, rng, input_shape)
 
     bn_y1, _ = bn_flax_module.apply(
         {'params': bn_params, 'batch_stats': bn_state},
         x1,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
 
     bn_y2, _ = bn_flax_module.apply(
         {'params': bn_params, 'batch_stats': bn_state},
         x2,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
 
     bn_y_both, _ = bn_flax_module.apply(
         {'params': bn_params, 'batch_stats': bn_state},
         x_both,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
 
     vbn_y_both, vbn_state = vbn_flax_module.apply(
         {'params': vbn_params, 'batch_stats': vbn_state},
         x_both,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
     vbn_state = vbn_state['batch_stats']
 
     # Test that the layer forward passes behave as expected.
     np.testing.assert_allclose(bn_y1, expected_bn_y, atol=1e-4)
     np.testing.assert_allclose(bn_y2, expected_bn_y, atol=1e-4)
     np.testing.assert_allclose(
-        vbn_y_both, jnp.concatenate((bn_y1, bn_y2)), atol=1e-4)
+        vbn_y_both, jnp.concatenate((bn_y1, bn_y2)), atol=1e-4
+    )
     # Test that the virtual batch norm and nn.BatchNorm layers do not perform
     # the same calculation on the concatenated batch.
     # There is no negative of `np.testing.assert_allclose` so we test that the
     # diff is greater than zero.
     np.testing.assert_array_less(
-        -jnp.abs(vbn_y_both - bn_y_both), jnp.zeros_like(vbn_y_both))
+        -jnp.abs(vbn_y_both - bn_y_both), jnp.zeros_like(vbn_y_both)
+    )
 
     _, vbn_state = vbn_flax_module.apply(
         {'params': vbn_params, 'batch_stats': vbn_state},
         x_both,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
     vbn_state = vbn_state['batch_stats']
 
     # The mean running average stats at 0.0, and the variance starts at 1.0. So
@@ -184,16 +199,18 @@ class NormalizationTest(absltest.TestCase):
     expected_mean_ema_x2 = 0.19 * jnp.mean(x2) * jnp.ones((feature_size,))
     expected_mean_ema_both = (expected_mean_ema_x1 + expected_mean_ema_x2) / 2.0
     expected_var_ema_both = (
-        (0.19 * jnp.std(jnp.concatenate((x1, x2))) ** 2.0 + 0.81) *
-        jnp.ones((feature_size,)))
+        0.19 * jnp.std(jnp.concatenate((x1, x2))) ** 2.0 + 0.81
+    ) * jnp.ones((feature_size,))
     np.testing.assert_allclose(
         np.squeeze(vbn_state['batch_norm_running_mean']),
         expected_mean_ema_both,
-        atol=1e-4)
+        atol=1e-4,
+    )
     np.testing.assert_allclose(
         np.squeeze(vbn_state['batch_norm_running_var']),
         expected_var_ema_both,
-        atol=1e-4)
+        atol=1e-4,
+    )
 
   def test_different_eval_batch_size(self):
     """Test virtual BN can use a different batch size for evals."""
@@ -204,20 +221,23 @@ class NormalizationTest(absltest.TestCase):
     x = 2.0 * jnp.ones(input_shape)
 
     vbn_flax_module = normalization.VirtualBatchNorm(
-        momentum=0.9, virtual_batch_size=batch_size, data_format='NHWC')
+        momentum=0.9, virtual_batch_size=batch_size, data_format='NHWC'
+    )
     vbn_params, vbn_state = _init(vbn_flax_module, rng, input_shape)
 
     _, vbn_state = vbn_flax_module.apply(
         {'params': vbn_params, 'batch_stats': vbn_state},
         x,
         mutable=['batch_stats'],
-        use_running_average=False)
+        use_running_average=False,
+    )
     vbn_state = vbn_state['batch_stats']
 
     vbn_flax_module.apply(
         {'params': vbn_params, 'batch_stats': vbn_state},
         jnp.ones((13, 3, 3, feature_size)),
-        use_running_average=True)
+        use_running_average=True,
+    )
 
 
 if __name__ == '__main__':

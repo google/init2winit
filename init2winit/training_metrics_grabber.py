@@ -101,13 +101,13 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         where each key is a field name in optstate_normsq_fields, and each
         value is a jnp array of length num_time_steps containing the time
         series of the normsq of this optstate field.
-    - optstate_sumsq_param_wise_fields (list of str): record the sum of squares 
-        of each of these fields in the optimizer state parameter wise.  
-        If this list is non-empty, the metrics state will have a field 
-        "optstate_sumsq_param_wise" which is a dict where each key is a field 
+    - optstate_sumsq_param_wise_fields (list of str): record the sum of squares
+        of each of these fields in the optimizer state parameter wise.
+        If this list is non-empty, the metrics state will have a field
+        "optstate_sumsq_param_wise" which is a dict where each key is a field
         name in optstate_sum_fields, and each value is a pytree of the same type
-        as params but with each leaf a jnp array of length num_time_steps 
-        containing the time series of the sum of this optstate field for this 
+        as params but with each leaf a jnp array of length num_time_steps
+        containing the time series of the sum of this optstate field for this
         parameter.
     - optstate_sum_fields (list of str): record the sum of each of these fields
         in the optimizer state.  If this list is non-empty, the metrics state
@@ -115,13 +115,13 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         field name in optstate_sum_fields, and each value is a jnp array
         of length num_time_steps containing the time series of the sum
         of this optstate field.
-    - optstate_sum_param_wise_fields (list of str): record the sum of each of 
-        these fields in the optimizer state parameter wise.  If this list is 
-        non-empty, the metrics state will have a field 
-        "optstate_sumsq_param_wise" which is a dict where each key is a field 
+    - optstate_sum_param_wise_fields (list of str): record the sum of each of
+        these fields in the optimizer state parameter wise.  If this list is
+        non-empty, the metrics state will have a field
+        "optstate_sumsq_param_wise" which is a dict where each key is a field
         name in optstate_sum_fields, and each value is a pytree of the same type
-        as params but with each leaf a jnp array of length num_time_steps 
-        containing the time series of the sum of this optstate field for this 
+        as params but with each leaf a jnp array of length num_time_steps
+        containing the time series of the sum of this optstate field for this
         parameter.
     - enable_preconditioner_normsq (bool): if true, the metrics state will have
         a field "preconditioner_normsq" which is a jnp array of length
@@ -178,22 +178,26 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
       metrics_state['train_cost'] = jnp.zeros(num_train_steps)
     if config['enable_param_norms']:
       metrics_state['param_norms'] = jax.tree.map(
-          lambda x: jnp.zeros(num_train_steps), params)
+          lambda x: jnp.zeros(num_train_steps), params
+      )
     if config['enable_batch_stats_norm']:
       metrics_state['batch_stats_norm'] = jnp.zeros(num_train_steps)
     if config['enable_all_batch_stats_norms']:
       metrics_state['all_batch_stats_norms'] = jax.tree.map(
-          lambda x: jnp.zeros(num_train_steps), batch_stats)
+          lambda x: jnp.zeros(num_train_steps), batch_stats
+      )
     if config['enable_gradient_norm']:
       metrics_state['gradient_norm'] = jnp.zeros(num_train_steps)
     if config['enable_all_gradient_norms']:
       metrics_state['all_gradient_norms'] = jax.tree.map(
-          lambda x: jnp.zeros(num_train_steps), params)
+          lambda x: jnp.zeros(num_train_steps), params
+      )
     if config['enable_update_norm']:
       metrics_state['update_norm'] = jnp.zeros(num_train_steps)
     if config['enable_update_norms']:
       metrics_state['update_norms'] = jax.tree.map(
-          lambda x: jnp.zeros(num_train_steps), params)
+          lambda x: jnp.zeros(num_train_steps), params
+      )
     if config['enable_ema']:
       metrics_state['grad_ema'] = jax.tree.map(jnp.zeros_like, params)
       metrics_state['grad_sq_ema'] = jax.tree.map(jnp.zeros_like, params)
@@ -225,13 +229,23 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
       metrics_state['semip_grad_normsq'] = jnp.zeros(num_train_steps)
     if config['enable_grafting_norms']:
       metrics_state['mag_norms'] = jax.tree.map(
-          lambda x: jnp.zeros(num_train_steps), params)
+          lambda x: jnp.zeros(num_train_steps), params
+      )
       metrics_state['dir_norms'] = jax.tree.map(
-          lambda x: jnp.zeros(num_train_steps), params)
+          lambda x: jnp.zeros(num_train_steps), params
+      )
     return metrics_state
 
-  def update_fn(metrics_state, step, train_cost, grad, old_params, new_params,
-                optimizer_state, batch_stats):
+  def update_fn(
+      metrics_state,
+      step,
+      train_cost,
+      grad,
+      old_params,
+      new_params,
+      optimizer_state,
+      batch_stats,
+  ):
     """Update the training metrics state.
 
     Args:
@@ -279,58 +293,83 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         batch_stats,
     )
 
-  def _update_fn(metrics_state, step, train_cost, grad, old_params, new_params,
-                 optimizer_state, batch_stats):
+  def _update_fn(
+      metrics_state,
+      step,
+      train_cost,
+      grad,
+      old_params,
+      new_params,
+      optimizer_state,
+      batch_stats,
+  ):
     param_norm = jax.tree.map(_compute_leaf_norms, old_params)
     grad_norm = jax.tree.map(_compute_leaf_norms, grad)
     batch_stats_norm = jax.tree.map(_compute_leaf_norms, batch_stats)
-    if (config['enable_update_norm'] or config['enable_update_norms'] or
-        config['enable_ema']):
+    if (
+        config['enable_update_norm']
+        or config['enable_update_norms']
+        or config['enable_ema']
+    ):
       update = jax.tree.map(lambda x, y: x - y, old_params, new_params)
     else:
       update = None
 
     next_metrics_state = {}
-    next_metrics_state['param_norm'] = metrics_state['param_norm'].at[
-        step].set(total_tree_norm_l2(param_norm))
+    next_metrics_state['param_norm'] = (
+        metrics_state['param_norm'].at[step].set(total_tree_norm_l2(param_norm))
+    )
     if config['enable_train_cost']:
-      next_metrics_state['train_cost'] = metrics_state['train_cost'].at[
-          step].set(train_cost)
+      next_metrics_state['train_cost'] = (
+          metrics_state['train_cost'].at[step].set(train_cost)
+      )
     if config['enable_param_norms']:
       next_metrics_state['param_norms'] = _set_pytree_idx(
-          metrics_state['param_norms'], param_norm, step)
+          metrics_state['param_norms'], param_norm, step
+      )
     if config['enable_batch_stats_norm']:
-      next_metrics_state['batch_stats_norm'] = metrics_state[
-          'batch_stats_norm'].at[step].set(
-              total_tree_norm_l2(batch_stats))
+      next_metrics_state['batch_stats_norm'] = (
+          metrics_state['batch_stats_norm']
+          .at[step]
+          .set(total_tree_norm_l2(batch_stats))
+      )
     if config['enable_all_batch_stats_norms']:
       next_metrics_state['all_batch_stats_norms'] = _set_pytree_idx(
-          metrics_state['all_batch_stats_norms'], batch_stats_norm, step)
+          metrics_state['all_batch_stats_norms'], batch_stats_norm, step
+      )
     if config['enable_gradient_norm']:
-      next_metrics_state['gradient_norm'] = metrics_state['gradient_norm'].at[
-          step].set(total_tree_norm_l2(grad))
+      next_metrics_state['gradient_norm'] = (
+          metrics_state['gradient_norm'].at[step].set(total_tree_norm_l2(grad))
+      )
     if config['enable_all_gradient_norms']:
       next_metrics_state['all_gradient_norms'] = _set_pytree_idx(
-          metrics_state['all_gradient_norms'], grad_norm, step)
+          metrics_state['all_gradient_norms'], grad_norm, step
+      )
     if config['enable_update_norm']:
-      next_metrics_state['update_norm'] = metrics_state['update_norm'].at[
-          step].set(total_tree_norm_l2(update))
+      next_metrics_state['update_norm'] = (
+          metrics_state['update_norm'].at[step].set(total_tree_norm_l2(update))
+      )
     if config['enable_update_norms']:
       update_norm = jax.tree.map(_compute_leaf_norms, update)
       next_metrics_state['update_norms'] = _set_pytree_idx(
-          metrics_state['update_norms'], update_norm, step)
+          metrics_state['update_norms'], update_norm, step
+      )
     if config['enable_ema']:
       beta = config['ema_beta']
       grad_sq = jax.tree.map(jnp.square, grad)
       update_sq = jax.tree.map(jnp.square, update)
       next_metrics_state['grad_ema'] = _advance_ema(
-          metrics_state['grad_ema'], grad, beta)
+          metrics_state['grad_ema'], grad, beta
+      )
       next_metrics_state['grad_sq_ema'] = _advance_ema(
-          metrics_state['grad_sq_ema'], grad_sq, beta)
+          metrics_state['grad_sq_ema'], grad_sq, beta
+      )
       next_metrics_state['update_ema'] = _advance_ema(
-          metrics_state['update_ema'], update, beta)
+          metrics_state['update_ema'], update, beta
+      )
       next_metrics_state['update_sq_ema'] = _advance_ema(
-          metrics_state['update_sq_ema'], update_sq, beta)
+          metrics_state['update_sq_ema'], update_sq, beta
+      )
     if config['optstate_sumsq_fields']:
       next_metrics_state['optstate_sumsq'] = {}
       for field_name in config['optstate_sumsq_fields']:
@@ -338,8 +377,11 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         if field is None:
           raise ValueError('optimizer state has no field {}'.format(field_name))
         field_normsq = total_tree_norm_sql2(field)
-        next_metrics_state['optstate_sumsq'][field_name] = metrics_state[
-            'optstate_sumsq'][field_name].at[step].set(field_normsq)
+        next_metrics_state['optstate_sumsq'][field_name] = (
+            metrics_state['optstate_sumsq'][field_name]
+            .at[step]
+            .set(field_normsq)
+        )
     if config['optstate_sumsq_param_wise_fields']:
       next_metrics_state['optstate_sumsq_param_wise'] = {}
       for field_name in config['optstate_sumsq_param_wise_fields']:
@@ -362,8 +404,9 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
         if field is None:
           raise ValueError('optimizer state has no field {}'.format(field_name))
         field_normsq = total_tree_sum(field)
-        next_metrics_state['optstate_sum'][field_name] = metrics_state[
-            'optstate_sum'][field_name].at[step].set(field_normsq)
+        next_metrics_state['optstate_sum'][field_name] = (
+            metrics_state['optstate_sum'][field_name].at[step].set(field_normsq)
+        )
     if config['optstate_sum_param_wise_fields']:
       next_metrics_state['optstate_sum_param_wise'] = {}
       for field_name in config['optstate_sum_param_wise_fields']:
@@ -378,34 +421,46 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
                 step,
             )
         )
-    if (config['enable_preconditioner_normsq'] or
-        config['enable_semip_grad_normsq']):
+    if (
+        config['enable_preconditioner_normsq']
+        or config['enable_semip_grad_normsq']
+    ):
       preconditioner = freeze(
-          make_diag_preconditioner(hps['optimizer'], hps['opt_hparams'],
-                                   optimizer_state, ConfigDict({})))
+          make_diag_preconditioner(
+              hps['optimizer'],
+              hps['opt_hparams'],
+              optimizer_state,
+              ConfigDict({}),
+          )
+      )
       if config['enable_preconditioner_normsq']:
         normsq = total_tree_norm_sql2(preconditioner)
-        next_metrics_state['preconditioner_normsq'] = metrics_state[
-            'preconditioner_normsq'].at[step].set(normsq)
+        next_metrics_state['preconditioner_normsq'] = (
+            metrics_state['preconditioner_normsq'].at[step].set(normsq)
+        )
       if config['enable_semip_grad_normsq']:
-        semip_grad = jax.tree.map(lambda g, p: g / (p**0.5),
-                                  grad, preconditioner)
+        semip_grad = jax.tree.map(
+            lambda g, p: g / (p**0.5), grad, preconditioner
+        )
         semip_grad_normsq = total_tree_norm_sql2(semip_grad)
-        next_metrics_state['semip_grad_normsq'] = metrics_state[
-            'semip_grad_normsq'].at[step].set(semip_grad_normsq)
+        next_metrics_state['semip_grad_normsq'] = (
+            metrics_state['semip_grad_normsq'].at[step].set(semip_grad_normsq)
+        )
     if config['enable_grafting_norms']:
       mag_norm = optimizer_utils.extract_field(optimizer_state, 'mag_norm')
       if mag_norm is None:
         raise ValueError('optimizer state has no field {}'.format('mag_norm'))
       mag_norm = freeze(mag_norm)
       next_metrics_state['mag_norms'] = _set_pytree_idx(
-          metrics_state['mag_norms'], mag_norm, step)
+          metrics_state['mag_norms'], mag_norm, step
+      )
       dir_norm = optimizer_utils.extract_field(optimizer_state, 'dir_norm')
       if dir_norm is None:
         raise ValueError('optimizer state has no field {}'.format('dir_norm'))
       dir_norm = freeze(dir_norm)
       next_metrics_state['dir_norms'] = _set_pytree_idx(
-          metrics_state['dir_norms'], dir_norm, step)
+          metrics_state['dir_norms'], dir_norm, step
+      )
 
     return next_metrics_state
 
@@ -429,17 +484,19 @@ def make_training_metrics(num_train_steps, hps, **config_overrides):
       def compute_var(first_moment, second_moment):
         return (second_moment - first_moment**2).sum()
 
-      summary['grad_var'] = jax.tree.map(compute_var,
-                                         metrics_state['grad_ema'],
-                                         metrics_state['grad_sq_ema'])
+      summary['grad_var'] = jax.tree.map(
+          compute_var, metrics_state['grad_ema'], metrics_state['grad_sq_ema']
+      )
 
-      summary['update_var'] = jax.tree.map(compute_var,
-                                           metrics_state['update_ema'],
-                                           metrics_state['update_sq_ema'])
+      summary['update_var'] = jax.tree.map(
+          compute_var,
+          metrics_state['update_ema'],
+          metrics_state['update_sq_ema'],
+      )
 
-      summary['update_ratio'] = jax.tree.map(operator.truediv,
-                                             summary['update_var'],
-                                             metrics_state['param_norm'])
+      summary['update_ratio'] = jax.tree.map(
+          operator.truediv, summary['update_var'], metrics_state['param_norm']
+      )
 
     # This dict will map from "summary key" to "flattened pytree of same shape
     # as params."
@@ -457,9 +514,9 @@ def _map_values(f, dictionary):
 
 def _advance_ema(cur_ema, new_val, beta):
   """Advance an exponential moving average."""
-  return jax.tree.map(lambda cur, new: beta * cur + (1 - beta) * new,
-                      cur_ema,
-                      new_val)
+  return jax.tree.map(
+      lambda cur, new: beta * cur + (1 - beta) * new, cur_ema, new_val
+  )
 
 
 def _compute_leaf_norms(pytree):
@@ -478,8 +535,9 @@ def _set_pytree_idx(pytree_of_arrs, new_pytree, idx):
   Returns:
     a pytree where we set the "idx" index of each leaf in pytree_of_arrs to
       the corresponding leaf in new_pytree.
-
   """
+
   def set_arr(arr, new_value):
     return arr.at[idx].set(new_value)
+
   return jax.tree.map(set_arr, pytree_of_arrs, new_pytree)

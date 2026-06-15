@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Aliases for optimizers not found in optax."""
+
 from typing import Any, Callable, Optional, Union
 from init2winit.optimizer_lib.kitchen_sink._src import transform
 import jax.numpy as jnp
@@ -28,8 +29,9 @@ def nadamw(
     eps_root: float = 0.0,
     debias: bool = True,
     weight_decay: float = 0.0,
-    weight_decay_mask: Optional[Union[Any, Callable[[optax.Params],
-                                                    Any]]] = None,
+    weight_decay_mask: Optional[
+        Union[Any, Callable[[optax.Params], Any]]
+    ] = None,
 ) -> optax.GradientTransformation:
   """Rescale updates according to the NAdam algorithm.
 
@@ -67,7 +69,8 @@ def nadamw(
   return optax.chain(
       transform.scale_by_nadam(b1, b2, eps, eps_root, debias),
       optax.add_decayed_weights(weight_decay, weight_decay_mask),
-      transform.scale_by_learning_rate(learning_rate))
+      transform.scale_by_learning_rate(learning_rate),
+  )
 
 
 def nadampw(
@@ -79,8 +82,9 @@ def nadampw(
     debias: bool = True,
     power: float = 2.0,
     weight_decay: float = 0.0,
-    weight_decay_mask: Optional[Union[Any, Callable[[optax.Params],
-                                                    Any]]] = None,
+    weight_decay_mask: Optional[
+        Union[Any, Callable[[optax.Params], Any]]
+    ] = None,
 ) -> optax.GradientTransformation:
   """Rescale updates according to the NAdam algorithm.
 
@@ -120,7 +124,8 @@ def nadampw(
   return optax.chain(
       transform.scale_by_nadam(b1, b2, eps, eps_root, debias, power=power),
       optax.add_decayed_weights(weight_decay, weight_decay_mask),
-      transform.scale_by_learning_rate(learning_rate))
+      transform.scale_by_learning_rate(learning_rate),
+  )
 
 
 def adamw_generic(
@@ -134,8 +139,9 @@ def adamw_generic(
     disable_preconditioning: bool = False,
     nesterov: bool = True,
     weight_decay: float = 0.0,
-    weight_decay_mask: Optional[Union[Any, Callable[[optax.Params],
-                                                    Any]]] = None,
+    weight_decay_mask: Optional[
+        Union[Any, Callable[[optax.Params], Any]]
+    ] = None,
     disable_multiply_wd_by_base_lr: bool = False,
     base_lr_multiplier: float = 1.0,
 ) -> optax.GradientTransformation:
@@ -215,25 +221,26 @@ def adapropw(
     use_nesterov: bool = True,
     quantized_dtype: str = 'float32',
     weight_decay: float = 0.0,
-    weight_decay_mask: Optional[Union[Any, Callable[[optax.Params],
-                                                    Any]]] = None,
+    weight_decay_mask: Optional[
+        Union[Any, Callable[[optax.Params], Any]]
+    ] = None,
 ) -> optax.GradientTransformation:
   """Rescale updates according to the AdaProp algorithm.
 
   Args:
     learning_rate: this is a fixed global scaling factor.
     b1: decay rate for the exponentially weighted average of grads.
-    b2: decay rate for the exponentially weighted average of absolute grads
-        is omitted because it is calculated from alpha and b1.
+    b2: decay rate for the exponentially weighted average of absolute grads is
+      omitted because it is calculated from alpha and b1.
     b3: decay rate for the exponentially weighted average of max grads.
     b4: decay rate for the exponentially weighted average of reward.
     eps: term added to the denominator to improve numerical stability.
     power: the power to use in the preconditioner (the value determines the
       power to which the absolute value of the grads are raised).
     use_nesterov: Whether to use Nesterov-style update.
-    quantized_dtype: type of the quantized input. Allowed options are
-      'bfloat16' and 'float32'. If floating-point type is specified,
-      accumulators are stored as such type, instead of quantized integers.
+    quantized_dtype: type of the quantized input. Allowed options are 'bfloat16'
+      and 'float32'. If floating-point type is specified, accumulators are
+      stored as such type, instead of quantized integers.
     weight_decay: strength of the weight decay regularization. Note that this
       weight decay is multiplied with the learning rate. This is consistent with
       other frameworks such as PyTorch, but different from (Loshchilov et al,
@@ -253,10 +260,16 @@ def adapropw(
   else:
     q_dtype = jnp.bfloat16
   return optax.chain(
-      transform.scale_by_adaprop(b1=b1, b2=b2, b3=b3, b4=b4,
-                                 eps=eps, power=power,
-                                 use_nesterov=use_nesterov,
-                                 quantized_dtype=q_dtype),
+      transform.scale_by_adaprop(
+          b1=b1,
+          b2=b2,
+          b3=b3,
+          b4=b4,
+          eps=eps,
+          power=power,
+          use_nesterov=use_nesterov,
+          quantized_dtype=q_dtype,
+      ),
       optax.add_decayed_weights(weight_decay, weight_decay_mask),
       transform.scale_by_learning_rate(learning_rate, flip_sign=True),
   )

@@ -37,12 +37,13 @@ PAD_ID = 0
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
-def get_trained_tokenizer(train_dataset: Union[tf.data.Dataset, str],
-                          tokenizer: str,
-                          vocab_path: str = SPM_TOKENIZER_VOCAB_PATH,
-                          vocab_size: int = SPM_TOKENIZER_VOCAB_SIZE,
-                          max_corpus_chars: int = MAX_CORPUS_CHARS,
-                          ) -> tf.data.Dataset:
+def get_trained_tokenizer(
+    train_dataset: Union[tf.data.Dataset, str],
+    tokenizer: str,
+    vocab_path: str = SPM_TOKENIZER_VOCAB_PATH,
+    vocab_size: int = SPM_TOKENIZER_VOCAB_SIZE,
+    max_corpus_chars: int = MAX_CORPUS_CHARS,
+) -> tf.data.Dataset:
   """Returns a tokenizer trained on the train dataset.
 
   Args:
@@ -71,11 +72,12 @@ def get_trained_tokenizer(train_dataset: Union[tf.data.Dataset, str],
   return tokenizer
 
 
-def batch_with_padding(dataset: tf.data.Dataset,
-                       batch_size,
-                       padded_shapes=None,
-                       padding_id=PAD_ID,
-                       ):
+def batch_with_padding(
+    dataset: tf.data.Dataset,
+    batch_size,
+    padded_shapes=None,
+    padding_id=PAD_ID,
+):
   """Batches a tf.data.Dataset and adds padding if len(dataset) is not divisible by the batch size.
 
   Args:
@@ -85,14 +87,14 @@ def batch_with_padding(dataset: tf.data.Dataset,
     padding_id: value for padding, for elements in new batch
 
   Returns:
-
   """
   batched_dataset = dataset.batch(batch_size, drop_remainder=False)
 
   # tf.data.Dataset.padded.batch pads elements in the batch so we call it
   # again with batch_size=1 to pad each element in original batch.
   padded_batched_dataset = batched_dataset.padded_batch(
-      1, padded_shapes=padded_shapes, padding_values=padding_id)
+      1, padded_shapes=padded_shapes, padding_values=padding_id
+  )
 
   # Remove extra dimension resulting from the batch_size=1.
   padded_batched_dataset = padded_batched_dataset.unbatch()
@@ -129,10 +131,12 @@ def get_wikitext103_dataset(
   test_text_dataset = tf.data.TextLineDataset(test_path)
 
   # Tokenize data
-  tokenizer = get_trained_tokenizer(train_text_dataset,
-                                    hps.tokenizer,
-                                    hps.tokenizer_vocab_path,
-                                    hps.vocab_size)
+  tokenizer = get_trained_tokenizer(
+      train_text_dataset,
+      hps.tokenizer,
+      hps.tokenizer_vocab_path,
+      hps.vocab_size,
+  )
   train_dataset_tokenized = train_text_dataset.map(tokenizer.tokenize)
   valid_dataset_tokenized = valid_text_dataset.map(tokenizer.tokenize)
   test_dataset_tokenized = test_text_dataset.map(tokenizer.tokenize)
@@ -173,24 +177,29 @@ def get_wikitext103_dataset(
 
   # Split the sequences into inputs and targets.
   train_dataset_sequences = train_dataset_sequences.map(
-      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE
+  )
   eval_train_dataset_sequences = eval_train_sequences.map(
-      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE
+  )
   valid_dataset_sequences = valid_dataset_sequences.map(
-      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE
+  )
   test_dataset_sequences = test_dataset_sequences.map(
-      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE)
+      lambda x: {'inputs': x, 'targets': x}, num_parallel_calls=AUTOTUNE
+  )
 
   # Shuffle the train sequences.
   train_dataset_sequences = train_dataset_sequences.shuffle(
-      SHUFFLE_BUFFER_SIZE, seed=shuffle_seed)
+      SHUFFLE_BUFFER_SIZE, seed=shuffle_seed
+  )
 
   # Perform batching for training, validation and testing.
   # Make training data repeat indefinitely.
   train_dataset_sequences = train_dataset_sequences.repeat()
   train_dataset = train_dataset_sequences.batch(
-      train_batch_size,
-      drop_remainder=False).prefetch(tf.data.experimental.AUTOTUNE)
+      train_batch_size, drop_remainder=False
+  ).prefetch(tf.data.experimental.AUTOTUNE)
 
   # Use padded batches for eval_train, validation and test_datasets since the
   # sequences do not repeat indefintely.
@@ -199,23 +208,26 @@ def get_wikitext103_dataset(
       train_batch_size,
       padded_shapes={
           'inputs': (train_batch_size, None),
-          'targets': (train_batch_size, None)
-      }).prefetch(tf.data.experimental.AUTOTUNE)
+          'targets': (train_batch_size, None),
+      },
+  ).prefetch(tf.data.experimental.AUTOTUNE)
 
   valid_dataset = batch_with_padding(
       valid_dataset_sequences,
       valid_batch_size,
       padded_shapes={
           'inputs': (valid_batch_size, None),
-          'targets': (valid_batch_size, None)
-      }).prefetch(tf.data.experimental.AUTOTUNE)
+          'targets': (valid_batch_size, None),
+      },
+  ).prefetch(tf.data.experimental.AUTOTUNE)
 
   test_dataset = batch_with_padding(
       test_dataset_sequences,
       test_batch_size,
       padded_shapes={
           'inputs': (test_batch_size, None),
-          'targets': (test_batch_size, None)
-      }).prefetch(tf.data.experimental.AUTOTUNE)
+          'targets': (test_batch_size, None),
+      },
+  ).prefetch(tf.data.experimental.AUTOTUNE)
 
   return train_dataset, eval_train_dataset, valid_dataset, test_dataset

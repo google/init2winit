@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Simple fully connected feedforward neural network classifier."""
+
 import copy
 from typing import Any, Tuple
 
@@ -23,7 +24,6 @@ from init2winit.model_lib import model_utils
 from jax.nn import initializers
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
-
 
 # small hparams used for unit tests
 DEFAULT_HPARAMS = config_dict.ConfigDict(
@@ -43,6 +43,7 @@ class FullyConnected(nn.Module):
   [batch_size_per_device, *input_shape] where input_shape may be of arbitrary
   rank. The model flatten the input before applying a dense layer.
   """
+
   num_outputs: int
   hid_sizes: Tuple[int]
   activation_function: Any
@@ -56,20 +57,23 @@ class FullyConnected(nn.Module):
       if len(self.activation_function) != len(self.hid_sizes):
         raise ValueError(
             'The number of activation functions must be equal to the number '
-            'of hidden layers')
+            'of hidden layers'
+        )
       activation_function = copy.deepcopy(self.activation_function)
     else:
       activation_function = [self.activation_function] * len(self.hid_sizes)
 
     x = jnp.reshape(x, (x.shape[0], -1))
     for i, (num_hid, init) in enumerate(
-        zip(self.hid_sizes, self.kernel_inits[:-1])):
+        zip(self.hid_sizes, self.kernel_inits[:-1])
+    ):
       x = nn.Dense(num_hid, kernel_init=init, bias_init=self.bias_init)(x)
       x = model_utils.ACTIVATIONS[activation_function[i]](x)
     x = nn.Dense(
         self.num_outputs,
         kernel_init=self.kernel_inits[-1],
-        bias_init=self.bias_init)(x)
+        bias_init=self.bias_init,
+    )(x)
     return x
 
 
@@ -86,7 +90,8 @@ class FullyConnectedModel(base_model.BaseModel):
         num_outputs=self.hps['output_shape'][-1],
         hid_sizes=tuple(self.hps.hid_sizes),
         activation_function=self.hps.activation_function,
-        kernel_inits=tuple(kernel_inits))
+        kernel_inits=tuple(kernel_inits),
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""

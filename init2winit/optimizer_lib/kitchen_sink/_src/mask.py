@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Mask utilities."""
+
 import flax
 
 
@@ -31,14 +32,17 @@ def create_mask(fn):
   def mask(data):
     flattened_dict = flax.traverse_util.flatten_dict(data)
     return flax.traverse_util.unflatten_dict(
-        {k: fn(k, v) for k, v in flattened_dict.items()})
+        {k: fn(k, v) for k, v in flattened_dict.items()}
+    )
 
   return mask
 
 
 def create_weight_decay_mask():
   return create_mask(
-      lambda p, _: 'bias' not in p and not p[-2].startswith('BatchNorm'))
+      lambda p, _: 'bias' not in p and not p[-2].startswith('BatchNorm')
+  )
+
 
 mask_registry = {
     'bias_bn': create_weight_decay_mask(),

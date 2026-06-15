@@ -24,7 +24,7 @@ trials = pd.DataFrame.from_dict({
     'hps.beta1': [2e-5, 4e-2, 6e-3, 1e-7, 3e-4],
     'hps.beta2': [3e-1, 5e-4, 6e-7, 7e-1, 1e-2],
     'hps.int': [1, 4, 5, 10, 2],
-    'hps.float': [1., 4., 5., 10., 2.],
+    'hps.float': [1.0, 4.0, 5.0, 10.0, 2.0],
     'objective': [[0.12451], [2.2312], [0.123123], [0.5325], [0.6423]],
 })
 
@@ -43,7 +43,7 @@ class SearchSubspaceTest(absltest.TestCase):
             'min_value': 1e-8,
             'max_value': 1e-1,
             'type': 'DOUBLE',
-            'scale_type': 'UNIT_LOG_SCALE'
+            'scale_type': 'UNIT_LOG_SCALE',
         }
     }
     cube_sizes = {'beta1': 2}
@@ -55,14 +55,17 @@ class SearchSubspaceTest(absltest.TestCase):
         search_space,
         k=k,
         cube_sizes=cube_sizes,
-        cube_strides=cube_strides)
+        cube_strides=cube_strides,
+    )
 
     testing.assert_equal(result['contains_best_trial'], False)
     testing.assert_equal(result['mean_trial_objective'], 0.12451)
-    testing.assert_array_equal(result['search_space']['beta1']['min_value'],
-                               1e-6)
-    testing.assert_array_equal(result['search_space']['beta1']['max_value'],
-                               1e-4)
+    testing.assert_array_equal(
+        result['search_space']['beta1']['min_value'], 1e-6
+    )
+    testing.assert_array_equal(
+        result['search_space']['beta1']['max_value'], 1e-4
+    )
     testing.assert_equal(len(result['trials']), 1)
 
   def test_find_best_cube_int(self):
@@ -72,7 +75,7 @@ class SearchSubspaceTest(absltest.TestCase):
             'min_value': 1,
             'max_value': 12,
             'type': 'INTEGER',
-            'scale_type': 'UNIT_LINEAR_SCALE'
+            'scale_type': 'UNIT_LINEAR_SCALE',
         }
     }
     cube_sizes = {'int': 2}
@@ -84,7 +87,8 @@ class SearchSubspaceTest(absltest.TestCase):
         search_space,
         k=k,
         cube_sizes=cube_sizes,
-        cube_strides=cube_strides)
+        cube_strides=cube_strides,
+    )
 
     testing.assert_equal(result['contains_best_trial'], True)
     testing.assert_equal(result['mean_trial_objective'], 0.123123)
@@ -96,10 +100,10 @@ class SearchSubspaceTest(absltest.TestCase):
     """Test find best cube of float params."""
     search_space = {
         'float': {
-            'min_value': 1.,
-            'max_value': 12.,
+            'min_value': 1.0,
+            'max_value': 12.0,
             'type': 'DOUBLE',
-            'scale_type': 'UNIT_LINEAR_SCALE'
+            'scale_type': 'UNIT_LINEAR_SCALE',
         }
     }
     cube_sizes = {'float': 2}
@@ -111,14 +115,17 @@ class SearchSubspaceTest(absltest.TestCase):
         search_space,
         k=k,
         cube_sizes=cube_sizes,
-        cube_strides=cube_strides)
+        cube_strides=cube_strides,
+    )
 
     testing.assert_equal(result['contains_best_trial'], True)
     testing.assert_equal(result['mean_trial_objective'], 0.123123)
-    testing.assert_array_equal(result['search_space']['float']['min_value'],
-                               5.0)
-    testing.assert_array_equal(result['search_space']['float']['max_value'],
-                               7.0)
+    testing.assert_array_equal(
+        result['search_space']['float']['min_value'], 5.0
+    )
+    testing.assert_array_equal(
+        result['search_space']['float']['max_value'], 7.0
+    )
     testing.assert_equal(len(result['trials']), 1)
 
   # TODO(namanagarwal): Get these tests working again.

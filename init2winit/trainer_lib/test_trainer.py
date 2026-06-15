@@ -48,7 +48,6 @@ import pandas
 import tensorflow.compat.v1 as tf  # importing this is needed for tfds mocking.
 import tensorflow_datasets as tfds
 
-
 FLAGS = flags.FLAGS
 
 _VOCAB_SIZE = 4
@@ -84,7 +83,7 @@ def get_column_names():
       'train_cost',
       'grad_norm',
       'update_norm',
-      'train_steps_per_sec'
+      'train_steps_per_sec',
   ]
   return column_names
 
@@ -92,7 +91,8 @@ def get_column_names():
 def _get_fake_text_dataset(batch_size, eval_num_batches):
   """Yields a single text batch repeatedly for train and test."""
   inputs = jnp.array(
-      np.random.randint(low=0, high=_VOCAB_SIZE, size=(batch_size, _MAX_LEN)))
+      np.random.randint(low=0, high=_VOCAB_SIZE, size=(batch_size, _MAX_LEN))
+  )
   batch = {
       'inputs': inputs,
       'targets': inputs,
@@ -124,10 +124,12 @@ def _get_fake_text_dataset(batch_size, eval_num_batches):
   meta_data = {
       'apply_one_hot_in_loss': True,
       'shift_inputs': True,
-      'causal': True
+      'causal': True,
   }
-  return (Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
-                  test_epoch), meta_data)
+  return (
+      Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch),
+      meta_data,
+  )
 
 
 def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
@@ -141,10 +143,9 @@ def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
     for n_nodes in n_nodes_list:
       n_edges = n_nodes**2
       graph = jraph.get_fully_connected_graph(
-          n_nodes, 1,
-          np.ones((n_nodes, *hps.input_node_shape)))
-      graph = graph._replace(
-          edges=np.ones((n_edges, *hps.input_edge_shape)))
+          n_nodes, 1, np.ones((n_nodes, *hps.input_node_shape))
+      )
+      graph = graph._replace(edges=np.ones((n_edges, *hps.input_edge_shape)))
       labels = np.ones(hps.output_shape) * (1 if n_nodes in [4, 6] else 0)
       weights = np.ones(*hps.output_shape)
       graphs_list.append(graph)
@@ -166,6 +167,7 @@ def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
       [i for i in range(min_nodes, min_nodes + n_graphs_per_batch)]
       for _ in range(num_batches)
   ]
+
   def train_iterator_fn():
     for ns in itertools.cycle(n_nodes_list):
       yield _get_batch(ns)
@@ -188,16 +190,19 @@ def _get_fake_graph_dataset(batch_size, eval_num_batches, hps):
     for ns in itertools.islice(itertools.cycle(n_nodes_list), num_batches):
       yield _get_batch(ns)
 
-  return (Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
-                  test_epoch), {
-                      'apply_one_hot_in_loss': False,
-                  })
+  return (
+      Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch),
+      {
+          'apply_one_hot_in_loss': False,
+      },
+  )
 
 
 def _get_fake_dlrm_dataset(batch_size, eval_num_batches, hps):
   """Yields a single text batch repeatedly for train and test."""
   cat_features = np.random.randint(
-      low=0, high=hps.vocab_size, size=(batch_size, 26))
+      low=0, high=hps.vocab_size, size=(batch_size, 26)
+  )
   int_features = np.random.normal(size=(batch_size, hps.num_dense_features))
   inputs = np.concatenate((int_features, cat_features), 1)
   targets = np.random.randint(low=0, high=2, size=(batch_size, 1))
@@ -232,8 +237,10 @@ def _get_fake_dlrm_dataset(batch_size, eval_num_batches, hps):
   meta_data = {
       'apply_one_hot_in_loss': False,
   }
-  return (Dataset(train_iterator_fn, eval_train_epoch, valid_epoch,
-                  test_epoch), meta_data)
+  return (
+      Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch),
+      meta_data,
+  )
 
 
 class TrainerTest(parameterized.TestCase):
@@ -269,7 +276,8 @@ class TrainerTest(parameterized.TestCase):
 
     # First initialize with no rescale.
     params, _ = model.initialize(
-        initializer, hps, init_rng, metrics_logger=None)
+        initializer, hps, init_rng, metrics_logger=None
+    )
 
     utils.log_pytree_shape_and_statistics(params)
     # Now rescale a layer by 100.
@@ -279,7 +287,8 @@ class TrainerTest(parameterized.TestCase):
     }
 
     rescaled_params, _ = model.initialize(
-        initializer, hps, init_rng, metrics_logger=None)
+        initializer, hps, init_rng, metrics_logger=None
+    )
 
     # Check the right variable is rescaled
     v1 = params['Dense_1']['kernel']
@@ -296,7 +305,7 @@ class TrainerTest(parameterized.TestCase):
   def test_classifaction_model_evaluate(self):
     """Test trainer evaluate end to end with classification model metrics."""
     # Define a fake model that always outputs the same logits.
-    fake_batch_logits = np.tile([.5, .2, .7, 0.0], (4, 1))
+    fake_batch_logits = np.tile([0.5, 0.2, 0.7, 0.0], (4, 1))
 
     class FakeModel(nn.Module):
 
@@ -305,7 +314,8 @@ class TrainerTest(parameterized.TestCase):
         # Make a single linear layer with the identity as the init.
         identity_fn = lambda *_: np.eye(4)
         x = nn.Dense(features=4, use_bias=False, kernel_init=identity_fn)(
-            fake_batch_logits)
+            fake_batch_logits
+        )
         return x
 
     key = jax.random.PRNGKey(0)
@@ -313,9 +323,8 @@ class TrainerTest(parameterized.TestCase):
     fake_flax_module = FakeModel()
     model_init_fn = jax.jit(fake_flax_module.init)
     init_dict = model_init_fn(
-        rngs={'params': params_rng, 'dropout': dropout_rng},
-        x=None,
-        train=False)
+        rngs={'params': params_rng, 'dropout': dropout_rng}, x=None, train=False
+    )
     mesh_shape = (jax.device_count(),)
     mesh = jax.sharding.Mesh(
         mesh_utils.create_device_mesh(mesh_shape, devices=jax.devices()),
@@ -327,26 +336,10 @@ class TrainerTest(parameterized.TestCase):
     # 4 evaluation batches of size 4.
     weights = np.ones((4))
     fake_batches = [
-        {
-            'inputs': None,
-            'targets': np.array([3, 2, 1, 0]),
-            'weights': weights
-        },
-        {
-            'inputs': None,
-            'targets': np.array([0, 3, 2, 0]),
-            'weights': weights
-        },
-        {
-            'inputs': None,
-            'targets': np.array([0, 0, 0, 0]),
-            'weights': weights
-        },
-        {
-            'inputs': None,
-            'targets': np.array([1, 1, 1, 1]),
-            'weights': weights
-        },
+        {'inputs': None, 'targets': np.array([3, 2, 1, 0]), 'weights': weights},
+        {'inputs': None, 'targets': np.array([0, 3, 2, 0]), 'weights': weights},
+        {'inputs': None, 'targets': np.array([0, 0, 0, 0]), 'weights': weights},
+        {'inputs': None, 'targets': np.array([1, 1, 1, 1]), 'weights': weights},
     ]
 
     def fake_batches_gen():
@@ -360,7 +353,8 @@ class TrainerTest(parameterized.TestCase):
         batch_stats,
         batch,
         metrics.get_metrics('classification_metrics'),
-        True)
+        True,
+    )
 
     evaluate_batch_jitted = jax.jit(eval_fn)
     # pylint: enable=protected-access
@@ -377,13 +371,15 @@ class TrainerTest(parameterized.TestCase):
       loss = -np.sum(one_hot_targets * nn.log_softmax(logits), axis=-1)
       return loss
 
-    expected_error_rate = 14.0/16.0  # FakeModel always predicts class 2.
+    expected_error_rate = 14.0 / 16.0  # FakeModel always predicts class 2.
     expected_ce_loss = np.mean(
-        [batch_ce_loss(fake_batch_logits, b['targets']) for b in fake_batches])
+        [batch_ce_loss(fake_batch_logits, b['targets']) for b in fake_batches]
+    )
 
     self.assertEqual(expected_error_rate, evaluated_metrics['error_rate'])
     self.assertAlmostEqual(
-        expected_ce_loss, evaluated_metrics['ce_loss'], places=4)
+        expected_ce_loss, evaluated_metrics['ce_loss'], places=4
+    )
     self.assertEqual(16, evaluated_metrics['num_examples'])
 
   def test_graph_model_trainer(self):
@@ -408,10 +404,7 @@ class TrainerTest(parameterized.TestCase):
         'num_message_passing_steps': 1,
         'normalizer': 'none',
         'dropout_rate': 0.0,
-        'lr_hparams': {
-            'base_lr': 0.001,
-            'schedule': 'constant'
-        },
+        'lr_hparams': {'base_lr': 0.001, 'schedule': 'constant'},
         'num_device_prefetches': 0,
     })
     eval_num_batches = 5
@@ -419,7 +412,8 @@ class TrainerTest(parameterized.TestCase):
     loss_name = 'sigmoid_binary_cross_entropy'
     metrics_name = 'binary_classification_metrics_ogbg_map'
     dataset, dataset_meta_data = _get_fake_graph_dataset(
-        batch_size=hps.batch_size, eval_num_batches=eval_num_batches, hps=hps)
+        batch_size=hps.batch_size, eval_num_batches=eval_num_batches, hps=hps
+    )
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
     initializer = initializers.get_initializer('noop')
 
@@ -448,8 +442,9 @@ class TrainerTest(parameterized.TestCase):
     )
     _ = list(self.trainer.train())
 
-    with tf.io.gfile.GFile(os.path.join(self.test_dir,
-                                        'measurements.csv')) as f:
+    with tf.io.gfile.GFile(
+        os.path.join(self.test_dir, 'measurements.csv')
+    ) as f:
       df = pandas.read_csv(f)
       train_loss = df['train/ce_loss'].values
       self.assertLess(train_loss[-1], train_loss[0])
@@ -476,7 +471,8 @@ class TrainerTest(parameterized.TestCase):
     loss_name = 'sigmoid_binary_cross_entropy'
     metrics_name = 'binary_classification_metrics'
     dataset, dataset_meta_data = _get_fake_dlrm_dataset(
-        dataset_hps.batch_size, eval_num_batches, dataset_hps)
+        dataset_hps.batch_size, eval_num_batches, dataset_hps
+    )
     hps = copy.copy(model_hps)
     hps.update({
         'train_size': 15,
@@ -517,8 +513,9 @@ class TrainerTest(parameterized.TestCase):
     )
     _ = list(self.trainer.train())
 
-    with tf.io.gfile.GFile(os.path.join(self.test_dir,
-                                        'measurements.csv')) as f:
+    with tf.io.gfile.GFile(
+        os.path.join(self.test_dir, 'measurements.csv')
+    ) as f:
       df = pandas.read_csv(f)
       train_loss = df['train/ce_loss'].values
       self.assertLess(train_loss[-1], train_loss[0])
@@ -554,10 +551,7 @@ class TrainerTest(parameterized.TestCase):
         'opt_hparams': {
             'momentum': 0.9,
         },
-        'lr_hparams': {
-            'base_lr': 0.005,
-            'schedule': 'constant'
-        },
+        'lr_hparams': {'base_lr': 0.005, 'schedule': 'constant'},
         # Training HParams.
         'l2_decay_factor': 1e-4,
         'l2_decay_rank_threshold': 2,
@@ -571,7 +565,8 @@ class TrainerTest(parameterized.TestCase):
     initializer = initializers.get_initializer('noop')
     eval_num_batches = 5
     dataset, dataset_meta_data = _get_fake_text_dataset(
-        batch_size=hps.batch_size, eval_num_batches=eval_num_batches)
+        batch_size=hps.batch_size, eval_num_batches=eval_num_batches
+    )
     eval_batch_size = hps.batch_size
 
     model = model_cls(hps, dataset_meta_data, loss_name, metrics_name)
@@ -602,7 +597,8 @@ class TrainerTest(parameterized.TestCase):
     _ = list(self.trainer.train())
 
     with tf.io.gfile.GFile(
-        os.path.join(self.test_dir, 'measurements.csv')) as f:
+        os.path.join(self.test_dir, 'measurements.csv')
+    ) as f:
       df = pandas.read_csv(f)
       train_err = df['train/error_rate'].values[-1]
       # Note that upgrading to Linen made this fail at 0.6.
@@ -633,7 +629,8 @@ class TrainerTest(parameterized.TestCase):
     )
     _ = list(self.trainer.train())
     with tf.io.gfile.GFile(
-        os.path.join(self.test_dir, 'measurements.csv')) as f:
+        os.path.join(self.test_dir, 'measurements.csv')
+    ) as f:
       df = pandas.read_csv(f)
       train_err = df['train/error_rate'].values[-1]
       train_loss = df['train/ce_loss'].values[-1]
@@ -645,7 +642,8 @@ class TrainerTest(parameterized.TestCase):
 
       self.assertEqual(
           df['valid/num_examples'].values[-1],
-          eval_num_batches * eval_batch_size * _MAX_LEN)
+          eval_num_batches * eval_batch_size * _MAX_LEN,
+      )
       # Check that the correct learning rate was saved in the measurements file.
       final_step = df['global_step'].values[-1]
       self.assertEqual(num_train_steps_reload, final_step)
@@ -670,10 +668,7 @@ class TrainerTest(parameterized.TestCase):
     initializer = initializers.get_initializer(initializer_name)
     dataset_builder = datasets.get_dataset(dataset_name)
     hparam_overrides = {
-        'lr_hparams': {
-            'base_lr': 0.1,
-            'schedule': 'cosine'
-        },
+        'lr_hparams': {'base_lr': 0.1, 'schedule': 'cosine'},
         'batch_size': 8,
         'train_size': 160,
         'valid_size': 96,
@@ -682,11 +677,13 @@ class TrainerTest(parameterized.TestCase):
     if grad_clip is not None:
       hparam_overrides['opt_hparams.grad_clip'] = grad_clip
 
-    input_pipeline_hps = config_dict.ConfigDict(dict(
-        num_tf_data_prefetches=-1,
-        num_device_prefetches=0,
-        num_tf_data_map_parallel_calls=-1,
-    ))
+    input_pipeline_hps = config_dict.ConfigDict(
+        dict(
+            num_tf_data_prefetches=-1,
+            num_device_prefetches=0,
+            num_tf_data_map_parallel_calls=-1,
+        )
+    )
     hps = hyperparameters.build_hparams(
         model_name,
         initializer_name,
@@ -705,25 +702,34 @@ class TrainerTest(parameterized.TestCase):
 
       # pylint: disable=g-long-lambda,g-complex-comprehension
       return tf.data.Dataset.from_generator(
-          lambda: ({
-              'image': np.ones(shape=(28, 28, 1), dtype=np.uint8),
-              'label': 9,
-          } for i in range(num_examples)),
+          lambda: (
+              {
+                  'image': np.ones(shape=(28, 28, 1), dtype=np.uint8),
+                  'label': 9,
+              }
+              for i in range(num_examples)
+          ),
           output_types=self.info.features.dtype,
           output_shapes=self.info.features.shape,
       )
 
     # This will override the tfds.load(mnist) call to return 100 fake samples.
     with tfds.testing.mock_data(
-        as_dataset_fn=as_dataset, num_examples=num_examples):
+        as_dataset_fn=as_dataset, num_examples=num_examples
+    ):
       dataset = dataset_builder(
           shuffle_rng=jax.random.PRNGKey(0),
           batch_size=hps.batch_size,
           eval_batch_size=eval_batch_size,
-          hps=hps)
+          hps=hps,
+      )
 
-    model = model_cls(hps, datasets.get_dataset_meta_data(dataset_name),
-                      loss_name, metrics_name)
+    model = model_cls(
+        hps,
+        datasets.get_dataset_meta_data(dataset_name),
+        loss_name,
+        metrics_name,
+    )
 
     num_train_steps = 40
     eval_num_batches = 5
@@ -762,7 +768,8 @@ class TrainerTest(parameterized.TestCase):
 
     self.assertLen(epoch_reports, num_train_steps / eval_every)
     with tf.io.gfile.GFile(
-        os.path.join(self.test_dir, 'measurements.csv')) as f:
+        os.path.join(self.test_dir, 'measurements.csv')
+    ) as f:
       df = pandas.read_csv(f)
       train_err = df['train/error_rate'].values[-1]
       self.assertEqual(df['preemption_count'].values[-1], 0)
@@ -770,8 +777,9 @@ class TrainerTest(parameterized.TestCase):
 
     self.assertEqual(set(df.columns.values), set(get_column_names()))
 
-    model = model_cls(hps, {'apply_one_hot_in_loss': False}, loss_name,
-                      metrics_name)
+    model = model_cls(
+        hps, {'apply_one_hot_in_loss': False}, loss_name, metrics_name
+    )
 
     # Test reload from the checkpoint by increasing num_train_steps.
     num_train_steps_reload = 100
@@ -795,17 +803,21 @@ class TrainerTest(parameterized.TestCase):
     )
     epoch_reports = list(self.trainer.train())
     self.assertLen(
-        epoch_reports, (num_train_steps_reload - num_train_steps) / eval_every)
+        epoch_reports, (num_train_steps_reload - num_train_steps) / eval_every
+    )
     with tf.io.gfile.GFile(
-        os.path.join(self.test_dir, 'measurements.csv')) as f:
+        os.path.join(self.test_dir, 'measurements.csv')
+    ) as f:
       df = pandas.read_csv(f)
       train_err = df['train/error_rate'].values[-1]
       train_loss = df['train/ce_loss'].values[-1]
       self.assertLess(train_err, 0.35)
       self.assertLess(train_loss, 0.1)
 
-      self.assertEqual(df['valid/num_examples'].values[-1],
-                       eval_num_batches * eval_batch_size)
+      self.assertEqual(
+          df['valid/num_examples'].values[-1],
+          eval_num_batches * eval_batch_size,
+      )
       self.assertEqual(df['preemption_count'].values[-1], 1)
       # Check that the correct learning rate was saved in the measurements file.
       final_learning_rate = df['learning_rate'].values[-1]
@@ -815,10 +827,12 @@ class TrainerTest(parameterized.TestCase):
       # final_step will be one larger than the last step used to calculate the
       # lr_decay, hense we plug in (final_step - 1) to the decay formula.
       # Note that there is a small numerical different here with np vs jnp.
-      decay_factor = (1 + np.cos(
-          (final_step - 1) / num_train_steps_reload * np.pi)) * 0.5
-      self.assertAlmostEqual(float(final_learning_rate),
-                             hps.lr_hparams['base_lr'] * decay_factor)
+      decay_factor = (
+          1 + np.cos((final_step - 1) / num_train_steps_reload * np.pi)
+      ) * 0.5
+      self.assertAlmostEqual(
+          float(final_learning_rate), hps.lr_hparams['base_lr'] * decay_factor
+      )
 
     self.assertEqual(set(df.columns.values), set(get_column_names()))
 
@@ -830,7 +844,8 @@ class TrainerTest(parameterized.TestCase):
           targets=np.array([[1, 0], [0, 1], [1, 0], [1, 0]]),
           weights=np.array([1, 1, 0, 0]),
           test_metric_names=['error_rate', 'num_examples'],
-          test_metric_vals=[0.5, 2]),
+          test_metric_vals=[0.5, 2],
+      ),
       dict(
           testcase_name='fractional_weights',
           metrics_name='classification_metrics',
@@ -838,86 +853,185 @@ class TrainerTest(parameterized.TestCase):
           targets=np.array([[1, 0], [1, 0]]),
           weights=np.array([0.3, 0.7]),
           test_metric_names=['error_rate', 'num_examples'],
-          test_metric_vals=[0.3, 1]),
+          test_metric_vals=[0.3, 1],
+      ),
       dict(
           testcase_name='binary_classification_basic',
           metrics_name='binary_classification_metrics',
-          logits=np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5],
-                           [0.5, 0.5], [0.5, 0.5]]),
+          logits=np.array([
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+          ]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
-          weights=np.array([[1., 1.], [1., 1.], [1., 1.], [1., 1.], [1., 1.],
-                            [1., 1.]]),
+          weights=np.array([
+              [1.0, 1.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+          ]),
           test_metric_names=['ce_loss', 'average_precision', 'auc_roc'],
-          test_metric_vals=[0.724077, 0.5, 0.5]),
+          test_metric_vals=[0.724077, 0.5, 0.5],
+      ),
       dict(
           testcase_name='binary_classification_no_weights',
           metrics_name='binary_classification_metrics',
-          logits=np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5],
-                           [0.5, 0.5], [0.5, 0.5]]),
+          logits=np.array([
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+          ]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
           weights=None,
           test_metric_names=['ce_loss', 'average_precision', 'auc_roc'],
-          test_metric_vals=[1.448154, 0.5, 0.5]),
+          test_metric_vals=[1.448154, 0.5, 0.5],
+      ),
       dict(
           testcase_name='binary_classification_zero_weights',
           metrics_name='binary_classification_metrics',
-          logits=np.array([[100, 0.5], [100, 0.5], [0.3, 0.7], [0.5, 0.15],
-                           [0.05, 0.5], [0.9, 0.5]]),
+          logits=np.array([
+              [100, 0.5],
+              [100, 0.5],
+              [0.3, 0.7],
+              [0.5, 0.15],
+              [0.05, 0.5],
+              [0.9, 0.5],
+          ]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
-          weights=np.array([[0., 1.], [0., 1.], [1., 1.], [1., 1.], [1., 1.],
-                            [1., 1.]]),
+          weights=np.array([
+              [0.0, 1.0],
+              [0.0, 1.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+          ]),
           test_metric_names=['ce_loss', 'average_precision', 'auc_roc'],
-          test_metric_vals=[0.8058497, 0.433333, 0.22222]),
+          test_metric_vals=[0.8058497, 0.433333, 0.22222],
+      ),
       dict(
           testcase_name='binary_classification_1d_weights',
           metrics_name='binary_classification_metrics',
-          logits=np.array([[100, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 100],
-                           [0.5, 0.5], [0.5, 0.5]]),
+          logits=np.array([
+              [100, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 100],
+              [0.5, 0.5],
+              [0.5, 0.5],
+          ]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
-          weights=np.array([0., 1., 1., 0., 1., 1.,]),
+          weights=np.array([
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              1.0,
+              1.0,
+          ]),
           test_metric_names=['ce_loss', 'average_precision', 'auc_roc'],
-          test_metric_vals=[1.448154, 0.5, 0.5]),
+          test_metric_vals=[1.448154, 0.5, 0.5],
+      ),
       dict(
           testcase_name='binary_autoencoder_2d_weights',
           metrics_name='binary_autoencoder_metrics',
-          logits=np.array([[0.5, 100], [0.5, 100], [0.5, 0.5], [0.5, 0.5],
-                           [0.5, 0.5], [0.5, 0.5]]),
+          logits=np.array([
+              [0.5, 100],
+              [0.5, 100],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+          ]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
-          weights=np.array([[1., 0.], [1., 0.], [1., 1.], [1., 1.], [1., 1.],
-                            [1., 1.]]),
+          weights=np.array([
+              [1.0, 0.0],
+              [1.0, 0.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+              [1.0, 1.0],
+          ]),
           test_metric_names=['sigmoid_mean_squared_error'],
-          test_metric_vals=[0.26499629]),
+          test_metric_vals=[0.26499629],
+      ),
       dict(
           testcase_name='binary_autoencoder_1d_weights',
           metrics_name='binary_autoencoder_metrics',
-          logits=np.array([[0.5, 100], [0.5, 0.5], [0.5, 100], [0.5, 0.5],
-                           [0.5, 0.5], [0.5, 0.5]]),
+          logits=np.array([
+              [0.5, 100],
+              [0.5, 0.5],
+              [0.5, 100],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+          ]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
-          weights=np.array([0., 1., 0., 1., 1., 1.,]),
+          weights=np.array([
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+          ]),
           test_metric_names=['sigmoid_mean_squared_error'],
-          test_metric_vals=[0.52999258]),
+          test_metric_vals=[0.52999258],
+      ),
       dict(
           testcase_name='binary_autoencoder_no_weights',
           metrics_name='binary_autoencoder_metrics',
-          logits=np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5],
-                           [0.5, 0.5], [0.5, 0.5]]),
+          logits=np.array([
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+              [0.5, 0.5],
+          ]),
           targets=np.array([[1, 0], [0, 1], [1, 0], [0, 1], [1, 0], [0, 1]]),
           weights=None,
           test_metric_names=['sigmoid_mean_squared_error'],
-          test_metric_vals=[0.5299926]),
+          test_metric_vals=[0.5299926],
+      ),
       dict(
           testcase_name='binary_classification_metrics_ogbg_map',
           metrics_name='binary_classification_metrics_ogbg_map',
-          logits=np.array([[100, 0.5], [0.75, 0.25], [0.15, -0.95], [0.5, 100],
-                           [0.15, 0.5], [0.5, 0.05], [-7.0, 8.1], [-7.0, 8.1]]),
+          logits=np.array([
+              [100, 0.5],
+              [0.75, 0.25],
+              [0.15, -0.95],
+              [0.5, 100],
+              [0.15, 0.5],
+              [0.5, 0.05],
+              [-7.0, 8.1],
+              [-7.0, 8.1],
+          ]),
           targets=np.array(
-              [[1, 0], [1, 0], [1, 0], [0, 1], [1, 0], [0, 1], [0, 1], [0, 1]]),
-          weights=np.array([0., 1., 1., 0., 1., 1., 1., 0.]),
+              [[1, 0], [1, 0], [1, 0], [0, 1], [1, 0], [0, 1], [0, 1], [0, 1]]
+          ),
+          weights=np.array([0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0]),
           test_metric_names=['average_precision', 'ce_loss'],
-          test_metric_vals=[0.791666, 1.0799019]),
+          test_metric_vals=[0.791666, 1.0799019],
+      ),
   )
-  def test_evaluate(self, metrics_name, logits, targets, weights,
-                    test_metric_names, test_metric_vals):
+  def test_evaluate(
+      self,
+      metrics_name,
+      logits,
+      targets,
+      weights,
+      test_metric_names,
+      test_metric_vals,
+  ):
     """Test metrics merging and evaluation including zero weights."""
 
     def mock_evaluate_batch(params, batch_stats, batch):
@@ -928,18 +1042,18 @@ class TrainerTest(parameterized.TestCase):
       return metrics_bundle.single_from_model_output(
           logits=batch.get('logits'),
           targets=batch.get('targets'),
-          weights=batch.get('weights'))
+          weights=batch.get('weights'),
+      )
 
     logits = np.split(logits, 2)
     targets = np.split(targets, 2)
     weights = np.split(weights, 2) if weights is not None else [None, None]
 
     # pylint: disable=g-complex-comprehension
-    batch_iter = [{
-        'logits': ls,
-        'targets': ts,
-        'weights': ws
-    } for ls, ts, ws in zip(logits, targets, weights)]
+    batch_iter = [
+        {'logits': ls, 'targets': ts, 'weights': ws}
+        for ls, ts, ws in zip(logits, targets, weights)
+    ]
 
     mesh_shape = (jax.device_count(),)
     mesh = jax.sharding.Mesh(
@@ -986,11 +1100,13 @@ class TrainerTest(parameterized.TestCase):
         'valid_size': 96,
         'test_size': 80,
     }
-    input_pipeline_hps = config_dict.ConfigDict(dict(
-        num_tf_data_prefetches=-1,
-        num_device_prefetches=0,
-        num_tf_data_map_parallel_calls=-1,
-    ))
+    input_pipeline_hps = config_dict.ConfigDict(
+        dict(
+            num_tf_data_prefetches=-1,
+            num_device_prefetches=0,
+            num_tf_data_map_parallel_calls=-1,
+        )
+    )
     hps = hyperparameters.build_hparams(
         model_name,
         initializer_name,
@@ -1009,25 +1125,34 @@ class TrainerTest(parameterized.TestCase):
 
       # pylint: disable=g-long-lambda,g-complex-comprehension
       return tf.data.Dataset.from_generator(
-          lambda: ({
-              'image': np.ones(shape=(28, 28, 1), dtype=np.uint8),
-              'label': 9,
-          } for i in range(num_examples)),
+          lambda: (
+              {
+                  'image': np.ones(shape=(28, 28, 1), dtype=np.uint8),
+                  'label': 9,
+              }
+              for i in range(num_examples)
+          ),
           output_types=self.info.features.dtype,
           output_shapes=self.info.features.shape,
       )
 
     # This will override the tfds.load(mnist) call to return 100 fake samples.
     with tfds.testing.mock_data(
-        as_dataset_fn=as_dataset, num_examples=num_examples):
+        as_dataset_fn=as_dataset, num_examples=num_examples
+    ):
       dataset = dataset_builder(
           shuffle_rng=jax.random.PRNGKey(0),
           batch_size=hps.batch_size,
           eval_batch_size=eval_batch_size,
-          hps=hps)
+          hps=hps,
+      )
 
-    model = model_cls(hps, datasets.get_dataset_meta_data(dataset_name),
-                      loss_name, metrics_name)
+    model = model_cls(
+        hps,
+        datasets.get_dataset_meta_data(dataset_name),
+        loss_name,
+        metrics_name,
+    )
 
     num_train_steps = 40
     early_stopping_target_name = 'test/ce_loss'
@@ -1071,10 +1196,12 @@ class TrainerTest(parameterized.TestCase):
     if not min_steps:
       self.assertGreater(
           epoch_reports[-2][early_stopping_target_name],
-          early_stopping_target_value)
+          early_stopping_target_value,
+      )
     self.assertLess(
         epoch_reports[-1][early_stopping_target_name],
-        early_stopping_target_value)
+        early_stopping_target_value,
+    )
 
 
 if __name__ == '__main__':

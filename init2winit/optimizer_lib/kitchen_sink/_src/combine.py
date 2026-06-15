@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Combine utilities."""
+
 import functools
 from typing import Any, NamedTuple
 from typing import Callable
@@ -27,9 +28,13 @@ import optax
 # TODO(dsuo): Add back grafting combinator.
 
 
-def join(by: Union[str, Callable[[optax.GradientTransformation, ...],
-                                 optax.Updates]], *args,
-         **kwargs) -> Callable[..., optax.GradientTransformation]:
+def join(
+    by: Union[
+        str, Callable[[optax.GradientTransformation, ...], optax.Updates]
+    ],
+    *args,
+    **kwargs,
+) -> Callable[..., optax.GradientTransformation]:
   """Join multiple chains."""
 
   if by is None or by == 'chain':
@@ -53,7 +58,7 @@ def join(by: Union[str, Callable[[optax.GradientTransformation, ...],
     def update(
         updates: optax.Updates,
         state: optax.OptState,
-        params: Optional[optax.Params] = None
+        params: Optional[optax.Params] = None,
     ) -> Tuple[optax.Updates, optax.OptState]:
       combinator_state, args_state, kwargs_state = state
 
@@ -89,14 +94,16 @@ def join(by: Union[str, Callable[[optax.GradientTransformation, ...],
 def _grafting_helper(chain, use_global_norm=False):
   norm = jax.tree.map(jnp.linalg.norm, chain)
   if use_global_norm:
-    global_norm = jax.tree_util.tree_reduce(lambda x, y: jnp.sqrt(x**2 + y**2),
-                                            norm)
+    global_norm = jax.tree_util.tree_reduce(
+        lambda x, y: jnp.sqrt(x**2 + y**2), norm
+    )
     norm = jax.tree.map(lambda x: global_norm, norm)
   return norm
 
 
 class GraftingState(NamedTuple):
   """State for the Layered Adaptive RMS Preconditioner algorithm."""
+
   mag_norm: Any
   dir_norm: Any
 
@@ -151,8 +158,12 @@ def combine_by_sum():
 
   def update(state, *args, **kwargs):
     args = args + tuple(kwargs.values())
-    return functools.reduce(
-        lambda x, y: jax.tree_multimap(lambda i, j: i + j, x, y), args), state
+    return (
+        functools.reduce(
+            lambda x, y: jax.tree_multimap(lambda i, j: i + j, x, y), args
+        ),
+        state,
+    )
 
   return init, update
 

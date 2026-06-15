@@ -54,18 +54,21 @@ AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 VOCAB_SIZE = 35561
 
-DEFAULT_HPARAMS = config_dict.ConfigDict(dict(
-    max_target_length=8192,
-    shuffle_size=512,
-    train_size=302013,
-    input_shape=(16,),
-    output_shape=(VOCAB_SIZE,),
-    vocab_path=None,
-    data_dir=None,
-    vocab_size=VOCAB_SIZE,
-    max_corpus_chars=10**7,
-    eod_id=1,
-    eval_split='test'))
+DEFAULT_HPARAMS = config_dict.ConfigDict(
+    dict(
+        max_target_length=8192,
+        shuffle_size=512,
+        train_size=302013,
+        input_shape=(16,),
+        output_shape=(VOCAB_SIZE,),
+        vocab_path=None,
+        data_dir=None,
+        vocab_size=VOCAB_SIZE,
+        max_corpus_chars=10**7,
+        eod_id=1,
+        eval_split='test',
+    )
+)
 
 METADATA = {
     'apply_one_hot_in_loss': True,
@@ -110,9 +113,9 @@ def map_line_length(tensor: tf.Tensor) -> Feature:
   return (tf.cast(len(tensor), tf.int64), tensor)
 
 
-def scan_func(state: tf.Tensor,
-              element: tf.Tensor,
-              max_target_length: int = 8192):
+def scan_func(
+    state: tf.Tensor, element: tf.Tensor, max_target_length: int = 8192
+):
   """Maps (old_state, input_element) to (new_state, output_element).
 
   Args:
@@ -143,7 +146,8 @@ def init_func(key: tf.Tensor) -> tf.TensorArray:
   """Maps a nested structure of tensors to a scalar tf.int64 tensor."""
   del key  # Not used by Reducer
   return tf.TensorArray(
-      tf.int64, size=0, dynamic_size=True, clear_after_read=False)
+      tf.int64, size=0, dynamic_size=True, clear_after_read=False
+  )
 
 
 def reduce_func(state: tf.Tensor, element: Feature) -> tf.TensorArray:
@@ -171,8 +175,9 @@ def preprocess_example(example: Feature) -> Dict[tf.Tensor, tf.Tensor]:
   return map_line_length(example)
 
 
-def generate_features(dataset: tf.data.Dataset,
-                      hps: config_dict.ConfigDict) -> Feature:
+def generate_features(
+    dataset: tf.data.Dataset, hps: config_dict.ConfigDict
+) -> Feature:
   """Preprocesses a dataset before serliazing features and saving TFRecords.
 
   Args:
@@ -184,14 +189,20 @@ def generate_features(dataset: tf.data.Dataset,
   """
   dataset = dataset.map(preprocess_example, num_parallel_calls=AUTOTUNE)
   dataset = dataset.scan(
-      (tf.convert_to_tensor(
-          0, dtype=tf.int64), tf.convert_to_tensor(0, dtype=tf.int64)),
-      functools.partial(scan_func, max_target_length=hps.max_target_length))
+      (
+          tf.convert_to_tensor(0, dtype=tf.int64),
+          tf.convert_to_tensor(0, dtype=tf.int64),
+      ),
+      functools.partial(scan_func, max_target_length=hps.max_target_length),
+  )
   reducer = tf.data.experimental.Reducer(
-      init_func, reduce_func,
-      functools.partial(finalize_func, eod_id=hps.eod_id))
+      init_func,
+      reduce_func,
+      functools.partial(finalize_func, eod_id=hps.eod_id),
+  )
   dataset = dataset.apply(
-      tf.data.experimental.group_by_reducer(key_func, reducer))
+      tf.data.experimental.group_by_reducer(key_func, reducer)
+  )
   return dataset
 
 
@@ -233,8 +244,13 @@ def create_example(tensor: tf.Tensor) -> tf.train.Example:
   return tf.train.Example(features=tf.train.Features(feature=feature))
 
 
-def write_pg19_tfrecords(data_dir: str, split: str, vocab_path: str,
-                         hps: config_dict.ConfigDict, dataset_builder):
+def write_pg19_tfrecords(
+    data_dir: str,
+    split: str,
+    vocab_path: str,
+    hps: config_dict.ConfigDict,
+    dataset_builder,
+):
   """Writes preprocessed PG-19 data as TF Records split into shards.
 
   Args:
@@ -256,14 +272,16 @@ def write_pg19_tfrecords(data_dir: str, split: str, vocab_path: str,
       train_data,
       vocab_path=vocab_path,
       vocab_size=hps.vocab_size,
-      max_corpus_chars=hps.max_corpus_chars)
+      max_corpus_chars=hps.max_corpus_chars,
+  )
 
   if split == 'dev':
     split = 'validation'
 
   split_dataset = generate_dataset(dataset_builder, split)
   split_dataset = split_dataset.map(
-      spm_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
+      spm_tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE
+  )
   split_dataset = generate_features(split_dataset, hps)
 
   num_shards = TFRECORDS_SHARDS[split]
@@ -280,8 +298,9 @@ def write_pg19_tfrecords(data_dir: str, split: str, vocab_path: str,
         writer.write(feature.SerializeToString())
 
 
-def decode_and_preprocess_example(encoded_example: Feature,
-                                  hps: config_dict.ConfigDict) -> Feature:
+def decode_and_preprocess_example(
+    encoded_example: Feature, hps: config_dict.ConfigDict
+) -> Feature:
   """Decodes a serialized data in an encoded_example.
 
   Args:
@@ -292,12 +311,14 @@ def decode_and_preprocess_example(encoded_example: Feature,
     output: a feature dictionary with decoded data.
   """
   example = tf.io.parse_example(
-      encoded_example, {
-          'targets':
-              tf.io.FixedLenSequenceFeature(
-                  shape=[], dtype=tf.int64, allow_missing=True)
-      })
-  return example['targets'][:hps.max_target_length]
+      encoded_example,
+      {
+          'targets': tf.io.FixedLenSequenceFeature(
+              shape=[], dtype=tf.int64, allow_missing=True
+          )
+      },
+  )
+  return example['targets'][: hps.max_target_length]
 
 
 def output_preprocess(tensor: tf.Tensor) -> Tuple[Feature, Feature]:
@@ -314,16 +335,18 @@ def output_preprocess(tensor: tf.Tensor) -> Tuple[Feature, Feature]:
   return add_inputs_and_targets(tensor)
 
 
-def get_dataset(data_dir: str,
-                split: str,
-                vocab_path: str,
-                per_host_batch_size: int,
-                hps: config_dict.ConfigDict,
-                shuffle: bool,
-                shuffle_rng: jax.random.PRNGKey,
-                process_count: int,
-                repeat: bool = False,
-                drop_remainder: bool = False) -> tf.data.Dataset:
+def get_dataset(
+    data_dir: str,
+    split: str,
+    vocab_path: str,
+    per_host_batch_size: int,
+    hps: config_dict.ConfigDict,
+    shuffle: bool,
+    shuffle_rng: jax.random.PRNGKey,
+    process_count: int,
+    repeat: bool = False,
+    drop_remainder: bool = False,
+) -> tf.data.Dataset:
   """Loads and decodes PG-19 TFRecords.
 
   Args:
@@ -346,11 +369,17 @@ def get_dataset(data_dir: str,
     split = 'dev'
   data_files = tf.io.matching_files(os.path.join(data_dir, (split + '*')))
   if not exists(data_dir) and tf.size(data_files) == 0:
-    logging.info('There is no directory like %s or'
-                 ' there is no TFRecords for %s split', data_dir, split)
-    logging.info('Generating TFRecords for the %s split.'
-                 ' If it is a train split then it might'
-                 ' take 5-6 hours to complete.', split)
+    logging.info(
+        'There is no directory like %s or there is no TFRecords for %s split',
+        data_dir,
+        split,
+    )
+    logging.info(
+        'Generating TFRecords for the %s split.'
+        ' If it is a train split then it might'
+        ' take 5-6 hours to complete.',
+        split,
+    )
 
     pg19_builder = tfds.builder('pg19')
     write_pg19_tfrecords(
@@ -358,7 +387,8 @@ def get_dataset(data_dir: str,
         split=split,
         vocab_path=vocab_path,
         hps=hps,
-        dataset_builder=pg19_builder)
+        dataset_builder=pg19_builder,
+    )
     data_files = tf.io.matching_files(os.path.join(data_dir, (split + '*')))
 
   if split == 'train':
@@ -368,7 +398,8 @@ def get_dataset(data_dir: str,
   dataset = tf.data.TFRecordDataset(data_files, buffer_size=8 * 1024 * 1024)
   dataset = dataset.map(
       lambda x: decode_and_preprocess_example(x, hps=hps),
-      num_parallel_calls=AUTOTUNE)
+      num_parallel_calls=AUTOTUNE,
+  )
   # In T2T they shuffle twice with a buffer sizes of 1024 and 512 respectively
   # We shuffle only once with a buffer size 512 since it does not seem to affect
   # results
@@ -379,7 +410,8 @@ def get_dataset(data_dir: str,
   dataset = dataset.padded_batch(
       batch_size=per_host_batch_size,
       padded_shapes=hps.max_target_length,
-      drop_remainder=drop_remainder)
+      drop_remainder=drop_remainder,
+  )
   dataset = dataset.map(output_preprocess, num_parallel_calls=AUTOTUNE)
   dataset = dataset.prefetch(AUTOTUNE)
   return dataset
@@ -390,7 +422,7 @@ def get_pg19_datasets(
     per_host_batch_size: int,
     per_host_eval_batch_size: int,
     shuffle_rng: jax.random.PRNGKey,
-    process_count: int
+    process_count: int,
 ) -> Tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset]:
   """Preprocesses a dataset.
 
@@ -429,7 +461,8 @@ def get_pg19_datasets(
       shuffle=True,
       shuffle_rng=convert_jax_to_tf_random_seed(shuffle_rng),
       drop_remainder=True,
-      process_count=process_count)
+      process_count=process_count,
+  )
   eval_ds = get_dataset(
       data_dir=data_dir,
       split='validation',
@@ -438,7 +471,8 @@ def get_pg19_datasets(
       hps=hps,
       shuffle=False,
       shuffle_rng=None,
-      process_count=process_count)
+      process_count=process_count,
+  )
   test_ds = get_dataset(
       data_dir=data_dir,
       split='test',
@@ -447,15 +481,18 @@ def get_pg19_datasets(
       hps=hps,
       shuffle=False,
       shuffle_rng=None,
-      process_count=process_count)
+      process_count=process_count,
+  )
 
   return train_ds, eval_ds, test_ds
 
 
-def get_pg19(shuffle_rng: jax.random.PRNGKey = None,
-             batch_size: int = 8,
-             eval_batch_size: Optional[int] = None,
-             hps: config_dict.ConfigDict = None):
+def get_pg19(
+    shuffle_rng: jax.random.PRNGKey = None,
+    batch_size: int = 8,
+    eval_batch_size: Optional[int] = None,
+    hps: config_dict.ConfigDict = None,
+):
   """PG-19 data generator.
 
   Args:
@@ -469,32 +506,46 @@ def get_pg19(shuffle_rng: jax.random.PRNGKey = None,
   """
   process_count = jax.process_count()
   if batch_size % process_count != 0:
-    raise ValueError('process_count={} must divide batch_size={}.'.format(
-        process_count, batch_size))
+    raise ValueError(
+        'process_count={} must divide batch_size={}.'.format(
+            process_count, batch_size
+        )
+    )
 
   per_host_batch_size = batch_size // process_count
   if eval_batch_size is None:
     eval_batch_size = batch_size
 
   if eval_batch_size % process_count != 0:
-    raise ValueError('process_count={} must divide eval_batch_size={}.'.format(
-        process_count, eval_batch_size))
+    raise ValueError(
+        'process_count={} must divide eval_batch_size={}.'.format(
+            process_count, eval_batch_size
+        )
+    )
   per_host_eval_batch_size = eval_batch_size // process_count
 
   n_devices = jax.local_device_count()
   if per_host_batch_size % 1 != 0:
-    raise ValueError('n_devices={} must divide per_host_batch_size={}.'.format(
-        n_devices, per_host_batch_size))
+    raise ValueError(
+        'n_devices={} must divide per_host_batch_size={}.'.format(
+            n_devices, per_host_batch_size
+        )
+    )
 
   if per_host_eval_batch_size % 1 != 0:
     raise ValueError(
         'n_devices={} must divide per_host_eval_batch_size={}.'.format(
-            n_devices, per_host_eval_batch_size))
+            n_devices, per_host_eval_batch_size
+        )
+    )
 
-  train_ds, eval_ds, test_ds = get_pg19_datasets(hps, per_host_batch_size,
-                                                 per_host_eval_batch_size,
-                                                 shuffle_rng,
-                                                 process_count)
+  train_ds, eval_ds, test_ds = get_pg19_datasets(
+      hps,
+      per_host_batch_size,
+      per_host_eval_batch_size,
+      shuffle_rng,
+      process_count,
+  )
 
   def train_iterator_fn():
     """Iterates over the train dataset and yields Numpy batches."""
@@ -513,7 +564,8 @@ def get_pg19(shuffle_rng: jax.random.PRNGKey = None,
       for batch in itertools.islice(iter(test_ds), num_batches):
         batch = tf_to_numpy(batch)
         yield maybe_pad_batch(
-            batch, desired_batch_size=per_host_eval_batch_size, padding_value=0)
+            batch, desired_batch_size=per_host_eval_batch_size, padding_value=0
+        )
 
     # pylint: disable=unreachable
     def test_epoch(*args, **kwargs):
@@ -529,13 +581,15 @@ def get_pg19(shuffle_rng: jax.random.PRNGKey = None,
       for batch in itertools.islice(iter(eval_ds), num_batches):
         batch = tf_to_numpy(batch)
         yield maybe_pad_batch(
-            batch, desired_batch_size=per_host_eval_batch_size, padding_value=0)
+            batch, desired_batch_size=per_host_eval_batch_size, padding_value=0
+        )
 
     def test_epoch(num_batches: int = None):
       """Iterates over the test dataset and yields Numpy batches."""
       for batch in itertools.islice(iter(test_ds), num_batches):
         batch = tf_to_numpy(batch)
         yield maybe_pad_batch(
-            batch, desired_batch_size=per_host_eval_batch_size, padding_value=0)
+            batch, desired_batch_size=per_host_eval_batch_size, padding_value=0
+        )
 
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)

@@ -39,7 +39,9 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         output_shape=(-1, VOCAB_SIZE),
         train_size=281241,
         tokenizer_vocab_path='',
-        tokenizer_type='SPM'))
+        tokenizer_type='SPM',
+    )
+)
 
 METADATA = {'apply_one_hot_in_loss': False}
 
@@ -53,37 +55,53 @@ def get_librispeech(shuffle_rng, batch_size, eval_batch_size=None, hps=None):
   """Wrapper to conform to the general dataset API."""
   process_count = jax.process_count()
   if batch_size % process_count != 0:
-    raise ValueError('process_count={} must divide batch_size={}.'.format(
-        process_count, batch_size))
+    raise ValueError(
+        'process_count={} must divide batch_size={}.'.format(
+            process_count, batch_size
+        )
+    )
 
   per_host_batch_size = batch_size // process_count
   if eval_batch_size is None:
     eval_batch_size = batch_size
 
   if eval_batch_size % process_count != 0:
-    raise ValueError('process_count={} must divide eval_batch_size={}.'.format(
-        process_count, eval_batch_size))
+    raise ValueError(
+        'process_count={} must divide eval_batch_size={}.'.format(
+            process_count, eval_batch_size
+        )
+    )
   per_host_eval_batch_size = eval_batch_size // process_count
 
-  return _get_librispeech(hps, per_host_batch_size, per_host_eval_batch_size,
-                          shuffle_rng)
+  return _get_librispeech(
+      hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng
+  )
 
 
-def _get_librispeech(hps, per_host_batch_size, per_host_eval_batch_size,
-                     shuffle_rng):
+def _get_librispeech(
+    hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng
+):
   """Data generators for lm1b."""
   n_devices = jax.local_device_count()
   if per_host_batch_size % n_devices != 0:
-    raise ValueError('n_devices={} must divide per_host_batch_size={}.'.format(
-        n_devices, per_host_batch_size))
+    raise ValueError(
+        'n_devices={} must divide per_host_batch_size={}.'.format(
+            n_devices, per_host_batch_size
+        )
+    )
 
   if per_host_eval_batch_size % n_devices != 0:
     raise ValueError(
         'n_devices={} must divide per_host_eval_batch_size={}.'.format(
-            n_devices, per_host_eval_batch_size))
+            n_devices, per_host_eval_batch_size
+        )
+    )
 
-  train_ds, eval_ds, test_ds = librispeech_input_pipeline.get_librispeech_datasets(
-      hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng)
+  train_ds, eval_ds, test_ds = (
+      librispeech_input_pipeline.get_librispeech_datasets(
+          hps, per_host_batch_size, per_host_eval_batch_size, shuffle_rng
+      )
+  )
 
   def train_iterator_fn():
     for batch in iter(train_ds):
@@ -99,14 +117,16 @@ def _get_librispeech(hps, per_host_batch_size, per_host_eval_batch_size,
     for batch in itertools.islice(valid_iter, num_batches):
       batch = _batch_to_dict(batch)
       yield data_utils.maybe_pad_batch(
-          batch, desired_batch_size=per_host_eval_batch_size, padding_value=1.0)
+          batch, desired_batch_size=per_host_eval_batch_size, padding_value=1.0
+      )
 
   def test_epoch(num_batches=None):
     test_iter = iter(test_ds)
     for batch in itertools.islice(test_iter, num_batches):
       batch = _batch_to_dict(batch)
       yield data_utils.maybe_pad_batch(
-          batch, desired_batch_size=per_host_eval_batch_size, padding_value=1.0)
+          batch, desired_batch_size=per_host_eval_batch_size, padding_value=1.0
+      )
 
   # pylint: enable=unreachable
   return Dataset(train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch)
@@ -114,16 +134,16 @@ def _get_librispeech(hps, per_host_batch_size, per_host_eval_batch_size,
 
 def get_fake_batch(hps):
   return {
-      'inputs':
-          np.ones((hps.batch_size, hps.max_input_length),
-                  dtype=hps.model_dtype),
-      'input_paddings':
-          np.ones((hps.batch_size, hps.max_input_length),
-                  dtype=hps.model_dtype),
-      'targets':
-          np.ones((hps.batch_size, hps.max_target_length),
-                  dtype=hps.model_dtype),
-      'target_paddings':
-          np.ones((hps.batch_size, hps.max_target_length),
-                  dtype=hps.model_dtype),
+      'inputs': np.ones(
+          (hps.batch_size, hps.max_input_length), dtype=hps.model_dtype
+      ),
+      'input_paddings': np.ones(
+          (hps.batch_size, hps.max_input_length), dtype=hps.model_dtype
+      ),
+      'targets': np.ones(
+          (hps.batch_size, hps.max_target_length), dtype=hps.model_dtype
+      ),
+      'target_paddings': np.ones(
+          (hps.batch_size, hps.max_target_length), dtype=hps.model_dtype
+      ),
   }

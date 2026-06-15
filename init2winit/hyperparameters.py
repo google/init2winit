@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Hyperparameter management logic."""
+
 import json
 from typing import Dict
 
@@ -30,18 +31,16 @@ def expand_key(hparams, key_pieces, index, value):
   """Util to safely expand dotted keys in a dictionary.
 
   Args:
-    hparams: the hparams dictionary containing dotted keys. 
-    key_pieces: 
-      list containing pieces of dotted key. e.g: ['a', 'b', 'c'] for 'a.b.c'
-    index:
-      current index being read within key_pieces.
-    value:
-      value to be inserted for dotted key.
+    hparams: the hparams dictionary containing dotted keys.
+    key_pieces: list containing pieces of dotted key. e.g: ['a', 'b', 'c'] for
+      'a.b.c'
+    index: current index being read within key_pieces.
+    value: value to be inserted for dotted key.
 
   Raises:
     ValueError:
     1) if any prefix of dotted key is not a dictionary
-    2) if dotted key overrides a constant value already set in dictionary. 
+    2) if dotted key overrides a constant value already set in dictionary.
   """
   curr_p = key_pieces[index]
 
@@ -57,8 +56,8 @@ def expand_key(hparams, key_pieces, index, value):
         raise ValueError(
             'prefix = {} already exists with value = {}'.format(
                 '.'.join(key_pieces[: index + 1]), hparams[curr_p]
-                )
             )
+        )
   else:
     if curr_p not in hparams:
       hparams[curr_p] = {}
@@ -219,7 +218,8 @@ def build_hparams(
         logging.warning('Unrecognized top-level hparams: %s', new_keys)
       if any(k not in allowed_unrecognized_hparams for k in new_keys):
         raise ValueError(
-            f'Unrecognized top-level hparams not in allowlist: {new_keys}')
+            f'Unrecognized top-level hparams not in allowlist: {new_keys}'
+        )
       with merged.unlocked():
         merged.update(overrides_dict)
     else:
