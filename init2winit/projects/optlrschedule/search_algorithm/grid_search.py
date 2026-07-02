@@ -160,7 +160,7 @@ class GridSearch:
     if best_score_in_gen < self.internal_state["best_score"]:
       self.internal_state["best_score"] = best_score_in_gen
       self.internal_state["best_augumented_param"] = (
-          current_best_augmented_param
+          current_best_augmented_param  # pyrefly: ignore[bad-assignment]
       )
       self.internal_state["generation"] = gen_idx
 

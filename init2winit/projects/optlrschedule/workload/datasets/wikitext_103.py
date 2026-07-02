@@ -146,9 +146,9 @@ def get_wikitext103_dataset(
   test_path = os.path.join(data_dir, TEST_FILENAME)
 
   # Get TextLineDataset from raw files
-  train_text_dataset = tf.data.TextLineDataset(train_path)
-  valid_text_dataset = tf.data.TextLineDataset(valid_path)
-  test_text_dataset = tf.data.TextLineDataset(test_path)
+  train_text_dataset = tf.data.TextLineDataset(train_path)  # pyrefly: ignore[bad-instantiation]
+  valid_text_dataset = tf.data.TextLineDataset(valid_path)  # pyrefly: ignore[bad-instantiation]
+  test_text_dataset = tf.data.TextLineDataset(test_path)  # pyrefly: ignore[bad-instantiation]
 
   # Tokenize data
   tokenizer = get_trained_tokenizer(

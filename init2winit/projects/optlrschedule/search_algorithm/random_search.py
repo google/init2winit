@@ -181,7 +181,7 @@ class RandomSearch:
     # Update best solution if current generation found a better one
     if best_score_in_gen < self._best_score:
       self._best_score = best_score_in_gen
-      self._best_augmented_param = current_best_augmented_param
+      self._best_augmented_param = current_best_augmented_param  # pyrefly: ignore[bad-assignment]
       self._generation = gen_idx
 
   def get_best_solution(self) -> Tuple[Dict[str, float], float]:

@@ -27,7 +27,7 @@ P = jax.P
 class Trainer(base_trainer.BaseTrainer):
   """Default trainer."""
 
-  def update(self, batch, rng, metrics_state, training_cost):
+  def update(self, batch, rng, metrics_state, training_cost):  # pyrefly: ignore[bad-override]
     """Single step of the training loop.
 
     Uses the training algorithm's update_params function to get the updated
@@ -71,7 +71,7 @@ class Trainer(base_trainer.BaseTrainer):
 
     new_metrics_state = None
     if metrics_state is not None:
-      new_metrics_state = self._metrics_update_fn(
+      new_metrics_state = self._metrics_update_fn(  # pyrefly: ignore[not-callable]
           metrics_state,
           step,
           cost_value,

@@ -281,7 +281,7 @@ class Cifar10Training(base_workload.BaseWorkload):
     x_train = x_train.astype(jnp.float32) / 255.0
     x_test = x_test.astype(jnp.float32) / 255.0
 
-    return x_train, y_train, x_test, y_test
+    return x_train, y_train, x_test, y_test  # pyrefly: ignore[bad-return]
 
   def _load_data(
       self,
@@ -330,7 +330,7 @@ class Cifar10Training(base_workload.BaseWorkload):
     model = CNN()
     params = model.init(init_param_rng, np.ones([1, 32, 32, 3]))
 
-    tx = optimizers.get_optimizer_from_config(self.config)
+    tx = optimizers.get_optimizer_from_config(self.config)  # pyrefly: ignore[bad-argument-type]
 
     state = train_state.TrainState.create(
         apply_fn=model.apply, params=params, tx=tx
@@ -524,7 +524,7 @@ class Cifar10Training(base_workload.BaseWorkload):
             self.make_global_array(batch_labels[start:end]),
         )
         vmap_states, _ = self.train_step(
-            vmap_states, batch, schedules[:, global_step]
+            vmap_states, batch, schedules[:, global_step]  # pyrefly: ignore[bad-argument-type]
         )
 
         # Evaluate based on configuration

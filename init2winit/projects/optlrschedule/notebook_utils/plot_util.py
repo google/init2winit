@@ -790,7 +790,7 @@ def plot_base_lr_heatmap(
   )
   ax.grid(False)  # Turn off grid lines on heatmap
 
-  cbar = fig.colorbar(image, ax=ax)
+  cbar = fig.colorbar(image, ax=ax)  # pyrefly: ignore[missing-attribute]
   cbar.set_label(metric_label)
 
   ax.set_yticks(np.arange(len(sched_names)))
@@ -970,13 +970,13 @@ def make_coordinate_descent_plots(
 
   if subplot_cols is not None:
     # Dimensions of subplot
-    n_rows = (n_plots - 1) // n_cols + 1
+    n_rows = (n_plots - 1) // n_cols + 1  # pyrefly: ignore[unsupported-operation]
     if fig is None:
       # Create subplots
       fig, axes = plt.subplots(
           n_rows,
           n_cols,
-          figsize=(single_figsize[0] * n_cols, single_figsize[1] * n_rows),
+          figsize=(single_figsize[0] * n_cols, single_figsize[1] * n_rows),  # pyrefly: ignore[unsupported-operation]
       )
     else:
       axes = fig.subplots(
@@ -994,8 +994,8 @@ def make_coordinate_descent_plots(
   for plot_idx, sweep_param in enumerate(param_list):
     init_param_val = initial_param_dict[sweep_param]
     if subplot_cols is not None:
-      row, col = divmod(plot_idx, n_cols)
-      ax = axes[row, col]
+      row, col = divmod(plot_idx, n_cols)  # pyrefly: ignore[no-matching-overload]
+      ax = axes[row, col]  # pyrefly: ignore[unsupported-operation]
     else:
       ax = None
     ax = make_single_descent_plot(
@@ -1006,10 +1006,10 @@ def make_coordinate_descent_plots(
   if subplot_cols is None:
     return ax_list
   else:
-    for plot_idx in range(n_plots, n_rows * n_cols):
-      row, col = divmod(plot_idx, n_cols)
-      fig.delaxes(axes[row, col])
-    fig.tight_layout()
+    for plot_idx in range(n_plots, n_rows * n_cols):  # pyrefly: ignore[unbound-name, unsupported-operation]
+      row, col = divmod(plot_idx, n_cols)  # pyrefly: ignore[no-matching-overload]
+      fig.delaxes(axes[row, col])  # pyrefly: ignore[missing-attribute, unsupported-operation]
+    fig.tight_layout()  # pyrefly: ignore[missing-attribute]
     return fig
 
 

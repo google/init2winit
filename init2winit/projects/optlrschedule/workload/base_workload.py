@@ -72,7 +72,7 @@ class BaseWorkload(abc.ABC):
 
     self.config = copy.deepcopy(config)
     if isinstance(self.config, ml_collections.ConfigDict):
-      self.config = config.to_dict()
+      self.config = config.to_dict()  # pyrefly: ignore[missing-attribute]
 
     # Add optimizer configuration
     default_optimizer_config = {

@@ -203,7 +203,7 @@ def _run(
   meta_data = {'worker_id': worker_id, 'status': 'incomplete'}
   if jax.process_index() == 0:
     logging.info('rng: %s', rng)
-    makedirs(trial_dir, mode=0o775)
+    makedirs(trial_dir, mode=0o775)  # pyrefly: ignore[unexpected-keyword]
     # Set up the metric loggers for host 0.
     metrics_logger, init_logger = utils.set_up_loggers(trial_dir, xm_work_unit)
     hparams_fname = os.path.join(trial_dir, 'hparams.json')
@@ -291,11 +291,11 @@ def main(unused_argv):
     # CNS2 cell, as it's just the parent for the trial directories.
     # The trial directories themselves will get the correct cell placement.
     kwargs = {}
-    makedirs(experiment_dir, mode=0o775, **kwargs)
+    makedirs(experiment_dir, mode=0o775, **kwargs)  # pyrefly: ignore[unexpected-keyword]
   log_dir = os.path.join(
       experiment_dir, CNS_LOGS_ENCODING, 'logs', str(worker_id)
   )
-  makedirs(log_dir, mode=0o775)
+  makedirs(log_dir, mode=0o775)  # pyrefly: ignore[unexpected-keyword]
   log_path = os.path.join(
       log_dir, 'worker{}_{}.log'.format(worker_id, jax.process_index())
   )

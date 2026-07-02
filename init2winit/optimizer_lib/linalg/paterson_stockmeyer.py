@@ -25,11 +25,11 @@ T = TypeVar('T')
 def _powers(x: T, n: int, product: Callable[[T, T], T]) -> List[T]:
   """Returns the list [x, x², ..., xⁿ]."""
   xp = [None] * (n + 1)
-  xp[1] = x
+  xp[1] = x  # pyrefly: ignore[unsupported-operation]
   for j in range(2, n + 1):
     # To reduce round-off, compute xʲ as the result of O(log j) mutliplies
-    xp[j] = product(xp[j // 2], xp[(j + 1) // 2])
-  return xp[1:]
+    xp[j] = product(xp[j // 2], xp[(j + 1) // 2])  # pyrefly: ignore[bad-argument-type, unsupported-operation]
+  return xp[1:]  # pyrefly: ignore[bad-return]
 
 
 def polynomial_no_constant(
@@ -82,5 +82,5 @@ def polynomial_no_constant(
   i = (n + s - 1) // s - 1
   y = inner_poly(i)
   for i in reversed(range(i)):
-    y = inner_poly(i) + product(xp[s - 1], y)
-  return y
+    y = inner_poly(i) + product(xp[s - 1], y)  # pyrefly: ignore[bad-argument-type, unsupported-operation]
+  return y  # pyrefly: ignore[bad-return]

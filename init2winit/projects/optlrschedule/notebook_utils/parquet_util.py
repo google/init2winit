@@ -47,12 +47,12 @@ def load_parquet_file(
   """
 
   if file_name:
-    path = epath.Path(path) / file_name
+    path = epath.Path(path) / file_name  # pyrefly: ignore[bad-assignment]
   else:
-    path = epath.Path(path)
+    path = epath.Path(path)  # pyrefly: ignore[bad-assignment]
 
   # Read the file
-  with path.open('rb') as in_f:
+  with path.open('rb') as in_f:  # pyrefly: ignore[missing-attribute]
     buf = io.BytesIO(in_f.read())
     df = pd.read_parquet(buf)
 
@@ -105,7 +105,7 @@ def load_all_parquet_files(
   if dfs:
     # Concat will ignore empty DataFrames properly.
     merged_df = pd.concat(dfs, ignore_index=True)
-    return merged_df
+    return merged_df  # pyrefly: ignore[bad-return]
   else:
     return pd.DataFrame()
 
@@ -148,6 +148,6 @@ def load_all_parquet_files_sequentially(
 
   if dfs:
     merged_df = pd.concat(dfs, ignore_index=True)
-    return merged_df
+    return merged_df  # pyrefly: ignore[bad-return]
   else:
     return pd.DataFrame()

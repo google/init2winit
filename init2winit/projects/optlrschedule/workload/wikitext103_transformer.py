@@ -258,7 +258,7 @@ class Wikitext103Transformer(BaseWorkload):
     )
     y_test = x_test
 
-    return x_train, y_train, x_test, y_test
+    return x_train, y_train, x_test, y_test  # pyrefly: ignore[bad-return]
 
   def _load_data(
       self,
@@ -280,7 +280,7 @@ class Wikitext103Transformer(BaseWorkload):
         wikitext_103.get_wikitext103_dataset()
     )
 
-    return (
+    return (  # pyrefly: ignore[bad-return]
         train_dataset['inputs'].astype(jnp.float32),
         train_dataset['targets'].astype(jnp.float32),
         validation_dataset['inputs'].astype(jnp.float32),
@@ -325,7 +325,7 @@ class Wikitext103Transformer(BaseWorkload):
         train=False,
     )
 
-    tx = optimizers.get_optimizer_from_config(self.config)
+    tx = optimizers.get_optimizer_from_config(self.config)  # pyrefly: ignore[bad-argument-type]
 
     state = train_state.TrainState.create(
         apply_fn=transformer.apply, params=variables['params'], tx=tx

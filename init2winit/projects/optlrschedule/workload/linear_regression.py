@@ -57,8 +57,8 @@ def generate_ntk_matrix(
 ) -> jnp.ndarray:
   """Generates an NTK (Neural Tangent Kernel) matrix with a known spectrum."""
   if spectrum is None:
-    weight_matrix = random.normal(key, shape=(num_data, num_params))
-    return weight_matrix @ weight_matrix.T / num_data
+    weight_matrix = random.normal(key, shape=(num_data, num_params))  # pyrefly: ignore[bad-argument-type]
+    return weight_matrix @ weight_matrix.T / num_data  # pyrefly: ignore[unsupported-operation]
   else:
     orthogonal_matrix = random.orthogonal(key, len(spectrum))
     return orthogonal_matrix @ jnp.diag(spectrum) @ orthogonal_matrix.T

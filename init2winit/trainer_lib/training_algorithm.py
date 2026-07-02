@@ -830,8 +830,8 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
       model_defaults = dict(_MODEL_TRAINING_DEFAULTS[model_name])
       model_optimizer = model_defaults.pop('optimizer', 'adam')
       # Start with the optimizer's own defaults, then overlay model-specific.
-      opt_defaults = dict(_OPTAX_OPTIMIZER_DEFAULTS.get(model_optimizer, {}))
-      opt_defaults.update(model_defaults.pop('opt_hparams', {}))
+      opt_defaults = dict(_OPTAX_OPTIMIZER_DEFAULTS.get(model_optimizer, {}))  # pyrefly: ignore[no-matching-overload]
+      opt_defaults.update(model_defaults.pop('opt_hparams', {}))  # pyrefly: ignore[no-matching-overload]
       training_hparams.update({
           'optimizer': model_optimizer,
           'opt_hparams': opt_defaults,
@@ -899,7 +899,7 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
         new_params: Pytree of model parameters.
         new_model_state: Pytree of model state.
     """
-    del (
+    del (  # pyrefly: ignore[unsupported-delete]
         workload,
         hyperparameters,
         param_types,
@@ -910,7 +910,7 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     grad_clip = self.hps.opt_hparams.get('grad_clip', None)
     # We pass the lr directly because the lr functions from sehedules.py
     # have numpy dependencies and can't be jitted.
-    lr = self._lr_fn(global_step)
+    lr = self._lr_fn(global_step)  # pyrefly: ignore[not-callable]
     jitted_update_fn = jax.jit(
         optax_update_params_helper,
         static_argnames=(
@@ -1009,11 +1009,11 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     """
     del params  # Unused
     if isinstance(optimizer_state, optax.InjectStatefulHyperparamsState):
-      eval_params = optimizer_state.inner_state[0][0].ema
+      eval_params = optimizer_state.inner_state[0][0].ema  # pyrefly: ignore[bad-index]
     elif isinstance(
         optimizer_state, gradient_accumulator.GradientAccumulatorState
     ):
-      eval_params = optimizer_state.base_state.inner_state[0][0].ema
+      eval_params = optimizer_state.base_state.inner_state[0][0].ema  # pyrefly: ignore[missing-attribute]
     else:
       raise ValueError(
           'EMA computation should be the very first transformation in defined'

@@ -119,7 +119,7 @@ def generic_super_lookahead(
         steps_since_sync=steps_since_sync,
     )
 
-  return optax.GradientTransformation(init_fn, update_fn)
+  return optax.GradientTransformation(init_fn, update_fn)  # pyrefly: ignore[bad-argument-type]
 
 
 def super_lookahead(

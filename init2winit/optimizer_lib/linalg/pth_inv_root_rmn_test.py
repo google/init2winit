@@ -138,7 +138,7 @@ class PthInvRootTest(parameterized.TestCase):
     n = 16
     eps = np.finfo(np.float32).eps
     rng = np.random.RandomState(seed=37)
-    s = _random_singular_values(n, eps, rng)
+    s = _random_singular_values(n, eps, rng)  # pyrefly: ignore[bad-argument-type]
     exact = s.astype(np.float64) ** (-1 / p)
     x = _root(np.diag(s).astype(np.float32), p).astype(np.float64)
     # since the matrix is diagonal, the error should be small despite the

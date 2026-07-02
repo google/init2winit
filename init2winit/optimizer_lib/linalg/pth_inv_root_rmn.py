@@ -47,7 +47,7 @@ def _xxt_params(m: int, n: int) -> dict[str, int] | None:
 
 def pthroot_xxt(x: chex.Array, scale: chex.Array | None = None) -> chex.Array:
   """(x * scale) @ x.T ."""
-  return (x if scale is None else x * scale) @ x.T
+  return (x if scale is None else x * scale) @ x.T  # pyrefly: ignore[unsupported-operation]
 
 
 def _scalar_power(x: chex.Array, n: int) -> chex.Array:
@@ -78,7 +78,7 @@ def _scalar_inverse_root(x: chex.Array, n: int) -> chex.Array:
     r = x ** (1 / n)
     # One step of Newton's method to polish the root
     r = ((n - 1) / n) * r + (x / n) / _scalar_power(r, n - 1)
-    return 1 / r
+    return 1 / r  # pyrefly: ignore[bad-return]
 
 
 @functools.cache
@@ -219,7 +219,7 @@ def pth_inv_root_rmn(
 
     if p > 1:
       x += x @ paterson_stockmeyer.polynomial_no_constant(
-          bc[1:], w, operator.matmul
+          bc[1:], w, operator.matmul  # pyrefly: ignore[bad-argument-type]
       )
     x = cpm1 * x
     return x, y

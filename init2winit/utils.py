@@ -153,7 +153,7 @@ def run_in_parallel(function, list_of_kwargs_to_function, num_workers):
     for f in concurrent.futures.as_completed(futures):
       if f.exception():
         # Propagate exception to main thread.
-        raise f.exception()
+        raise f.exception()  # pyrefly: ignore[bad-raise]
 
   return [f.result() for f in futures]
 
