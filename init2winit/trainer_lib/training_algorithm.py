@@ -1009,7 +1009,7 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     """
     del params  # Unused
     if isinstance(optimizer_state, optax.InjectStatefulHyperparamsState):
-      eval_params = optimizer_state.inner_state[0][0].ema  # pyrefly: ignore[bad-index]
+      eval_params = optimizer_state.inner_state[0][0].ema  # pyrefly: ignore[bad-index, missing-attribute]
     elif isinstance(
         optimizer_state, gradient_accumulator.GradientAccumulatorState
     ):
