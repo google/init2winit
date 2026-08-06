@@ -141,4 +141,4 @@ def sharpness_aware_minimization(
     # example, in Adam preconditioning the SAM perturbation is helpful.
     return base_opt_update_fn(updates, state, params)  # Apply base optimizer
 
-  return optax.GradientTransformation(init_fn, update_fn)
+  return optax.GradientTransformation(init_fn, update_fn)  # pyrefly: ignore[bad-argument-type]
