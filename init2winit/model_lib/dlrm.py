@@ -22,6 +22,7 @@ from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax
 from jax import nn as jnn
+import jax.experimental.shard_map
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 
