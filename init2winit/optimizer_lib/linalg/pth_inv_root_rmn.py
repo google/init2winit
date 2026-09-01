@@ -142,8 +142,13 @@ def pth_inv_root_rmn(
   x = x.astype(jnp.float32)
   n = x.shape[-1]
 
-  alpha = jax.lax.sqrt(jnp.linalg.norm(x, ord=1))
-  alpha *= jax.lax.sqrt(jnp.linalg.norm(x, ord=jnp.inf))
+  # Based on Gelfand's inequality, the lines below provide a
+  # tighter upper bound on the norm of the matrix.
+  # \sigma_max \leq (\parallel X X^T \parallel_F^k)^{1/2k}
+  xx = x @ x.T
+  alpha = jnp.power(jnp.linalg.norm(xx @ xx), 0.25)
+  # alpha = jax.lax.sqrt(jnp.linalg.norm(x, ord=1))
+  # alpha *= jax.lax.sqrt(jnp.linalg.norm(x, ord=jnp.inf))
   alpha = lax.select(alpha == 0, jnp.ones_like(alpha), alpha)
   beta = _scalar_inverse_root(alpha, p)
 
