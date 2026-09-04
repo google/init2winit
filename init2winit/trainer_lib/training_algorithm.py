@@ -209,6 +209,8 @@ class TrainingAlgorithm(metaclass=abc.ABCMeta):
     Returns:
       The post-processed optimizer state, ready for sharding.
     """
+    if hasattr(self, '_optimizer_state'):
+      self._optimizer_state = None
     return optimizer_state
 
 
@@ -945,7 +947,6 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
         grad_norm=grad_norm.item(),
         update_norm=update_norm.item(),
     )
-    self._optimizer_state = new_optimizer_state
 
     return new_optimizer_state, new_params, new_batch_stats, cost_value, grad
 
@@ -988,7 +989,7 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     # Wrapping init in jax.jit fuses per-parameter state creation ops into
     # a single compilation instead of compiling each one individually.
     optax_optimizer_state = jax.jit(optimizer_init_fn)(params)
-    self._optimizer_state = optax_optimizer_state
+    self._optimizer_state = None
     self._update_fn = optax_optimizer_update_fn
     return optax_optimizer_state
 

@@ -19,6 +19,7 @@ This is useful for training neural networks with stax, where model parameters
 are nested numpy arrays.
 """
 
+import gc
 from absl import flags
 from absl import logging
 from init2winit.dataset_lib import data_utils
@@ -146,14 +147,32 @@ def maybe_restore_checkpoint(
         False,
     )  # is_restored
 
+  restored_optimizer_state = ckpt_to_return['optimizer_state']
+  restored_params = ckpt_to_return['params']
+  restored_batch_stats = ckpt_to_return['batch_stats']
+  restored_metrics_state = ckpt_to_return['training_metrics_grabber']
+  restored_global_step = ckpt_to_return['global_step']
+  restored_sum_train_cost = ckpt_to_return['sum_train_cost']
+  restored_preemption_count = ckpt_to_return['preemption_count']
+
+  del latest_ckpt
+  del ckpt_to_return
+  del unreplicated_checkpoint_state
+  del unwrapped_optimizer_state
+  del unreplicated_optimizer_state
+  del unreplicated_params
+  del unreplicated_batch_stats
+  del unreplicated_training_metrics_state
+  gc.collect()
+
   return (
-      ckpt_to_return['optimizer_state'],
-      ckpt_to_return['params'],
-      ckpt_to_return['batch_stats'],
-      ckpt_to_return['training_metrics_grabber'],
-      ckpt_to_return['global_step'],  # global_step
-      ckpt_to_return['sum_train_cost'],
-      ckpt_to_return['preemption_count'],  # preemption_count
+      restored_optimizer_state,
+      restored_params,
+      restored_batch_stats,
+      restored_metrics_state,
+      restored_global_step,
+      restored_sum_train_cost,
+      restored_preemption_count,
       is_restored,
   )  # is_restored
 
