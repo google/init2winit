@@ -15,7 +15,7 @@
 
 """Algorithms for narrowing hyperparameter search spaces.
 
-TODO(dsuo): suport discrete hparams.
+TODO(dsuo): support discrete hparams.
 """
 
 import copy

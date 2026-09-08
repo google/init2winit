@@ -25,7 +25,7 @@ import numpy as np
 def _check_schedule_hparams(schedule_hparams, expected_keys):
   if set(schedule_hparams.keys()) != set(expected_keys):
     raise ValueError(
-        'Provided schedule_hparams keys are invalid. Recieved: {}, Expected: {}'
+        'Provided schedule_hparams keys are invalid. Received: {}, Expected: {}'
         .format(sorted(schedule_hparams.keys()), sorted(expected_keys))
     )
 
