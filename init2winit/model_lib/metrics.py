@@ -214,6 +214,48 @@ class NumExamples(Metric):
     return self.count
 
 
+@flax.struct.dataclass
+class NumTokens(Metric):
+  """Computes the number of tokens seen."""
+
+  count: jnp.float32
+
+  @classmethod
+  def from_model_output(cls, num_tokens=None, **_):
+    if num_tokens is None:
+      return cls(count=jnp.array(0.0, dtype=jnp.float32))
+    return cls(count=jnp.array(num_tokens, dtype=jnp.float32))
+
+  def merge(self, other):
+    """Merges two NumTokens metrics."""
+    return type(self)(count=self.count + other.count)
+
+  def compute(self):
+    """Computes the number of tokens."""
+    return self.count
+
+
+@flax.struct.dataclass
+class EffectiveNumTokens(Metric):
+  """Computes the effective number of tokens seen (masked)."""
+
+  count: jnp.float32
+
+  @classmethod
+  def from_model_output(cls, effective_num_tokens=None, **_):
+    if effective_num_tokens is None:
+      return cls(count=jnp.array(0.0, dtype=jnp.float32))
+    return cls(count=jnp.array(effective_num_tokens, dtype=jnp.float32))
+
+  def merge(self, other):
+    """Merges two EffectiveNumTokens metrics."""
+    return type(self)(count=self.count + other.count)
+
+  def compute(self):
+    """Computes the effective number of tokens."""
+    return self.count
+
+
 # Following the Flax OGB example:
 # https://github.com/google/flax/blob/main/examples/ogbg_molpcba/train.py
 @flax.struct.dataclass
@@ -835,7 +877,10 @@ _METRICS = {
         num_examples=NumExamples,
     ),
     'mdlm_metrics': Collection.create(
-        ce_loss=average_ctc_loss(), perplexity=mdlm_perplexity()
+        ce_loss=average_ctc_loss(),
+        perplexity=mdlm_perplexity(),
+        num_tokens=NumTokens,
+        effective_num_tokens=EffectiveNumTokens,
     ),
 }
 
