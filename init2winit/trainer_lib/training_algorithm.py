@@ -857,7 +857,6 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
 
   def __init__(self, hps, model, num_train_steps):
     super().__init__(hps, model, num_train_steps)
-    self._optimizer_state = None
     self._update_fn = None
     self._lr_fn = None
     self.training_cost_fn = model.training_cost
@@ -945,7 +944,6 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
         grad_norm=grad_norm.item(),
         update_norm=update_norm.item(),
     )
-    self._optimizer_state = new_optimizer_state
 
     return new_optimizer_state, new_params, new_batch_stats, cost_value, grad
 
@@ -988,7 +986,6 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     # Wrapping init in jax.jit fuses per-parameter state creation ops into
     # a single compilation instead of compiling each one individually.
     optax_optimizer_state = jax.jit(optimizer_init_fn)(params)
-    self._optimizer_state = optax_optimizer_state
     self._update_fn = optax_optimizer_update_fn
     return optax_optimizer_state
 

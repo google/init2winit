@@ -16,6 +16,7 @@
 """Abstract parent class for all trainers."""
 
 import abc
+import gc
 import itertools
 import multiprocessing
 import os.path
@@ -690,6 +691,12 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         'Training state sharded in %f seconds', time.time() - start_time
     )
 
+    del unreplicated_params
+    del unreplicated_optimizer_state
+    del unreplicated_batch_stats
+    del unreplicated_metrics_state
+    gc.collect()
+
     self._dataset = self.setup_data_loader(data_rng, self._global_step)
     self._eval_callbacks = self._setup_eval_callbacks(callback_rng)
     logging.info('Training state setup complete')
@@ -719,6 +726,7 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       logging.info('Hyperparameters: %s', self._hps)
 
     self.setup_and_maybe_restore(init_rng, data_rng, callback_rng)
+    gc.collect()
 
     trainer_utils.log_message(
         'Setup and maybe restore completed!',
