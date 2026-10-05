@@ -78,7 +78,7 @@ def _scalar_inverse_root(x: chex.Array, n: int) -> chex.Array:
     r = x ** (1 / n)
     # One step of Newton's method to polish the root
     r = ((n - 1) / n) * r + (x / n) / _scalar_power(r, n - 1)
-    return 1 / r  # pyrefly: ignore[bad-return]
+    return 1 / r
 
 
 @functools.cache

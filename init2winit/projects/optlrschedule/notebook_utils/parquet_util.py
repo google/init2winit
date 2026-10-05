@@ -105,7 +105,7 @@ def load_all_parquet_files(
   if dfs:
     # Concat will ignore empty DataFrames properly.
     merged_df = pd.concat(dfs, ignore_index=True)
-    return merged_df  # pyrefly: ignore[bad-return]
+    return merged_df
   else:
     return pd.DataFrame()
 
@@ -148,6 +148,6 @@ def load_all_parquet_files_sequentially(
 
   if dfs:
     merged_df = pd.concat(dfs, ignore_index=True)
-    return merged_df  # pyrefly: ignore[bad-return]
+    return merged_df
   else:
     return pd.DataFrame()

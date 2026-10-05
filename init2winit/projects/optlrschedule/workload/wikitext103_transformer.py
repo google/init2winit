@@ -138,7 +138,7 @@ def _train_step(
   loss, grads = jax.value_and_grad(_loss_fn, argnums=0)(
       state.params, state.apply_fn, batch, dropout_train_rng
   )
-  state.opt_state.hyperparams['learning_rate'] = lr  # pytype: disable=attribute-error
+  state.opt_state.hyperparams['learning_rate'] = lr  # pyrefly: ignore[missing-attribute]
   state = state.apply_gradients(grads=grads)
   return state, loss
 

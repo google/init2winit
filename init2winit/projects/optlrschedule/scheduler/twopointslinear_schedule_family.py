@@ -130,7 +130,7 @@ class TwoPointLinearScheduleFamily(base_schedule_family.WarmupScheduleFamily):
     # Create a piecewise linear interpolation
     lr_values = np.interp(np.arange(total_steps), x_steps, y_points)
 
-    return lr_values  # pyrefly: ignore[bad-return]
+    return lr_values
 
   def list_schedule_parameter_keys(self) -> list[str]:
     """List the keys of the schedule parameters."""
