@@ -16,6 +16,7 @@
 """FastMRI knee singlecoil input pipeline."""
 
 import datetime
+import functools
 import itertools
 import os
 
@@ -23,6 +24,7 @@ from absl import logging
 import h5py
 from init2winit.dataset_lib import data_utils
 import jax
+from jax.experimental import multihost_utils
 from ml_collections.config_dict import config_dict
 import numpy as np
 import tensorflow as tf
@@ -379,13 +381,22 @@ def get_fastmri(shuffle_rng, batch_size, eval_batch_size, hps):
     for batch in itertools.islice(eval_train_ds, num_batches):
       yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
 
-  def valid_epoch(num_batches=None):
-    for batch in itertools.islice(eval_ds, num_batches):
-      yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
+  def _iter_eval_epoch(ds, num_batches=None):
+    batches = [
+        data_utils.maybe_pad_batch(b, per_host_eval_batch_size)
+        for b in itertools.islice(ds, num_batches)
+    ]
+    if jax.process_count() > 1 and batches:
+      max_batches = int(np.max(multihost_utils.process_allgather(len(batches))))
+      pad_batch = {
+          **batches[-1],
+          'weights': np.zeros_like(batches[-1]['weights']),
+      }
+      batches.extend([pad_batch] * (max_batches - len(batches)))
+    yield from batches
 
-  def test_epoch(num_batches=None):
-    for batch in itertools.islice(test_ds, num_batches):
-      yield data_utils.maybe_pad_batch(batch, per_host_eval_batch_size)
+  valid_epoch = functools.partial(_iter_eval_epoch, eval_ds)
+  test_epoch = functools.partial(_iter_eval_epoch, test_ds)
 
   return data_utils.Dataset(
       train_iterator_fn, eval_train_epoch, valid_epoch, test_epoch
