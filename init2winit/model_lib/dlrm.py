@@ -25,6 +25,7 @@ from jax import nn as jnn
 import jax.experimental.shard_map
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
+import numpy as np
 
 ParameterType = model_utils.ParameterType
 
@@ -70,10 +71,21 @@ def dot_interact(concat_features, keep_diags=True):
   )
   feature_dim = xactions.shape[-1]
 
-  rows, cols = jnp.array(
-      jnp.triu_indices(feature_dim, k=0 if keep_diags else 1)
+  triu_indices = np.stack(
+      np.triu_indices(feature_dim, k=0 if keep_diags else 1), axis=-1
+  ).astype(np.int32)
+  dnums = jax.lax.GatherDimensionNumbers(
+      offset_dims=(0,),
+      collapsed_slice_dims=(1, 2),
+      start_index_map=(1, 2),
   )
-  activations = xactions[:, rows, cols]
+  activations = jax.lax.gather(
+      xactions,
+      triu_indices,
+      dimension_numbers=dnums,
+      slice_sizes=(xactions.shape[0], 1, 1),
+      mode=jax.lax.GatherScatterMode.PROMISE_IN_BOUNDS,
+  )
   return activations
 
 
@@ -109,7 +121,9 @@ class DLRM(nn.Module):
     embedding_table_block = jax.lax.all_gather(
         embedding_table_block, 'devices', axis=1, tiled=True
     )
-    embeddings = jnp.take(embedding_table_block, indices_block, axis=0)
+    embeddings = embedding_table_block.at[indices_block].get(
+        mode='promise_in_bounds'
+    )
     return embeddings
 
   @nn.compact
