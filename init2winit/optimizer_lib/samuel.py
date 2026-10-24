@@ -64,7 +64,7 @@ def samuel(
     mw_etas: list of multiplicative weight etas.
     seed: initial jax random seed.
     train_loss: train loss to be injected at update time.
-    learning_rate: for compatability, but ignored for now.
+    learning_rate: for compatibility, but ignored for now.
 
   Returns:
     samuel optimizer

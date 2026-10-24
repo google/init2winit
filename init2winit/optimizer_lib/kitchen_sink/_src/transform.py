@@ -1882,7 +1882,7 @@ def no_op() -> optax.GradientTransformation:
   return optax.GradientTransformation(init_fn, update_fn)
 
 
-# scale_by_rms exists only for backward compatability
+# scale_by_rms exists only for backward compatibility
 _composites = {
     'scale_by_adaptive_gd': scale_by_adaptive_gd,
     'scale_by_adaptive_gd_simple': scale_by_adaptive_gd_simple,
