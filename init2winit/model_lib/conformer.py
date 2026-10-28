@@ -33,6 +33,7 @@ from typing import Any, List
 
 from flax import linen as nn
 from flax import struct
+from init2winit import utils
 from init2winit.model_lib import base_model
 from init2winit.model_lib import librispeech_preprocessor as preprocessor
 from init2winit.model_lib import lingvo_attention
@@ -47,6 +48,7 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation_function='swish',
         eval_batch_size=128,
+        computation_dtype='bfloat16',
         model_dtype='float32',
         encoder_dim=512,
         num_attention_heads=8,
@@ -76,6 +78,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation_function='swish',
         eval_batch_size=128,
+        computation_dtype='bfloat16',
         model_dtype='float32',
         encoder_dim=512,
         num_attention_heads=8,
@@ -104,7 +107,8 @@ class ConformerConfig:
   """Global hyperparameters used to minimize obnoxious kwarg plumbing."""
 
   vocab_size: int = 0
-  dtype: Any = jnp.float32
+  dtype: Any = jnp.bfloat16
+  param_dtype: Any = jnp.float32
   encoder_dim: int = 0
   num_attention_heads: int = 0
   num_encoder_layers: int = 0
@@ -150,21 +154,28 @@ class LayerNorm(nn.Module):
 
   dim: int = 0
   epsilon: float = 1e-6
+  param_dtype: Any = jnp.float32
 
   def setup(self):
-    self.scale = self.param('scale', nn.initializers.zeros, [self.dim])
-    self.bias = self.param('bias', nn.initializers.zeros, [self.dim])
+    self.scale = self.param(
+        'scale', nn.initializers.zeros, [self.dim], self.param_dtype
+    )
+    self.bias = self.param(
+        'bias', nn.initializers.zeros, [self.dim], self.param_dtype
+    )
 
   @nn.compact
   def __call__(self, inputs):
-    mean = jnp.mean(inputs, axis=[-1], keepdims=True)
-    var = jnp.mean(jnp.square(inputs - mean), axis=[-1], keepdims=True)
+    inputs_f32 = inputs.astype(jnp.float32)
+    mean = jnp.mean(inputs_f32, axis=[-1], keepdims=True)
+    var = jnp.mean(jnp.square(inputs_f32 - mean), axis=[-1], keepdims=True)
 
-    normed_inputs = (inputs - mean) * jax.lax.rsqrt(var + self.epsilon)
-    normed_inputs *= 1 + self.scale
-    normed_inputs += self.bias
+    normed_inputs = (inputs_f32 - mean) * jax.lax.rsqrt(var + self.epsilon)
+    normed_inputs = normed_inputs * (
+        1.0 + self.scale.astype(jnp.float32)
+    ) + self.bias.astype(jnp.float32)
 
-    return normed_inputs
+    return normed_inputs.astype(inputs.dtype)
 
 
 class Subsample(nn.Module):
@@ -173,22 +184,33 @@ class Subsample(nn.Module):
   Attributes:
     encoder_dim: model dimension of conformer.
     input_dropout_rate: dropout rate for inputs.
+    dtype: activation compute dtype.
+    param_dtype: parameter dtype.
   """
 
   encoder_dim: int = 0
   input_dropout_rate: float = 0.0
+  dtype: Any = jnp.float32
+  param_dtype: Any = jnp.float32
 
   @nn.compact
   def __call__(self, inputs, input_paddings, train):
+    work_dtype = self.dtype if self.dtype is not None else inputs.dtype
     output_paddings = input_paddings
-    outputs = jnp.expand_dims(inputs, axis=-1)
+    outputs = jnp.expand_dims(inputs.astype(work_dtype), axis=-1)
 
     outputs, output_paddings = Conv2dSubsampling(
-        input_channels=1, output_channels=self.encoder_dim
+        input_channels=1,
+        output_channels=self.encoder_dim,
+        dtype=work_dtype,
+        param_dtype=self.param_dtype,
     )(outputs, output_paddings)
 
     outputs, output_paddings = Conv2dSubsampling(
-        input_channels=self.encoder_dim, output_channels=self.encoder_dim
+        input_channels=self.encoder_dim,
+        output_channels=self.encoder_dim,
+        dtype=work_dtype,
+        param_dtype=self.param_dtype,
     )(outputs, output_paddings)
 
     batch_size, subsampled_lengths, subsampled_dims, channels = outputs.shape
@@ -196,16 +218,18 @@ class Subsample(nn.Module):
     outputs = jnp.reshape(
         outputs, (batch_size, subsampled_lengths, subsampled_dims * channels)
     )
-
     outputs = nn.Dense(
         self.encoder_dim,
         use_bias=True,
+        dtype=work_dtype,
+        param_dtype=self.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
     )(outputs)
 
-    outputs = outputs + AddPositionalEmbedding(embedding_dim=self.encoder_dim)(
+    pos_emb = AddPositionalEmbedding(embedding_dim=self.encoder_dim)(
         seq_length=outputs.shape[1]
-    )
+    ).astype(work_dtype)
+    outputs = outputs + pos_emb
 
     outputs = nn.Dropout(rate=self.input_dropout_rate, deterministic=not train)(
         outputs
@@ -226,23 +250,36 @@ class Conv2dSubsampling(nn.Module):
   output_channels: int = 0
   filter_stride: List[int] = (2, 2)
   padding: str = 'SAME'
+  dtype: Any = jnp.float32
+  param_dtype: Any = jnp.float32
 
   def setup(self):
     self.filter_shape = (3, 3, self.input_channels, self.output_channels)
     self.kernel = self.param(
-        'kernel', nn.initializers.xavier_uniform(), self.filter_shape
+        'kernel',
+        nn.initializers.xavier_uniform(),
+        self.filter_shape,
+        self.param_dtype,
     )
     self.bias = self.param(
-        'bias', lambda rng, s: jnp.zeros(s, jnp.float32), self.output_channels
+        'bias',
+        nn.initializers.zeros,
+        self.output_channels,
+        self.param_dtype,
     )
 
   @nn.compact
   def __call__(self, inputs, paddings):
+    compute_dtype = self.dtype if self.dtype is not None else inputs.dtype
+    inputs = inputs.astype(compute_dtype)
+    kernel = self.kernel.astype(compute_dtype)
+    bias = self.bias.astype(compute_dtype)
+
     # Computing strided convolution to subsample inputs.
     feature_group_count = inputs.shape[3] // self.filter_shape[2]
     outputs = jax.lax.conv_general_dilated(
         lhs=inputs,
-        rhs=self.kernel,
+        rhs=kernel,
         window_strides=self.filter_stride,
         padding=self.padding,
         rhs_dilation=(1, 1),
@@ -250,28 +287,21 @@ class Conv2dSubsampling(nn.Module):
         feature_group_count=feature_group_count,
     )
 
-    outputs += jnp.reshape(self.bias, (1,) * (outputs.ndim - 1) + (-1,))
+    outputs += jnp.reshape(bias, (1,) * (outputs.ndim - 1) + (-1,))
     outputs = nn.relu(outputs)
 
     # Computing correct paddings post input convolution.
-    input_length = paddings.shape[1]
     stride = self.filter_stride[0]
-
-    pad_len = (input_length + stride - 1) // stride * stride - input_length
-    out_padding = jax.lax.conv_general_dilated(
-        lhs=paddings[:, :, None],
-        rhs=jnp.ones([1, 1, 1]),
-        window_strides=self.filter_stride[:1],
-        padding=[(0, pad_len)],
-        dimension_numbers=('NHC', 'HIO', 'NHC'),
+    out_padding = paddings[:, ::stride].astype(
+        jnp.result_type(paddings, jnp.float32)
     )
-    out_padding = jnp.squeeze(out_padding, axis=-1)
 
     # Mask outputs by correct paddings to ensure padded elements in inputs map
     # to padded value in outputs.
-    outputs = outputs * (
+    mask = (
         1.0 - jnp.expand_dims(jnp.expand_dims(out_padding, -1), -1)
-    )
+    ).astype(compute_dtype)
+    outputs = outputs * mask
     return outputs, out_padding
 
 
@@ -283,12 +313,17 @@ class FeedForwardModule(nn.Module):
   @nn.compact
   def __call__(self, inputs, padding_mask=None, train=False):
     config = self.config
+    work_dtype = config.dtype if config.dtype is not None else inputs.dtype
 
-    inputs = LayerNorm(dim=config.encoder_dim)(inputs)
+    inputs = LayerNorm(
+        dim=config.encoder_dim, param_dtype=config.param_dtype
+    )(inputs.astype(work_dtype))
 
     inputs = nn.Dense(
         config.encoder_dim * config.feed_forward_expansion_factor,
         use_bias=True,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
     )(inputs)
     inputs = model_utils.ACTIVATIONS[self.config.activation_function](inputs)
@@ -296,14 +331,19 @@ class FeedForwardModule(nn.Module):
         inputs, deterministic=not train
     )
 
-    inputs = inputs * padding_mask
+    if padding_mask is not None:
+      padding_mask = padding_mask.astype(work_dtype)
+      inputs = inputs * padding_mask
 
     inputs = nn.Dense(
         config.encoder_dim,
         use_bias=True,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
     )(inputs)
-    inputs = inputs * padding_mask
+    if padding_mask is not None:
+      inputs = inputs * padding_mask
 
     inputs = nn.Dropout(rate=config.feed_forward_residual_dropout_rate)(
         inputs, deterministic=not train
@@ -355,9 +395,12 @@ class QueryScaler(nn.Module):
   """A layer to scale individual dims of the query attention matrix."""
 
   dim: int = 0
+  param_dtype: Any = jnp.float32
 
   def setup(self):
-    self.scale = self.param('scale', nn.initializers.zeros, [self.dim])
+    self.scale = self.param(
+        'scale', nn.initializers.zeros, [self.dim], self.param_dtype
+    )
 
   @nn.compact
   def __call__(self, inputs):
@@ -372,8 +415,9 @@ class QueryScaler(nn.Module):
     # can avoid unnecessary XLA op fusion mess on TPU.
     r_softplus_0 = 1.442695041
 
-    scale = jnp.array(r_softplus_0, dtype=inputs.dtype)
-    scale *= jax.nn.softplus(self.scale)
+    scale = (
+        r_softplus_0 * jax.nn.softplus(self.scale.astype(jnp.float32))
+    ).astype(inputs.dtype)
 
     return inputs * scale
 
@@ -392,6 +436,7 @@ def dot_product_attention(
     dropout_rate=0.0,
     deterministic=False,
     dtype=jnp.float32,
+    param_dtype=jnp.float32,
     precision=None,
     temperature=1.0,
 ):
@@ -423,6 +468,7 @@ def dot_product_attention(
     dropout_rate: dropout rate
     deterministic: bool, deterministic or not (to apply dropout)
     dtype: the dtype of the computation (default: float32)
+    param_dtype: the dtype of the query scaling parameter (default: float32)
     precision: numerical precision of the computation see `jax.lax.Precision`
       for details.
     temperature: Constant factor to multiply logits by before computing softmax.
@@ -439,28 +485,40 @@ def dot_product_attention(
   ), 'q, k, v num_heads must match.'
   assert key.shape[-3] == value.shape[-3], 'k, v lengths must match.'
 
-  # compute attention weights
-  query = QueryScaler(dim=query.shape[-1])(query)
-  attn_weights = nn.dot_product_attention_weights(
-      query,
-      key,
-      bias,
-      mask,
-      broadcast_dropout,
-      dropout_rng,
-      dropout_rate,
-      deterministic,
-      dtype,
-      precision,
+  work_dtype = dtype if dtype is not None else query.dtype
+  query = QueryScaler(dim=query.shape[-1], param_dtype=param_dtype)(
+      query.astype(work_dtype)
   )
+  key = key.astype(work_dtype)
+  value = value.astype(work_dtype)
+
+  depth = query.shape[-1]
+  query = query / jnp.sqrt(depth).astype(work_dtype)
+  logits = jnp.einsum(
+      '...qhd,...khd->...hqk', query, key, precision=precision
+  ).astype(jnp.float32)
+  if bias is not None:
+    logits = logits + bias.astype(jnp.float32)
+  if mask is not None:
+    logits = jnp.where(mask, logits, jnp.asarray(-1e9, dtype=jnp.float32))
+  attn_weights = jax.nn.softmax(logits, axis=-1).astype(work_dtype)
+
+  if not deterministic and dropout_rate > 0.0:
+    keep_prob = 1.0 - dropout_rate
+    if broadcast_dropout:
+      dropout_shape = tuple([1] * (key.ndim - 2)) + attn_weights.shape[-2:]
+      keep = jax.random.bernoulli(dropout_rng, keep_prob, dropout_shape)
+    else:
+      keep = jax.random.bernoulli(dropout_rng, keep_prob, attn_weights.shape)
+    multiplier = keep.astype(work_dtype) / jnp.asarray(
+        keep_prob, dtype=work_dtype
+    )
+    attn_weights = attn_weights * multiplier
 
   # return weighted sum over values for each query position
-  return (
-      jnp.einsum(
-          '...hqk,...khd->...qhd', attn_weights, value, precision=precision
-      )
-      * temperature
-  )
+  return jnp.einsum(
+      '...hqk,...khd->...qhd', attn_weights, value, precision=precision
+  ) * jnp.asarray(temperature, dtype=work_dtype)
 
 
 class MultiHeadedSelfAttention(nn.Module):
@@ -501,33 +559,40 @@ class MultiHeadedSelfAttention(nn.Module):
     return attention_mask
 
   @nn.compact
-  def __call__(self, inputs, paddings, train):
+  def __call__(self, inputs, paddings, train, attention_mask=None):
     config = self.config
-    mask_paddings = 1 - paddings
-    attention_mask = nn.make_attention_mask(
-        mask_paddings > 0, mask_paddings > 0, dtype=jnp.float32
-    )
+    work_dtype = config.dtype if config.dtype is not None else inputs.dtype
+    if not self.config.use_lingvo_attention and attention_mask is None:
+      valid = (1 - paddings) > 0
+      attention_mask = jnp.logical_and(
+          valid[:, None, :, None], valid[:, None, None, :]
+      )
 
-    inputs = LayerNorm(dim=config.encoder_dim)(inputs)
+    inputs = LayerNorm(
+        dim=config.encoder_dim, param_dtype=config.param_dtype
+    )(inputs.astype(work_dtype))
 
     if self.config.use_lingvo_attention:
-      atten_mask = self.convert_paddings_to_mask(paddings, inputs.dtype)
+      atten_mask = self.convert_paddings_to_mask(paddings, jnp.float32)
 
       result = self.self_attention(
           query_vec=inputs,
           key_vec=inputs,
           value_vec=inputs,
           atten_mask=atten_mask,
-      )[0]
+      )[0].astype(work_dtype)
     else:
       attn_fn = functools.partial(
-          dot_product_attention, temperature=config.attn_temperature
+          dot_product_attention,
+          temperature=config.attn_temperature,
+          param_dtype=config.param_dtype,
       )
       result = nn.SelfAttention(
           num_heads=config.num_attention_heads,
           qkv_features=config.encoder_dim,
           decode=False,
-          dtype=config.dtype,
+          dtype=work_dtype,
+          param_dtype=config.param_dtype,
           kernel_init=nn.initializers.xavier_uniform(),
           bias_init=nn.initializers.zeros,
           use_bias=True,
@@ -561,39 +626,45 @@ class BatchNorm(nn.Module):
 
   def setup(self):
     dim = self.config.encoder_dim
-    dtype = self.config.dtype
 
     self.ra_mean = self.variable(
-        'batch_stats', 'mean', lambda s: jnp.zeros(s, dtype), dim
+        'batch_stats', 'mean', lambda s: jnp.zeros(s, jnp.float32), dim
     )
     self.ra_var = self.variable(
-        'batch_stats', 'var', lambda s: jnp.ones(s, dtype), dim
+        'batch_stats', 'var', lambda s: jnp.ones(s, jnp.float32), dim
     )
 
-    self.gamma = self.param('scale', nn.initializers.zeros, dim, dtype)
-    self.beta = self.param('bias', nn.initializers.zeros, dim, dtype)
+    self.gamma = self.param(
+        'scale', nn.initializers.zeros, dim, self.config.param_dtype
+    )
+    self.beta = self.param(
+        'bias', nn.initializers.zeros, dim, self.config.param_dtype
+    )
 
   @nn.compact
   def __call__(self, inputs, input_paddings, train):
+    out_dtype = (
+        self.config.dtype if self.config.dtype is not None else inputs.dtype
+    )
     rank = inputs.ndim
     reduce_over_dims = list(range(0, rank - 1))
 
-    padding = jnp.expand_dims(input_paddings, -1)
+    padding = jnp.expand_dims(input_paddings, -1).astype(jnp.float32)
+    mask = 1.0 - padding
+    inputs_f32 = inputs.astype(jnp.float32)
     momentum = self.config.batch_norm_momentum
     epsilon = self.config.batch_norm_epsilon
 
     if train:
-      mask = 1.0 - padding
-      sum_v = jnp.sum(inputs * mask, axis=reduce_over_dims, keepdims=False)
-      count_v = jnp.sum(
-          jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=False
+      sum_v = jnp.sum(inputs_f32 * mask, axis=reduce_over_dims, keepdims=False)
+      count_v = jnp.maximum(
+          jnp.sum(mask, axis=reduce_over_dims, keepdims=False), 1.0
       )
-
-      count_v = jnp.maximum(count_v, 1.0)
       mean = sum_v / count_v
 
+      centered = inputs_f32 - mean
       sum_vv = jnp.sum(
-          (inputs - mean) * (inputs - mean) * mask,
+          jnp.square(centered) * mask,
           axis=reduce_over_dims,
           keepdims=False,
       )
@@ -603,15 +674,15 @@ class BatchNorm(nn.Module):
       self.ra_mean.value = momentum * self.ra_mean.value + (1 - momentum) * mean
       self.ra_var.value = momentum * self.ra_var.value + (1 - momentum) * var
     else:
-      mean = self.ra_mean.value
-      var = self.ra_var.value
+      mean = self.ra_mean.value.astype(jnp.float32)
+      var = self.ra_var.value.astype(jnp.float32)
+      centered = inputs_f32 - mean
 
-    inv = (1 + self.gamma) / jnp.sqrt(var + epsilon)
+    inv = (1.0 + self.gamma.astype(jnp.float32)) * jax.lax.rsqrt(var + epsilon)
 
-    bn_output = (inputs - mean) * inv + self.beta
-    bn_output *= 1.0 - padding
+    bn_output = (centered * inv + self.beta.astype(jnp.float32)) * mask
 
-    return bn_output
+    return bn_output.astype(out_dtype)
 
 
 class ConvolutionBlock(nn.Module):
@@ -640,22 +711,33 @@ class ConvolutionBlock(nn.Module):
   @nn.compact
   def __call__(self, inputs, input_paddings, train):
     config = self.config
-    inputs = LayerNorm(dim=config.encoder_dim)(inputs)
+    work_dtype = config.dtype if config.dtype is not None else inputs.dtype
+    inputs = LayerNorm(
+        dim=config.encoder_dim,
+        param_dtype=config.param_dtype,
+        name='LayerNorm_0',
+    )(inputs.astype(work_dtype))
 
     input_gated1 = nn.Dense(
         config.encoder_dim,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
         use_bias=True,
     )(inputs)
 
     input_gated2 = nn.Dense(
         config.encoder_dim,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
         use_bias=True,
     )(inputs)
 
     inputs = input_gated1 * jax.nn.sigmoid(input_gated2)
-    inputs = inputs * (1 - jnp.expand_dims(input_paddings, -1))
+    inputs = inputs * (1 - jnp.expand_dims(input_paddings, -1)).astype(
+        work_dtype
+    )
 
     inputs = nn.Conv(
         features=config.encoder_dim,
@@ -664,18 +746,29 @@ class ConvolutionBlock(nn.Module):
         padding='SAME',
         feature_group_count=config.encoder_dim,
         use_bias=False,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
+        name='Conv_0',
     )(inputs)
 
-    inputs = BatchNorm(config)(inputs, input_paddings, train)
+    inputs = BatchNorm(config, name='BatchNorm_0')(
+        inputs, input_paddings, train
+    )
 
     inputs = model_utils.ACTIVATIONS[self.config.activation_function](inputs)
     inputs = nn.Dense(
-        config.encoder_dim, kernel_init=nn.initializers.xavier_uniform()
+        config.encoder_dim,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
+        kernel_init=nn.initializers.xavier_uniform(),
+        name='Dense_2',
     )(inputs)
 
     inputs = nn.Dropout(
-        rate=config.conv_residual_dropout_rate, deterministic=not train
+        rate=config.conv_residual_dropout_rate,
+        deterministic=not train,
+        name='Dropout_0',
     )(inputs)
     return inputs
 
@@ -696,16 +789,18 @@ class ConformerBlock(nn.Module):
   config: ConformerConfig
 
   @nn.compact
-  def __call__(self, inputs, input_paddings, train):
+  def __call__(self, inputs, input_paddings, train, attention_mask=None):
     config = self.config
-    padding_mask = jnp.expand_dims(1 - input_paddings, -1)
+    work_dtype = config.dtype if config.dtype is not None else inputs.dtype
+    inputs = inputs.astype(work_dtype)
+    padding_mask = jnp.expand_dims(1 - input_paddings, -1).astype(work_dtype)
 
     inputs = inputs + 0.5 * FeedForwardModule(config=self.config)(
         inputs, padding_mask, train
     )
 
     inputs = inputs + MultiHeadedSelfAttention(config=self.config)(
-        inputs, input_paddings, train
+        inputs, input_paddings, train, attention_mask=attention_mask
     )
 
     inputs = inputs + ConvolutionBlock(config)(inputs, input_paddings, train)
@@ -715,7 +810,9 @@ class ConformerBlock(nn.Module):
     )
 
     if config.enable_conformer_post_layer_norm:
-      inputs = LayerNorm(dim=config.encoder_dim)(inputs)
+      inputs = LayerNorm(
+          dim=config.encoder_dim, param_dtype=config.param_dtype
+      )(inputs)
 
     return inputs
 
@@ -762,24 +859,45 @@ class ConformerEncoderDecoder(nn.Module):
     if config.use_specaug and train:
       outputs, output_paddings = self.specaug(outputs, output_paddings)
 
+    work_dtype = config.dtype if config.dtype is not None else jnp.float32
+    outputs = outputs.astype(work_dtype)
+
     # Subsample input by a factor of 4 by performing strided convolutions.
     outputs, output_paddings = Subsample(
         encoder_dim=config.encoder_dim,
         input_dropout_rate=config.input_dropout_rate,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
     )(outputs, output_paddings, train)
+
+    # Precompute the boolean self-attention mask once across all encoder layers.
+    if config.use_lingvo_attention:
+      attention_mask = None
+    else:
+      valid = (1 - output_paddings) > 0
+      attention_mask = jnp.logical_and(
+          valid[:, None, :, None], valid[:, None, None, :]
+      )
 
     # Run the conformer encoder layers.
     for _ in range(config.num_encoder_layers):
-      outputs = ConformerBlock(config)(outputs, output_paddings, train)
+      outputs = ConformerBlock(config)(
+          outputs, output_paddings, train, attention_mask=attention_mask
+      )
 
     if config.enable_decoder_pre_layer_norm:
-      outputs = LayerNorm(config.encoder_dim)(outputs)
+      outputs = LayerNorm(
+          config.encoder_dim, param_dtype=config.param_dtype
+      )(outputs)
     # Run the decoder which in this case is a trivial projection layer.
     outputs = nn.Dense(
         config.vocab_size,
         use_bias=True,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
     )(outputs)
+    outputs = outputs.astype(jnp.float32)
 
     return outputs, output_paddings
 
@@ -928,6 +1046,8 @@ class ConformerModel(base_model.BaseModel):
   def build_flax_module(self):
     config = ConformerConfig(
         vocab_size=self.hps.output_shape[1],
+        dtype=utils.dtype_from_str(self.hps.computation_dtype),
+        param_dtype=utils.dtype_from_str(self.hps.model_dtype),
         encoder_dim=self.hps.encoder_dim,
         num_attention_heads=self.hps.num_attention_heads,
         num_encoder_layers=self.hps.num_encoder_layers,
@@ -978,6 +1098,8 @@ class MLCommonsConformerModel(ConformerModel):
 
     config = ConformerConfig(
         vocab_size=self.hps.output_shape[1],
+        dtype=utils.dtype_from_str(self.hps.computation_dtype),
+        param_dtype=utils.dtype_from_str(self.hps.model_dtype),
         encoder_dim=self.hps.encoder_dim,
         num_attention_heads=self.hps.num_attention_heads,
         num_encoder_layers=self.hps.num_encoder_layers,
