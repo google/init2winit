@@ -22,8 +22,10 @@ import functools
 from typing import Optional, Sequence, Union
 
 from flax import linen as nn
+from init2winit import utils
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
+import jax
 import jax.numpy as jnp
 from ml_collections.config_dict import config_dict
 import numpy as np
@@ -42,6 +44,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         pool_type='gap',
         posemb='sincos2d',
         head_zeroinit=True,
+        computation_dtype='bfloat16',
         model_dtype='float32',
         dropout_rate=0.0,
         normalizer='pre_layer_norm',
@@ -94,7 +97,7 @@ def dot_product_attention(
     dropout_rng=None,
     dropout_rate=0.0,
     deterministic=False,
-    dtype=jnp.float32,
+    dtype=jnp.bfloat16,
     precision=None,
     temperature=1.0,
 ):
@@ -141,27 +144,37 @@ def dot_product_attention(
   ), 'q, k, v num_heads must match.'
   assert key.shape[-3] == value.shape[-3], 'k, v lengths must match.'
 
-  # compute attention weights
-  attn_weights = nn.dot_product_attention_weights(
-      query,
-      key,
-      bias,
-      mask,
-      broadcast_dropout,
-      dropout_rng,
-      dropout_rate,
-      deterministic,
-      dtype,
-      precision,
-  )
+  if dtype is not None:
+    query = jnp.asarray(query, dtype)
+    key = jnp.asarray(key, dtype)
+    value = jnp.asarray(value, dtype)
 
-  # return weighted sum over values for each query position
-  return (
-      jnp.einsum(
-          '...hqk,...khd->...qhd', attn_weights, value, precision=precision
-      )
-      * temperature
-  )
+  if deterministic or dropout_rate == 0.0:
+    out = jax.nn.dot_product_attention(query, key, value, bias=bias, mask=mask)
+  else:
+    # compute attention weights
+    attn_weights = nn.dot_product_attention_weights(
+        query,
+        key,
+        bias,
+        mask,
+        broadcast_dropout,
+        dropout_rng,
+        dropout_rate,
+        deterministic,
+        dtype,
+        precision,
+        force_fp32_for_softmax=True,
+    )
+    attn_weights = jnp.asarray(attn_weights, value.dtype)
+    # return weighted sum over values for each query position
+    out = jnp.einsum(
+        '...hqk,...khd->...qhd', attn_weights, value, precision=precision
+    )
+
+  if temperature != 1.0:
+    out = out * jnp.asarray(temperature, out.dtype)
+  return out
 
 
 class MlpBlock(nn.Module):
@@ -171,19 +184,24 @@ class MlpBlock(nn.Module):
   dropout: float = 0.0
   activation: str = 'gelu'
   use_glu: bool = False
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
 
   @nn.compact
   def __call__(self, x, train=True):
     """Applies Transformer MlpBlock module."""
+    x = jnp.asarray(x, self.dtype)
     inits = dict(
         kernel_init=nn.initializers.xavier_uniform(),
         bias_init=nn.initializers.normal(stddev=1e-6),
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
     )
 
     d = x.shape[2]
     x = nn.Dense(self.mlp_dim or 4 * d, **inits)(x)
     if self.activation in model_utils.ACTIVATIONS:
-      x = model_utils.ACTIVATIONS[self.activation](x)
+      x = jnp.asarray(model_utils.ACTIVATIONS[self.activation](x), self.dtype)
     else:
       raise ValueError('Unsupported activation: {}'.format(self.activation))
 
@@ -209,33 +227,38 @@ class Encoder1DBlock(nn.Module):
   scale_attention_init: float = 1.0
   attn_temperature: float = 1.0
   use_glu: bool = False
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
 
   @nn.compact
   def __call__(self, x, train=True):
     out = {}
+    x = jnp.asarray(x, self.dtype)
     if self.normalizer == 'pre_layer_norm':
       maybe_pre_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=None
+          self.normalizer, train, dtype=self.dtype
       )
       maybe_post_normalize = model_utils.get_normalizer(
-          'none', train, dtype=None
+          'none', train, dtype=self.dtype
       )
     elif self.normalizer == 'post_layer_norm':
       maybe_pre_normalize = model_utils.get_normalizer(
-          'none', train, dtype=None
+          'none', train, dtype=self.dtype
       )
       maybe_post_normalize = model_utils.get_normalizer(
-          self.normalizer, train, dtype=None
+          self.normalizer, train, dtype=self.dtype
       )
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
-    y = maybe_pre_normalize()(x)
+    y = maybe_pre_normalize(param_dtype=self.param_dtype)(x)
     attn_fn = functools.partial(
         dot_product_attention, temperature=self.attn_temperature
     )
     y = out['sa'] = nn.SelfAttention(
         num_heads=self.num_heads,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
         kernel_init=nn.initializers.variance_scaling(
             self.scale_attention_init,
             'fan_avg',
@@ -251,23 +274,25 @@ class Encoder1DBlock(nn.Module):
     )(y)
     y = nn.Dropout(rate=self.dropout)(y, train)
     x = 2 * (self.residual_alpha * x + (1 - self.residual_alpha) * y)
-    x = maybe_post_normalize()(x)
+    x = maybe_post_normalize(param_dtype=self.param_dtype)(x)
     out['+sa'] = x
 
-    y = maybe_pre_normalize()(x)
+    y = maybe_pre_normalize(param_dtype=self.param_dtype)(x)
     y = out['mlp'] = MlpBlock(
         mlp_dim=self.mlp_dim,
         dropout=self.dropout,
         name='MlpBlock_3',
         activation=self.activation,
         use_glu=self.use_glu,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
     )(y, train)
     y = nn.Dropout(rate=self.dropout)(y, train)
     x = 2 * (self.residual_alpha * x + (1 - self.residual_alpha) * y)
-    x = maybe_post_normalize()(x)
+    x = maybe_post_normalize(param_dtype=self.param_dtype)(x)
     if self.resnet_style_residual:
       activation_fn = model_utils.ACTIVATIONS[self.activation]
-      x = activation_fn(x)
+      x = jnp.asarray(activation_fn(x), self.dtype)
     out['+mlp'] = x
 
     return x, out
@@ -285,13 +310,16 @@ class Encoder(nn.Module):
   resnet_style_residual: bool = False
   residual_alpha: float = 0.5
   scale_attention_init: float = 1.0
-  layer_norm_struct: Sequence[str] = None
+  layer_norm_struct: Optional[Sequence[str]] = None
   attn_temperature: float = 1.0
   use_glu: bool = False
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
 
   @nn.compact
   def __call__(self, x, train=True):
     out = {}
+    x = jnp.asarray(x, self.dtype)
 
     # Input Encoder
     for lyr in range(self.depth):
@@ -308,6 +336,8 @@ class Encoder(nn.Module):
             scale_attention_init=self.scale_attention_init,
             attn_temperature=self.attn_temperature,
             use_glu=self.use_glu,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
         )
       else:
         assert (len(self.layer_norm_struct)) == self.depth
@@ -323,12 +353,21 @@ class Encoder(nn.Module):
             scale_attention_init=self.scale_attention_init,
             attn_temperature=self.attn_temperature,
             use_glu=self.use_glu,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
         )
       x, out[f'block{lyr:02d}'] = block(x, train)
     out['pre_ln'] = x  # Alias for last block, but without the number in it.
 
     if self.normalizer == 'pre_layer_norm':
-      return nn.LayerNorm(name='encoder_norm')(x), out
+      return (
+          nn.LayerNorm(
+              dtype=self.dtype,
+              param_dtype=self.param_dtype,
+              name='encoder_norm',
+          )(x),
+          out,
+      )
     else:
       return x, out
 
@@ -339,40 +378,51 @@ class MAPHead(nn.Module):
   mlp_dim: Optional[int] = None  # Defaults to 4x input dim
   num_heads: int = 12
   normalizer: str = 'pre_layer_norm'
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
 
   @nn.compact
   def __call__(self, x):
     # TODO(lbeyer): condition on GAP(x)
+    x = jnp.asarray(x, self.dtype)
     n, _, d = x.shape
     probe = self.param(
-        'probe', nn.initializers.xavier_uniform(), (1, 1, d), x.dtype
+        'probe', nn.initializers.xavier_uniform(), (1, 1, d), self.param_dtype
     )
-    probe = jnp.tile(probe, [n, 1, 1])
+    probe = jnp.tile(jnp.asarray(probe, self.dtype), [n, 1, 1])
 
     x = nn.MultiHeadDotProductAttention(
-        num_heads=self.num_heads, kernel_init=nn.initializers.xavier_uniform()
+        num_heads=self.num_heads,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
+        kernel_init=nn.initializers.xavier_uniform(),
+        attention_fn=dot_product_attention,
     )(probe, x)
 
     # TODO(lbeyer): dropout on head?
     if self.normalizer == 'pre_layer_norm':
       maybe_pre_normalize = model_utils.get_normalizer(
-          self.normalizer, train=True, dtype=None
+          self.normalizer, train=True, dtype=self.dtype
       )
       maybe_post_normalize = model_utils.get_normalizer(
-          'none', train=True, dtype=None
+          'none', train=True, dtype=self.dtype
       )
     elif self.normalizer == 'post_layer_norm':
       maybe_pre_normalize = model_utils.get_normalizer(
-          'none', train=True, dtype=None
+          'none', train=True, dtype=self.dtype
       )
       maybe_post_normalize = model_utils.get_normalizer(
-          self.normalizer, train=True, dtype=None
+          self.normalizer, train=True, dtype=self.dtype
       )
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
-    y = maybe_pre_normalize()(x)
-    x = x + MlpBlock(mlp_dim=self.mlp_dim)(y)
-    x = maybe_post_normalize()(x)
+    y = maybe_pre_normalize(param_dtype=self.param_dtype)(x)
+    x = x + MlpBlock(
+        mlp_dim=self.mlp_dim,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
+    )(y)
+    x = maybe_post_normalize(param_dtype=self.param_dtype)(x)
     return x[:, 0]
 
 
@@ -396,13 +446,16 @@ class ViT(nn.Module):
   resnet_style_residual: bool = False
   residual_alpha: float = 0.5
   scale_attention_init: float = 1.0
-  layer_norm_struct: Sequence[str] = None
+  layer_norm_struct: Optional[Sequence[str]] = None
   attn_temperature: float = 1.0
   use_glu: bool = False
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
 
   @nn.compact
   def __call__(self, x, *, train=False):
     out = {}
+    x = jnp.asarray(x, self.dtype)
 
     # Patch extraction
     x = out['stem'] = nn.Conv(
@@ -410,6 +463,8 @@ class ViT(nn.Module):
         self.patch_size,
         strides=self.patch_size,
         padding='VALID',
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
         name='conv_patch_extract',
     )(x)
 
@@ -417,12 +472,16 @@ class ViT(nn.Module):
     x = jnp.reshape(x, [n, h * w, c])
 
     # Add posemb before adding extra token.
-    x = out['with_posemb'] = x + get_posemb(
-        self, self.posemb, (h, w), c, 'pos_embedding', x.dtype
+    posemb = get_posemb(
+        self, self.posemb, (h, w), c, 'pos_embedding', self.param_dtype
     )
+    x = out['with_posemb'] = x + jnp.asarray(posemb, self.dtype)
 
     if self.pool_type == 'tok':
-      cls = self.param('cls', nn.initializers.zeros, (1, 1, c), x.dtype)
+      cls = self.param(
+          'cls', nn.initializers.zeros, (1, 1, c), self.param_dtype
+      )
+      cls = jnp.asarray(cls, self.dtype)
       x = jnp.concatenate([jnp.tile(cls, [n, 1, 1]), x], axis=1)
 
     n, l, c = x.shape  # pylint: disable=unused-variable
@@ -441,47 +500,58 @@ class ViT(nn.Module):
         layer_norm_struct=self.layer_norm_struct,
         attn_temperature=self.attn_temperature,
         use_glu=self.use_glu,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
         name='Transformer',
     )(x, train=not train)
-    encoded = out['encoded'] = x
+    out['encoded'] = x
 
     if self.pool_type == 'map':
       x = out['head_input'] = MAPHead(
           num_heads=self.num_heads,
           mlp_dim=self.mlp_dim,
           normalizer=self.normalizer,
+          dtype=self.dtype,
+          param_dtype=self.param_dtype,
       )(x)
     elif self.pool_type == 'gap':
-      x = out['head_input'] = jnp.mean(x, axis=1)
+      x = out['head_input'] = jnp.asarray(
+          jnp.mean(x, axis=1, dtype=jnp.float32), self.dtype
+      )
     elif self.pool_type == '0':
       x = out['head_input'] = x[:, 0]
     elif self.pool_type == 'tok':
       x = out['head_input'] = x[:, 0]
-      encoded = encoded[:, 1:]
     else:
       raise ValueError(f'Unknown pool type: "{self.pool_type}"')
 
-    x_2d = jnp.reshape(encoded, [n, h, w, -1])
-
     if self.rep_size:
       rep_size = self.width if self.rep_size is True else self.rep_size  # pylint: disable=g-bool-id-comparison
-      hid = nn.Dense(rep_size, name='pre_logits')
+      hid = nn.Dense(
+          rep_size,
+          dtype=self.dtype,
+          param_dtype=self.param_dtype,
+          name='pre_logits',
+      )
       # NOTE: In the past we did not include tanh in pre_logits.
       # For few-shot, it should not matter much, as it whitens anyways.
-      x_2d = nn.tanh(hid(x_2d))
-      x = nn.tanh(hid(x))
+      x = jnp.asarray(nn.tanh(hid(x)), self.dtype)
 
-    out['pre_logits_2d'] = x_2d
     out['pre_logits'] = x
 
     if self.num_classes:
       kw = {'kernel_init': nn.initializers.zeros} if self.head_zeroinit else {}
-      head = nn.Dense(self.num_classes, name='head', **kw)
-      x_2d = out['logits_2d'] = head(x_2d)
+      head = nn.Dense(
+          self.num_classes,
+          dtype=self.dtype,
+          param_dtype=self.param_dtype,
+          name='head',
+          **kw,
+      )
       x = out['logits'] = head(x)
 
     # TODO(dsuo): this used to be `return x, out`. Do we need out?
-    return x
+    return jnp.asarray(x, jnp.float32)
 
 
 class ViTModel(base_model.BaseModel):
@@ -513,6 +583,8 @@ class ViTModel(base_model.BaseModel):
     ]
 
     args = {k: self.hps[k] for k in keys}
+    args['dtype'] = utils.dtype_from_str(self.hps.computation_dtype)
+    args['param_dtype'] = jnp.float32
 
     if self.hps.variant is not None:
       args.update(decode_variant(self.hps.variant))
