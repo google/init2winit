@@ -24,6 +24,30 @@ NamedSharding = jax.NamedSharding
 P = jax.P
 
 
+def _get_param_key(path, leaf):
+  """Returns a `(dict_path, shape)` key for matching optimizer leaves to params.
+
+  Optax state trees wrap parameter-shaped state dicts (such as `mu` and `nu` in
+  Adam/NAdamW) inside outer tuples (`SequenceKey`) and namedtuples
+  (`GetAttrKey`), while preserving the inner parameter `DictKey` path.
+  Matching both the `DictKey` path and tensor shape ensures that
+  coordinate-aligned state tensors inherit the parameter's `NamedSharding`,
+  while factored, reduced, or scalar state leaves at the same parameter key path
+  (such as 1D row/column factors in Adafactor or block preconditioners) fall
+  back to replicated sharding instead of failing rank or axis-divisibility
+  checks.
+
+  Args:
+    path: The JAX pytree key path for the leaf node.
+    leaf: The pytree leaf value.
+
+  Returns:
+    A tuple `(dict_path, shape)` of `DictKey` entries and the leaf's shape.
+  """
+  dict_path = tuple(k for k in path if isinstance(k, jax.tree_util.DictKey))
+  return (dict_path, getattr(leaf, 'shape', None))
+
+
 class Trainer(base_trainer.BaseTrainer):
   """Default trainer."""
 
@@ -106,16 +130,31 @@ class Trainer(base_trainer.BaseTrainer):
         unreplicated_params, self._mesh, params_sharding
     )
 
-    def _get_sharding(x):
+    replicated_sharding = NamedSharding(self._mesh, P())
+    sharded_param_by_key = {}
+    param_leaves_with_path, _ = jax.tree_util.tree_flatten_with_path(
+        unreplicated_params
+    )
+    sharding_leaves = jax.tree_util.tree_leaves(params_sharding)
+    for (param_path, param_leaf), p_sharding in zip(
+        param_leaves_with_path, sharding_leaves
+    ):
+      if isinstance(p_sharding, NamedSharding) and p_sharding.spec != P():
+        sharded_param_by_key[_get_param_key(param_path, param_leaf)] = (
+            p_sharding
+        )
+
+    def _get_sharding(opt_path, x):
       """Returns the sharding for the given pytree node."""
       if isinstance(x, data_utils.CpuOffloaded):
         return None
-      elif isinstance(x, jax.Array) and isinstance(x.sharding, NamedSharding):
+      if isinstance(x, jax.Array) and isinstance(x.sharding, NamedSharding):
         return x.sharding
-      else:
-        return NamedSharding(self._mesh, P())
+      return sharded_param_by_key.get(
+          _get_param_key(opt_path, x), replicated_sharding
+      )
 
-    optimizer_state_sharding = jax.tree_util.tree_map(
+    optimizer_state_sharding = jax.tree_util.tree_map_with_path(
         _get_sharding,
         unreplicated_optimizer_state,
     )

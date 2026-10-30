@@ -64,16 +64,22 @@ def dot_interact(concat_features, keep_diags=True):
   Returns:
     activations: Array representing interacted features.
   """
-  # Interact features, select upper.
+  # Interact features, select upper triangle via static row slices so VJP
+  # lowers to zero-cost static pad + concat instead of 2D scatter-add.
   xactions = jnp.matmul(
       concat_features, jnp.transpose(concat_features, [0, 2, 1])
   )
   feature_dim = xactions.shape[-1]
+  offset = 0 if keep_diags else 1
+  if feature_dim - offset <= 0:
+    return jnp.zeros((xactions.shape[0], 0), dtype=xactions.dtype)
 
-  rows, cols = jnp.array(
-      jnp.triu_indices(feature_dim, k=0 if keep_diags else 1)
-  )
-  activations = xactions[:, rows, cols]
+  row_slices = jnp.split(xactions, feature_dim, axis=1)
+  triu_parts = [
+      jax.lax.squeeze(row_slices[i], dimensions=(1,))[:, i + offset :]
+      for i in range(feature_dim - offset)
+  ]
+  activations = jnp.concatenate(triu_parts, axis=-1)
   return activations
 
 
@@ -106,11 +112,10 @@ class DLRM(nn.Module):
 
   def get_embeddings(self, embedding_table_block, indices_block):
     """Get embeddings for a block of indices."""
-    embedding_table_block = jax.lax.all_gather(
+    all_embedding_tables = jax.lax.all_gather(
         embedding_table_block, 'devices', axis=1, tiled=True
     )
-    embeddings = jnp.take(embedding_table_block, indices_block, axis=0)
-    return embeddings
+    return jnp.take(all_embedding_tables, indices_block, axis=0)
 
   @nn.compact
   def __call__(self, x, train):

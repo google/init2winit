@@ -27,6 +27,7 @@ from absl.testing import parameterized
 import flax.linen as nn
 from init2winit import utils
 from init2winit.init_lib import initializers
+from init2winit.model_lib import dlrm
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
 from init2winit.trainer_lib import training_algorithm
@@ -1349,6 +1350,54 @@ class ModelsTest(parameterized.TestCase):
             f'Model {model_name} has mismatched intermediate dtypes:\n'
             f' {mismatched}'
         ),
+    )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='keep_diags_true',
+          num_features=4,
+          keep_diags=True,
+      ),
+      dict(
+          testcase_name='keep_diags_false',
+          num_features=4,
+          keep_diags=False,
+      ),
+      dict(
+          testcase_name='single_feature_no_diags',
+          num_features=1,
+          keep_diags=False,
+      ),
+  )
+  def test_dlrm_dot_interact(self, num_features, keep_diags):
+    """Tests that dlrm.dot_interact matches triu_indices forward and backward."""
+    rng = jax.random.PRNGKey(0)
+    x_key, cotangent_key = jax.random.split(rng)
+    concat_features = jax.random.normal(x_key, (3, num_features, 5))
+
+    def reference_dot_interact(features):
+      xactions = jnp.matmul(features, jnp.transpose(features, [0, 2, 1]))
+      rows, cols = jnp.array(
+          jnp.triu_indices(num_features, k=0 if keep_diags else 1),
+          dtype=jnp.int32,
+      )
+      return xactions[:, rows, cols]
+
+    actual = dlrm.dot_interact(concat_features, keep_diags=keep_diags)
+    expected = reference_dot_interact(concat_features)
+    np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-6)
+
+    cotangent = jax.random.normal(cotangent_key, expected.shape)
+    actual_grad = jax.grad(
+        lambda x: jnp.sum(
+            dlrm.dot_interact(x, keep_diags=keep_diags) * cotangent
+        )
+    )(concat_features)
+    expected_grad = jax.grad(
+        lambda x: jnp.sum(reference_dot_interact(x) * cotangent)
+    )(concat_features)
+    np.testing.assert_allclose(
+        actual_grad, expected_grad, rtol=1e-5, atol=1e-5
     )
 
 
