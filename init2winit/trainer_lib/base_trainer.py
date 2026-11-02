@@ -750,6 +750,13 @@ class BaseTrainer(metaclass=abc.ABCMeta):
           global_step=self._global_step,
           constant_base_rng=rng,
       )
+    num_device_prefetches = self._hps.get('num_device_prefetches', 0)
+    if utils.use_mock_tpu_backend() or num_device_prefetches < 0:
+      num_device_prefetches = 0
+    train_iter = data_utils.prefetch_iterator(
+        map(self.finalize_batch_fn, train_iter),
+        num_device_prefetches,
+    )
 
     start_time = time.time()
     start_step = self._global_step
@@ -772,7 +779,6 @@ class BaseTrainer(metaclass=abc.ABCMeta):
         # creation in the StepTraceContext (as opposed to putting `train_iter`
         # directly in the top-level for loop).
         batch = next(train_iter)
-        batch = self.finalize_batch_fn(batch)
         if self._global_step == 0:
           batch_size_pytree = self.get_batch_size(batch)
           if any(
