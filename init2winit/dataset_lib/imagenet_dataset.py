@@ -365,9 +365,8 @@ def load_split(
       },
   )
 
-  ds = ds.cache()
-
   if split == 'train':
+    ds = ds.cache()
     ds = ds.shuffle(
         16 * per_host_batch_size,
         seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng),
@@ -376,9 +375,19 @@ def load_split(
     ds = ds.repeat()
 
   ds = ds.enumerate().map(
-      decode_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls
+      decode_example,
+      num_parallel_calls=(
+          hps.num_tf_data_map_parallel_calls if split == 'train' else 16
+      ),
   )
-  ds = ds.batch(per_host_batch_size, drop_remainder=False)
+  if split == 'train':
+    ds = ds.batch(
+        per_host_batch_size,
+        drop_remainder=False,
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
+  else:
+    ds = ds.batch(per_host_batch_size, drop_remainder=False)
 
   if split == 'train' and hps.use_mixup:
     mixup_rng = tf.convert_to_tensor(shuffle_rng, dtype=tf.int32)
@@ -405,9 +414,18 @@ def load_split(
         mixup_batch, num_parallel_calls=hps.num_tf_data_map_parallel_calls
     )
 
-  if split != 'train':
+  if split in ['valid', 'test']:
     ds = ds.cache()
-  ds = ds.prefetch(hps.num_tf_data_prefetches)
+  if split == 'train':
+    options = tf.data.Options()
+    options.threading.private_threadpool_size = 64
+    options.threading.max_intra_op_parallelism = 1
+    options.experimental_optimization.parallel_batch = True
+    options.experimental_optimization.map_and_batch_fusion = True
+    ds = ds.with_options(options)
+    ds = ds.prefetch(hps.num_tf_data_prefetches)
+  else:
+    ds = ds.prefetch(2)
   return ds
 
 
