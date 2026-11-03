@@ -357,7 +357,6 @@ def get_criteo1tb(shuffle_rng, batch_size, eval_batch_size, hps):
       if hps.num_tf_data_prefetches > 0
       else tf.data.AUTOTUNE
   )
-  num_device_prefetches = hps.get('num_device_prefetches', 0)
 
   if hps.use_raw_tsv:
     return _get_criteo1tb_tsv(
@@ -366,7 +365,6 @@ def get_criteo1tb(shuffle_rng, batch_size, eval_batch_size, hps):
         per_host_eval_batch_size,
         hps,
         num_batches_to_prefetch,
-        num_device_prefetches,
     )
   else:
     return _get_criteo1tb_arrayrecord(
@@ -375,7 +373,6 @@ def get_criteo1tb(shuffle_rng, batch_size, eval_batch_size, hps):
         per_host_eval_batch_size,
         hps,
         num_batches_to_prefetch,
-        num_device_prefetches,
     )
 
 
@@ -385,7 +382,6 @@ def _get_criteo1tb_arrayrecord(
     per_host_eval_batch_size,
     hps,
     num_batches_to_prefetch,
-    num_device_prefetches,
 ):
   """Load Criteo 1TB from preprocessed ArrayRecord files."""
   base = hps.get('preprocessed_data_path', PREPROCESSED_CRITEO1TB_FILE_PATH)
@@ -403,16 +399,7 @@ def _get_criteo1tb_arrayrecord(
       num_batches_to_prefetch=num_batches_to_prefetch,
   )
   data_utils.log_rss('train arrayrecord dataset created')
-
-  if num_device_prefetches > 0:
-    train_iterator_fn = lambda: data_utils.prefetch_iterator(
-        tfds.as_numpy(train_dataset), num_device_prefetches
-    )
-    data_utils.log_rss(
-        f'using prefetching with {num_device_prefetches} in the train dataset'
-    )
-  else:
-    train_iterator_fn = lambda: tfds.as_numpy(train_dataset)
+  train_iterator_fn = lambda: tfds.as_numpy(train_dataset)
 
   eval_train_dataset = criteo_arrayrecord_reader(
       split='eval_train',
@@ -483,7 +470,6 @@ def _get_criteo1tb_tsv(
     per_host_eval_batch_size,
     hps,
     num_batches_to_prefetch,
-    num_device_prefetches,
 ):
   """Load Criteo 1TB from raw TSV files (legacy path)."""
   train_file_path = os.path.join(RAW_CRITEO1TB_FILE_PATH, 'train/*/*')
@@ -501,15 +487,7 @@ def _get_criteo1tb_tsv(
       num_batches_to_prefetch=num_batches_to_prefetch,
   )
   data_utils.log_rss('train dataset created')
-  if num_device_prefetches > 0:
-    train_iterator_fn = lambda: data_utils.prefetch_iterator(
-        tfds.as_numpy(train_dataset), num_device_prefetches
-    )
-    data_utils.log_rss(
-        f'using prefetching with {num_device_prefetches} in the train dataset'
-    )
-  else:
-    train_iterator_fn = lambda: tfds.as_numpy(train_dataset)
+  train_iterator_fn = lambda: tfds.as_numpy(train_dataset)
   eval_train_dataset = criteo_tsv_reader(
       split='eval_train',
       shuffle_rng=None,

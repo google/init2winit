@@ -326,6 +326,7 @@ class GradientAccumulatorTest(absltest.TestCase):
         'gradient_clipping': 0.0,
         'model_dtype': 'float32',
         'decode': False,
+        'num_device_prefetches': 0,
     })
     initializer = initializers.get_initializer('noop')
     eval_num_batches = 5
