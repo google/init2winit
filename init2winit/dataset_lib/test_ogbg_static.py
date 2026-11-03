@@ -404,6 +404,85 @@ class VerifyStaticBatchingTest(tf.test.TestCase):
           msg=f'weights mismatch with all augmentations in batch {i}',
       )
 
+  def test_numpy_padding_mask_and_weights_parity_with_jraph(self):
+    """Tests that NumPy padding mask, targets, and weights match jraph."""
+    examples = _make_dataset()[:BATCH_SIZE]
+    for max_nodes_per_shard in [
+        BATCH_SIZE * NUM_NODES + 1,
+        2 * NUM_NODES + 1,
+        NUM_NODES + 1,
+    ]:
+      batch = ogbg_molpcba._build_full_batch(  # pylint: disable=protected-access
+          examples=examples,
+          graphs_per_shard=BATCH_SIZE,
+          num_shards=1,
+          max_nodes_per_shard=max_nodes_per_shard,
+          max_edges_per_shard=BATCH_SIZE * NUM_EDGES,
+          add_bidirectional_edges=False,
+          add_virtual_node=False,
+          add_self_loops=False,
+          node_feat_dim=9,
+          edge_feat_dim=3,
+          num_labels=NUM_LABELS,
+      )
+      graph = batch['inputs']
+      n_node = graph.n_node
+
+      n_padding_graph = int(np.argmin(n_node[::-1] == 0)) + 1
+      np_padding_mask = np.arange(n_node.shape[0]) < (
+          n_node.shape[0] - n_padding_graph
+      )
+      jraph_padding_mask = np.asarray(jraph.get_graph_padding_mask(graph))
+      self.assertAllEqual(np_padding_mask, jraph_padding_mask)
+
+      # Reconstruct the pre-mask labels array populated by _build_full_batch
+      # and compare against the original jraph reference computation.
+      raw_labels = np.zeros((BATCH_SIZE + 1, NUM_LABELS), dtype=np.float32)
+      for idx in range(BATCH_SIZE):
+        if n_node[idx] > 0:
+          raw_labels[idx] = examples[idx]['labels']
+      nan_mask = np.isnan(raw_labels)
+      ref_targets = np.where(nan_mask, 0.0, raw_labels).astype(np.float32)
+      ref_weights = (
+          (1.0 - nan_mask) * jraph_padding_mask[:, None]
+      ).astype(np.float32)
+
+      self.assertEqual(batch['targets'].dtype, np.float32)
+      self.assertEqual(batch['weights'].dtype, np.float32)
+      self.assertAllEqual(batch['targets'], ref_targets)
+      self.assertAllEqual(batch['weights'], ref_weights)
+
+    # Also test parity on jraph.pad_with_graphs with multiple trailing 0-node
+    # padding graphs.
+    base_graph = ogbg_molpcba._build_full_batch(  # pylint: disable=protected-access
+        examples=examples[:2],
+        graphs_per_shard=2,
+        num_shards=1,
+        max_nodes_per_shard=2 * NUM_NODES + 1,
+        max_edges_per_shard=2 * NUM_EDGES,
+        add_bidirectional_edges=False,
+        add_virtual_node=False,
+        add_self_loops=False,
+        node_feat_dim=9,
+        edge_feat_dim=3,
+        num_labels=NUM_LABELS,
+    )['inputs']
+    unpadded = jraph.unpad_with_graphs(base_graph)
+    for target_n_graph in [3, 4, 6]:
+      padded = jraph.pad_with_graphs(
+          unpadded,
+          n_node=target_n_graph * NUM_NODES + 1,
+          n_edge=target_n_graph * NUM_EDGES,
+          n_graph=target_n_graph,
+      )
+      n_node = np.asarray(padded.n_node)
+      n_padding_graph = int(np.argmin(n_node[::-1] == 0)) + 1
+      np_padding_mask = np.arange(n_node.shape[0]) < (
+          n_node.shape[0] - n_padding_graph
+      )
+      jraph_padding_mask = np.asarray(jraph.get_graph_padding_mask(padded))
+      self.assertAllEqual(np_padding_mask, jraph_padding_mask)
+
 
 if __name__ == '__main__':
   tf.test.main()

@@ -143,24 +143,13 @@ def _preprocess_output(features, tokenizer, hps):
   """
   if hps.tokenizer_type == 'SPM':
     features['targets'] = tokenizer.tokenize(features['targets'])
-    features['target_paddings'] = tf.zeros_like(
-        features['targets'], dtype=tf.float32
-    )
   elif hps.tokenizer_type == 'RAW':
     features['targets'] = tf.py_function(
         func=tokenizer.tokenize, inp=[features['targets']], Tout=tf.int32
     )
-    features['target_paddings'] = tf.zeros_like(
-        features['targets'], dtype=tf.float32
-    )
+  features['_input_len'] = tf.shape(features['inputs'])[0]
+  features['_target_len'] = tf.shape(features['targets'])[0]
 
-  return features
-
-
-def _make_input_paddings(features):
-  features['input_paddings'] = tf.zeros_like(
-      features['inputs'], dtype=tf.float32
-  )
   return features
 
 
@@ -232,10 +221,8 @@ def preprocess_data(
 
   dataset = dataset.map(
       functools.partial(_preprocess_output, tokenizer=tokenizer, hps=hps),
-      num_parallel_calls=10,
+      num_parallel_calls=AUTOTUNE,
   )
-
-  dataset = dataset.map(_make_input_paddings, num_parallel_calls=10)
 
   # Filter out audio and transcriptions that are longer than given lengths.
   # note that audio filtering is post frequency domain conversion.
@@ -243,8 +230,11 @@ def preprocess_data(
     inputs_length_filter, targets_length_filter = length_filter(
         max_input_length, max_target_length
     )
-    dataset = dataset.filter(inputs_length_filter)
-    dataset = dataset.filter(targets_length_filter)
+    dataset = dataset.filter(
+        lambda x: tf.logical_and(
+            inputs_length_filter(x), targets_length_filter(x)
+        )
+    )
 
   if train:
     dataset = dataset.shuffle(shuffle_buffer_size, seed=shuffle_seed)
@@ -256,16 +246,45 @@ def preprocess_data(
       padded_shapes={
           'inputs': max_input_length,
           'targets': max_target_length,
-          'input_paddings': max_input_length,
-          'target_paddings': max_target_length,
+          '_input_len': [],
+          '_target_len': [],
       },
       padding_values={
           'inputs': 0,
           'targets': 0,
-          'input_paddings': 1.0,
-          'target_paddings': 1.0,
+          '_input_len': 0,
+          '_target_len': 0,
       },
   )
+
+  def _add_batch_paddings(batch):
+    input_len = batch.pop('_input_len')
+    target_len = batch.pop('_target_len')
+    in_idx = (
+        tf.range(max_input_length, dtype=tf.int32)
+        if max_input_length and max_input_length > 0
+        else tf.range(tf.shape(batch['inputs'])[1], dtype=tf.int32)
+    )
+    tgt_idx = (
+        tf.range(max_target_length, dtype=tf.int32)
+        if max_target_length and max_target_length > 0
+        else tf.range(tf.shape(batch['targets'])[1], dtype=tf.int32)
+    )
+    batch['input_paddings'] = tf.cast(
+        in_idx[None, :] >= input_len[:, None], tf.float32
+    )
+    batch['target_paddings'] = tf.cast(
+        tgt_idx[None, :] >= target_len[:, None], tf.float32
+    )
+    return batch
+
+  dataset = dataset.map(_add_batch_paddings, num_parallel_calls=AUTOTUNE)
+
+  options = tf.data.Options()
+  options.threading.private_threadpool_size = 48
+  options.threading.max_intra_op_parallelism = 1
+  options.experimental_optimization.parallel_batch = True
+  dataset = dataset.with_options(options)
 
   if prefetch_size:
     dataset = dataset.prefetch(prefetch_size)
