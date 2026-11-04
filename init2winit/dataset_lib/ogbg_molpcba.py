@@ -419,6 +419,10 @@ def _build_full_batch(
     global_node_offset = shard_node_end
     global_edge_offset = shard_edge_end
 
+  node_offset = np.int32(jax.process_index() * total_nodes)
+  senders_buf += node_offset
+  receivers_buf += node_offset
+
   graph = jraph.GraphsTuple(
       n_node=n_node,
       n_edge=n_edge,
@@ -429,10 +433,15 @@ def _build_full_batch(
       globals={},
   )
 
-  padding_mask = jraph.get_graph_padding_mask(graph)
+  n_padding_graph = int(np.argmin(n_node[::-1] == 0)) + 1
+  padding_mask = np.arange(n_node.shape[0]) < (
+      n_node.shape[0] - n_padding_graph
+  )
   nan_mask = np.isnan(labels)
-  replaced_labels = np.where(nan_mask, 0.0, labels)
-  weights = (1.0 - nan_mask) * padding_mask[:, None]
+  replaced_labels = np.where(nan_mask, np.float32(0.0), labels)
+  weights = np.where(
+      nan_mask | ~padding_mask[:, None], np.float32(0.0), np.float32(1.0)
+  )
 
   return {
       'inputs': graph,

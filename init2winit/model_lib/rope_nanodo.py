@@ -180,7 +180,6 @@ def init_rope(dim=256, seq_len=128, n_heads=4):
   return freqs_cis.transpose(0, 1, 2, 4, 3)
 
 
-@jax.jit
 def apply_rope(q, k, freqs_cis):
   """Apply rotary embeddings to Q and K."""
   input_dtype = q.dtype
@@ -204,6 +203,42 @@ def apply_rope(q, k, freqs_cis):
   rotated_k = rotate_tensor(k).astype(input_dtype)
 
   return rotated_q, rotated_k
+
+
+def _checkpointed_dot_product_attention(
+    query: jax.Array,
+    key: jax.Array,
+    value: jax.Array,
+    is_causal: bool,
+    chunk_size: int = 256,
+) -> jax.Array:
+  """Memory-efficient exact dot-product attention via query-chunked remat."""
+  seq_len = query.shape[1]
+  if not is_causal or seq_len <= chunk_size or seq_len % chunk_size != 0:
+    return jax.checkpoint(
+        partial(jax.nn.dot_product_attention, is_causal=is_causal, scale=1.0)
+    )(query, key, value)
+
+  @jax.checkpoint
+  def _causal_attn_chunk(q_chunk, k_sub, v_sub):
+    q_pos = (k_sub.shape[1] - q_chunk.shape[1]) + jnp.arange(q_chunk.shape[1])
+    k_pos = jnp.arange(k_sub.shape[1])
+    mask = (q_pos[:, None] >= k_pos[None, :])[None, None, :, :]
+    return jax.nn.dot_product_attention(
+        q_chunk, k_sub, v_sub, mask=mask, scale=1.0
+    )
+
+  return jnp.concatenate(
+      [
+          _causal_attn_chunk(
+              query[:, start : start + chunk_size],
+              key[:, : start + chunk_size],
+              value[:, : start + chunk_size],
+          )
+          for start in range(0, seq_len, chunk_size)
+      ],
+      axis=1,
+  )
 
 
 class Attention(nn.Module):
@@ -262,22 +297,26 @@ class Attention(nn.Module):
     v_BxLxHxDh = self.multilinear_value(x_BxLxD)
 
     if cfg.qk_norm:
-      q_BxLxHxDh /= (
-          jnp.linalg.norm(q_BxLxHxDh, axis=-1, keepdims=True) + self.eps
+      q_f32 = q_BxLxHxDh.astype(jnp.float32)
+      k_f32 = k_BxLxHxDh.astype(jnp.float32)
+      q_f32 /= jnp.linalg.norm(q_f32, axis=-1, keepdims=True) + self.eps
+      k_f32 /= jnp.linalg.norm(k_f32, axis=-1, keepdims=True) + self.eps
+      q_BxLxHxDh = (q_f32 * self.attn_scale.astype(jnp.float32)).astype(
+          cfg.dtype
       )
-      k_BxLxHxDh /= (
-          jnp.linalg.norm(k_BxLxHxDh, axis=-1, keepdims=True) + self.eps
+      k_BxLxHxDh = k_f32.astype(cfg.dtype)
+    else:
+      q_BxLxHxDh = q_BxLxHxDh.astype(cfg.dtype) * self.attn_scale.astype(
+          cfg.dtype
       )
-    q_BxLxHxDh = q_BxLxHxDh * self.attn_scale.astype(cfg.dtype)
 
     q_BxLxHxDh, k_BxLxHxDh = apply_rope(q_BxLxHxDh, k_BxLxHxDh, self.freqs_cis)
 
-    out_BxLxHxDh = jax.nn.dot_product_attention(
+    out_BxLxHxDh = _checkpointed_dot_product_attention(
         q_BxLxHxDh.astype(cfg.dtype),
         k_BxLxHxDh.astype(cfg.dtype),
         v_BxLxHxDh.astype(cfg.dtype),
         is_causal=cfg.is_causal,
-        scale=1.0,
     )
 
     out_BxLxD = out_BxLxHxDh.reshape(*x_BxLxD.shape)
@@ -325,7 +364,7 @@ class TransformerDo(nn.Module):
 
     # Output projection - tied to input embeddings if configured
     if cfg.tie_embeddings:
-      self.output_proj = lambda x: self.embed.attend(x.astype(jnp.float32))
+      self.output_proj = self.embed.attend
     else:
       self.output_proj = nn.Dense(
           cfg.V,
