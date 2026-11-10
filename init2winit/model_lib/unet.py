@@ -98,7 +98,13 @@ class UNet(nn.Module):
   @nn.compact
   def __call__(self, x, train=True):
     down_sample_layers = [
-        ConvBlock(self.chans, self.drop_prob, self.activation, self.normalizer)
+        ConvBlock(
+            self.chans,
+            self.drop_prob,
+            self.activation,
+            self.normalizer,
+            is_input_block=True,
+        )
     ]
 
     ch = self.chans
@@ -123,7 +129,9 @@ class UNet(nn.Module):
         ConvBlock(ch, self.drop_prob, self.activation, self.normalizer)
     )
 
-    final_conv = nn.Conv(self.out_chans, kernel_size=(1, 1), strides=(1, 1))
+    final_conv = nn.Conv(
+        self.out_chans, kernel_size=(1, 1), strides=(1, 1), name='output_conv'
+    )
 
     stack = []
     output = jnp.expand_dims(x, axis=-1)
@@ -172,6 +180,7 @@ class ConvBlock(nn.Module):
   drop_prob: float
   activation: str
   normalizer: str
+  is_input_block: bool = False
 
   @nn.compact
   def __call__(self, x, train=True):
@@ -191,6 +200,7 @@ class ConvBlock(nn.Module):
         kernel_size=(3, 3),
         strides=(1, 1),
         use_bias=False,
+        name='input_conv' if self.is_input_block else None,
     )(x)
     # InstanceNorm2d was implemented with no learnable params in reference code
     # so this is a simple normalization along channels

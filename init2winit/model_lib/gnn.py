@@ -54,6 +54,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
 
 def _make_embed(
     latent_dim,
+    name: str,
     dtype: model_utils.Dtype = jnp.bfloat16,
     param_dtype: model_utils.Dtype = jnp.float32,
 ):
@@ -64,6 +65,7 @@ def _make_embed(
         features=latent_dim,
         dtype=dtype,
         param_dtype=param_dtype,
+        name=name,
     )(inputs)
 
   return make_fn
@@ -149,11 +151,13 @@ class GNN(nn.Module):
     embedder = jraph.GraphMapFeatures(
         embed_node_fn=_make_embed(
             self.latent_dim,
+            name='node_embed',
             dtype=self.dtype,
             param_dtype=self.param_dtype,
         ),
         embed_edge_fn=_make_embed(
             self.latent_dim,
+            name='edge_embed',
             dtype=self.dtype,
             param_dtype=self.param_dtype,
         ),
@@ -199,6 +203,7 @@ class GNN(nn.Module):
             self.num_outputs,
             dtype=self.dtype,
             param_dtype=self.param_dtype,
+            name='head',
         )
     )
     graph = decoder(graph)
