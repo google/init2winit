@@ -30,6 +30,7 @@ from init2winit.init_lib import initializers
 from init2winit.model_lib import dlrm
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
+from init2winit.model_lib import rope_nanodo
 from init2winit.trainer_lib import training_algorithm
 import jax
 from jax.experimental import mesh_utils
@@ -679,6 +680,7 @@ class ModelsTest(parameterized.TestCase):
         'lr_hparams': {'base_lr': 0.005, 'schedule': 'constant'},
         'vocab_size': vocab_size,
         'output_shape': (vocab_size,),
+        'computation_dtype': dtype_str,
         'model_dtype': dtype_str,
         # Training HParams.
         'l2_decay_factor': 1e-4,
@@ -1399,6 +1401,79 @@ class ModelsTest(parameterized.TestCase):
     np.testing.assert_allclose(
         actual_grad, expected_grad, rtol=1e-5, atol=1e-5
     )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='causal_chunked_bf16',
+          seq_len=16,
+          chunk_size=4,
+          is_causal=True,
+          dtype=jnp.bfloat16,
+      ),
+      dict(
+          testcase_name='causal_chunked_fp32',
+          seq_len=16,
+          chunk_size=4,
+          is_causal=True,
+          dtype=jnp.float32,
+      ),
+      dict(
+          testcase_name='non_causal_fallback',
+          seq_len=16,
+          chunk_size=4,
+          is_causal=False,
+          dtype=jnp.float32,
+      ),
+      dict(
+          testcase_name='short_seq_fallback',
+          seq_len=4,
+          chunk_size=4,
+          is_causal=True,
+          dtype=jnp.float32,
+      ),
+  )
+  def test_rope_nanodo_checkpointed_dot_product_attention(
+      self, seq_len, chunk_size, is_causal, dtype
+  ):
+    """Tests that _checkpointed_dot_product_attention matches unchunked DPA."""
+    q_key, k_key, v_key, cot_key = jax.random.split(jax.random.PRNGKey(42), 4)
+    shape = (2, seq_len, 3, 8)
+    query = jax.random.normal(q_key, shape, dtype=dtype)
+    key = jax.random.normal(k_key, shape, dtype=dtype)
+    value = jax.random.normal(v_key, shape, dtype=dtype)
+
+    def chunked_fn(q, k, v):
+      return rope_nanodo._checkpointed_dot_product_attention(  # pylint: disable=protected-access
+          q, k, v, is_causal=is_causal, chunk_size=chunk_size
+      )
+
+    def reference_fn(q, k, v):
+      return jax.nn.dot_product_attention(
+          q, k, v, is_causal=is_causal, scale=1.0
+      )
+
+    actual = chunked_fn(query, key, value)
+    expected = reference_fn(query, key, value)
+    tol = 1e-2 if dtype == jnp.bfloat16 else 1e-6
+    np.testing.assert_allclose(actual, expected, rtol=tol, atol=tol)
+
+    cotangent = jax.random.normal(cot_key, shape, dtype=dtype)
+    actual_grads = jax.grad(
+        lambda q, k, v: jnp.sum(
+            chunked_fn(q, k, v).astype(jnp.float32)
+            * cotangent.astype(jnp.float32)
+        ),
+        argnums=(0, 1, 2),
+    )(query, key, value)
+    expected_grads = jax.grad(
+        lambda q, k, v: jnp.sum(
+            reference_fn(q, k, v).astype(jnp.float32)
+            * cotangent.astype(jnp.float32)
+        ),
+        argnums=(0, 1, 2),
+    )(query, key, value)
+    for actual_g, expected_g in zip(actual_grads, expected_grads):
+      np.testing.assert_allclose(actual_g, expected_g, rtol=tol, atol=tol)
 
 
 if __name__ == '__main__':

@@ -29,6 +29,7 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple, Type, Union
 import flax
 from flax import linen as nn
 from flax import struct
+from init2winit import utils
 from init2winit.model_lib import base_model
 from init2winit.model_lib import librispeech_preprocessor as preprocessor
 from init2winit.model_lib import model_utils
@@ -47,6 +48,7 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation='relu',
         eval_batch_size=128,
+        computation_dtype='bfloat16',
         model_dtype='float32',
         num_lstm_layers=4,
         num_ffn_layers=3,
@@ -76,6 +78,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         activation='relu',
         eval_batch_size=128,
+        computation_dtype='bfloat16',
         model_dtype='float32',
         num_lstm_layers=4,
         num_ffn_layers=3,
@@ -105,7 +108,8 @@ class DeepspeechConfig:
   """Global hyperparameters used to minimize obnoxious kwarg plumbing."""
 
   vocab_size: int = 0
-  dtype: Any = jnp.float32
+  dtype: Any = jnp.bfloat16
+  param_dtype: Any = jnp.float32
   encoder_dim: int = 0
   num_lstm_layers: int = 3
   num_ffn_layers: int = 2
@@ -146,11 +150,13 @@ class Subsample(nn.Module):
   @nn.compact
   def __call__(self, inputs, output_paddings, train):
     config = self.config
-    outputs = jnp.expand_dims(inputs, axis=-1)
+    work_dtype = config.dtype if config.dtype is not None else inputs.dtype
+    outputs = jnp.expand_dims(inputs.astype(work_dtype), axis=-1)
 
     outputs, output_paddings = Conv2dSubsampling(
         encoder_dim=config.encoder_dim,
-        dtype=config.dtype,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         batch_norm_momentum=config.batch_norm_momentum,
         batch_norm_epsilon=config.batch_norm_epsilon,
         input_channels=1,
@@ -162,7 +168,8 @@ class Subsample(nn.Module):
 
     outputs, output_paddings = Conv2dSubsampling(
         encoder_dim=config.encoder_dim,
-        dtype=config.dtype,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         batch_norm_momentum=config.batch_norm_momentum,
         batch_norm_epsilon=config.batch_norm_epsilon,
         input_channels=config.encoder_dim,
@@ -177,10 +184,11 @@ class Subsample(nn.Module):
     outputs = jnp.reshape(
         outputs, (batch_size, subsampled_lengths, subsampled_dims * channels)
     )
-
     outputs = nn.Dense(
         config.encoder_dim,
         use_bias=True,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
     )(outputs)
 
@@ -205,6 +213,7 @@ class Conv2dSubsampling(nn.Module):
   padding: str = 'SAME'
   encoder_dim: int = 0
   dtype: Any = jnp.float32
+  param_dtype: Any = jnp.float32
   batch_norm_momentum: float = 0.999
   batch_norm_epsilon: float = 0.001
   enable_batchnorm: bool = False
@@ -214,19 +223,30 @@ class Conv2dSubsampling(nn.Module):
   def setup(self):
     self.filter_shape = (3, 3, self.input_channels, self.output_channels)
     self.kernel = self.param(
-        'kernel', nn.initializers.xavier_uniform(), self.filter_shape
+        'kernel',
+        nn.initializers.xavier_uniform(),
+        self.filter_shape,
+        self.param_dtype,
     )
     self.bias = self.param(
-        'bias', lambda rng, s: jnp.zeros(s, jnp.float32), self.output_channels
+        'bias',
+        nn.initializers.zeros,
+        self.output_channels,
+        self.param_dtype,
     )
 
   @nn.compact
   def __call__(self, inputs, paddings, train):
+    compute_dtype = self.dtype if self.dtype is not None else inputs.dtype
+    inputs = inputs.astype(compute_dtype)
+    kernel = self.kernel.astype(compute_dtype)
+    bias = self.bias.astype(compute_dtype)
+
     # Computing strided convolution to subsample inputs.
     feature_group_count = inputs.shape[3] // self.filter_shape[2]
     outputs = jax.lax.conv_general_dilated(
         lhs=inputs,
-        rhs=self.kernel,
+        rhs=kernel,
         window_strides=self.filter_stride,
         padding=self.padding,
         rhs_dilation=(1, 1),
@@ -234,15 +254,16 @@ class Conv2dSubsampling(nn.Module):
         feature_group_count=feature_group_count,
     )
 
-    outputs += jnp.reshape(self.bias, (1,) * (outputs.ndim - 1) + (-1,))
+    outputs += jnp.reshape(bias, (1,) * (outputs.ndim - 1) + (-1,))
 
     if self.enable_batchnorm:
       outputs = BatchNorm(
           self.encoder_dim,
-          self.dtype,
+          compute_dtype,
           self.batch_norm_momentum,
           self.batch_norm_epsilon,
           self.enable_synced_batchnorm,
+          param_dtype=self.param_dtype,
       )(outputs, input_paddings=None, train=train)
 
     if self.activation in model_utils.ACTIVATIONS:
@@ -251,24 +272,17 @@ class Conv2dSubsampling(nn.Module):
       raise ValueError('Unsupported activation: {}'.format(self.activation))
 
     # Computing correct paddings post input convolution.
-    input_length = paddings.shape[1]
     stride = self.filter_stride[0]
-
-    pad_len = (input_length + stride - 1) // stride * stride - input_length
-    out_padding = jax.lax.conv_general_dilated(
-        lhs=paddings[:, :, None],
-        rhs=jnp.ones([1, 1, 1]),
-        window_strides=self.filter_stride[:1],
-        padding=[(0, pad_len)],
-        dimension_numbers=('NHC', 'HIO', 'NHC'),
+    out_padding = paddings[:, ::stride].astype(
+        jnp.result_type(paddings, jnp.float32)
     )
-    out_padding = jnp.squeeze(out_padding, axis=-1)
 
     # Mask outputs by correct paddings to ensure padded elements in inputs map
     # to padded value in outputs.
-    outputs = outputs * (
+    mask = (
         1.0 - jnp.expand_dims(jnp.expand_dims(out_padding, -1), -1)
-    )
+    ).astype(compute_dtype)
+    outputs = outputs * mask
 
     return outputs, out_padding
 
@@ -280,23 +294,29 @@ class FeedForwardModule(nn.Module):
 
   @nn.compact
   def __call__(self, inputs, input_paddings=None, train=False):
-    padding_mask = jnp.expand_dims(1 - input_paddings, -1)
     config = self.config
+    work_dtype = config.dtype if config.dtype is not None else inputs.dtype
+    padding_mask = jnp.expand_dims(1 - input_paddings, -1).astype(work_dtype)
 
     if config.layernorm_everywhere:
-      inputs = LayerNorm(config.encoder_dim)(inputs)
+      inputs = LayerNorm(
+          config.encoder_dim, param_dtype=config.param_dtype
+      )(inputs.astype(work_dtype))
     else:
       inputs = BatchNorm(
           config.encoder_dim,
-          config.dtype,
+          work_dtype,
           config.batch_norm_momentum,
           config.batch_norm_epsilon,
           config.enable_synced_batchnorm,
+          param_dtype=config.param_dtype,
       )(inputs, input_paddings, train)
 
     inputs = nn.Dense(
         config.encoder_dim,
         use_bias=True,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
     )(inputs)
 
@@ -326,21 +346,28 @@ class LayerNorm(nn.Module):
 
   dim: int = 0
   epsilon: float = 1e-6
+  param_dtype: Any = jnp.float32
 
   def setup(self):
-    self.scale = self.param('scale', nn.initializers.zeros, [self.dim])
-    self.bias = self.param('bias', nn.initializers.zeros, [self.dim])
+    self.scale = self.param(
+        'scale', nn.initializers.zeros, [self.dim], self.param_dtype
+    )
+    self.bias = self.param(
+        'bias', nn.initializers.zeros, [self.dim], self.param_dtype
+    )
 
   @nn.compact
   def __call__(self, inputs):
-    mean = jnp.mean(inputs, axis=-1, keepdims=True)
-    var = jnp.mean(jnp.square(inputs - mean), axis=-1, keepdims=True)
+    inputs_f32 = inputs.astype(jnp.float32)
+    mean = jnp.mean(inputs_f32, axis=-1, keepdims=True)
+    var = jnp.mean(jnp.square(inputs_f32 - mean), axis=-1, keepdims=True)
 
-    normed_inputs = (inputs - mean) * jax.lax.rsqrt(var + self.epsilon)
-    normed_inputs *= 1 + self.scale
-    normed_inputs += self.bias
+    normed_inputs = (inputs_f32 - mean) * jax.lax.rsqrt(var + self.epsilon)
+    normed_inputs = normed_inputs * (
+        1.0 + self.scale.astype(jnp.float32)
+    ) + self.bias.astype(jnp.float32)
 
-    return normed_inputs
+    return normed_inputs.astype(inputs.dtype)
 
 
 class BatchNorm(nn.Module):
@@ -361,53 +388,58 @@ class BatchNorm(nn.Module):
   batch_norm_momentum: float = 0.999
   batch_norm_epsilon: float = 0.001
   enable_synced_batchnorm: bool = False
+  param_dtype: Any = jnp.float32
 
   def setup(self):
     dim = self.encoder_dim
-    dtype = self.dtype
 
     self.ra_mean = self.variable(
-        'batch_stats', 'mean', lambda s: jnp.zeros(s, dtype), dim
+        'batch_stats', 'mean', lambda s: jnp.zeros(s, jnp.float32), dim
     )
     self.ra_var = self.variable(
-        'batch_stats', 'var', lambda s: jnp.ones(s, dtype), dim
+        'batch_stats', 'var', lambda s: jnp.ones(s, jnp.float32), dim
     )
 
-    self.gamma = self.param('scale', nn.initializers.zeros, dim, dtype)
-    self.beta = self.param('bias', nn.initializers.zeros, dim, dtype)
+    self.gamma = self.param(
+        'scale', nn.initializers.zeros, dim, self.param_dtype
+    )
+    self.beta = self.param(
+        'bias', nn.initializers.zeros, dim, self.param_dtype
+    )
 
   def _get_default_paddings(self, inputs):
     """Gets the default paddings for an input."""
     in_shape = list(inputs.shape)
     in_shape[-1] = 1
 
-    return jnp.zeros(in_shape, dtype=inputs.dtype)
+    return jnp.zeros(in_shape, dtype=jnp.float32)
 
   @nn.compact
   def __call__(self, inputs, input_paddings=None, train=False):
+    out_dtype = self.dtype if self.dtype is not None else inputs.dtype
     rank = inputs.ndim
     reduce_over_dims = list(range(0, rank - 1))
 
     if input_paddings is None:
       padding = self._get_default_paddings(inputs)
     else:
-      padding = jnp.expand_dims(input_paddings, -1)
+      padding = jnp.expand_dims(input_paddings, -1).astype(jnp.float32)
 
+    mask = 1.0 - padding
+    inputs_f32 = inputs.astype(jnp.float32)
     momentum = self.batch_norm_momentum
     epsilon = self.batch_norm_epsilon
 
     if train:
-      mask = 1.0 - padding
-      sum_v = jnp.sum(inputs * mask, axis=reduce_over_dims, keepdims=False)
-      count_v = jnp.sum(
-          jnp.ones_like(inputs) * mask, axis=reduce_over_dims, keepdims=False
+      sum_v = jnp.sum(inputs_f32 * mask, axis=reduce_over_dims, keepdims=False)
+      count_v = jnp.maximum(
+          jnp.sum(mask, axis=reduce_over_dims, keepdims=False), 1.0
       )
-
-      count_v = jnp.maximum(count_v, 1.0)
       mean = sum_v / count_v
 
+      centered = inputs_f32 - mean
       sum_vv = jnp.sum(
-          (inputs - mean) * (inputs - mean) * mask,
+          jnp.square(centered) * mask,
           axis=reduce_over_dims,
           keepdims=False,
       )
@@ -417,15 +449,15 @@ class BatchNorm(nn.Module):
       self.ra_mean.value = momentum * self.ra_mean.value + (1 - momentum) * mean
       self.ra_var.value = momentum * self.ra_var.value + (1 - momentum) * var
     else:
-      mean = self.ra_mean.value
-      var = self.ra_var.value
+      mean = self.ra_mean.value.astype(jnp.float32)
+      var = self.ra_var.value.astype(jnp.float32)
+      centered = inputs_f32 - mean
 
-    inv = (1 + self.gamma) / jnp.sqrt(var + epsilon)
+    inv = (1.0 + self.gamma.astype(jnp.float32)) * jax.lax.rsqrt(var + epsilon)
 
-    bn_output = (inputs - mean) * inv + self.beta
-    bn_output *= 1.0 - padding
+    bn_output = (centered * inv + self.beta.astype(jnp.float32)) * mask
 
-    return bn_output
+    return bn_output.astype(out_dtype)
 
 
 
@@ -484,6 +516,7 @@ class GenericRNNSequenceEncoder(nn.Module):
   cell_type: Type[nn.RNNCellBase]
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
   recurrent_dropout_rate: float = 0.0
+  return_final_state: bool = True
 
   def setup(self):
     self.cell = self.cell_type(features=self.hidden_size, **self.cell_kwargs)
@@ -514,12 +547,15 @@ class GenericRNNSequenceEncoder(nn.Module):
 
     Returns:
       The cell state after processing the complete sequence (including padding),
-      and a tuple with all intermediate cell states and cell outputs.
+      and either a tuple with all intermediate cell states and cell outputs (if
+      `return_final_state=True`) or cell outputs alone.
     """
     # We do not directly scan the cell itself, since it only returns the output.
-    # This returns both the state and the output, so we can slice out the
-    # correct final states later.
+    # This returns both the state and the output when `return_final_state=True`,
+    # so we can slice out the correct final states later.
     new_cell_state, output = self.cell(cell_state, inputs)
+    if not self.return_final_state:
+      return new_cell_state, output
     return new_cell_state, (new_cell_state, output)
 
   def __call__(
@@ -545,20 +581,26 @@ class GenericRNNSequenceEncoder(nn.Module):
 
     Returns:
       The encoded sequence of inputs, shaped <float32>[batch_size, seq_len,
-        hidden_size], as well as the final hidden states of the RNN cell. For an
-        LSTM cell the final states are a tuple (c, h), each shaped <float32>[
-          batch_size, hidden_size].
+        hidden_size], as well as the final hidden states of the RNN cell (or
+        None when `return_final_state=False`). For an LSTM cell the final states
+        are a tuple (c, h), each shaped <float32>[batch_size, hidden_size].
     """
     if reverse:
       inputs = flip_sequences(inputs, lengths)
 
     recurrent_dropout_mask = None
-    _, (cell_states, outputs) = self.unroll_cell(
-        initial_state, inputs, recurrent_dropout_mask, deterministic
-    )
-    final_state = jax.tree.map(
-        lambda x: x[jnp.arange(inputs.shape[0]), lengths - 1], cell_states
-    )
+    if self.return_final_state:
+      _, (cell_states, outputs) = self.unroll_cell(
+          initial_state, inputs, recurrent_dropout_mask, deterministic
+      )
+      final_state = jax.tree.map(
+          lambda x: x[jnp.arange(inputs.shape[0]), lengths - 1], cell_states
+      )
+    else:
+      _, outputs = self.unroll_cell(
+          initial_state, inputs, recurrent_dropout_mask, deterministic
+      )
+      final_state = None
 
     if reverse:
       outputs = flip_sequences(outputs, lengths)
@@ -587,6 +629,7 @@ class GenericRNN(nn.Module):
     bidirectional: Process the sequence left-to-right and right-to-left and
       concatenate the outputs from the two directions.
     cell_kwargs: Optional keyword arguments to instantiate the cell with.
+    return_final_state: Whether to extract and return per-cell final states.
   """
 
   cell_type: Type[nn.RNNCellBase]
@@ -596,6 +639,7 @@ class GenericRNN(nn.Module):
   recurrent_dropout_rate: float = 0.0
   bidirectional: bool = False
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
+  return_final_state: bool = True
 
   @nn.compact
   def __call__(
@@ -634,9 +678,13 @@ class GenericRNN(nn.Module):
     # Construct initial states.
     if initial_states is None:  # Initialize with zeros.
       rng = jax.random.PRNGKey(0)
+      cell_dtype = self.cell_kwargs.get('dtype')
       initial_states = [
-          self.cell_type(self.hidden_size).initialize_carry(
-              rng, (batch_size, 1)
+          jax.tree.map(
+              lambda x: x.astype(cell_dtype) if cell_dtype is not None else x,
+              self.cell_type(self.hidden_size).initialize_carry(
+                  rng, (batch_size, 1)
+              ),
           )
           for _ in range(num_cells)
       ]
@@ -655,6 +703,7 @@ class GenericRNN(nn.Module):
           cell_kwargs=self.cell_kwargs,
           hidden_size=self.hidden_size,
           recurrent_dropout_rate=self.recurrent_dropout_rate,
+          return_final_state=self.return_final_state,
           name=f'{self.name}SequenceEncoder_{cell_idx}',
       )(
           inputs,
@@ -672,6 +721,7 @@ class GenericRNN(nn.Module):
             cell_kwargs=self.cell_kwargs,
             hidden_size=self.hidden_size,
             recurrent_dropout_rate=self.recurrent_dropout_rate,
+            return_final_state=self.return_final_state,
             name=f'{self.name}SequenceEncoder_{cell_idx}',
         )(
             inputs,
@@ -707,6 +757,7 @@ class LSTM(nn.Module):
       using `flax.linen.LSTMCell` instead, since the optimized LSTM cell works
       best for hidden sizes up to 2048.
     cell_kwargs: Optional keyword arguments to instantiate the cell with.
+    return_final_state: Whether to extract and return per-cell final states.
   """
 
   hidden_size: int
@@ -716,6 +767,7 @@ class LSTM(nn.Module):
   bidirectional: bool = False
   cell_type: Any = nn.OptimizedLSTMCell
   cell_kwargs: Mapping[str, Any] = flax.core.FrozenDict()
+  return_final_state: bool = True
 
   @nn.compact
   def __call__(
@@ -757,6 +809,7 @@ class LSTM(nn.Module):
         recurrent_dropout_rate=self.recurrent_dropout_rate,
         bidirectional=self.bidirectional,
         cell_kwargs=self.cell_kwargs,
+        return_final_state=self.return_final_state,
         name='LSTM',
     )(
         inputs,
@@ -775,21 +828,26 @@ class BatchRNN(nn.Module):
   config: DeepspeechConfig
 
   @nn.compact
-  def __call__(self, inputs, input_paddings, train):
+  def __call__(self, inputs, input_paddings, train, lengths=None):
     config = self.config
+    work_dtype = config.dtype if config.dtype is not None else inputs.dtype
 
     if config.layernorm_everywhere:
-      inputs = LayerNorm(config.encoder_dim)(inputs)
+      inputs = LayerNorm(
+          config.encoder_dim, param_dtype=config.param_dtype
+      )(inputs.astype(work_dtype))
     else:
       inputs = BatchNorm(
           config.encoder_dim,
-          config.dtype,
+          work_dtype,
           config.batch_norm_momentum,
           config.batch_norm_epsilon,
           config.enable_synced_batchnorm,
+          param_dtype=config.param_dtype,
       )(inputs, input_paddings, train)
 
-    lengths = jnp.sum(1 - input_paddings, axis=-1, dtype=jnp.int32)
+    if lengths is None:
+      lengths = jnp.sum(1 - input_paddings, axis=-1, dtype=jnp.int32)
 
     hidden_size = (
         config.encoder_dim // 2 if config.bidirectional else config.encoder_dim
@@ -799,9 +857,13 @@ class BatchRNN(nn.Module):
         hidden_size=hidden_size,
         bidirectional=config.bidirectional,
         num_layers=1,
+        cell_kwargs=flax.core.FrozenDict(
+            {'dtype': work_dtype, 'param_dtype': config.param_dtype}
+        ),
+        return_final_state=False,
     )(inputs, lengths)
 
-    return output
+    return output.astype(work_dtype)
 
 
 class DeepSpeechEncoderDecoder(nn.Module):
@@ -846,17 +908,26 @@ class DeepSpeechEncoderDecoder(nn.Module):
     if config.use_specaug and train:
       outputs, output_paddings = self.specaug(outputs, output_paddings)
 
+    work_dtype = config.dtype if config.dtype is not None else jnp.float32
+    outputs = outputs.astype(work_dtype)
+
     # Subsample input by a factor of 4 by performing strided convolutions.
     outputs, output_paddings = Subsample(config=config)(
         outputs, output_paddings, train
     )
 
+    lengths = jnp.sum(1 - output_paddings, axis=-1, dtype=jnp.int32)
+
     # Run the lstm layers.
     for _ in range(config.num_lstm_layers):
       if config.enable_residual_connections:
-        outputs = outputs + BatchRNN(config)(outputs, output_paddings, train)
+        outputs = outputs + BatchRNN(config)(
+            outputs, output_paddings, train, lengths=lengths
+        )
       else:
-        outputs = BatchRNN(config)(outputs, output_paddings, train)
+        outputs = BatchRNN(config)(
+            outputs, output_paddings, train, lengths=lengths
+        )
 
     for _ in range(config.num_ffn_layers):
       if config.enable_residual_connections:
@@ -870,13 +941,18 @@ class DeepSpeechEncoderDecoder(nn.Module):
 
     # Run the decoder which in this case is a trivial projection layer.
     if config.enable_decoder_layer_norm:
-      outputs = LayerNorm(config.encoder_dim)(outputs)
+      outputs = LayerNorm(
+          config.encoder_dim, param_dtype=config.param_dtype
+      )(outputs)
 
     outputs = nn.Dense(
         config.vocab_size,
         use_bias=True,
+        dtype=work_dtype,
+        param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
     )(outputs)
+    outputs = outputs.astype(jnp.float32)
 
     return outputs, output_paddings
 
@@ -1023,6 +1099,8 @@ class DeepSpeechModel(base_model.BaseModel):
   def build_flax_module(self):
     config = DeepspeechConfig(
         vocab_size=self.hps.output_shape[1],
+        dtype=utils.dtype_from_str(self.hps.computation_dtype),
+        param_dtype=utils.dtype_from_str(self.hps.model_dtype),
         encoder_dim=self.hps.encoder_dim,
         num_lstm_layers=self.hps.num_lstm_layers,
         num_ffn_layers=self.hps.num_ffn_layers,
@@ -1074,6 +1152,8 @@ class MLCommonsDeepSpeechModel(DeepSpeechModel):
 
     config = DeepspeechConfig(
         vocab_size=self.hps.output_shape[1],
+        dtype=utils.dtype_from_str(self.hps.computation_dtype),
+        param_dtype=utils.dtype_from_str(self.hps.model_dtype),
         encoder_dim=self.hps.encoder_dim,
         num_lstm_layers=self.hps.num_lstm_layers,
         num_ffn_layers=self.hps.num_ffn_layers,

@@ -470,8 +470,8 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     time_since_last_log = time.time() - self._time_at_prev_log_end
     steps_since_last_log = self._global_step - self._prev_log_step
 
-    mean_train_cost = self._sum_train_cost / max(
-        1, self._global_step - self._prev_eval_step
+    mean_train_cost = float(
+        self._sum_train_cost / max(1, self._global_step - self._prev_eval_step)
     )
     train_steps_per_sec = steps_since_last_log / time_since_last_log
 
@@ -790,6 +790,19 @@ class BaseTrainer(metaclass=abc.ABCMeta):
                 f' does not match hps batch size {self._hps.batch_size}'
             )
 
+        next_step = self._global_step + 1
+        should_eval = trainer_utils.should_trigger(
+            next_step, self._eval_frequency, self._eval_steps
+        )
+        should_log_train_metrics = trainer_utils.should_trigger(
+            next_step, self._log_frequency, self._log_steps
+        )
+        need_report_norms = bool(
+            should_eval
+            or should_log_train_metrics
+            or next_step == self._num_train_steps
+        )
+
         # It looks like we are reusing an rng key, but we aren't.
         (
             self._optimizer_state,
@@ -802,20 +815,11 @@ class BaseTrainer(metaclass=abc.ABCMeta):
             rng,
             self._metrics_state,
             self._sum_train_cost,
+            compute_norms=need_report_norms,
         )
         if self._global_step in self._checkpoint_steps:
           logging.info('Saving checkpoint at step %d', self._global_step)
           self._save(checkpoint_manager=self._orbax_checkpoint_manager_extra)
-
-        # TODO(gdahl, gilmer): consider moving this test up.
-        # NB: Since this test is after we increment self._global_step, having 0
-        # in eval_steps does nothing.
-        should_eval = trainer_utils.should_trigger(
-            self._global_step, self._eval_frequency, self._eval_steps
-        )
-        should_log_train_metrics = trainer_utils.should_trigger(
-            self._global_step, self._log_frequency, self._log_steps
-        )
         if should_eval:
           try:
             report = self._eval(start_step, start_time, eval_rng)
@@ -844,7 +848,15 @@ class BaseTrainer(metaclass=abc.ABCMeta):
     self._orbax_checkpoint_manager_extra.close()
 
   @abc.abstractmethod
-  def update(self, batch, rng, metrics_update_fn, metrics_state, training_cost):
+  def update(
+      self,
+      batch,
+      rng,
+      metrics_state,
+      training_cost,
+      *,
+      compute_norms: bool = True,
+  ):
     """Single step of the training loop.
 
     Note this method is responsible for updating the private _global_step
@@ -854,11 +866,10 @@ class BaseTrainer(metaclass=abc.ABCMeta):
       batch: the per-device batch of data to process.
       rng: the RNG used for calling the model. `step` and `local_device_index`
         will be folded into this to produce a unique per-device, per-step RNG.
-      metrics_update_fn: a function that takes in the current metrics state, the
-        current step, and the training cost, gradients, params, and optimizer
-        state and returns the new metrics state.
       metrics_state: the current metrics state.
       training_cost: the current training cost.
+      compute_norms: whether to compute `grad_norm` and `update_norm` for
+        logging/reporting on this step.
 
     Returns:
       A tuple of the new optimizer, the new batch stats, the scalar training
