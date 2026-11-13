@@ -405,83 +405,138 @@ class VerifyStaticBatchingTest(tf.test.TestCase):
       )
 
   def test_numpy_padding_mask_and_weights_parity_with_jraph(self):
-    """Tests that NumPy padding mask, targets, and weights match jraph."""
+    """Tests single-shard unskipped parity of targets and weights with jraph."""
     examples = _make_dataset()[:BATCH_SIZE]
-    for max_nodes_per_shard in [
-        BATCH_SIZE * NUM_NODES + 1,
-        2 * NUM_NODES + 1,
-        NUM_NODES + 1,
-    ]:
-      batch = ogbg_molpcba._build_full_batch(  # pylint: disable=protected-access
-          examples=examples,
-          graphs_per_shard=BATCH_SIZE,
-          num_shards=1,
-          max_nodes_per_shard=max_nodes_per_shard,
-          max_edges_per_shard=BATCH_SIZE * NUM_EDGES,
-          add_bidirectional_edges=False,
-          add_virtual_node=False,
-          add_self_loops=False,
-          node_feat_dim=9,
-          edge_feat_dim=3,
-          num_labels=NUM_LABELS,
-      )
-      graph = batch['inputs']
-      n_node = graph.n_node
-
-      n_padding_graph = int(np.argmin(n_node[::-1] == 0)) + 1
-      np_padding_mask = np.arange(n_node.shape[0]) < (
-          n_node.shape[0] - n_padding_graph
-      )
-      jraph_padding_mask = np.asarray(jraph.get_graph_padding_mask(graph))
-      self.assertAllEqual(np_padding_mask, jraph_padding_mask)
-
-      # Reconstruct the pre-mask labels array populated by _build_full_batch
-      # and compare against the original jraph reference computation.
-      raw_labels = np.zeros((BATCH_SIZE + 1, NUM_LABELS), dtype=np.float32)
-      for idx in range(BATCH_SIZE):
-        if n_node[idx] > 0:
-          raw_labels[idx] = examples[idx]['labels']
-      nan_mask = np.isnan(raw_labels)
-      ref_targets = np.where(nan_mask, 0.0, raw_labels).astype(np.float32)
-      ref_weights = (
-          (1.0 - nan_mask) * jraph_padding_mask[:, None]
-      ).astype(np.float32)
-
-      self.assertEqual(batch['targets'].dtype, np.float32)
-      self.assertEqual(batch['weights'].dtype, np.float32)
-      self.assertAllEqual(batch['targets'], ref_targets)
-      self.assertAllEqual(batch['weights'], ref_weights)
-
-    # Also test parity on jraph.pad_with_graphs with multiple trailing 0-node
-    # padding graphs.
-    base_graph = ogbg_molpcba._build_full_batch(  # pylint: disable=protected-access
-        examples=examples[:2],
-        graphs_per_shard=2,
+    batch = ogbg_molpcba._build_full_batch(  # pylint: disable=protected-access
+        examples=examples,
+        graphs_per_shard=BATCH_SIZE,
         num_shards=1,
-        max_nodes_per_shard=2 * NUM_NODES + 1,
-        max_edges_per_shard=2 * NUM_EDGES,
+        max_nodes_per_shard=BATCH_SIZE * NUM_NODES + 1,
+        max_edges_per_shard=BATCH_SIZE * NUM_EDGES,
         add_bidirectional_edges=False,
         add_virtual_node=False,
         add_self_loops=False,
         node_feat_dim=9,
         edge_feat_dim=3,
         num_labels=NUM_LABELS,
-    )['inputs']
-    unpadded = jraph.unpad_with_graphs(base_graph)
-    for target_n_graph in [3, 4, 6]:
-      padded = jraph.pad_with_graphs(
-          unpadded,
-          n_node=target_n_graph * NUM_NODES + 1,
-          n_edge=target_n_graph * NUM_EDGES,
-          n_graph=target_n_graph,
+    )
+    graph = batch['inputs']
+    jraph_padding_mask = np.asarray(jraph.get_graph_padding_mask(graph))
+
+    raw_labels = np.zeros((BATCH_SIZE + 1, NUM_LABELS), dtype=np.float32)
+    for idx in range(BATCH_SIZE):
+      raw_labels[idx] = examples[idx]['labels']
+    nan_mask = np.isnan(raw_labels)
+    ref_targets = np.where(nan_mask, 0.0, raw_labels).astype(np.float32)
+    ref_weights = ((1.0 - nan_mask) * jraph_padding_mask[:, None]).astype(
+        np.float32
+    )
+
+    self.assertEqual(batch['targets'].dtype, np.float32)
+    self.assertEqual(batch['weights'].dtype, np.float32)
+    self.assertAllEqual(batch['targets'], ref_targets)
+    self.assertAllEqual(batch['weights'], ref_weights)
+
+  def test_multishard_parity_with_dynamic_batching(self):
+    """Static and dynamic batching match on targets and weights per shard."""
+    num_shards = 4
+    batch_size = 8
+    graphs_per_shard = batch_size // num_shards
+
+    dyn_batches = list(
+        ogbg_molpcba._get_dynamic_batch_iterator(  # pylint: disable=protected-access
+            iter(_make_dataset()),
+            batch_size=batch_size,
+            nodes_per_graph=NUM_NODES,
+            edges_per_graph=NUM_EDGES,
+            add_bidirectional_edges=False,
+            add_self_loops=False,
+            add_virtual_node=False,
+            num_shards=num_shards,
+        )
+    )
+    static_batches = list(
+        ogbg_molpcba._get_static_batch_iterator(  # pylint: disable=protected-access
+            iter(_make_dataset()),
+            batch_size=batch_size,
+            nodes_per_graph=NUM_NODES,
+            edges_per_graph=NUM_EDGES,
+            add_bidirectional_edges=False,
+            add_self_loops=False,
+            add_virtual_node=False,
+            node_feat_dim=9,
+            edge_feat_dim=3,
+            num_labels=NUM_LABELS,
+            num_shards=num_shards,
+        )
+    )
+
+    self.assertLen(static_batches, len(dyn_batches))
+    for i, (dyn_b, stat_b) in enumerate(zip(dyn_batches, static_batches)):
+      self.assertAllEqual(
+          dyn_b['inputs'].n_node,
+          stat_b['inputs'].n_node,
+          msg=f'n_node mismatch in multishard batch {i}',
       )
-      n_node = np.asarray(padded.n_node)
-      n_padding_graph = int(np.argmin(n_node[::-1] == 0)) + 1
-      np_padding_mask = np.arange(n_node.shape[0]) < (
-          n_node.shape[0] - n_padding_graph
+      self.assertAllClose(
+          dyn_b['targets'],
+          stat_b['targets'],
+          atol=1e-6,
+          msg=f'targets mismatch in multishard batch {i}',
       )
-      jraph_padding_mask = np.asarray(jraph.get_graph_padding_mask(padded))
-      self.assertAllEqual(np_padding_mask, jraph_padding_mask)
+      self.assertAllClose(
+          dyn_b['weights'],
+          stat_b['weights'],
+          atol=1e-6,
+          msg=f'weights mismatch in multishard batch {i}',
+      )
+      for shard_idx in range(num_shards):
+        pad_idx = shard_idx * (graphs_per_shard + 1) + graphs_per_shard
+        self.assertAllEqual(
+            stat_b['weights'][pad_idx],
+            np.zeros(NUM_LABELS, dtype=np.float32),
+        )
+
+  def test_skipped_graphs_and_shard_padding_masked(self):
+    """Skipped graphs and all shard padding graphs receive zero weight."""
+    dataset = _make_dataset()
+    for num_shards in [1, 3]:
+      examples = dataset[: num_shards * BATCH_SIZE]
+      for max_nodes_per_shard, max_edges_per_shard in [
+          (2 * NUM_NODES + 1, BATCH_SIZE * NUM_EDGES),
+          (NUM_NODES + 1, BATCH_SIZE * NUM_EDGES),
+          (BATCH_SIZE * NUM_NODES + 1, 2 * NUM_EDGES),
+      ]:
+        batch = ogbg_molpcba._build_full_batch(  # pylint: disable=protected-access
+            examples=examples,
+            graphs_per_shard=BATCH_SIZE,
+            num_shards=num_shards,
+            max_nodes_per_shard=max_nodes_per_shard,
+            max_edges_per_shard=max_edges_per_shard,
+            add_bidirectional_edges=False,
+            add_virtual_node=False,
+            add_self_loops=False,
+            node_feat_dim=9,
+            edge_feat_dim=3,
+            num_labels=NUM_LABELS,
+        )
+        n_node = batch['inputs'].n_node
+        total_graphs = num_shards * (BATCH_SIZE + 1)
+        ref_targets = np.zeros((total_graphs, NUM_LABELS), dtype=np.float32)
+        ref_weights = np.zeros((total_graphs, NUM_LABELS), dtype=np.float32)
+
+        for shard_idx in range(num_shards):
+          graph_base = shard_idx * (BATCH_SIZE + 1)
+          for local_idx in range(BATCH_SIZE):
+            slot = graph_base + local_idx
+            if n_node[slot] > 0:
+              lbl = examples[shard_idx * BATCH_SIZE + local_idx]['labels']
+              nan_mask = np.isnan(lbl)
+              ref_targets[slot] = np.where(nan_mask, 0.0, lbl)
+              ref_weights[slot] = np.where(nan_mask, 0.0, 1.0)
+
+        self.assertAllEqual(batch['targets'], ref_targets)
+        self.assertAllEqual(batch['weights'], ref_weights)
 
 
 if __name__ == '__main__':
