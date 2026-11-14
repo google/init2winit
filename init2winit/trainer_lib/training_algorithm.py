@@ -41,6 +41,8 @@ def optax_update_params_helper(
     rng,
     grad_clip,
     training_cost_fn,
+    compute_norms: bool = True,
+    return_grad: bool = True,
 ):
   """Helper function for updating parameters using optax.
 
@@ -54,6 +56,8 @@ def optax_update_params_helper(
     rng: The random number generator.
     grad_clip: The gradient clipping value.
     training_cost_fn: The training cost function.
+    compute_norms: Whether to compute `grad_norm` and `update_norm` metrics.
+    return_grad: Whether to return the gradient pytree.
 
   Returns:
     A tuple containing the new optimizer state, the new model parameters,
@@ -70,14 +74,21 @@ def optax_update_params_helper(
   (cost_value, new_batch_stats), grad = grad_fn(params)
   new_batch_stats = new_batch_stats.get('batch_stats', None)
 
-  grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
-  if grad_clip:
-    scaled_grad = jax.tree.map(
-        lambda x: x / (grad_norm + _GRAD_CLIP_EPS) * grad_clip, grad
-    )
-    grad = jax.lax.cond(
-        grad_norm > grad_clip, lambda _: scaled_grad, lambda _: grad, None
-    )
+  grad_norm = None
+  if grad_clip or compute_norms:
+    computed_grad_norm = jnp.sqrt(model_utils.l2_regularization(grad, 0))
+    if grad_clip:
+      clip_triggered = computed_grad_norm > grad_clip
+      grad = jax.tree.map(
+          lambda x: jnp.where(
+              clip_triggered,
+              x / (computed_grad_norm + _GRAD_CLIP_EPS) * grad_clip,
+              x,
+          ),
+          grad,
+      )
+    if compute_norms:
+      grad_norm = computed_grad_norm
   model_updates, new_optimizer_state = optimizer_update_fn(
       grad,
       optimizer_state,
@@ -89,7 +100,9 @@ def optax_update_params_helper(
       value=cost_value,
   )
 
-  update_norm = jnp.sqrt(model_utils.l2_regularization(model_updates, 0))
+  update_norm = None
+  if compute_norms:
+    update_norm = jnp.sqrt(model_utils.l2_regularization(model_updates, 0))
 
   new_params = optax.apply_updates(params, model_updates)
   return (
@@ -97,7 +110,7 @@ def optax_update_params_helper(
       new_params,
       new_batch_stats,
       cost_value,
-      grad,
+      grad if return_grad else None,
       grad_norm,
       update_norm,
   )
@@ -148,6 +161,8 @@ class TrainingAlgorithm(metaclass=abc.ABCMeta):
       loss_type=None,
       train_state=None,
       eval_results=None,
+      compute_norms: bool = True,
+      return_grad: bool = True,
   ):
     """Updates the model parameters.
 
@@ -875,6 +890,8 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
       loss_type=None,
       train_state=None,
       eval_results=None,
+      compute_norms: bool = True,
+      return_grad: bool = True,
   ):
     """Updates the model parameters.
 
@@ -891,6 +908,8 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
       loss_type: The type of loss function to use.
       train_state: The optional training state.
       eval_results: The optional evaluation results.
+      compute_norms: Whether to compute `grad_norm` and `update_norm` metrics.
+      return_grad: Whether to return the gradient pytree.
 
     Returns:
       A tuple containing:
@@ -909,13 +928,15 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
     grad_clip = self.hps.opt_hparams.get('grad_clip', None)
     # We pass the lr directly because the lr functions from sehedules.py
     # have numpy dependencies and can't be jitted.
-    lr = self._lr_fn(global_step)  # pyrefly: ignore[not-callable]
+    lr = float(self._lr_fn(global_step))  # pyrefly: ignore[not-callable]
     jitted_update_fn = jax.jit(
         optax_update_params_helper,
         static_argnames=(
             'training_cost_fn',
             'optimizer_update_fn',
             'grad_clip',
+            'compute_norms',
+            'return_grad',
         ),
         donate_argnums=(0, 1, 2),
     )
@@ -937,13 +958,15 @@ class OptaxTrainingAlgorithm(TrainingAlgorithm):
         rng,
         grad_clip,
         self.training_cost_fn,
+        bool(compute_norms),
+        bool(return_grad),
     )
 
-    self.eval_report_metrics.update(
-        learning_rate=lr,
-        grad_norm=grad_norm.item(),
-        update_norm=update_norm.item(),
-    )
+    self.eval_report_metrics['learning_rate'] = lr
+    if grad_norm is not None:
+      self.eval_report_metrics['grad_norm'] = grad_norm.item()
+    if update_norm is not None:
+      self.eval_report_metrics['update_norm'] = update_norm.item()
 
     return new_optimizer_state, new_params, new_batch_stats, cost_value, grad
 
