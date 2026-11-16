@@ -115,7 +115,9 @@ class DLRM(nn.Module):
     all_embedding_tables = jax.lax.all_gather(
         embedding_table_block, 'devices', axis=1, tiled=True
     )
-    return jnp.take(all_embedding_tables, indices_block, axis=0)
+    return all_embedding_tables.at[indices_block].get(
+        mode='promise_in_bounds'
+    )
 
   @nn.compact
   def __call__(self, x, train):
