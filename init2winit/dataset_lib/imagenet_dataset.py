@@ -365,49 +365,64 @@ def load_split(
       },
   )
 
-  ds = ds.cache()
-
   if split == 'train':
+    ds = ds.cache()
     ds = ds.shuffle(
         16 * per_host_batch_size,
         seed=data_utils.convert_jax_to_tf_random_seed(shuffle_rng),
         reshuffle_each_iteration=True,
     )
     ds = ds.repeat()
-
-  ds = ds.enumerate().map(
-      decode_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls
-  )
-  ds = ds.batch(per_host_batch_size, drop_remainder=False)
-
-  if split == 'train' and hps.use_mixup:
-    mixup_rng = tf.convert_to_tensor(shuffle_rng, dtype=tf.int32)
-    mixup_rng = tf.random.experimental.stateless_fold_in(mixup_rng, 0)
-    mixup_rng = multihost_utils.broadcast_one_to_all(
-        mixup_rng, is_source=jax.process_index() == 0
-    )
-
-    def mixup_batch(batch_index, batch):
-      per_batch_mixup_rng = tf.random.experimental.stateless_fold_in(
-          mixup_rng, batch_index
-      )
-      inputs, targets = image_preprocessing.mixup_tf(
-          per_batch_mixup_rng,
-          batch['inputs'],
-          batch['targets'],
-          alpha=hps.mixup.alpha,
-      )
-      batch['inputs'] = inputs
-      batch['targets'] = targets
-      return batch
-
     ds = ds.enumerate().map(
-        mixup_batch, num_parallel_calls=hps.num_tf_data_map_parallel_calls
+        decode_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls
     )
+    ds = ds.batch(
+        per_host_batch_size,
+        drop_remainder=False,
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
+    if hps.use_mixup:
+      mixup_rng = tf.convert_to_tensor(shuffle_rng, dtype=tf.int32)
+      mixup_rng = tf.random.experimental.stateless_fold_in(mixup_rng, 0)
+      mixup_rng = multihost_utils.broadcast_one_to_all(
+          mixup_rng, is_source=jax.process_index() == 0
+      )
 
-  if split != 'train':
-    ds = ds.cache()
-  ds = ds.prefetch(hps.num_tf_data_prefetches)
+      def mixup_batch(batch_index, batch):
+        per_batch_mixup_rng = tf.random.experimental.stateless_fold_in(
+            mixup_rng, batch_index
+        )
+        inputs, targets = image_preprocessing.mixup_tf(
+            per_batch_mixup_rng,
+            batch['inputs'],
+            batch['targets'],
+            alpha=hps.mixup.alpha,
+        )
+        batch['inputs'] = inputs
+        batch['targets'] = targets
+        return batch
+
+      ds = ds.enumerate().map(
+          mixup_batch, num_parallel_calls=hps.num_tf_data_map_parallel_calls
+      )
+
+    options = tf.data.Options()
+    options.threading.private_threadpool_size = 64
+    options.threading.max_intra_op_parallelism = 1
+    options.experimental_optimization.parallel_batch = True
+    options.experimental_optimization.map_and_batch_fusion = True
+    ds = ds.with_options(options)
+    ds = ds.prefetch(hps.num_tf_data_prefetches)
+  else:
+    ds = ds.enumerate().map(decode_example, num_parallel_calls=16)
+    ds = ds.batch(per_host_batch_size, drop_remainder=False)
+    if split in ['valid', 'test']:
+      # Valid/test are iterated to EOF, so caching decoded batches here avoids
+      # re-decoding across evals. Skip caching 'eval_train': eval_train_epoch
+      # slices early via itertools.islice (never reaching EOF to finalize
+      # tf.data's cache), and caching full decoded train tensors would OOM RAM.
+      ds = ds.cache()
+    ds = ds.prefetch(2)
   return ds
 
 
