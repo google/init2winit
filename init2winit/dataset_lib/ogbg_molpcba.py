@@ -433,10 +433,8 @@ def _build_full_batch(
       globals={},
   )
 
-  n_padding_graph = int(np.argmin(n_node[::-1] == 0)) + 1
-  padding_mask = np.arange(n_node.shape[0]) < (
-      n_node.shape[0] - n_padding_graph
-  )
+  padding_mask = n_node > 0
+  padding_mask[graphs_per_shard :: graphs_per_shard + 1] = False
   nan_mask = np.isnan(labels)
   replaced_labels = np.where(nan_mask, np.float32(0.0), labels)
   weights = np.where(
