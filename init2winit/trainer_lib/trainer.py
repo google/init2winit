@@ -51,15 +51,7 @@ def _get_param_key(path, leaf):
 class Trainer(base_trainer.BaseTrainer):
   """Default trainer."""
 
-  def update(
-      self,
-      batch,
-      rng,
-      metrics_state,
-      training_cost,
-      *,
-      compute_norms: bool = True,
-  ):
+  def update(self, batch, rng, metrics_state, training_cost):  # pyrefly: ignore[bad-override]
     """Single step of the training loop.
 
     Uses the training algorithm's update_params function to get the updated
@@ -73,17 +65,16 @@ class Trainer(base_trainer.BaseTrainer):
         will be folded into this to produce a unique per-device, per-step RNG.
       metrics_state: the current metrics state.
       training_cost: the current training cost.
-      compute_norms: whether to compute `grad_norm` and `update_norm` for
-        logging/reporting on this step.
 
     Returns:
       A tuple containing:
         new_optimizer_state: Pytree of optimizer state.
         new_params: Pytree of model parameters.
         new_model_state: Pytree of model state.
-        new_metrics_state: The updated metrics state.
-        new_sum_train_cost: The accumulated training cost.
+        cost_value: The training cost used for the metrics state.
+        grad: The gradient used for the metrics state.
     """
+
     # `jax.random.split` is very slow outside the train step, so instead we do a
     # `jax.random.fold_in` here.
     # The RNG is already sharded per-device, so each device has a scalar
@@ -99,8 +90,6 @@ class Trainer(base_trainer.BaseTrainer):
             batch=batch,
             global_step=step,
             rng=rng,
-            compute_norms=compute_norms,
-            return_grad=metrics_state is not None,
         )
     )
 
