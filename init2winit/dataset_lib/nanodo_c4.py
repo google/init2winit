@@ -18,7 +18,7 @@
 # Implementation based on:
 # https://github.com/google-deepmind/nanodo/blob/main/nanodo/data.py
 # This pygrain dataloader can be used with any TFDS datasource (e.g. c4, lm1b,
-# etc.) but is primarily used to load C4 dataset in it's current form.
+# etc.) but is primarily used to load C4 dataset in its current form.
 # This data loader is deterministically reproducible with shuffling guarantees
 # but we don't checkpoint dataset iterators in i2w yet so this is not
 # guaranteed to be reproducible across restarts.
