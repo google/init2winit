@@ -30,6 +30,7 @@ FAKE_MODEL_DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
         num_filters=16,
         num_layers=18,  # Must be one of [18, 34, 50, 101, 152, 200]
+        computation_dtype='bfloat16',
         model_dtype='float32',
         virtual_batch_size=64,
         data_format='NHWC',
@@ -48,6 +49,7 @@ MLPERF_DEFAULT_HPARAMS = config_dict.ConfigDict(
         bn_output_scale=0.0,
         batch_norm_momentum=0.9,
         batch_norm_epsilon=1e-5,
+        computation_dtype='bfloat16',
         model_dtype='float32',
         virtual_batch_size=64,
         data_format='NHWC',
@@ -60,7 +62,7 @@ MLPERF_DEFAULT_HPARAMS = config_dict.ConfigDict(
 def _constant_init(factor):
   def init_fn(key, shape, dtype=jnp.float32):
     del key
-    return jnp.ones(shape, dtype) * factor
+    return jnp.ones(shape, dtype) * jnp.asarray(factor, dtype)
 
   return init_fn
 
@@ -72,7 +74,8 @@ class ResidualBlock(nn.Module):
   strides: Tuple[int, int] = (1, 1)
   axis_name: Optional[str] = None
   axis_index_groups: Optional[Any] = None
-  dtype: model_utils.Dtype = jnp.float32
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
   bn_output_scale: float = 0.0
@@ -84,6 +87,7 @@ class ResidualBlock(nn.Module):
 
   @nn.compact
   def __call__(self, x, train):
+    x = jnp.asarray(x, self.dtype)
     needs_projection = x.shape[-1] != self.filters * 4 or self.strides != (1, 1)
     batch_norm = functools.partial(
         normalization.VirtualBatchNorm,
@@ -92,12 +96,18 @@ class ResidualBlock(nn.Module):
         axis_name=self.axis_name,
         axis_index_groups=self.axis_index_groups,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
         total_batch_size=self.total_batch_size,
         data_format=self.data_format,
     )
-    conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
+    conv = functools.partial(
+        nn.Conv,
+        use_bias=False,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
+    )
     residual = x
     if needs_projection:
       residual = conv(self.filters * 4, (1, 1), self.strides, name='proj_conv')(
@@ -109,15 +119,15 @@ class ResidualBlock(nn.Module):
     y = conv(self.filters, (1, 1), name='conv1')(x)
     y = batch_norm(name='bn1')(y, use_running_average=not train)
     activation_fn = model_utils.ACTIVATIONS[self.activation_function]
-    y = activation_fn(y)
+    y = jnp.asarray(activation_fn(y), self.dtype)
     y = conv(self.filters, (3, 3), self.strides, name='conv2')(y)
     y = batch_norm(name='bn2')(y, use_running_average=not train)
-    y = activation_fn(y)
+    y = jnp.asarray(activation_fn(y), self.dtype)
     y = conv(self.filters * 4, (1, 1), name='conv3')(y)
     y = batch_norm(name='bn3', scale_init=_constant_init(self.bn_output_scale))(
         y, use_running_average=not train
     )
-    y = activation_fn(residual + y)
+    y = jnp.asarray(activation_fn(residual + y), self.dtype)
     return y
 
 
@@ -129,7 +139,8 @@ class ResNet(nn.Module):
   num_layers: int = 50
   axis_name: Optional[str] = None
   axis_index_groups: Optional[Any] = None
-  dtype: model_utils.Dtype = jnp.float32
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
   bn_output_scale: float = 0.0
@@ -145,6 +156,7 @@ class ResNet(nn.Module):
     if self.num_layers not in _block_size_options:
       raise ValueError('Please provide a valid number of layers')
     block_sizes = _block_size_options[self.num_layers]
+    x = jnp.asarray(x, self.dtype)
     conv = functools.partial(nn.Conv, padding=[(3, 3), (3, 3)])
     x = conv(
         self.num_filters,
@@ -152,7 +164,8 @@ class ResNet(nn.Module):
         strides=(2, 2),
         use_bias=False,
         dtype=self.dtype,
-        name='conv0',
+        param_dtype=self.param_dtype,
+        name='input_conv',
     )(x)
     x = normalization.VirtualBatchNorm(
         momentum=self.batch_norm_momentum,
@@ -161,12 +174,15 @@ class ResNet(nn.Module):
         axis_name=self.axis_name,
         axis_index_groups=self.axis_index_groups,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
         batch_size=self.batch_size,
         virtual_batch_size=self.virtual_batch_size,
         total_batch_size=self.total_batch_size,
         data_format=self.data_format,
     )(x, use_running_average=not train)
-    x = model_utils.ACTIVATIONS[self.activation_function](x)  # MLperf-required
+    x = jnp.asarray(
+        model_utils.ACTIVATIONS[self.activation_function](x), self.dtype
+    )  # MLperf-required
     x = nn.max_pool(x, (3, 3), strides=(2, 2), padding='SAME')
     for i, block_size in enumerate(block_sizes):
       for j in range(block_size):
@@ -177,6 +193,7 @@ class ResNet(nn.Module):
             axis_name=self.axis_name,
             axis_index_groups=self.axis_index_groups,
             dtype=self.dtype,
+            param_dtype=self.param_dtype,
             batch_norm_momentum=self.batch_norm_momentum,
             batch_norm_epsilon=self.batch_norm_epsilon,
             bn_output_scale=self.bn_output_scale,
@@ -186,13 +203,17 @@ class ResNet(nn.Module):
             data_format=self.data_format,
             activation_function=self.activation_function,
         )(x, train=train)
-    x = jnp.mean(x, axis=(1, 2))
+    x = jnp.asarray(jnp.mean(x, axis=(1, 2), dtype=jnp.float32), self.dtype)
     if self.dropout_rate > 0.0:
       x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
     x = nn.Dense(
-        self.num_classes, kernel_init=nn.initializers.normal(), dtype=self.dtype
+        self.num_classes,
+        kernel_init=nn.initializers.normal(),
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
+        name='head',
     )(x)
-    return x
+    return jnp.asarray(x, jnp.float32)
 
 
 # a dictionary mapping the number of layers in a resnet to the number of blocks
@@ -213,10 +234,12 @@ class FakeResNet(nn.Module):
   num_classes: int
   axis_name: Optional[str] = None
   axis_index_groups: Optional[Any] = None
-  dtype: model_utils.Dtype = jnp.float32
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
 
   @nn.compact
   def __call__(self, x, train):
+    x = jnp.asarray(x, self.dtype)
     x = nn.BatchNorm(
         use_running_average=not train,
         momentum=0.9,
@@ -225,12 +248,17 @@ class FakeResNet(nn.Module):
         axis_name=self.axis_name,
         axis_index_groups=self.axis_index_groups,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
     )(x)
-    x = jnp.mean(x, axis=(1, 2))
+    x = jnp.asarray(jnp.mean(x, axis=(1, 2), dtype=jnp.float32), self.dtype)
     x = nn.Dense(
-        self.num_classes, kernel_init=nn.initializers.normal(), dtype=self.dtype
+        self.num_classes,
+        kernel_init=nn.initializers.normal(),
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
+        name='head',
     )(x)
-    return x
+    return jnp.asarray(x, jnp.float32)
 
 
 class ResnetModelMLPerf(base_model.BaseModel):
@@ -241,7 +269,8 @@ class ResnetModelMLPerf(base_model.BaseModel):
         num_classes=self.hps['output_shape'][-1],
         num_filters=self.hps.num_filters,
         num_layers=self.hps.num_layers,
-        dtype=utils.dtype_from_str(self.hps.model_dtype),
+        dtype=utils.dtype_from_str(self.hps.computation_dtype),
+        param_dtype=utils.dtype_from_str(self.hps.model_dtype),
         batch_norm_momentum=self.hps.batch_norm_momentum,
         batch_norm_epsilon=self.hps.batch_norm_epsilon,
         bn_output_scale=self.hps.bn_output_scale,
@@ -265,7 +294,11 @@ class FakeModel(base_model.BaseModel):
   """Fake Model for easy debugging."""
 
   def build_flax_module(self):
-    return FakeResNet(num_classes=self.hps['output_shape'][-1])
+    return FakeResNet(
+        num_classes=self.hps['output_shape'][-1],
+        dtype=utils.dtype_from_str(self.hps.computation_dtype),
+        param_dtype=utils.dtype_from_str(self.hps.model_dtype),
+    )
 
   def get_fake_inputs(self, hps):
     """Helper method solely for the purpose of initialzing the model."""

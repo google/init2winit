@@ -18,6 +18,7 @@
 from typing import Any, Callable, Iterable, Optional
 
 from flax import linen as nn
+import jax
 from jax import lax
 from jax.nn import initializers
 import jax.numpy as jnp
@@ -130,6 +131,7 @@ class VirtualBatchNorm(nn.Module):
   momentum: float = 0.99
   epsilon: float = 1e-5
   dtype: Any = jnp.float32
+  param_dtype: Any = jnp.float32
   use_bias: bool = True
   use_scale: bool = True
   bias_init: Initializer = initializers.zeros
@@ -183,7 +185,9 @@ class VirtualBatchNorm(nn.Module):
       # across their first dim.
       virtual_batch_size = x.shape[batch_axis]
 
-    x = jnp.asarray(x, jnp.float32)
+    x = jnp.asarray(
+        x, jnp.bfloat16 if x.dtype == jnp.bfloat16 else jnp.float32
+    )
     # Note that this should only ever default to the first case if we are
     # passing in a batch `x` with less examples than `virtual_batch_size`, which
     # should only happen if we are initializing with dummy variables (typically
@@ -260,9 +264,19 @@ class VirtualBatchNorm(nn.Module):
       mean = jnp.expand_dims(ra_mean.value, 0)
       var = jnp.expand_dims(ra_var.value, 0)
     else:
-      # Shape (num_sub_batches, x.shape[axis]).
-      mean = jnp.mean(x, axis=reduction_axis, keepdims=False)
-      mean2 = jnp.mean(lax.square(x), axis=reduction_axis, keepdims=False)
+      # Shape (num_sub_batches, x.shape[axis]). Always reduce in float32 while
+      # checkpointing the bf16->f32 upcast so autodiff saves bf16 `x` instead
+      # of full-sized float32 activation buffers.
+      def _sub_batch_moments(x_sub):
+        x_f32 = jnp.asarray(x_sub, jnp.float32)
+        m = jnp.mean(x_f32, axis=reduction_axis, keepdims=False)
+        m2 = jnp.mean(lax.square(x_f32), axis=reduction_axis, keepdims=False)
+        return m, m2
+
+      if x.dtype == jnp.bfloat16:
+        mean, mean2 = jax.checkpoint(_sub_batch_moments, prevent_cse=False)(x)
+      else:
+        mean, mean2 = _sub_batch_moments(x)
       if self.axis_name is not None and not initializing:
         concatenated_mean = jnp.concatenate([mean, mean2])
         mean, mean2 = jnp.split(
@@ -273,11 +287,14 @@ class VirtualBatchNorm(nn.Module):
             ),
             2,
         )
-      var = mean2 - lax.square(mean)
+      var = jnp.maximum(0.0, mean2 - lax.square(mean))
 
       if not initializing:
-        mean_accumulator.value += jnp.mean(mean, axis=0)
-        mean2_accumulator.value += jnp.mean(mean2, axis=0)
+        # Fuse mean and mean2 cross-sub-batch reduction so GSPMD emits a single
+        # cross-device all-reduce instead of two per VirtualBatchNorm layer.
+        batch_stats_pair = jnp.mean(jnp.stack([mean, mean2], axis=0), axis=1)
+        mean_accumulator.value += batch_stats_pair[0]
+        mean2_accumulator.value += batch_stats_pair[1]
         grad_accum_counter_inc = grad_accum_counter.value + 1
         # This will be 0 for all gradient accumulation passes except for the
         # last one when we have seen enough examples to make an update to the
@@ -289,9 +306,10 @@ class VirtualBatchNorm(nn.Module):
         ra_mean.value = (
             1 - should_update_ra * (1 - self.momentum)
         ) * ra_mean.value + (1 - self.momentum) * ra_mean_update
-        ra_var_update = should_update_ra * (
+        ra_var_update = should_update_ra * jnp.maximum(
+            0.0,
             mean2_accumulator.value / grad_accum_counter_inc
-            - lax.square(mean_accumulator.value / grad_accum_counter_inc)
+            - lax.square(mean_accumulator.value / grad_accum_counter_inc),
         )
         ra_var.value = (
             1 - should_update_ra * (1 - self.momentum)
@@ -300,23 +318,48 @@ class VirtualBatchNorm(nn.Module):
         grad_accum_counter.value = (
             grad_accum_counter_inc % passes_per_total_batch
         )
-        # Reset the activation accumulators every `passes_per_total_batch` steps
-        # (np.sign == 0 if grad_accum_counter == 0).
+        # Reset the activation accumulators every `passes_per_total_batch`
+        # steps (np.sign == 0 if grad_accum_counter == 0).
         mean_accumulator.value *= jnp.sign(grad_accum_counter.value)
         mean2_accumulator.value *= jnp.sign(grad_accum_counter.value)
 
-    y = x - mean.reshape((num_sub_batches, *feature_shape))
-    mul = lax.rsqrt(
-        var.reshape((num_sub_batches, *feature_shape)) + self.epsilon
-    )
+    scale = None
     if self.use_scale:
-      mul = mul * self.param(
-          'scale', self.scale_init, reduced_feature_shape
+      scale = jnp.asarray(
+          self.param(
+              'scale', self.scale_init, reduced_feature_shape, self.param_dtype
+          ),
+          jnp.float32,
       ).reshape((1, *feature_shape))
-    y = y * mul
+    bias = None
     if self.use_bias:
-      y = y + self.param('bias', self.bias_init, reduced_feature_shape).reshape(
-          (1, *feature_shape)
+      bias = jnp.asarray(
+          self.param(
+              'bias', self.bias_init, reduced_feature_shape, self.param_dtype
+          ),
+          jnp.float32,
+      ).reshape((1, *feature_shape))
+
+    mean_b = mean.reshape((num_sub_batches, *feature_shape))
+    var_b = var.reshape((num_sub_batches, *feature_shape))
+    out_dtype = self.dtype
+    eps = self.epsilon
+
+    def _normalize_sub_batches(x_sub, m_b, v_b, s_b, b_b):
+      x_f32 = jnp.asarray(x_sub, jnp.float32)
+      y_f32 = x_f32 - m_b
+      mul = lax.rsqrt(v_b + eps)
+      if s_b is not None:
+        mul = mul * s_b
+      y_f32 = y_f32 * mul
+      if b_b is not None:
+        y_f32 = y_f32 + b_b
+      return jnp.asarray(y_f32, out_dtype)
+
+    if x.dtype == jnp.bfloat16:
+      y = jax.checkpoint(_normalize_sub_batches, prevent_cse=False)(
+          x, mean_b, var_b, scale, bias
       )
-    y = jnp.reshape(y, input_shape)
-    return jnp.asarray(y, self.dtype)
+    else:
+      y = _normalize_sub_batches(x, mean_b, var_b, scale, bias)
+    return jnp.reshape(y, input_shape)

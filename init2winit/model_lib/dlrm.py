@@ -192,6 +192,7 @@ class DLRM(nn.Module):
           bias_init=jnn.initializers.normal(
               stddev=(1.0 / mlp_top_dims[layer_idx]) ** 0.5
           ),
+          name='head' if layer_idx == num_layers_top - 1 else None,
       )(top_mlp_input)
       if layer_idx < (num_layers_top - 1):
         top_mlp_input = activation_fn(top_mlp_input)
