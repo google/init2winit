@@ -55,6 +55,7 @@ MLCOMMONS_DEFAULT_HPARAMS = config_dict.ConfigDict(
         aux_dropout_rate=0.1,
         tie_dropouts=False,
         normalizer='layer_norm',
+        computation_dtype='bfloat16',
         model_dtype='float32',
         enc_self_attn_kernel_init='xavier_uniform',
         dec_self_attn_kernel_init='xavier_uniform',
@@ -80,6 +81,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         dropout_rate=0.1,
         attention_dropout_rate=0.1,
         normalizer='layer_norm',
+        computation_dtype='bfloat16',
         model_dtype='float32',
         enc_self_attn_kernel_init='xavier_uniform',
         dec_self_attn_kernel_init='xavier_uniform',
@@ -183,6 +185,7 @@ class AddPositionEmbs(nn.Module):
   max_len: int = 512
   posemb_init: Optional[model_utils.Initializer] = None
   decode: bool = False
+  param_dtype: model_utils.Dtype = jnp.float32
 
   @nn.compact
   def __call__(
@@ -213,13 +216,13 @@ class AddPositionEmbs(nn.Module):
     if self.posemb_init is None:
       # Use a fixed (non-learned) sinusoidal position embedding.
       pos_embedding = sinusoidal_init(max_len=self.max_len)(
-          None, pos_emb_shape, dtype
-      )
+          None, pos_emb_shape, np.float32
+      ).astype(dtype)
     else:
       pos_embedding = self.param(
-          'pos_embedding', self.posemb_init, pos_emb_shape, dtype
+          'pos_embedding', self.posemb_init, pos_emb_shape, self.param_dtype
       )
-    pe = pos_embedding[:, :length, :]
+    pe = pos_embedding[:, :length, :].astype(dtype)
     if self.decode:
       is_initialized = self.has_variable('cache', 'cache_index')
       cache_index = self.variable(
@@ -229,13 +232,15 @@ class AddPositionEmbs(nn.Module):
         i = cache_index.value
         cache_index.value = i + 1
         _, _, df = pos_embedding.shape
-        pe = lax.dynamic_slice(pos_embedding, jnp.array((0, i, 0)), (1, 1, df))
+        pe = lax.dynamic_slice(
+            pos_embedding, jnp.array((0, i, 0)), (1, 1, df)
+        ).astype(dtype)
     if inputs_position is None:
       # normal unpacked case:
-      return inputs + pe
+      return (inputs + pe).astype(dtype)
     else:
       # for packed data we need to use known position indices:
-      return inputs + jnp.take(pe[0], inputs_position, axis=0)
+      return (inputs + jnp.take(pe[0], inputs_position, axis=0)).astype(dtype)
 
 
 class MlpBlock(nn.Module):
@@ -243,6 +248,7 @@ class MlpBlock(nn.Module):
 
   mlp_dim: int
   dtype: model_utils.Dtype = jnp.float32
+  param_dtype: model_utils.Dtype = jnp.float32
   out_dim: Optional[int] = None
   dropout_rate: float = 0.1
   kernel_init: model_utils.Initializer = nn.initializers.xavier_uniform()
@@ -255,7 +261,7 @@ class MlpBlock(nn.Module):
     x = nn.Dense(
         self.mlp_dim,
         dtype=self.dtype,
-        param_dtype=self.dtype,
+        param_dtype=self.param_dtype,
         kernel_init=self.kernel_init,
         bias_init=self.bias_init,
     )(inputs)
@@ -264,7 +270,7 @@ class MlpBlock(nn.Module):
     output = nn.Dense(
         actual_out_dim,
         dtype=self.dtype,
-        param_dtype=self.dtype,
+        param_dtype=self.param_dtype,
         kernel_init=self.kernel_init,
         bias_init=self.bias_init,
     )(x)
@@ -294,6 +300,7 @@ class Encoder1DBlock(nn.Module):
   mlp_dim: int
   num_heads: int
   dtype: model_utils.Dtype = jnp.float32
+  param_dtype: model_utils.Dtype = jnp.float32
   dropout_rate: float = 0.1
   attention_dropout_rate: float = 0.1
   normalizer: str = 'layer_norm'
@@ -336,11 +343,11 @@ class Encoder1DBlock(nn.Module):
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
-    x = maybe_pre_normalize(param_dtype=self.dtype)(inputs)
+    x = maybe_pre_normalize(param_dtype=self.param_dtype)(inputs)
     x = attention.SelfAttention(
         num_heads=self.num_heads,
         dtype=self.dtype,
-        param_dtype=self.dtype,
+        param_dtype=self.param_dtype,
         qkv_features=self.qkv_dim,
         kernel_init=self.enc_self_attn_kernel_init_fn,
         bias_init=nn.initializers.normal(stddev=1e-6),
@@ -354,18 +361,19 @@ class Encoder1DBlock(nn.Module):
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
     x = x + inputs
 
-    x = maybe_post_normalize(param_dtype=self.dtype)(x)
+    x = maybe_post_normalize(param_dtype=self.param_dtype)(x)
     # MLP block.
-    y = maybe_pre_normalize(param_dtype=self.dtype)(x)
+    y = maybe_pre_normalize(param_dtype=self.param_dtype)(x)
     y = MlpBlock(
         mlp_dim=self.mlp_dim,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
         dropout_rate=self.dropout_rate,
         name='MLPBlock',
     )(y, train=train)
 
     res = x + y
-    return maybe_post_normalize(param_dtype=self.dtype)(res)
+    return maybe_post_normalize(param_dtype=self.param_dtype)(res)
 
 
 class EncoderDecoder1DBlock(nn.Module):
@@ -393,6 +401,7 @@ class EncoderDecoder1DBlock(nn.Module):
   mlp_dim: int
   num_heads: int
   dtype: model_utils.Dtype = jnp.float32
+  param_dtype: model_utils.Dtype = jnp.float32
   dropout_rate: float = 0.1
   attention_dropout_rate: float = 0.1
   normalizer: str = 'layer_norm'
@@ -446,11 +455,11 @@ class EncoderDecoder1DBlock(nn.Module):
     else:
       raise ValueError('Unsupported normalizer: {}'.format(self.normalizer))
 
-    x = maybe_pre_normalize(param_dtype=self.dtype)(targets)
+    x = maybe_pre_normalize(param_dtype=self.param_dtype)(targets)
     x = attention.SelfAttention(
         num_heads=self.num_heads,
         dtype=self.dtype,
-        param_dtype=self.dtype,
+        param_dtype=self.param_dtype,
         qkv_features=self.qkv_dim,
         kernel_init=self.dec_self_attn_kernel_init_fn,
         bias_init=nn.initializers.normal(stddev=1e-6),
@@ -464,13 +473,13 @@ class EncoderDecoder1DBlock(nn.Module):
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
     x = x + targets
 
-    x = maybe_post_normalize(param_dtype=self.dtype)(x)
+    x = maybe_post_normalize(param_dtype=self.param_dtype)(x)
     # Encoder-Decoder block.
-    y = maybe_pre_normalize(param_dtype=self.dtype)(x)
+    y = maybe_pre_normalize(param_dtype=self.param_dtype)(x)
     y = attention.MultiHeadDotProductAttention(
         num_heads=self.num_heads,
         dtype=self.dtype,
-        param_dtype=self.dtype,
+        param_dtype=self.param_dtype,
         qkv_features=self.qkv_dim,
         kernel_init=self.dec_cross_attn_kernel_init_fn,
         bias_init=nn.initializers.normal(stddev=1e-6),
@@ -483,18 +492,19 @@ class EncoderDecoder1DBlock(nn.Module):
     y = nn.Dropout(rate=self.dropout_rate)(y, deterministic=not train)
     y = y + x
 
-    y = maybe_post_normalize(param_dtype=self.dtype)(y)
+    y = maybe_post_normalize(param_dtype=self.param_dtype)(y)
     # MLP block.
-    z = maybe_pre_normalize(param_dtype=self.dtype)(y)
+    z = maybe_pre_normalize(param_dtype=self.param_dtype)(y)
     z = MlpBlock(
         mlp_dim=self.mlp_dim,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
         dropout_rate=self.dropout_rate,
         name='MLPBlock',
     )(z, train=train)
 
     res = y + z
-    return maybe_post_normalize(param_dtype=self.dtype)(res)
+    return maybe_post_normalize(param_dtype=self.param_dtype)(res)
 
 
 class Encoder(nn.Module):
@@ -525,6 +535,7 @@ class Encoder(nn.Module):
   vocab_size: int
   shared_embedding: Any = None
   dtype: jnp.dtype = jnp.float32
+  param_dtype: jnp.dtype = jnp.float32
   emb_dim: int = 512
   num_heads: int = 8
   enc_num_layers: Optional[int] = 6
@@ -560,7 +571,7 @@ class Encoder(nn.Module):
       input_embed = nn.Embed(
           num_embeddings=self.vocab_size,
           dtype=self.dtype,
-          param_dtype=self.dtype,
+          param_dtype=self.param_dtype,
           features=self.emb_dim,
           embedding_init=nn.initializers.normal(stddev=1.0),
           name='input_vocab_embeddings',
@@ -570,7 +581,10 @@ class Encoder(nn.Module):
     x = inputs.astype('int32')
     x = input_embed(x)
     x = AddPositionEmbs(
-        max_len=self.max_len, decode=False, name='posembed_input'
+        max_len=self.max_len,
+        decode=False,
+        param_dtype=self.param_dtype,
+        name='posembed_input',
     )(x, inputs_position=inputs_position, train=train, dtype=self.dtype)
     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
 
@@ -581,6 +595,7 @@ class Encoder(nn.Module):
         mlp_dim=self.mlp_dim,
         num_heads=self.num_heads,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
         dropout_rate=self.dropout_rate,
         attention_dropout_rate=self.attention_dropout_rate,
         normalizer=self.normalizer,
@@ -605,7 +620,7 @@ class Encoder(nn.Module):
       maybe_normalize = model_utils.get_normalizer(
           self.normalizer, train, dtype=self.dtype
       )
-      x = maybe_normalize(param_dtype=self.dtype)(x)
+      x = maybe_normalize(param_dtype=self.param_dtype)(x)
     return x
 
 
@@ -644,6 +659,7 @@ class Decoder(nn.Module):
   shared_embedding: Any = None
   logits_via_embedding: bool = False
   dtype: jnp.dtype = jnp.float32
+  param_dtype: jnp.dtype = jnp.float32
   emb_dim: int = 512
   num_heads: int = 8
   dec_num_layers: Optional[int] = 6
@@ -691,7 +707,7 @@ class Decoder(nn.Module):
           num_embeddings=self.output_vocab_size,
           features=self.emb_dim,
           dtype=self.dtype,
-          param_dtype=self.dtype,
+          param_dtype=self.param_dtype,
           embedding_init=nn.initializers.normal(stddev=1.0),
           name='output_vocab_embeddings',
       )
@@ -703,7 +719,10 @@ class Decoder(nn.Module):
       y = shift_right(y)
     y = output_embed(y)
     y = AddPositionEmbs(
-        max_len=self.max_len, decode=self.decode, name='posembed_output'
+        max_len=self.max_len,
+        decode=self.decode,
+        param_dtype=self.param_dtype,
+        name='posembed_output',
     )(y, inputs_position=targets_position, train=train, dtype=self.dtype)
     y = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(y)
 
@@ -714,6 +733,7 @@ class Decoder(nn.Module):
         mlp_dim=self.mlp_dim,
         num_heads=self.num_heads,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
         dropout_rate=self.dropout_rate,
         attention_dropout_rate=self.attention_dropout_rate,
         normalizer=self.normalizer,
@@ -747,20 +767,20 @@ class Decoder(nn.Module):
       maybe_normalize = model_utils.get_normalizer(
           self.normalizer, train, dtype=self.dtype
       )
-      y = maybe_normalize(param_dtype=self.dtype)(y)
+      y = maybe_normalize(param_dtype=self.param_dtype)(y)
 
     # Decoded Logits
     if self.logits_via_embedding:
       # Use the transpose of embedding matrix for logit transform.
       logits = output_embed.attend(y)
       # Correctly normalize pre-softmax logits for this shared case.
-      logits = logits / jnp.sqrt(y.shape[-1])
+      logits = logits / jnp.sqrt(y.shape[-1]).astype(self.dtype)
 
     else:
       logits = nn.Dense(
           self.output_vocab_size,
           dtype=self.dtype,
-          param_dtype=self.dtype,
+          param_dtype=self.param_dtype,
           kernel_init=nn.initializers.xavier_uniform(),
           bias_init=nn.initializers.normal(stddev=1e-6),
           name='logitdense',
@@ -814,6 +834,7 @@ class Transformer(nn.Module):
   share_embeddings: bool = False
   logits_via_embedding: bool = False
   dtype: jnp.dtype = jnp.float32
+  param_dtype: jnp.dtype = jnp.float32
   emb_dim: int = 512
   num_heads: int = 8
   enc_num_layers: Optional[int] = 6
@@ -856,7 +877,7 @@ class Transformer(nn.Module):
           num_embeddings=self.vocab_size,
           features=self.emb_dim,
           dtype=self.dtype,
-          param_dtype=self.dtype,
+          param_dtype=self.param_dtype,
           embedding_init=nn.initializers.normal(stddev=1.0),
           name='VocabEmbeddings',
       )
@@ -867,6 +888,7 @@ class Transformer(nn.Module):
         vocab_size=self.vocab_size,
         shared_embedding=self.shared_embedding,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
         emb_dim=self.emb_dim,
         num_heads=self.num_heads,
         enc_num_layers=self.enc_num_layers,
@@ -886,6 +908,7 @@ class Transformer(nn.Module):
         shared_embedding=self.shared_embedding,
         logits_via_embedding=self.logits_via_embedding,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
         emb_dim=self.emb_dim,
         num_heads=self.num_heads,
         dec_num_layers=self.dec_num_layers,
@@ -1036,7 +1059,10 @@ class TransformerTranslate(base_model.BaseModel):
     """Evaluates cross_entopy on the given batch."""
 
     # TODO(ankugarg): Augment with other metrics like log-perplexity.
-    logits = self.apply_on_batch(params, batch_stats, batch, train=False)
+    logits = jnp.asarray(
+        self.apply_on_batch(params, batch_stats, batch, train=False),
+        jnp.float32,
+    )
 
     weights = batch.get('weights')
     targets = batch['targets']
@@ -1086,6 +1112,7 @@ class TransformerTranslate(base_model.BaseModel):
         rngs={'dropout': dropout_rng},
         train=True,
     )
+    logits = jnp.asarray(logits, jnp.float32)
 
     weights = batch.get('weights')
     targets = batch['targets']
@@ -1126,7 +1153,8 @@ class TransformerTranslate(base_model.BaseModel):
     dec_cross_attn_kernel_init_fn = model_utils.INITIALIZERS[
         self.hps.dec_cross_attn_kernel_init
     ]()
-    dtype = utils.dtype_from_str(self.hps.model_dtype)
+    param_dtype = utils.dtype_from_str(self.hps.model_dtype)
+    dtype = utils.dtype_from_str(self.hps.computation_dtype)
 
     return Transformer(
         vocab_size=self.hps.vocab_size,
@@ -1134,6 +1162,7 @@ class TransformerTranslate(base_model.BaseModel):
         share_embeddings=self.hps.share_embeddings,
         logits_via_embedding=self.hps.logits_via_embedding,
         dtype=dtype,
+        param_dtype=param_dtype,
         emb_dim=self.hps.emb_dim,
         num_heads=self.hps.num_heads,
         enc_num_layers=self.hps.enc_num_layers,
@@ -1184,7 +1213,8 @@ class MLCommonsTransformerTranslate(TransformerTranslate):
     dec_cross_attn_kernel_init_fn = model_utils.INITIALIZERS[
         self.hps.dec_cross_attn_kernel_init
     ]()
-    dtype = utils.dtype_from_str(self.hps.model_dtype)
+    param_dtype = utils.dtype_from_str(self.hps.model_dtype)
+    dtype = utils.dtype_from_str(self.hps.computation_dtype)
     aux_dropout_rate = (
         self.hps.dropout_rate
         if self.hps.tie_dropouts
@@ -1197,6 +1227,7 @@ class MLCommonsTransformerTranslate(TransformerTranslate):
         share_embeddings=self.hps.share_embeddings,
         logits_via_embedding=self.hps.logits_via_embedding,
         dtype=dtype,
+        param_dtype=param_dtype,
         emb_dim=self.hps.emb_dim,
         num_heads=self.hps.num_heads,
         enc_num_layers=self.hps.enc_num_layers,

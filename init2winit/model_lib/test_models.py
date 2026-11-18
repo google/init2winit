@@ -680,6 +680,7 @@ class ModelsTest(parameterized.TestCase):
         'lr_hparams': {'base_lr': 0.005, 'schedule': 'constant'},
         'vocab_size': vocab_size,
         'output_shape': (vocab_size,),
+        'computation_dtype': dtype_str,
         'model_dtype': dtype_str,
         # Training HParams.
         'l2_decay_factor': 1e-4,
