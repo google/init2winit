@@ -26,9 +26,11 @@ closest to the GIN+Virtual Node (Xu et al., 2018) model, and it reaches
 equivalent performance on the ogbg-molpcba dataset.
 """
 
-from typing import Tuple
+import functools
+from typing import Sequence
 
 from flax import linen as nn
+from init2winit import utils
 from init2winit.model_lib import base_model
 from init2winit.model_lib import model_utils
 import jax.numpy as jnp
@@ -38,6 +40,7 @@ from ml_collections.config_dict import config_dict
 # small hparams used for unit tests
 DEFAULT_HPARAMS = config_dict.ConfigDict(
     dict(
+        computation_dtype='bfloat16',
         model_dtype='float32',
         latent_dim=256,
         hidden_dims=(256,),
@@ -49,28 +52,66 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
 )
 
 
-def _make_embed(latent_dim):
+def _make_embed(
+    latent_dim,
+    dtype: model_utils.Dtype = jnp.bfloat16,
+    param_dtype: model_utils.Dtype = jnp.float32,
+):
+  """Creates an embedding layer with the specified latent dimension."""
 
   def make_fn(inputs):
-    return nn.Dense(features=latent_dim)(inputs)
+    return nn.Dense(
+        features=latent_dim,
+        dtype=dtype,
+        param_dtype=param_dtype,
+    )(inputs)
 
   return make_fn
 
 
-def _make_mlp(hidden_dims, maybe_normalize_fn, dropout, activation=nn.relu):
+def _make_mlp(
+    hidden_dims,
+    maybe_normalize_fn,
+    dropout,
+    activation=nn.relu,
+    dtype: model_utils.Dtype = jnp.bfloat16,
+    param_dtype: model_utils.Dtype = jnp.float32,
+):
   """Creates a MLP with specified dimensions."""
 
   @jraph.concatenated_args
   def make_fn(inputs):
     x = inputs
     for dim in hidden_dims:
-      x = nn.Dense(features=dim)(x)
-      x = maybe_normalize_fn()(x)
+      x = nn.Dense(
+          features=dim,
+          dtype=dtype,
+          param_dtype=param_dtype,
+      )(x)
+      x = maybe_normalize_fn(param_dtype=param_dtype)(x)
       x = activation(x)
       x = dropout(x)
     return x
 
   return make_fn
+
+
+def _segment_sum_fp32(
+    data,
+    segment_ids,
+    num_segments=None,
+    indices_are_sorted=False,
+    unique_indices=False,
+    dtype: model_utils.Dtype = jnp.bfloat16,
+):
+  """Accumulates graph segment sums in float32 and casts back to dtype."""
+  return jraph.segment_sum(
+      jnp.asarray(data, dtype=jnp.float32),
+      segment_ids,
+      num_segments=num_segments,
+      indices_are_sorted=indices_are_sorted,
+      unique_indices=unique_indices,
+  ).astype(dtype)
 
 
 class GNN(nn.Module):
@@ -82,25 +123,40 @@ class GNN(nn.Module):
 
   num_outputs: int
   latent_dim: int
-  hidden_dims: Tuple[int]
+  hidden_dims: Sequence[int]
   normalizer: str
   dropout_rate: float
   num_message_passing_steps: int
   activation_function: str
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
 
   @nn.compact
   def __call__(self, graph, train):
-    maybe_normalize_fn = model_utils.get_normalizer(self.normalizer, train)
+    maybe_normalize_fn = model_utils.get_normalizer(
+        self.normalizer, train, dtype=self.dtype
+    )
     dropout = nn.Dropout(rate=self.dropout_rate, deterministic=not train)
     activation = model_utils.ACTIVATIONS[self.activation_function]
+    segment_sum_fn = functools.partial(_segment_sum_fp32, dtype=self.dtype)
 
     graph = graph._replace(
-        globals=jnp.zeros([graph.n_node.shape[0], self.num_outputs])
+        globals=jnp.zeros(
+            [graph.n_node.shape[0], self.num_outputs], dtype=self.dtype
+        )
     )
 
     embedder = jraph.GraphMapFeatures(
-        embed_node_fn=_make_embed(self.latent_dim),
-        embed_edge_fn=_make_embed(self.latent_dim),
+        embed_node_fn=_make_embed(
+            self.latent_dim,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+        ),
+        embed_edge_fn=_make_embed(
+            self.latent_dim,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+        ),
     )
     graph = embedder(graph)
 
@@ -111,28 +167,43 @@ class GNN(nn.Module):
               maybe_normalize_fn=maybe_normalize_fn,
               dropout=dropout,
               activation=activation,
+              dtype=self.dtype,
+              param_dtype=self.param_dtype,
           ),
           update_node_fn=_make_mlp(
               self.hidden_dims,
               maybe_normalize_fn=maybe_normalize_fn,
               dropout=dropout,
               activation=activation,
+              dtype=self.dtype,
+              param_dtype=self.param_dtype,
           ),
           update_global_fn=_make_mlp(
               self.hidden_dims,
               maybe_normalize_fn=maybe_normalize_fn,
               dropout=dropout,
               activation=activation,
+              dtype=self.dtype,
+              param_dtype=self.param_dtype,
           ),
+          aggregate_edges_for_nodes_fn=segment_sum_fn,
+          aggregate_nodes_for_globals_fn=segment_sum_fn,
+          aggregate_edges_for_globals_fn=segment_sum_fn,
       )
 
       graph = net(graph)
 
     # Map globals to represent the final result
-    decoder = jraph.GraphMapFeatures(embed_global_fn=nn.Dense(self.num_outputs))
+    decoder = jraph.GraphMapFeatures(
+        embed_global_fn=nn.Dense(
+            self.num_outputs,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+        )
+    )
     graph = decoder(graph)
 
-    return graph.globals
+    return jnp.asarray(graph.globals, dtype=jnp.float32)
 
 
 class GNNModel(base_model.BaseModel):
@@ -163,4 +234,6 @@ class GNNModel(base_model.BaseModel):
         dropout_rate=self.hps['dropout_rate'],
         num_message_passing_steps=self.hps['num_message_passing_steps'],
         activation_function=self.hps['activation_function'],
+        dtype=utils.dtype_from_str(self.hps['computation_dtype']),
+        param_dtype=utils.dtype_from_str(self.hps['model_dtype']),
     )
