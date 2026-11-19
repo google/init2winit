@@ -28,6 +28,7 @@ from absl.testing import parameterized
 import flax.linen as nn
 from init2winit import utils
 from init2winit.init_lib import initializers
+from init2winit.model_lib import deepspeech
 from init2winit.model_lib import dlrm
 from init2winit.model_lib import model_utils
 from init2winit.model_lib import models
@@ -107,18 +108,26 @@ DATA_HPS = {
         'output_shape': (28, 28, 1),
     },
     'deepspeech': {
-        'max_input_length': 64,
+        'input_shape': [(1600,), (1600,)],
+        'max_eval_target_length': 64,
         'max_target_length': 64,
-        'input_shape': [(64,), (64,)],
         'output_shape': (-1, 32),
-        'tokenizer_type': 'WPM',
+        'vocab_size': 32,
+        'tokenizer_type': 'SPM',
+        'tokenizer_vocab_path': '/mock/wpm.vocab',
+        'num_lstm_layers': 1,
+        'num_ffn_layers': 1,
     },
     'mlcommons_deepspeech': {
-        'max_input_length': 64,
+        'input_shape': [(1600,), (1600,)],
+        'max_eval_target_length': 64,
         'max_target_length': 64,
-        'input_shape': [(64,), (64,)],
         'output_shape': (-1, 32),
-        'tokenizer_type': 'WPM',
+        'vocab_size': 32,
+        'tokenizer_type': 'SPM',
+        'tokenizer_vocab_path': '/mock/wpm.vocab',
+        'num_lstm_layers': 1,
+        'num_ffn_layers': 1,
     },
     'dlrm': {
         'input_shape': (39,),  # Like criteo1tb
@@ -372,9 +381,7 @@ dtypes = ['bfloat16', 'float32']
 # Construct keys for tests for initialization
 # TODO(kasimbeg): Add HPS for excluded models and include in tests.
 skipped_models = [
-    'deepspeech',
     'local_attention_transformer',
-    'mlcommons_deepspeech',
     'transformer_stu',
     'transformer_stu_tensordot',
 ]
@@ -1480,6 +1487,88 @@ class ModelsTest(parameterized.TestCase):
     )(query, key, value)
     for actual_g, expected_g in zip(actual_grads, expected_grads):
       np.testing.assert_allclose(actual_g, expected_g, rtol=tol, atol=tol)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='even_len_stride2_fp32',
+          input_length=16,
+          stride=2,
+          dtype=jnp.float32,
+      ),
+      dict(
+          testcase_name='odd_len_stride2_fp32',
+          input_length=17,
+          stride=2,
+          dtype=jnp.float32,
+      ),
+      dict(
+          testcase_name='odd_len_stride2_bf16',
+          input_length=17,
+          stride=2,
+          dtype=jnp.bfloat16,
+      ),
+      dict(
+          testcase_name='rem1_stride3_fp32',
+          input_length=16,
+          stride=3,
+          dtype=jnp.float32,
+      ),
+      dict(
+          testcase_name='rem2_stride3_fp32',
+          input_length=17,
+          stride=3,
+          dtype=jnp.float32,
+      ),
+      dict(
+          testcase_name='len1_stride2_fp32',
+          input_length=1,
+          stride=2,
+          dtype=jnp.float32,
+      ),
+      dict(
+          testcase_name='stride1_fp32',
+          input_length=7,
+          stride=1,
+          dtype=jnp.float32,
+      ),
+  )
+  def test_deepspeech_conv2d_subsampling_padding_equivalence(
+      self, input_length, stride, dtype
+  ):
+    """Tests that strided padding slicing matches legacy conv_general_dilated."""
+    # Row 0: realistic 0/1 padding mask; Row 1: unique per-position values so
+    # any index mismatch is caught unambiguously.
+    binary_row = (jnp.arange(input_length) >= (input_length // 2)).astype(
+        jnp.float32
+    )
+    index_row = jnp.arange(input_length, dtype=jnp.float32)
+    paddings = jnp.stack([binary_row, index_row], axis=0)
+    inputs = jnp.ones((2, input_length, 8, 2), dtype=dtype)
+
+    module = deepspeech.Conv2dSubsampling(
+        input_channels=2,
+        output_channels=4,
+        filter_stride=(stride, 2),
+        dtype=dtype,
+    )
+    variables = module.init(jax.random.PRNGKey(0), inputs, paddings, train=True)
+    outputs, actual_out_padding = module.apply(
+        variables, inputs, paddings, train=False
+    )
+
+    pad_len = (input_length + stride - 1) // stride * stride - input_length
+    expected_out_padding = jax.lax.conv_general_dilated(
+        lhs=paddings[:, :, None],
+        rhs=jnp.ones([1, 1, 1]),
+        window_strides=(stride,),
+        padding=[(0, pad_len)],
+        dimension_numbers=('NHC', 'HIO', 'NHC'),
+    )
+    expected_out_padding = jnp.squeeze(expected_out_padding, axis=-1)
+
+    self.assertEqual(outputs.shape[1], actual_out_padding.shape[1])
+    self.assertEqual(actual_out_padding.dtype, expected_out_padding.dtype)
+    np.testing.assert_array_equal(actual_out_padding, expected_out_padding)
 
 
 if __name__ == '__main__':
