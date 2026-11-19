@@ -44,6 +44,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         use_randaug=False,
         randaug={'magnitude': 15, 'num_layers': 2},
         use_grain=False,
+        train_tf_data_map_parallel_calls=-1,
+        eval_tf_data_map_parallel_calls=16,
     )
 )
 

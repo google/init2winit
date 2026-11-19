@@ -52,6 +52,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         test_size=3581,
         num_test_h5_files=99,
         eval_seed=0,
+        tf_data_map_parallel_calls=32,
     )
 )
 
@@ -309,7 +310,7 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
       _create_generator,
       cycle_length=32,
       block_length=64,
-      num_parallel_calls=hps.num_tf_data_map_parallel_calls,
+      num_parallel_calls=hps.tf_data_map_parallel_calls,
   )
   ds = ds.cache()
 
@@ -324,7 +325,7 @@ def load_split(per_host_batch_size, split, hps, shuffle_rng=None):
     return _process_example(*example, process_rng)
 
   ds = ds.enumerate().map(
-      process_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls
+      process_example, num_parallel_calls=hps.tf_data_map_parallel_calls
   )
 
   if split == 'train':

@@ -681,7 +681,6 @@ class TrainerTest(parameterized.TestCase):
         dict(
             num_tf_data_prefetches=-1,
             num_device_prefetches=0,
-            num_tf_data_map_parallel_calls=-1,
         )
     )
     hps = hyperparameters.build_hparams(
@@ -1104,7 +1103,6 @@ class TrainerTest(parameterized.TestCase):
         dict(
             num_tf_data_prefetches=-1,
             num_device_prefetches=0,
-            num_tf_data_map_parallel_calls=-1,
         )
     )
     hps = hyperparameters.build_hparams(

@@ -33,6 +33,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         valid_size=50000,
         test_size=10000,  # ImageNet-v2.
         use_imagenetv2_test=True,
+        eval_tf_data_map_parallel_calls=16,
     )
 )
 

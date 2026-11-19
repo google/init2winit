@@ -47,6 +47,8 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         use_randaug=False,
         randaug={'magnitude': 15, 'num_layers': 2},
         use_grain=False,
+        train_tf_data_map_parallel_calls=-1,
+        eval_tf_data_map_parallel_calls=16,
     )
 )
 
@@ -374,7 +376,7 @@ def load_split(
     )
     ds = ds.repeat()
     ds = ds.enumerate().map(
-        decode_example, num_parallel_calls=hps.num_tf_data_map_parallel_calls
+        decode_example, num_parallel_calls=hps.train_tf_data_map_parallel_calls
     )
     ds = ds.batch(
         per_host_batch_size,
@@ -403,7 +405,7 @@ def load_split(
         return batch
 
       ds = ds.enumerate().map(
-          mixup_batch, num_parallel_calls=hps.num_tf_data_map_parallel_calls
+          mixup_batch, num_parallel_calls=hps.train_tf_data_map_parallel_calls
       )
 
     options = tf.data.Options()
@@ -414,7 +416,9 @@ def load_split(
     ds = ds.with_options(options)
     ds = ds.prefetch(hps.num_tf_data_prefetches)
   else:
-    ds = ds.enumerate().map(decode_example, num_parallel_calls=16)
+    ds = ds.enumerate().map(
+        decode_example, num_parallel_calls=hps.eval_tf_data_map_parallel_calls
+    )
     ds = ds.batch(per_host_batch_size, drop_remainder=False)
     if split in ['valid', 'test']:
       # Valid/test are iterated to EOF, so caching decoded batches here avoids

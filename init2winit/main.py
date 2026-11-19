@@ -126,7 +126,6 @@ def _run(
     checkpoint_steps,
     num_tf_data_prefetches,
     num_device_prefetches,
-    num_tf_data_map_parallel_calls,
     early_stopping_target_name,
     early_stopping_target_value,
     early_stopping_mode,
@@ -159,7 +158,6 @@ def _run(
       dict(
           num_tf_data_prefetches=num_tf_data_prefetches,
           num_device_prefetches=num_device_prefetches,
-          num_tf_data_map_parallel_calls=num_tf_data_map_parallel_calls,
       )
   )
   training_algorithm_class = (
@@ -327,7 +325,6 @@ def main(unused_argv):
         checkpoint_steps=checkpoint_steps,
         num_tf_data_prefetches=config.num_tf_data_prefetches,
         num_device_prefetches=config.num_device_prefetches,
-        num_tf_data_map_parallel_calls=config.num_tf_data_map_parallel_calls,
         early_stopping_target_name=config.early_stopping_target_name,
         early_stopping_target_value=config.early_stopping_target_value,
         early_stopping_mode=config.early_stopping_mode,
