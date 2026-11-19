@@ -33,6 +33,7 @@ DEFAULT_HPARAMS = config_dict.ConfigDict(
         batch_norm_momentum=0.9,
         batch_norm_epsilon=1e-5,
         # Make this a string to avoid having to import jnp into the configs.
+        computation_dtype='bfloat16',
         model_dtype='float32',
         virtual_batch_size=64,
         data_format='NHWC',
@@ -56,8 +57,9 @@ class PreActResidualBlock(nn.Module):
   """
 
   filters: int
-  strides: Tuple[int] = (1, 1)
-  dtype: model_utils.Dtype = jnp.float32
+  strides: Tuple[int, int] = (1, 1)
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
   batch_size: Optional[int] = None
@@ -71,6 +73,7 @@ class PreActResidualBlock(nn.Module):
 
   @nn.compact
   def __call__(self, x, train):
+    x = jnp.asarray(x, self.dtype)
     needs_projection = x.shape[-1] != self.filters * 4 or self.strides != (1, 1)
 
     def maybe_normalize(name):
@@ -79,6 +82,7 @@ class PreActResidualBlock(nn.Module):
             momentum=self.batch_norm_momentum,
             epsilon=self.batch_norm_epsilon,
             dtype=self.dtype,
+            param_dtype=self.param_dtype,
             batch_size=self.batch_size,
             virtual_batch_size=self.virtual_batch_size,
             total_batch_size=self.total_batch_size,
@@ -88,7 +92,12 @@ class PreActResidualBlock(nn.Module):
       else:
         return lambda x, **kwargs: x
 
-    conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
+    conv = functools.partial(
+        nn.Conv,
+        use_bias=False,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
+    )
 
     residual = x
     if needs_projection:
@@ -102,9 +111,13 @@ class PreActResidualBlock(nn.Module):
     def _bn_nonlin(y, name):
       if self.bn_relu_conv:
         y = maybe_normalize(name=name)(y, use_running_average=not train)
-        y = model_utils.ACTIVATIONS[self.activation_function](y)
+        y = jnp.asarray(
+            model_utils.ACTIVATIONS[self.activation_function](y), self.dtype
+        )
       else:
-        y = model_utils.ACTIVATIONS[self.activation_function](y)
+        y = jnp.asarray(
+            model_utils.ACTIVATIONS[self.activation_function](y), self.dtype
+        )
         y = maybe_normalize(name=name)(y, use_running_average=not train)
       return y
 
@@ -126,8 +139,9 @@ class ResidualBlock(nn.Module):
   """Bottleneck ResNet block."""
 
   filters: int
-  strides: Tuple[int] = (1, 1)
-  dtype: model_utils.Dtype = jnp.float32
+  strides: Tuple[int, int] = (1, 1)
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
   batch_size: Optional[int] = None
@@ -141,6 +155,7 @@ class ResidualBlock(nn.Module):
 
   @nn.compact
   def __call__(self, x, train):
+    x = jnp.asarray(x, self.dtype)
     needs_projection = x.shape[-1] != self.filters * 4 or self.strides != (1, 1)
 
     def maybe_normalize(name, scale_init=nn.initializers.ones):
@@ -149,6 +164,7 @@ class ResidualBlock(nn.Module):
             momentum=self.batch_norm_momentum,
             epsilon=self.batch_norm_epsilon,
             dtype=self.dtype,
+            param_dtype=self.param_dtype,
             batch_size=self.batch_size,
             virtual_batch_size=self.virtual_batch_size,
             total_batch_size=self.total_batch_size,
@@ -159,7 +175,12 @@ class ResidualBlock(nn.Module):
       else:
         return lambda x, **kwargs: x
 
-    conv = functools.partial(nn.Conv, use_bias=False, dtype=self.dtype)
+    conv = functools.partial(
+        nn.Conv,
+        use_bias=False,
+        dtype=self.dtype,
+        param_dtype=self.param_dtype,
+    )
 
     residual = x
     if needs_projection:
@@ -172,17 +193,24 @@ class ResidualBlock(nn.Module):
 
     y = conv(self.filters, (1, 1), name='conv1')(x)
     y = maybe_normalize(name='bn1')(y, use_running_average=not train)
-    y = model_utils.ACTIVATIONS[self.activation_function](y)
+    y = jnp.asarray(
+        model_utils.ACTIVATIONS[self.activation_function](y), self.dtype
+    )
     y = conv(self.filters, (3, 3), self.strides, name='conv2')(y)
     y = maybe_normalize(name='bn2')(y, use_running_average=not train)
-    y = model_utils.ACTIVATIONS[self.activation_function](y)
+    y = jnp.asarray(
+        model_utils.ACTIVATIONS[self.activation_function](y), self.dtype
+    )
     y = conv(self.filters * 4, (1, 1), name='conv3')(y)
 
     y = maybe_normalize(name='bn3', scale_init=nn.initializers.zeros)(
         y, use_running_average=not train
     )
 
-    y = model_utils.ACTIVATIONS[self.activation_function](residual + y)
+    y = jnp.asarray(
+        model_utils.ACTIVATIONS[self.activation_function](residual + y),
+        self.dtype,
+    )
     if self.extra_norm_on_residual:
       return maybe_normalize(name='extra')(y, use_running_average=not train)
     return y
@@ -194,7 +222,8 @@ class ResNet(nn.Module):
   num_outputs: int
   num_filters: int = 64
   num_layers: int = 50
-  dtype: model_utils.Dtype = jnp.float32
+  dtype: model_utils.Dtype = jnp.bfloat16
+  param_dtype: model_utils.Dtype = jnp.float32
   batch_norm_momentum: float = 0.9
   batch_norm_epsilon: float = 1e-5
   batch_size: Optional[int] = None
@@ -213,6 +242,7 @@ class ResNet(nn.Module):
     if self.num_layers not in _block_size_options:
       raise ValueError('Please provide a valid number of layers')
     block_sizes = _block_size_options[self.num_layers]
+    x = jnp.asarray(x, self.dtype)
 
     x = nn.Conv(
         self.num_filters,
@@ -220,6 +250,7 @@ class ResNet(nn.Module):
         (2, 2),
         use_bias=False,
         dtype=self.dtype,
+        param_dtype=self.param_dtype,
         name='init_conv',
     )(x)
     if self.use_bn:
@@ -227,6 +258,7 @@ class ResNet(nn.Module):
           momentum=self.batch_norm_momentum,
           epsilon=self.batch_norm_epsilon,
           dtype=self.dtype,
+          param_dtype=self.param_dtype,
           name='init_bn',
           batch_size=self.batch_size,
           virtual_batch_size=self.virtual_batch_size,
@@ -249,6 +281,7 @@ class ResNet(nn.Module):
             self.num_filters * 2**i,
             strides=strides,
             dtype=self.dtype,
+            param_dtype=self.param_dtype,
             batch_norm_momentum=self.batch_norm_momentum,
             batch_norm_epsilon=self.batch_norm_epsilon,
             batch_size=self.batch_size,
@@ -260,11 +293,13 @@ class ResNet(nn.Module):
             activation_function=self.activation_function,
             extra_norm_on_residual=self.extra_norm_on_residual,
         )(x, train=train)
-    x = jnp.mean(x, axis=(1, 2))
+    x = jnp.asarray(jnp.mean(x, axis=(1, 2), dtype=jnp.float32), self.dtype)
     if self.dropout_rate > 0.0:
       x = nn.Dropout(rate=self.dropout_rate, deterministic=not train)(x)
-    x = nn.Dense(self.num_outputs, dtype=self.dtype)(x)
-    return x
+    x = nn.Dense(
+        self.num_outputs, dtype=self.dtype, param_dtype=self.param_dtype
+    )(x)
+    return jnp.asarray(x, jnp.float32)
 
 
 # a dictionary mapping the number of layers in a resnet to the number of blocks
@@ -290,7 +325,8 @@ class ResnetModel(base_model.BaseModel):
         num_filters=self.hps.num_filters,
         num_layers=self.hps.num_layers,
         num_outputs=self.hps['output_shape'][-1],
-        dtype=utils.dtype_from_str(self.hps.model_dtype),
+        dtype=utils.dtype_from_str(self.hps.computation_dtype),
+        param_dtype=utils.dtype_from_str(self.hps.model_dtype),
         batch_norm_momentum=self.hps.batch_norm_momentum,
         batch_norm_epsilon=self.hps.batch_norm_epsilon,
         batch_size=self.hps.batch_size,
