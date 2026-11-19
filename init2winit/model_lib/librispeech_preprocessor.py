@@ -507,6 +507,7 @@ class SpectrogramFrontend(nn.Module):
       inputs = jnp.expand_dims(inputs, -1)
     output_paddings = None
     if input_paddings is not None:
+      input_paddings = input_paddings.astype(jnp.float32)
       inputs = inputs * jnp.expand_dims(1.0 - input_paddings, -1)
       output_paddings = self.fprop_paddings(input_paddings)
     else:

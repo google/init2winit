@@ -21,6 +21,7 @@ import copy
 import functools
 import itertools
 import os
+from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -81,22 +82,25 @@ DATA_HPS = {
         'output_shape': (32, 32000),
         'vocab_size': 32000,
     },
-    # TODO(kasimbeg): fix issue with tokenizer_vocab_path
     'conformer': {
-        'input_shape': (64,),
+        'input_shape': [(1600,), (1600,)],
         'max_eval_target_length': 64,
         'max_target_length': 64,
-        'output_shape': (16,),
-        'vocab_size': 16,
-        'tokenizer_type': 'WPM',
+        'output_shape': (-1, 32),
+        'vocab_size': 32,
+        'tokenizer_type': 'SPM',
+        'tokenizer_vocab_path': '/mock/wpm.vocab',
+        'num_encoder_layers': 1,
     },
     'mlcommons_conformer': {
-        'input_shape': (64,),
+        'input_shape': [(1600,), (1600,)],
         'max_eval_target_length': 64,
         'max_target_length': 64,
-        'output_shape': (16,),
-        'vocab_size': 16,
-        'tokenizer_type': 'WPM',
+        'output_shape': (-1, 32),
+        'vocab_size': 32,
+        'tokenizer_type': 'SPM',
+        'tokenizer_vocab_path': '/mock/wpm.vocab',
+        'num_encoder_layers': 1,
     },
     'convolutional_autoencoder': {
         'input_shape': (28, 28, 1),
@@ -368,10 +372,8 @@ dtypes = ['bfloat16', 'float32']
 # Construct keys for tests for initialization
 # TODO(kasimbeg): Add HPS for excluded models and include in tests.
 skipped_models = [
-    'conformer',
     'deepspeech',
     'local_attention_transformer',
-    'mlcommons_conformer',
     'mlcommons_deepspeech',
     'transformer_stu',
     'transformer_stu_tensordot',
@@ -450,12 +452,16 @@ def _initialize_model(model_str, model_dtype):
     hps.input_shape = (hps.input_node_shape, hps.input_edge_shape)
   hps.model_dtype = model_dtype
 
-  model = model_cls(
-      hps,
-      dataset_meta_data={'shift_inputs': True, 'causal': True},
-      loss_name=LOSS_NAME[model_str],
-      metrics_name=METRICS_NAME[model_str],
-  )
+  with mock.patch(
+      'init2winit.dataset_lib.spm_tokenizer.load_tokenizer',
+      return_value=mock.MagicMock(),
+  ):
+    model = model_cls(
+        hps,
+        dataset_meta_data={'shift_inputs': True, 'causal': True},
+        loss_name=LOSS_NAME[model_str],
+        metrics_name=METRICS_NAME[model_str],
+    )
   rng = jax.random.PRNGKey(0)
   initializer = initializers.get_initializer('noop')
   init_dict = model.initialize(initializer, hps, rng, metrics_logger=None)
