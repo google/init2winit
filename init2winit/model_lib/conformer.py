@@ -204,6 +204,7 @@ class Subsample(nn.Module):
         output_channels=self.encoder_dim,
         dtype=work_dtype,
         param_dtype=self.param_dtype,
+        name='input_conv',
     )(outputs, output_paddings)
 
     outputs, output_paddings = Conv2dSubsampling(
@@ -740,7 +741,7 @@ class ConvolutionBlock(nn.Module):
         dtype=work_dtype,
         param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
-        name='Conv_0',
+        name='depthwise_conv',
     )(inputs)
 
     inputs = BatchNorm(config, name='BatchNorm_0')(
@@ -887,6 +888,7 @@ class ConformerEncoderDecoder(nn.Module):
         dtype=work_dtype,
         param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
+        name='head',
     )(outputs)
     outputs = outputs.astype(jnp.float32)
 

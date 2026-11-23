@@ -165,7 +165,7 @@ class ResNet(nn.Module):
         use_bias=False,
         dtype=self.dtype,
         param_dtype=self.param_dtype,
-        name='conv0',
+        name='input_conv',
     )(x)
     x = normalization.VirtualBatchNorm(
         momentum=self.batch_norm_momentum,
@@ -211,6 +211,7 @@ class ResNet(nn.Module):
         kernel_init=nn.initializers.normal(),
         dtype=self.dtype,
         param_dtype=self.param_dtype,
+        name='head',
     )(x)
     return jnp.asarray(x, jnp.float32)
 
@@ -255,6 +256,7 @@ class FakeResNet(nn.Module):
         kernel_init=nn.initializers.normal(),
         dtype=self.dtype,
         param_dtype=self.param_dtype,
+        name='head',
     )(x)
     return jnp.asarray(x, jnp.float32)
 

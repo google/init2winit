@@ -1244,8 +1244,8 @@ class ModelsTest(parameterized.TestCase):
     model_dtype = 'float32'
     model, _ = _initialize_model(model_str, model_dtype)
     expected = {
-        'conv0': {'kernel': model_utils.ParameterType.CONV_WEIGHT},
-        'Dense_0': {
+        'input_conv': {'kernel': model_utils.ParameterType.CONV_WEIGHT},
+        'head': {
             'bias': model_utils.ParameterType.BIAS,
             'kernel': model_utils.ParameterType.WEIGHT,
         },

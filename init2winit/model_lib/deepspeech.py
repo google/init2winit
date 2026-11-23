@@ -164,6 +164,7 @@ class Subsample(nn.Module):
         enable_batchnorm=config.enable_subsampling_batchnorm,
         enable_synced_batchnorm=config.enable_synced_batchnorm,
         activation=config.activation,
+        name='input_conv',
     )(outputs, output_paddings, train)
 
     outputs, output_paddings = Conv2dSubsampling(
@@ -958,6 +959,7 @@ class DeepSpeechEncoderDecoder(nn.Module):
         dtype=work_dtype,
         param_dtype=config.param_dtype,
         kernel_init=nn.initializers.xavier_uniform(),
+        name='head',
     )(outputs)
     outputs = outputs.astype(jnp.float32)
 
